@@ -1,0 +1,136 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+  Theme tokens are RGB triplets (no "rgb()" wrapper) so Tailwind's
+  <alpha-value> substitution works for per-use transparency.
+  Values here are DEFAULTS; ThemeEditor overwrites them as inline
+  style props on :root, which always win over these rules.
+*/
+:root {
+  --c-bg: 251 251 250;
+  --c-bg-elevated: 255 255 255;
+  --c-bg-sunken: 244 244 242;
+  --c-border: 231 229 225;
+  --c-text: 30 32 30;
+  --c-text-muted: 133 129 123;
+  --c-accent: 13 121 105;
+  --c-accent-text: 255 255 255;
+  --c-msg-user: 13 121 105;
+  --c-msg-char: 255 255 255;
+  --c-danger: 197 48 48;
+
+  --radius: 1rem;
+  --chat-width: 48rem;
+  --font-scale: 1;
+  --chat-blur: 0px;
+  --shadow-strength: 1;
+  --motion-duration: 150ms;
+}
+
+:root.dark {
+  --c-bg: 17 18 18;
+  --c-bg-elevated: 26 27 27;
+  --c-bg-sunken: 12 13 13;
+  --c-border: 42 44 43;
+  --c-text: 235 235 232;
+  --c-text-muted: 148 148 143;
+  --c-accent: 94 224 197;
+  --c-accent-text: 12 13 13;
+  --c-msg-user: 94 224 197;
+  --c-msg-char: 26 27 27;
+  --c-danger: 240 120 120;
+}
+
+:root.reduced-motion * {
+  animation-duration: 0.001ms !important;
+  transition-duration: 0.001ms !important;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background-color: rgb(var(--c-bg));
+  background-image: radial-gradient(
+    ellipse 1200px 800px at 15% -10%,
+    rgb(var(--c-accent) / 0.05),
+    transparent 60%
+  );
+  background-attachment: fixed;
+  color: rgb(var(--c-text));
+  font-family:
+    'Inter Variable',
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    Helvetica,
+    Arial,
+    sans-serif;
+  line-height: 1.6;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  line-height: 1.25;
+}
+
+::selection {
+  background-color: rgb(var(--c-accent) / 0.35);
+}
+
+@keyframes cursor-blink {
+  0%, 45% { opacity: 1; }
+  50%, 95% { opacity: 0; }
+  100% { opacity: 1; }
+}
+.cursor-blink {
+  display: inline-block;
+  animation: cursor-blink 1s step-start infinite;
+  color: rgb(var(--c-accent));
+}
+@media (prefers-reduced-motion: reduce) {
+  .cursor-blink { animation: none; opacity: 1; }
+}
+
+/* thin, theme-aware scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--c-border)) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: rgb(var(--c-border));
+  border-radius: 999px;
+}
+
+.themed-shadow {
+  box-shadow: 0 1px 2px rgb(0 0 0 / calc(0.04 * var(--shadow-strength))),
+    0 4px 12px rgb(0 0 0 / calc(0.06 * var(--shadow-strength)));
+}
+
+.prose-rp em {
+  color: rgb(var(--c-text-muted));
+  font-style: italic;
+}
+.prose-rp q,
+.prose-rp .rp-quote {
+  color: rgb(var(--c-text));
+  font-weight: 500;
+}
+.prose-rp p + p {
+  margin-top: 0.6em;
+}

@@ -1,0 +1,172 @@
+import Database from 'better-sqlite3'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+export const dataDir = path.resolve(__dirname, '..', 'data')
+export const avatarsDir = path.join(dataDir, 'avatars')
+fs.mkdirSync(avatarsDir, { recursive: true })
+
+export const db = new Database(path.join(dataDir, 'rp.db'))
+db.pragma('journal_mode = WAL')
+db.pragma('foreign_keys = ON')
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS characters (
+    id TEXT PRIMARY KEY,
+    worldId TEXT,
+    createdAt INTEGER NOT NULL,
+    updatedAt INTEGER NOT NULL,
+    data TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_characters_updatedAt ON characters(updatedAt);
+  CREATE INDEX IF NOT EXISTS idx_characters_worldId ON characters(worldId);
+
+  CREATE TABLE IF NOT EXISTS personas (
+    id TEXT PRIMARY KEY,
+    createdAt INTEGER NOT NULL,
+    data TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS chats (
+    id TEXT PRIMARY KEY,
+    characterId TEXT NOT NULL,
+    createdAt INTEGER NOT NULL,
+    updatedAt INTEGER NOT NULL,
+    data TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_chats_characterId ON chats(characterId);
+  CREATE INDEX IF NOT EXISTS idx_chats_updatedAt ON chats(updatedAt);
+
+  CREATE TABLE IF NOT EXISTS messages (
+    id TEXT PRIMARY KEY,
+    chatId TEXT NOT NULL,
+    createdAt INTEGER NOT NULL,
+    data TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_messages_chatId_createdAt ON messages(chatId, createdAt);
+
+  CREATE TABLE IF NOT EXISTS world_info_books (
+    id TEXT PRIMARY KEY,
+    createdAt INTEGER NOT NULL,
+    data TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS presets (
+    id TEXT PRIMARY KEY,
+    createdAt INTEGER NOT NULL,
+    data TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS themes (
+    id TEXT PRIMARY KEY,
+    createdAt INTEGER NOT NULL,
+    data TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS worlds (
+    id TEXT PRIMARY KEY,
+    createdAt INTEGER NOT NULL,
+    updatedAt INTEGER NOT NULL,
+    data TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS objectives (
+    id TEXT PRIMARY KEY,
+    chatId TEXT NOT NULL,
+    status TEXT NOT NULL,
+    createdAt INTEGER NOT NULL,
+    updatedAt INTEGER NOT NULL,
+    data TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_objectives_chatId_status ON objectives(chatId, status);
+`)
+
+type Row = Record<string, unknown>
+
+interface ColumnSpec {
+  name: string
+}
+
+/**
+ * A table where a few fields get real (indexed/queryable) SQLite columns and
+ * everything else rides along as one JSON blob column. This mirrors exactly what
+ * the old IndexedDB store already did (whole objects, a couple of indexed keys) — a
+ * full relational schema isn't warranted for a single-user local app, but plain
+ * flat files can't be queried or sorted, which is why this sits in between.
+ */
+function createStore(table: string, columns: ColumnSpec[]) {
+  const columnNames = columns.map((c) => c.name)
+  const insertColumns = ['id', ...columnNames, 'data']
+  const insertStmt = db.prepare(
+    `INSERT INTO ${table} (${insertColumns.join(', ')}) VALUES (${insertColumns.map(() => '?').join(', ')})`,
+  )
+  const updateStmt = db.prepare(
+    `UPDATE ${table} SET ${[...columnNames, 'data'].map((c) => `${c} = ?`).join(', ')} WHERE id = ?`,
+  )
+  const deleteStmt = db.prepare(`DELETE FROM ${table} WHERE id = ?`)
+  const getStmt = db.prepare(`SELECT * FROM ${table} WHERE id = ?`)
+
+  function fromRow(row: Row): Row {
+    const blob = JSON.parse(row.data as string) as Row
+    const result: Row = { id: row.id, ...blob }
+    for (const name of columnNames) result[name] = row[name]
+    return result
+  }
+
+  function blobOf(obj: Row): string {
+    const rest = { ...obj }
+    delete rest.id
+    for (const name of columnNames) delete rest[name]
+    return JSON.stringify(rest)
+  }
+
+  return {
+    list(opts?: { where?: string; params?: unknown[]; orderBy?: string }): Row[] {
+      let sql = `SELECT * FROM ${table}`
+      if (opts?.where) sql += ` WHERE ${opts.where}`
+      if (opts?.orderBy) sql += ` ORDER BY ${opts.orderBy}`
+      const rows = db.prepare(sql).all(...(opts?.params ?? [])) as Row[]
+      return rows.map(fromRow)
+    },
+    get(id: string): Row | undefined {
+      const row = getStmt.get(id) as Row | undefined
+      return row ? fromRow(row) : undefined
+    },
+    insert(obj: Row): Row {
+      insertStmt.run(obj.id, ...columnNames.map((c) => obj[c] ?? null), blobOf(obj))
+      return obj
+    },
+    update(id: string, patch: Row): Row | undefined {
+      const existing = getStmt.get(id) as Row | undefined
+      if (!existing) return undefined
+      const merged: Row = { ...fromRow(existing), ...patch, id }
+      updateStmt.run(...columnNames.map((c) => merged[c] ?? null), blobOf(merged), id)
+      return merged
+    },
+    remove(id: string): void {
+      deleteStmt.run(id)
+    },
+  }
+}
+
+export const characterStore = createStore('characters', [{ name: 'worldId' }, { name: 'createdAt' }, { name: 'updatedAt' }])
+export const personaStore = createStore('personas', [{ name: 'createdAt' }])
+export const chatStore = createStore('chats', [{ name: 'characterId' }, { name: 'createdAt' }, { name: 'updatedAt' }])
+export const messageStore = createStore('messages', [{ name: 'chatId' }, { name: 'createdAt' }])
+export const worldInfoBookStore = createStore('world_info_books', [{ name: 'createdAt' }])
+export const presetStore = createStore('presets', [{ name: 'createdAt' }])
+export const themeStore = createStore('themes', [{ name: 'createdAt' }])
+export const worldStore = createStore('worlds', [{ name: 'createdAt' }, { name: 'updatedAt' }])
+export const objectiveStore = createStore('objectives', [
+  { name: 'chatId' },
+  { name: 'status' },
+  { name: 'createdAt' },
+  { name: 'updatedAt' },
+])
+
+export function newId(): string {
+  return crypto.randomUUID()
+}

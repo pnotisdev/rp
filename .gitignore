@@ -1,0 +1,10 @@
+node_modules
+dist
+dist-ssr
+*.local
+.DS_Store
+.env
+.env.*
+
+# Your actual character/chat/world data — lives on disk now, not in the browser.
+data/
