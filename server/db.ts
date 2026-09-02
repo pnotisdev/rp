@@ -86,6 +86,22 @@ db.exec(`
     data TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_objectives_chatId_status ON objectives(chatId, status);
+
+  CREATE TABLE IF NOT EXISTS relationship_events (
+    id TEXT PRIMARY KEY,
+    chatId TEXT NOT NULL,
+    createdAt INTEGER NOT NULL,
+    data TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_relationship_events_chatId_createdAt ON relationship_events(chatId, createdAt);
+
+  CREATE TABLE IF NOT EXISTS chat_facts (
+    id TEXT PRIMARY KEY,
+    chatId TEXT NOT NULL,
+    createdAt INTEGER NOT NULL,
+    data TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_chat_facts_chatId_createdAt ON chat_facts(chatId, createdAt);
 `)
 
 type Row = Record<string, unknown>
@@ -200,6 +216,8 @@ export const objectiveStore = createStore('objectives', [
   { name: 'createdAt' },
   { name: 'updatedAt' },
 ])
+export const relationshipEventStore = createStore('relationship_events', [{ name: 'chatId' }, { name: 'createdAt' }])
+export const chatFactStore = createStore('chat_facts', [{ name: 'chatId' }, { name: 'createdAt' }])
 
 export function newId(): string {
   return crypto.randomUUID()

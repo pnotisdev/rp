@@ -28,6 +28,11 @@ export function NewChatDialog({
   const [personaId, setPersonaId] = useState<string>('')
   const [greetingIndex, setGreetingIndex] = useState(0)
   const [starterId, setStarterId] = useState<string>('')
+  const [participantIds, setParticipantIds] = useState<string[]>([])
+
+  const toggleParticipant = (id: string) => {
+    setParticipantIds((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]))
+  }
 
   const character = characters.find((c) => c.id === characterId)
   const world = worlds.find((w) => w.id === character?.worldId)
@@ -53,6 +58,7 @@ export function NewChatDialog({
     const warmth = computeWarmth(startingAffection, getRelationshipStats({ relationshipStats: startingStats }))
     const chat = await chatsApi.create({
       characterId,
+      participants: participantIds.length ? participantIds : undefined,
       personaId: personaId || '',
       title: character.card.name,
       affection: startingAffection,
@@ -93,6 +99,7 @@ export function NewChatDialog({
             setCharacterId(e.target.value)
             setGreetingIndex(0)
             setStarterId('')
+            setParticipantIds((prev) => prev.filter((id) => id !== e.target.value))
           }}
           className="mb-3 w-full rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none"
         >
@@ -103,6 +110,35 @@ export function NewChatDialog({
             </option>
           ))}
         </select>
+
+        {characters.length > 1 && (
+          <div className="mb-4">
+            <label className="mb-1 block text-xs text-text-muted">
+              Other characters in this scene (optional)
+            </label>
+            <div className="flex flex-wrap gap-1.5">
+              {characters
+                .filter((c) => c.id !== characterId)
+                .map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => toggleParticipant(c.id)}
+                    className={`rounded-lg px-2.5 py-1 text-xs transition-colors ${
+                      participantIds.includes(c.id) ? 'bg-accent/10 text-accent' : 'bg-bg-sunken text-text-muted hover:text-text'
+                    }`}
+                  >
+                    {c.card.name}
+                  </button>
+                ))}
+            </div>
+            <p className="mt-1.5 text-xs text-text-muted">
+              {participantIds.length > 0
+                ? "They'll be able to speak, but relationship tracking/gifts/gallery stay with the character above."
+                : 'A group scene — pick who else can speak besides the character above.'}
+            </p>
+          </div>
+        )}
 
         <label className="mb-1 block text-xs text-text-muted">Persona</label>
         <select

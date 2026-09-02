@@ -1,5 +1,8 @@
+import { useState } from 'react'
 import type { Character, GalleryEntry } from '@/lib/characters/cardSpec'
 import type { Chat, WorldCard } from '@/lib/types'
+import { useApiQuery } from '@/lib/hooks/useApiQuery'
+import { chatFactsApi, relationshipEventsApi } from '@/lib/api/client'
 import { getGiftCatalog } from '@/lib/dating/gifts'
 import {
   computeWarmth,
@@ -45,6 +48,13 @@ function upcomingGallery(gallery: GalleryEntry[], unlocked: Set<string>, affecti
     .sort((a, b) => a.missingAffection - b.missingAffection)
 }
 
+function formatDeltas(deltas: Partial<Record<string, number>>): string {
+  return Object.entries(deltas)
+    .filter(([, v]) => v)
+    .map(([key, v]) => `${(v as number) > 0 ? '+' : ''}${v} ${DIMENSION_LABELS[key as keyof typeof DIMENSION_LABELS] ?? key}`)
+    .join(', ')
+}
+
 export function RelationshipPanel({ chat, character, world, onClose, onBuyGift }: RelationshipPanelProps) {
   const affection = Math.max(0, Math.min(100, chat.affection ?? 0))
   const stats = getRelationshipStats(chat)
@@ -59,6 +69,22 @@ export function RelationshipPanel({ chat, character, world, onClose, onBuyGift }
   const gallery = character?.gallery ?? []
   const upcoming = upcomingGallery(gallery, unlocked, affection, flags)
   const knownFlags = SCENE_FLAGS
+
+  const events = useApiQuery('relationship-events', () => relationshipEventsApi.listByChat(chat.id), [chat.id]) ?? []
+  const facts = useApiQuery('chat-facts', () => chatFactsApi.listByChat(chat.id), [chat.id]) ?? []
+  const activeFacts = facts.filter((f) => f.active)
+  const [newFactText, setNewFactText] = useState('')
+
+  const addFact = async () => {
+    const text = newFactText.trim()
+    if (!text) return
+    setNewFactText('')
+    await chatFactsApi.create({ chatId: chat.id, text })
+  }
+
+  const retireFact = async (id: string) => {
+    await chatFactsApi.update(id, { active: false })
+  }
 
   const nextSpriteUnlock = Object.entries(character?.spriteUnlocks ?? {})
     .filter(([, n]) => Number(n) > affection)
@@ -172,6 +198,50 @@ export function RelationshipPanel({ chat, character, world, onClose, onBuyGift }
               {upcoming.length === 0 && <div className="text-xs text-text-muted">Everything unlocked for this character.</div>}
             </div>
           </section>
+
+          <section className="rounded-xl bg-bg-sunken p-4 md:col-span-2">
+            <h3 className="mb-2 text-sm font-semibold text-text">What {character?.card.name ?? 'they'} remembers</h3>
+            <div className="mb-3 flex flex-wrap gap-2">
+              {activeFacts.map((f) => (
+                <button
+                  key={f.id}
+                  onClick={() => retireFact(f.id)}
+                  title="Click to forget this"
+                  className="rounded-full bg-bg-elevated px-3 py-1 text-xs text-text hover:text-danger"
+                >
+                  {f.text} ✕
+                </button>
+              ))}
+              {activeFacts.length === 0 && <span className="text-xs text-text-muted">Nothing remembered yet.</span>}
+            </div>
+            <div className="flex gap-2">
+              <input
+                value={newFactText}
+                onChange={(e) => setNewFactText(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && addFact()}
+                placeholder="Add a fact by hand — e.g. 'Allergic to cats'"
+                className="flex-1 rounded-xl bg-bg-elevated px-3 py-2 text-xs text-text outline-none"
+              />
+              <Button onClick={addFact} disabled={!newFactText.trim()}>Add</Button>
+            </div>
+          </section>
+
+          <details className="rounded-xl bg-bg-sunken p-4 md:col-span-2">
+            <summary className="cursor-pointer text-sm font-semibold text-text">History ({events.length})</summary>
+            <div className="mt-2 max-h-56 space-y-2 overflow-y-auto">
+              {events.map((e) => (
+                <div key={e.id} className="rounded-lg bg-bg-elevated px-3 py-2 text-xs">
+                  <div className="text-text">{e.reason}</div>
+                  <div className="text-text-muted">
+                    {new Date(e.createdAt).toLocaleString()}
+                    {formatDeltas(e.deltas) ? ` · ${formatDeltas(e.deltas)}` : ''}
+                    {e.newFlags?.length ? ` · +${e.newFlags.join(', ')}` : ''}
+                  </div>
+                </div>
+              ))}
+              {events.length === 0 && <div className="text-xs text-text-muted">Nothing logged yet.</div>}
+            </div>
+          </details>
         </div>
       </div>
     </div>

@@ -29,6 +29,39 @@ export type RelationshipDimension = 'trust' | 'chemistry' | 'comfort' | 'respect
 
 export type SceneFlag = 'first_date' | 'confession' | 'jealousy' | 'promise'
 
+/**
+ * One turn's worth of relationship movement, logged append-only alongside the overwritten
+ * running totals on `Chat` — answers "why is trust 62 now" instead of only ever showing the
+ * current number. `deltas` holds only the dimensions that actually moved that turn (zeros
+ * omitted); `reason` is the AI classifier's short one-line account of what happened.
+ */
+export interface RelationshipEvent {
+  id: string
+  chatId: string
+  createdAt: number
+  reason: string
+  deltas: Partial<Record<'affection' | RelationshipDimension, number>>
+  newFlags?: SceneFlag[]
+  sourceMessageId?: string
+}
+
+/**
+ * A discrete, durable fact about the user worth recalling much later — a name, a stated
+ * preference, a promise made — distinct from `Chat.summary`'s one rolling prose blob, which is
+ * lossy and gets rewritten wholesale on every resummarization. Fed into the prompt as a synthetic
+ * constant lorebook entry (see `useChatSession.ts`'s `buildCurrentPrompt`), reusing World Info's
+ * existing token-budget/placement machinery rather than adding a new prompt section.
+ */
+export interface ChatFact {
+  id: string
+  chatId: string
+  text: string
+  /** false once retired (superseded/contradicted/no longer relevant) — kept, not deleted, for the audit trail. */
+  active: boolean
+  sourceMessageId?: string
+  createdAt: number
+}
+
 export type GiftRarity = 'common' | 'uncommon' | 'rare' | 'epic'
 
 export interface GiftItem {
@@ -57,6 +90,16 @@ export interface DateEventCard {
   backgroundId?: string
   affectionRequirement?: number
   kind?: 'date' | 'gift' | 'milestone'
+  /**
+   * Set the moment a `kind: 'date'` event actually starts — marks it as a *live, scored* date
+   * (10b), not just the original lightweight event-card flow. Its presence (rather than a
+   * separate boolean) does double duty: it's both the "this is a scored live date" flag AND the
+   * cutoff timestamp used to gather the date's own transcript for end-of-date scoring. Stamped on
+   * every new event regardless of kind (harmless metadata for gift/milestone cards, which never
+   * read it), so only `kind === 'date'` actually changes behavior — the original flow is
+   * untouched for anyone not using the new "live date" action.
+   */
+  startedAt?: number
 }
 
 export interface StoredMessage extends ChatMessage {
@@ -74,11 +117,22 @@ export interface StoredMessage extends ChatMessage {
   choices?: string[]
   /** Structured branch options that can include direct lines, actions, or gifts. */
   choiceCards?: ChoiceOption[]
+  /** Bookmarked as a favorite moment — surfaced in the chat's "Pinned" panel. */
+  pinned?: boolean
+  /**
+   * Which character "said" this (role: 'char' only) — undefined means the chat's primary
+   * `characterId`, so every message from before group chats existed stays valid with no
+   * migration. Only set when a non-primary participant generated the reply.
+   */
+  speakerId?: string
 }
 
 export interface Chat {
   id: string
+  /** The primary character — relationship stats/gifts/gallery/VN sprites stay keyed on this one even when `participants` is set. */
   characterId: string
+  /** Extra characters who can also speak in this chat (group scenes). Unset/empty = today's single-character chat. */
+  participants?: string[]
   personaId: string
   title: string
   createdAt: number
@@ -129,6 +183,10 @@ export interface WorldCard {
   gifts?: GiftItem[]
   /** Overrides the default warmth thresholds for characters living here. Unset stages fall back to the default. */
   relationshipThresholds?: Partial<Record<Exclude<RelationshipStage, 'near_strangers'>, number>>
+  /** Absolute day count in the shared 112-day calendar (src/lib/world/calendar.ts) — 0 if the clock has never been advanced. */
+  currentDay?: number
+  /** Index into calendar.ts's PHASES (morning/afternoon/evening/night) — 0 if never advanced. */
+  currentPhaseIndex?: number
   createdAt: number
   updatedAt: number
 }

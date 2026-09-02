@@ -1,8 +1,10 @@
 import type { Character } from '@/lib/characters/cardSpec'
 import type {
   Chat,
+  ChatFact,
   Objective,
   Persona,
+  RelationshipEvent,
   SamplerPreset,
   StoredMessage,
   Theme,
@@ -139,6 +141,10 @@ export const messagesApi = {
   listByChat(chatId: string): Promise<StoredMessage[]> {
     return request<StoredMessage[]>('GET', `/chats/${chatId}/messages`)
   },
+  /** Substring search across every chat's messages, newest first, capped server-side to 50 hits. */
+  search(query: string): Promise<StoredMessage[]> {
+    return request<StoredMessage[]>('GET', `/messages/search?q=${encodeURIComponent(query)}`)
+  },
 }
 
 // A full backup/restore inlines every avatar/sprite/background as base64 — on a
@@ -161,6 +167,8 @@ export const backupApi = {
       'themes',
       'worlds',
       'objectives',
+      'relationship-events',
+      'chat-facts',
     ]) {
       invalidate(resource)
     }
@@ -177,5 +185,19 @@ export const objectivesApi = {
   listByChat(chatId: string, status?: string): Promise<Objective[]> {
     const statusQuery = status ? `&status=${encodeURIComponent(status)}` : ''
     return request<Objective[]>('GET', `/objectives?chatId=${encodeURIComponent(chatId)}${statusQuery}`)
+  },
+}
+
+export const relationshipEventsApi = {
+  ...makeResource<RelationshipEvent>('relationship-events', '/relationship-events'),
+  listByChat(chatId: string): Promise<RelationshipEvent[]> {
+    return request<RelationshipEvent[]>('GET', `/chats/${chatId}/relationship-events`)
+  },
+}
+
+export const chatFactsApi = {
+  ...makeResource<ChatFact>('chat-facts', '/chat-facts'),
+  listByChat(chatId: string): Promise<ChatFact[]> {
+    return request<ChatFact[]>('GET', `/chats/${chatId}/chat-facts`)
   },
 }

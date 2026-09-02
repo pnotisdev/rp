@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { StoredMessage } from '@/lib/types'
 import { useSettingsStore, type AvatarShape } from '@/lib/store/useSettingsStore'
+import { messageAnchorId } from '@/lib/scrollToMessage'
 
 function avatarClass(shape: AvatarShape): string {
   switch (shape) {
@@ -29,11 +30,14 @@ interface MessageBubbleProps {
   avatarDataUrl?: string
   isStreaming?: boolean
   streamingText?: string
+  /** Briefly highlighted after being scrolled to from a search result or the pinned-messages panel. */
+  isHighlighted?: boolean
   onEdit: (text: string) => void
   onDelete: () => void
   onRegenerate: () => void
   onSwipe: (dir: 'left' | 'right') => void
   onFork: () => void
+  onTogglePin: () => void
 }
 
 export function MessageBubble({
@@ -41,11 +45,13 @@ export function MessageBubble({
   avatarDataUrl,
   isStreaming,
   streamingText,
+  isHighlighted,
   onEdit,
   onDelete,
   onRegenerate,
   onSwipe,
   onFork,
+  onTogglePin,
 }: MessageBubbleProps) {
   const chatStyle = useSettingsStore((s) => s.chatStyle)
   const avatarShape = useSettingsStore((s) => s.avatarShape)
@@ -126,6 +132,14 @@ export function MessageBubble({
       )}
       {!isStreaming && (
         <>
+          <button
+            onClick={onTogglePin}
+            className={message.pinned ? 'text-accent hover:text-accent' : 'hover:text-text'}
+            title={message.pinned ? 'Unpin' : 'Pin this moment'}
+            aria-label={message.pinned ? 'Unpin message' : 'Pin message'}
+          >
+            {message.pinned ? '★' : '☆'}
+          </button>
           <button onClick={onRegenerate} className="hover:text-text" title="Regenerate" aria-label="Regenerate">
             ⟲
           </button>
@@ -142,11 +156,21 @@ export function MessageBubble({
   // Meta (timestamp, regenerate/delete, swipe) only appears on hover — keeps the resting
   // conversation calm and free of per-line chrome, matching the reference screens.
   const metaHoverable = <div className="mt-1.5 h-4 opacity-0 transition-opacity group-hover:opacity-100">{meta}</div>
+  // Unlike the rest of `meta`, a pin needs to stay visible at rest — otherwise there's no way to
+  // spot favorited moments while scrolling without hovering every single bubble.
+  const pinBadge = message.pinned ? (
+    <span className="text-accent" title="Pinned">
+      ★
+    </span>
+  ) : null
+  const anchorId = messageAnchorId(message.id)
+  const highlightClass = isHighlighted ? 'bg-accent/10' : ''
 
   if (chatStyle === 'document') {
     return (
-      <div className="group py-2">
-        <span className={`font-semibold ${isUser ? 'text-accent' : 'text-text'}`}>{message.name}: </span>
+      <div id={anchorId} className={`group rounded-lg py-2 transition-colors duration-1000 ${highlightClass}`}>
+        <span className={`font-display ${isUser ? 'text-accent' : 'text-text'}`}>{message.name}: </span>
+        {pinBadge}{' '}
         {imageStrip}
         <span className="prose-rp whitespace-pre-wrap break-words text-sm leading-relaxed">
           {editing ? (
@@ -165,7 +189,10 @@ export function MessageBubble({
 
   if (chatStyle === 'bubbles') {
     return (
-      <div className={`group flex gap-3 py-2 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
+      <div
+        id={anchorId}
+        className={`group flex gap-3 rounded-lg py-2 transition-colors duration-1000 ${highlightClass} ${isUser ? 'flex-row-reverse' : 'flex-row'}`}
+      >
         <Avatar name={message.name} shape={avatarShape} dataUrl={avatarDataUrl} />
         <div className={`flex max-w-[75%] flex-col ${isUser ? 'items-end' : 'items-start'}`}>
           <div
@@ -176,7 +203,10 @@ export function MessageBubble({
             {imageStrip}
             {textBlock}
           </div>
-          {metaHoverable}
+          <div className="flex items-center gap-1.5">
+            {pinBadge}
+            {metaHoverable}
+          </div>
         </div>
       </div>
     )
@@ -184,10 +214,13 @@ export function MessageBubble({
 
   // flat (default): log-like, full width, no dividers — just generous vertical rhythm
   return (
-    <div className="group flex gap-3 py-3.5">
+    <div id={anchorId} className={`group flex gap-3 rounded-lg py-3.5 transition-colors duration-1000 ${highlightClass}`}>
       <Avatar name={message.name} shape={avatarShape} dataUrl={avatarDataUrl} />
       <div className="flex-1 min-w-0">
-        <div className="text-sm font-semibold text-text">{message.name}</div>
+        <div className="flex items-center gap-1.5 text-sm font-display text-text">
+          {message.name}
+          {pinBadge}
+        </div>
         {imageStrip}
         {textBlock}
         {metaHoverable}

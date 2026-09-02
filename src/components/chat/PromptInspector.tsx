@@ -110,6 +110,12 @@ export function PromptInspector({
                 didn't fit the lorebook's token budget: {result.droppedForBudget.map((e) => e.keys[0] ?? e.comment).join(', ')}
               </p>
             )}
+            {result.droppedForGroup.length > 0 && (
+              <p className="mb-5 text-xs text-text-muted">
+                {result.droppedForGroup.length} entr{result.droppedForGroup.length === 1 ? 'y' : 'ies'} lost to a
+                higher-priority entry in the same inclusion group: {result.droppedForGroup.map((e) => e.keys[0] ?? e.comment).join(', ')}
+              </p>
+            )}
 
             <h3 className="mb-1 text-xs font-semibold text-text-muted">Exact text sent to the model</h3>
             <pre className="whitespace-pre-wrap rounded-xl bg-bg-sunken p-4 text-xs text-text">{result.prompt}</pre>

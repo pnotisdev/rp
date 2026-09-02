@@ -54,12 +54,44 @@ const DIMENSION_GLOSSARY: Record<RelationshipDeltaKey, string> = {
 
 const ZERO_DELTAS: RelationshipDeltas = Object.fromEntries(DELTA_KEYS.map((k) => [k, 0])) as RelationshipDeltas
 
+/** Gentle/Normal/Harsh — a global scale on how far consequences swing (10b), never what a character says or how a scene opens. */
+export type RelationshipDifficulty = 'gentle' | 'normal' | 'harsh'
+
+const DIFFICULTY_MULTIPLIERS: Record<RelationshipDifficulty, number> = {
+  gentle: 0.6,
+  normal: 1,
+  harsh: 1.6,
+}
+
+/** Applied once, right before judge-returned deltas are added to the running totals — everything upstream (the judge call itself, prompts, scene generation) stays difficulty-agnostic. */
+export function scaleDeltasForDifficulty(deltas: RelationshipDeltas, difficulty: RelationshipDifficulty): RelationshipDeltas {
+  const factor = DIFFICULTY_MULTIPLIERS[difficulty]
+  if (factor === 1) return deltas
+  return Object.fromEntries(DELTA_KEYS.map((k) => [k, Math.round(deltas[k] * factor)])) as RelationshipDeltas
+}
+
+export interface RelationshipMoment {
+  deltas: RelationshipDeltas
+  newFlags: SceneFlag[]
+  /** Short one-line reason for whatever moved, e.g. "Complimented her cooking unprompted" — undefined when nothing moved. */
+  reason?: string
+  /** New durable facts worth remembering long-term (name, preference, backstory, a promise made) — [] most turns. */
+  newFacts: string[]
+}
+
 /**
  * Small conservative classifier that estimates whether the latest exchange moved relationship
- * tone, across seven independent dimensions (see `RelationshipDeltaKey`). Most dimensions should
- * stay at 0 on most turns — only the ones this specific exchange clearly touched should move.
+ * tone (across seven independent dimensions, see `RelationshipDeltaKey`), newly established any
+ * romance-route flags, AND surfaced any durable fact worth remembering — combined into one call
+ * on purpose. This used to be two sequential requests (`assessRelationshipDeltas` +
+ * `detectSceneFlags`), then three once fact-extraction was folded in too; on a local single-GPU
+ * KoboldCpp server, every background classifier call after a reply is serialized, so this fires
+ * on literally every single turn (unlike the conditional gallery-unlock check below) and keeping
+ * it to one call is a real responsiveness win, not just tidiness. Most dimensions, all flags, and
+ * facts should stay unchanged on most turns — only what this specific exchange clearly touched
+ * should move.
  */
-export async function assessRelationshipDeltas(
+export async function assessRelationshipMoment(
   client: KoboldClient,
   params: {
     history: ChatMessage[]
@@ -67,30 +99,46 @@ export async function assessRelationshipDeltas(
     charName: string
     userName: string
     current: RelationshipDeltas
+    /** Facts already known, so the model doesn't re-extract the same thing every turn. */
+    knownFacts?: string[]
   },
-): Promise<RelationshipDeltas> {
+): Promise<RelationshipMoment> {
   const prompt = [
-    'You are scoring relationship momentum in an in-character roleplay, across several independent dimensions.',
+    'You are scoring relationship momentum, tracking high-level romance route flags, AND noting durable facts worth remembering long-term, in an in-character roleplay.',
     `Current scores (0-100 each): ${DELTA_KEYS.map((k) => `${k}=${params.current[k]}`).join(', ')}.`,
-    `Recent context:\n${recentText(params.history, params.charName, params.userName)}`,
+    `Recent context:\n${recentText(params.history, params.charName, params.userName, 8)}`,
     `Latest reply from ${params.charName}:\n${params.latestReply}`,
     `Dimension meanings: ${DELTA_KEYS.map((k) => `${k} = ${DIMENSION_GLOSSARY[k]}`).join('; ')}.`,
-    `Return ONLY a minified JSON object with an integer delta (-2, -1, 0, 1, or 2) for each key: ${DELTA_KEYS.join(', ')}.`,
-    'Only move a dimension if this specific exchange clearly affected it — leave the rest at 0. Most turns should only move one or two dimensions.',
-    'Example: {"affection":1,"trust":0,"chemistry":0,"comfort":1,"respect":0,"curiosity":0,"tension":0}',
+    `Known route flags: ${SCENE_FLAGS.join(', ')}.`,
+    params.knownFacts?.length ? `Facts already remembered (don't repeat these): ${params.knownFacts.join('; ')}.` : '',
+    'Return ONLY a minified JSON object: {"deltas":{ one integer -2..2 per dimension key },"newFlags":[ any newly-established flags from the known set, or [] ],"reason":"...","newFacts":[ any new durable facts, or [] ]}.',
+    'Only move a dimension if this specific exchange clearly affected it — leave the rest at 0. Most turns should move only one or two dimensions and add no new flags.',
+    '"reason" is a short (under 12 words) in-world one-liner naming what just happened, e.g. "Complimented her cooking unprompted" — only if at least one dimension moved or a flag was added, otherwise "".',
+    '"newFacts" is for concrete, durable facts about {{user}} worth recalling much later — a name, a stated preference, a piece of backstory, a promise made. NOT every line of dialogue — most turns should add none. Each fact as one short standalone sentence, e.g. "Prefers tea over coffee" or "Promised to visit again next weekend".',
+    'Example: {"deltas":{"affection":1,"trust":0,"chemistry":0,"comfort":1,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"Stayed to help clean up without being asked","newFacts":[]}',
     'JSON:',
-  ].join('\n\n')
+  ]
+    .filter(Boolean)
+    .join('\n\n')
 
-  const text = await client.generate({ ...REL_PARAMS, max_context_length: await client.getEffectiveMaxContext(), prompt })
+  const text = await client.generate({ ...REL_PARAMS, max_length: 340, max_context_length: await client.getEffectiveMaxContext(), prompt })
   const parsed = parseLenientJson(text)
-  if (!parsed || typeof parsed !== 'object') return ZERO_DELTAS
-  const obj = parsed as Record<string, unknown>
-  const result = { ...ZERO_DELTAS }
+  const obj = (parsed && typeof parsed === 'object' ? parsed : {}) as Record<string, unknown>
+  const deltasObj = (obj.deltas && typeof obj.deltas === 'object' ? obj.deltas : {}) as Record<string, unknown>
+  const deltas = { ...ZERO_DELTAS }
   for (const key of DELTA_KEYS) {
-    const v = Number(obj[key])
-    result[key] = [-2, -1, 0, 1, 2].includes(v) ? v : 0
+    const v = Number(deltasObj[key])
+    deltas[key] = [-2, -1, 0, 1, 2].includes(v) ? v : 0
   }
-  return result
+  const allowed = new Set(SCENE_FLAGS)
+  const newFlags = Array.isArray(obj.newFlags)
+    ? obj.newFlags.filter((f): f is SceneFlag => typeof f === 'string' && allowed.has(f as SceneFlag))
+    : []
+  const reason = typeof obj.reason === 'string' && obj.reason.trim() ? obj.reason.trim().slice(0, 160) : undefined
+  const newFacts = Array.isArray(obj.newFacts)
+    ? obj.newFacts.filter((f): f is string => typeof f === 'string' && f.trim().length > 0).map((f) => f.trim().slice(0, 200))
+    : []
+  return { deltas, newFlags, reason, newFacts }
 }
 
 /**
@@ -127,32 +175,74 @@ export async function detectGalleryUnlocks(
   return parsed.filter((id): id is string => typeof id === 'string' && valid.has(id))
 }
 
-/** Detects major branching milestones as persistent scene-memory flags. */
-export async function detectSceneFlags(
-  client: KoboldClient,
-  params: { history: ChatMessage[]; latestReply: string; charName: string; userName: string },
-): Promise<SceneFlag[]> {
-  const known: SceneFlag[] = SCENE_FLAGS
-  const prompt = [
-    'You track high-level romance route flags in roleplay.',
-    `Recent context:\n${recentText(params.history, params.charName, params.userName, 8)}`,
-    `Latest reply from ${params.charName}:\n${params.latestReply}`,
-    `Return ONLY a minified JSON array of any newly-established flags from this set: ${known.join(', ')}.`,
-    'Use [] if none were clearly established in this moment.',
-    'JSON:',
-  ].join('\n\n')
+export interface DateOutcome {
+  deltas: RelationshipDeltas
+  newFlags: SceneFlag[]
+  /** A short (1-3 sentence) in-world recap of how the whole date went — shown to the player, unlike the terser per-turn `reason`. */
+  recap: string
+  newFacts: string[]
+}
 
-  const text = await client.generate({
-    ...REL_PARAMS,
-    max_length: 100,
-    temperature: 0.2,
-    max_context_length: await client.getEffectiveMaxContext(),
-    prompt,
-  })
+/**
+ * Turns an entire date's transcript into one outcome — deltas, new route flags, a player-facing
+ * recap, and any durable facts — instead of the per-turn drip-feed `assessRelationshipMoment`
+ * already does for ordinary chat. Deliberately a separate pass (10b's "save-safe end-of-date
+ * scoring"): a date in progress suppresses the normal per-turn tracking (see
+ * `useChatSession.ts`'s `runGeneration`) so a flat, awkward, or hurtful date doesn't quietly drift
+ * the relationship forward turn by turn — only this end-of-scene judgment counts, and it can
+ * legitimately score near-zero across the board for a date that went nowhere.
+ */
+export async function assessDateOutcome(
+  client: KoboldClient,
+  params: {
+    transcript: ChatMessage[]
+    eventTitle: string
+    charName: string
+    userName: string
+    current: RelationshipDeltas
+    knownFacts?: string[]
+  },
+): Promise<DateOutcome> {
+  // Cap at the last 24 turns — plenty for a single date scene, and keeps the prompt bounded even
+  // if the player let this run long. Empty messages (still-streaming placeholders) are dropped.
+  const turns = params.transcript.filter((m) => m.text.trim()).slice(-24)
+  const transcriptText = turns.map((m) => `${m.role === 'user' ? params.userName : params.charName}: ${m.text}`).join('\n')
+
+  const prompt = [
+    `You are scoring how an entire date/scene went, in an in-character roleplay: "${params.eventTitle}".`,
+    `Current scores (0-100 each): ${DELTA_KEYS.map((k) => `${k}=${params.current[k]}`).join(', ')}.`,
+    `Full transcript of the date:\n${transcriptText || '(nothing was said)'}`,
+    `Dimension meanings: ${DELTA_KEYS.map((k) => `${k} = ${DIMENSION_GLOSSARY[k]}`).join('; ')}.`,
+    `Known route flags: ${SCENE_FLAGS.join(', ')}.`,
+    params.knownFacts?.length ? `Facts already remembered (don't repeat these): ${params.knownFacts.join('; ')}.` : '',
+    'Return ONLY a minified JSON object: {"deltas":{ one integer -5..5 per dimension key, judged across the WHOLE date, not per line },"newFlags":[ any newly-established flags from the known set, or [] ],"recap":"...","newFacts":[ any new durable facts, or [] ]}.',
+    'Judge the date honestly: a flat, awkward, one-sided, or hurtful date should score low or even negative deltas, not a token positive bump just for happening. A genuinely warm, attentive date should score well across the relevant dimensions.',
+    '"recap" is a short 1-3 sentence in-world summary of how the date felt from {{char}}\'s side, written for the player to read afterward — not a mechanical report.',
+    '"newFacts" is for concrete, durable facts about {{user}} worth recalling much later. Most dates add one or none.',
+    'Example: {"deltas":{"affection":3,"trust":2,"chemistry":2,"comfort":1,"respect":0,"curiosity":1,"tension":0},"newFlags":["first_date"],"recap":"She lit up talking about her old bakery and kept finding reasons to lean in closer.","newFacts":["Used to run a small bakery before moving here"]}',
+    'JSON:',
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+
+  const text = await client.generate({ ...REL_PARAMS, max_length: 420, max_context_length: await client.getEffectiveMaxContext(), prompt })
   const parsed = parseLenientJson(text)
-  if (!Array.isArray(parsed)) return []
-  const allowed = new Set(known)
-  return parsed.filter((f): f is SceneFlag => typeof f === 'string' && allowed.has(f as SceneFlag))
+  const obj = (parsed && typeof parsed === 'object' ? parsed : {}) as Record<string, unknown>
+  const deltasObj = (obj.deltas && typeof obj.deltas === 'object' ? obj.deltas : {}) as Record<string, unknown>
+  const deltas = { ...ZERO_DELTAS }
+  for (const key of DELTA_KEYS) {
+    const v = Number(deltasObj[key])
+    deltas[key] = Number.isInteger(v) ? Math.max(-5, Math.min(5, v)) : 0
+  }
+  const allowed = new Set(SCENE_FLAGS)
+  const newFlags = Array.isArray(obj.newFlags)
+    ? obj.newFlags.filter((f): f is SceneFlag => typeof f === 'string' && allowed.has(f as SceneFlag))
+    : []
+  const recap = typeof obj.recap === 'string' && obj.recap.trim() ? obj.recap.trim().slice(0, 400) : 'The date came to an end.'
+  const newFacts = Array.isArray(obj.newFacts)
+    ? obj.newFacts.filter((f): f is string => typeof f === 'string' && f.trim().length > 0).map((f) => f.trim().slice(0, 200))
+    : []
+  return { deltas, newFlags, recap, newFacts }
 }
 
 /** Suggests a themed event card that can be spun into an objective-driven scene. */

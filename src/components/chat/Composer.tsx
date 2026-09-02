@@ -12,6 +12,10 @@ interface ComposerProps {
   onAbort: () => void
   onContinue: () => void
   onImpersonate: () => Promise<string>
+  /** Group-scene characters who can reply besides the primary — omitted/empty hides the "reply as" picker entirely. */
+  replyAsOptions?: { id: string; name: string }[]
+  replyAsId?: string | null
+  onChangeReplyAs?: (id: string | null) => void
 }
 
 export function Composer({
@@ -24,6 +28,9 @@ export function Composer({
   onAbort,
   onContinue,
   onImpersonate,
+  replyAsOptions = [],
+  replyAsId,
+  onChangeReplyAs,
 }: ComposerProps) {
   const [attachments, setAttachments] = useState<PendingAttachment[]>([])
   const [composerError, setComposerError] = useState<string | null>(null)
@@ -128,6 +135,21 @@ export function Composer({
 
         <div className="flex items-center justify-between px-1 pt-1">
           <div className="flex items-center gap-1">
+            {replyAsOptions.length > 1 && (
+              <select
+                value={replyAsId || replyAsOptions[0].id}
+                onChange={(e) => onChangeReplyAs?.(e.target.value)}
+                title="Reply as"
+                aria-label="Reply as"
+                className="mr-1 rounded-full bg-bg-elevated px-2.5 py-1.5 text-xs text-text-muted outline-none hover:text-text"
+              >
+                {replyAsOptions.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.name}
+                  </option>
+                ))}
+              </select>
+            )}
             <button
               onClick={() => fileRef.current?.click()}
               disabled={disabled}

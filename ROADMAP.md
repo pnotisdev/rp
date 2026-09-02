@@ -19,6 +19,13 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
       (`VNStage.tsx`), with a backlog toggle.
 - [x] Character sprites & expressions: `Character.sprites`/`spriteUnlocks` per expression id,
       uploaded per-character in `CharacterEditor`.
+- [x] **Broadened the default expression set with love/arousal range** — user-requested: the
+      original 16 covered general emotional range (happy/sad/angry/etc.) plus a couple of mild
+      romantic ones (blush, love), but nothing for the more intense end a dating-sim scene actually
+      needs. Added five (`DEFAULT_EXPRESSIONS`, `expressions.ts`): flirty, smitten, yearning,
+      sultry, aroused — 21 built-in expressions total. Purely additive (just more entries in the
+      same array everything else already reads generically), so no other code needed to change;
+      each is still just a category a creator uploads their own art for.
 - [x] Expression selection: the model tags each reply with an inline scene directive
       (`src/lib/vn/sceneTag.ts`), sanitized against unlocked expression/background ids in
       `useChatSession.ts`.
@@ -91,9 +98,67 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
       the Define-the-Relationship ladder, breakups/reconciliation, the endings gallery, rival/
       multiple romanceable characters sharing a world (blocked on group chats, section 4), and any
       save-slot/route concept (section 12).
+- [x] **Relationship state now actually reaches the model, not just unlock gates** — until this
+      pass, `affection`/`relationshipStats` only ever gated WHICH content was available (lorebook
+      entries, sprites, backgrounds, gallery); nothing told the model itself how the relationship
+      is going, so in-character warmth couldn't track the numbers unless an author happened to
+      write affection-gated lore for every stage. `buildRelationshipDescription()`
+      (`useChatSession.ts`) now builds one short, qualitative line — stage label plus at most a
+      couple of notable-dimension notes ("a deep mutual trust has built up"), deliberately never a
+      raw number — injected in the same late "right before generation" slot the objective block
+      already uses (`PromptBuildInput.relationshipDescription`, `builder.ts`). Verified live via
+      the Prompt Inspector, which shows it automatically since it's plain text in the same
+      assembled prompt, no separate wiring needed. Gated behind the new `autoTrackRelationship`
+      setting (off = no block, matching "nothing is being tracked for this chat").
+- [x] **Two sequential judge calls merged into one** — `assessRelationshipDeltas` and
+      `detectSceneFlags` used to be separate, always-fire-every-turn `client.generate()` round
+      trips; combined into one `assessRelationshipMoment()` call (`relationshipAssist.ts`) that
+      returns both deltas and new flags from a single prompt. On a local single-GPU KoboldCpp
+      server every background classifier call after a reply is serialized — with the (also
+      always-fire) memory-summary and task-detection calls plus the conditional gallery-unlock and
+      choice-suggestion calls, this was becoming a real per-turn latency cost, not just an
+      inefficiency. `detectGalleryUnlocks` stays separate since it's a genuine second step (only
+      runs when locked entries exist AND depends on this call's own flag results).
+- [x] **`autoTrackRelationship` setting** — relationship tracking used to always run
+      unconditionally, the only AI-assist feature (unlike summarize/objectives/choices) with no
+      toggle. Added alongside the others in Settings → Generation, default on; also gates the new
+      prompt-steering line above.
+- [x] **Milestone/unlock toasts** — stage-ups and gallery-CG unlocks used to be completely silent;
+      the only way to notice one was to happen to open the Relationship panel or Gallery tab. Now
+      surfaced via the existing `toastSuccess()` system the moment they happen. Deliberately NOT
+      toasting scene flags or per-turn stat deltas — those are internal bookkeeping/would be
+      constant noise, not a player-facing reward.
 
 ## 3. Character & content creation
 - [x] Multi-sprite upload UI in `CharacterEditor` with an unlock-affection field per expression.
+- [x] **Fixed: clicking an expression's box didn't open the file picker** — user-reported, found
+      while building the custom-expressions bullet below. Each expression slot's `<label>` wrapped
+      *two* labelable controls (the unlock-affection number input and the hidden file input) with
+      no `htmlFor`; a label with no explicit target implicitly activates whichever labelable
+      descendant comes first in the DOM, and the number input came first — so clicking the sprite
+      box/emoji just focused the number input instead of opening a file dialog. Fixed by reordering
+      the file input first. Verified live: simulated a click on the visible box and confirmed the
+      hidden file input now receives it (previously it didn't), while a direct click on the number
+      input still behaves normally and never opens the file picker.
+- [x] **Custom expressions beyond the fixed default set** — user-reported gap: the Expressions grid
+      only ever rendered upload slots for `DEFAULT_EXPRESSIONS`' fixed 16 (`src/lib/vn/
+      expressions.ts`), with no way to add one of your own (a signature smirk unique to one
+      character, say). Turned out the rest of the pipeline was already fully generic and needed no
+      changes at all: `getUnlockedExpressionIds()` already reads whatever keys are actually present
+      in `character.sprites` rather than the fixed list, `extractSceneTag`/`sanitizeSceneTag` never
+      validated against a closed set, and VNStage's sprite lookup is a plain `sprites?.[expression]`
+      — the *only* gap was the editor UI never offering a slot for anything else. Added
+      `Character.customExpressions?: { id, label }[]` (`cardSpec.ts`) — just the id/label
+      definitions; the actual sprite images still live in the same `sprites`/`spriteUnlocks` maps
+      as any default expression, so every other consumer needed zero changes. `slugifyExpressionId()`
+      (`expressions.ts`, 7 tests) turns a free-typed label into a safe id (matches the server's
+      `SAFE_KEY_RE`, since it becomes both a sprite filename and a literal token in the model's
+      prompt), suffixing on collision with a default or existing custom id. Wired into character
+      packs (`pack.ts`) so it round-trips on export/import alongside the sprites themselves.
+      Verified live end-to-end: added a custom expression through the real editor UI, uploaded a
+      real sprite for it via the API (exercising the exact same server code the UI's file picker
+      calls), and confirmed the Prompt Inspector listed it as a valid expression ID for the model to
+      tag replies with.
 - [ ] AI-assisted sprite/portrait/CG generation — see section 11 (SwarmUI / ComfyUI / NovelAI) —
       no image-generation integration exists anywhere in the repo yet, only image *upload*.
 - [x] Voice presets per character — `Character.voice?: { provider?, voiceId? }` (`cardSpec.ts`)
@@ -104,6 +169,38 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
       one seeds `Chat.affection`/`relationshipStage` and drops the blurb into `Chat.summary`, which
       the prompt builder already surfaces as "Story so far: …" — so the model has the backstory
       from message one instead of every chat starting blank.
+- [x] **World Info / lorebook depth** — brought `activateWorldInfo` (`src/lib/worldinfo/
+      activation.ts`) up to SillyTavern's actual feature set instead of just the always/keyword/
+      manual basics it already had:
+      - **Probability** — `LorebookEntry.probability?: number` (0-100), a "Chance %" field in
+        `LorebookEditor` shown only for keyword-mode entries (always/manual ignore it, since
+        "sometimes fires" would contradict what those modes mean). A keyword match still has to
+        pass a roll to actually activate.
+      - **Inclusion groups** — `LorebookEntry.group?: string`; entries sharing a non-empty group
+        are mutually exclusive, only the highest-`insertion_order` one fires. Useful for
+        alternative phrasings of the same beat (e.g. three "how the tavern reacts" entries that
+        shouldn't all fire together). Losers go into a new `droppedForGroup` result bucket
+        (kept separate from `droppedForBudget` so the Prompt Inspector's wording stays accurate —
+        one says "didn't fit the token budget", the other "lost to a higher-priority entry").
+      - **Regex keys** — a key formatted as `/pattern/flags` (ST's own convention) now matches via
+        `RegExp` instead of literal substring; an invalid pattern falls back to literal matching
+        rather than throwing. Documented inline via the Keys field's label instead of a separate
+        UI control.
+      - **Recursive scanning** — actually consumes `Lorebook.recursive_scanning`, which existed on
+        the type from card imports but was dead: never read anywhere. A depth-capped (3 passes)
+        second wave scans just-activated keyword entries' own `content` for further keyword
+        matches, so e.g. an entry mentioning "Ashfall Keep" can pull in the Ashfall Keep entry even
+        though the player never typed it. Always/manual entries don't participate in the recursive
+        wave (they're already fully resolved before it runs) and can't be recursively triggered
+        either. A toggle lives at the book level in `LorebookEditor`.
+      Deliberately left out (need new persisted per-chat-per-entry state, a bigger change):
+      sticky (an entry stays active for N more turns after it stops matching) and cooldown (an
+      entry can't refire for N turns after it does).  14 new vitest cases in
+      `activation.test.ts` (probability boundaries, regex matching incl. invalid-pattern fallback,
+      group exclusivity, recursive scanning incl. a cycle/no-infinite-loop case) — 33/33 passing.
+      Verified live: new "Chance %"/"Group"/"Recursive scanning" controls render and behave
+      correctly in the browser (Chance % hides itself outside keyword mode), typecheck clean,
+      full suite (81 tests) green.
 
 ## 4. Chat & roleplay mechanics
 - [x] Branching/checkpoints: `Chat.parentChatId`/`forkedFromMessageId` plus `POST
@@ -112,25 +209,114 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
       original is untouched. A "⑂" action on any message (`MessageBubble`, VN quick-actions)
       forks from there and switches to the new chat; the chat list badges forks, and the header
       shows a "⑂ original chat" jump-back link.
-- [ ] Group chats: multiple characters in one chat. `Chat.characterId` is a single string
-      ([types.ts:66](src/lib/types.ts#L66)) — no rival/friend NPCs can appear in the same scene.
-      Also the prerequisite for section 10e's "social connections" authoring and 10c's milestone
-      ripple-through-social-circle behavior. Worth designing as a proper `Scene` concept —
-      participants, location, an objective/atmosphere, and a turn policy (who speaks when) — rather
-      than just letting `Chat.characterId` become an array, since 10b's dates are really a
-      one-character special case of the same thing and would ideally share the machinery.
-- [ ] Message search across a chat or across all chats.
-- [ ] Bookmarks/pinned messages for favorite moments — no such field on `StoredMessage`
-      ([types.ts:47-62](src/lib/types.ts#L47-L62)).
-- [ ] Chat export as readable HTML/VN-style transcript (nice complement to the gallery — export a
-      "visual novel log" of a playthrough, screenshots included).
+- [x] **Group chats: multiple characters in one chat** — shipped as a minimal, deliberately
+      scoped-down slice rather than the full `Scene` concept this bullet originally floated (no
+      location/objective/atmosphere entity, no AI-directed turn policy — see the cuts below).
+      `Chat.characterId` stays the "primary" (relationship stats/gifts/gallery/VN sprites all stay
+      keyed on it, unchanged); a new `Chat.participants?: string[]` holds extra characters who can
+      also speak, unset for every chat that existed before this — no migration needed.
+      - **Who's "active" for a given turn** is resolved once (`resolveSpeaker()` in
+        `useChatSession.ts`) and reused by both prompt-building and generation, so they can never
+        disagree about who's speaking: the picked character's own card becomes the full
+        system_prompt/description/personality/scenario identity block (exactly like an ordinary
+        chat), and everyone else present becomes a compact roster line
+        (`PromptBuildInput.participants`, `builder.ts`) — "Also present in this scene: - Aria: …".
+      - **The actual bug this fixed**: `renderTurn` (`builder.ts`) used to stamp *every* historical
+        char turn with the primary's name regardless of who "said" it — `StoredMessage.name` was
+        already per-message-correct but silently ignored at prompt-build time. It now uses each
+        turn's own `msg.name`, which is a no-op for every existing single-character chat (name was
+        always the primary's anyway) and the actual fix for a participant's lines reading correctly
+        in history.
+      - **Turn-taking is manual, not AI-directed**: a "reply as ▾" picker in `Composer.tsx` (only
+        rendered once `chat.participants` is non-empty) sets which character's reply gets generated
+        next; `StoredMessage.speakerId` records it (`undefined` = primary, so again no migration).
+        Regenerating/swiping/continuing a message keeps whoever originally said it rather than
+        letting that silently change the speaker.
+      - **Relationship tracking, gift-aware/objective-driven choice suggestions, and the
+        in-character relationship nudge all stay primary-only** — gated on `speaker.id ===
+        character.id` in both `useChatSession.ts` and `buildCurrentPrompt`. Caught one real bug
+        here live: the relationship nudge originally read `{{char}}` — which resolves to
+        whoever's *speaking* — so asking Kestrel to reply momentarily attributed the player's
+        relationship *with Aria* to Kestrel. Fixed by spelling out the primary's name directly
+        instead of relying on the macro, and by not injecting the nudge at all on a non-primary
+        turn (verified via the Prompt Inspector both broken and fixed).
+      - **`DELETE /api/characters/:id`** now also scans every chat for that id as a *participant*
+        (not just as primary) and strips it from `participants` rather than leaving a dangling
+        reference — verified live: deleting a participant leaves the chat and its other participant
+        intact; deleting the primary still deletes the chat as before.
+      - **Deliberately cut, not silently missing**: VN mode still only ever shows the primary's
+        sprite/expression, even mid-scene with a participant speaking (VNStage is built entirely
+        around one character's sprite state — per-participant sprites is a separate, larger lift);
+        no `Scene` entity (location/objective/atmosphere) and no AI-"director" turn policy, both
+        explicitly deferred per the design conversation this bullet originally called for; dates
+        (10b) were NOT unified with this — kept as their own separate mechanic.
+      5 new tests (`builder.test.ts`, covering per-turn speaker naming, the roster block, and
+      `nextSpeakerName`), typecheck clean, full suite (86 tests) green. Verified live end-to-end
+      with two real test characters: created a group chat, sent a message replying as each
+      character in turn, confirmed `speakerId`/avatar/name all resolved correctly in the transcript,
+      and confirmed via the Prompt Inspector that the assembled prompt correctly swaps identity
+      blocks and roster depending on who's replying.
+- [x] **Message search across a chat or across all chats** — a 🔎 header button opens
+      `SearchPanel.tsx` with a "This chat" / "All chats" toggle. In-chat search filters the
+      already-loaded `messages` client-side (instant, no round trip); all-chats search hits a new
+      debounced `GET /api/messages/search?q=` (`messagesApi.search()`) — a plain JS substring scan
+      over the whole table server-side rather than a SQL `LIKE`, so it never has to add the JSON
+      `data` blob column to `assertSafeClause`'s identifier allowlist for what is a read-only,
+      non-performance-critical feature on a single-user local database. Cross-chat results are
+      labeled `{character} — {chat title}` by joining against `chats`/`characters`
+      (`useApiQuery`, already-cached). Clicking a result jumps to it: in the current chat that's a
+      scroll-to + 2.2s highlight flash; in another chat it switches `activeChatId` (no deep-scroll
+      across the chat-switch boundary — a deliberate simplification, see below).
+- [x] **Bookmarks/pinned messages for favorite moments** — `StoredMessage.pinned?: boolean`
+      (`types.ts`), toggled via a ☆/★ button next to regenerate/fork/delete on every message
+      (`MessageBubble.tsx`, `VNStage.tsx`'s own quick-view header). Unlike the rest of that action
+      row, the pin itself stays visible at rest (next to the sender's name) rather than only on
+      hover — otherwise there'd be no way to spot favorited moments while scrolling. A ★ header
+      button opens `PinnedMessagesPanel.tsx`, listing every pinned message in the chat with a
+      one-click jump (scroll-to + highlight) or unpin.
+      - **Shared "jump to message" mechanism** (`src/lib/scrollToMessage.ts`) built once for both
+        features above: every message bubble carries a stable `#msg-{id}` anchor; jumping sets a
+        `highlightedId` in `ChatWindow` that scrolls it into view and fades a `bg-accent/10` tint
+        for ~2.2s. VN mode needed its own handling since its backlog transcript is a collapsed
+        drawer (`VNStage.tsx`'s `showLog`) — a jump opens the drawer first, then scrolls once it's
+        actually mounted, as two separate effects (open, then scroll-once-open).
+      - **Deliberately simpler than the full idea**: a cross-chat search/jump only switches chats,
+        it doesn't also deep-scroll to the specific message in the newly-opened chat (the target
+        chat's own `ChatWindow` instance remounts fresh with no highlight target carried over).
+        Revisit if that gap turns out to matter in practice.
+      Verified live end-to-end: pin persists and shows on both message-list styles and VN mode,
+      unpins correctly, in-chat and cross-chat search both return correct/correctly-labeled
+      results, cross-chat jump switches chats. Typecheck clean, full suite (81 tests) green.
+- [x] **Chat export as a readable HTML transcript** — a "↓" header button builds a fully
+      standalone `.html` file (`src/lib/export/chatTranscript.ts`) via `buildChatTranscriptHtml()`
+      + `downloadChatTranscript()`: a dark, VN-log-styled page with alternating char/user rows,
+      avatars, and any message image attachments, that opens correctly in any browser with the
+      app's server not even running. Avatars are inlined as data URLs (reusing `urlToDataUrl()`
+      from `pack.ts`, exported for this); `StoredMessage.images` are already full data URLs
+      (`useChatSession.ts`'s `sendUserMessage`), so those need no conversion. All user/model text
+      is HTML-escaped — verified live with a message containing `<script>`, `&`, and quote
+      characters, all rendered inert in the output. Filename derived from the chat title.
 
 ## 5. Aesthetic polish (anime/manga mood)
-- [ ] Manga/anime-flavored font pairing alongside the current Inter-only stack (`globals.css` has
-      no second font import).
-- [ ] Ship 1–2 additional theme presets (e.g. "Sakura", "Neon Night") — today there are exactly two
-      token sets, `DEFAULT_THEME_TOKENS`/`_DARK` ([useSettingsStore.ts:10,24](src/lib/store/useSettingsStore.ts#L10)),
-      and `ThemeEditor.tsx` only lets users hand-edit raw tokens with no starting presets to pick from.
+- [x] **Manga/anime-flavored font pairing** — self-hosted `@fontsource/zen-maru-gothic` (500/700
+      weights, matching the existing self-hosted-Inter, no-external-font-requests convention)
+      alongside the current Inter-only stack, via a new `--font-display` token and `.font-display`
+      utility class (`globals.css`). Deliberately scoped to character name-plates only — the
+      `ChatWindow` header name, `MessageBubble`'s sender name (document/flat styles), and
+      `VNStage`'s VN dialogue-box name-plate — not swept across editor/settings chrome, which
+      stays plain Inter; a tool's own UI shouldn't wear the same costume as the characters inside
+      it. Verified live: confirmed the font actually loads (`document.fonts`, not just declared
+      and silently falling back) and resolves correctly on all three name-plate surfaces.
+- [x] **Shipped 2 additional theme presets: "Sakura" and "Neon Night"** — `src/lib/store/
+      themePresets.ts` defines each as a full light+dark token pair; a new "Presets" row at the top
+      of `ThemeEditor.tsx` applies one with a single click via the same `setThemeToken()` the
+      color-swatch pickers use, so every value stays hand-editable afterward, same as any
+      hand-tuned theme. Deliberately narrower than applying a full saved theme (`themesApi`/
+      "Apply"): a preset only touches the 11 color tokens, not `chatStyle`/`avatarShape`/layout/
+      `customCss` — picking a palette shouldn't silently reach into unrelated settings. Sakura is a
+      soft pink/plum romance palette; Neon Night a vivid magenta cyberpunk one — both verified live
+      in both light and dark mode (the swatch preview, the applied `--c-accent` value, and the
+      whole app's re-themed look all checked, then reset back to the default teal).
 - [ ] Speech-bubble tails / manga-style SFX text bursts for `*action text*` emphasis — no such
       styling exists in `MessageBubble.tsx`/`globals.css`.
 - [ ] Subtle ambient particle/gradient effects (e.g. optional falling sakura petals layer) behind
@@ -155,6 +341,27 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
       hard confirmation before restore since it's destructive and irreversible. Deliberately
       separate from character packs (`pack.ts`), which mint new ids for sharing a single
       character rather than reproducing the whole install.
+- [x] **Avatar/sprite/CG/background folder structure reorganized to nest per-entity** — was a flat
+      `data/avatars/<kind>/` per image type (`characters/`, `sprites/`, `gallery/`, `worlds/`,
+      `backgrounds/`, `personas/`), every character's/world's images distinguished only by an
+      id-prefixed filename (`<charId>_happy.png`) sitting alongside every other character's. Now
+      everything belonging to one character or world lives under one folder for that entity —
+      `data/avatars/characters/<id>/{avatar, sprites/*, gallery/*}` and
+      `data/avatars/worlds/<id>/{avatar, backgrounds/*}` — browsable as a single unit in a real
+      file manager. Personas stay flat (`data/avatars/personas/<id>.<ext>`) since they never have
+      more than the one image. `server/avatars.ts`'s `resolveAvatar`/`resolveAvatarMap` do the path
+      construction; `removeAvatarMap` no longer exists at all — deleting a character or world now
+      just recursively removes its one folder (avatar + every sprite/gallery/background together),
+      which is simpler than the three separate removal calls this used to take and can't leave
+      anything orphaned. Nothing else needed to change: `express.static` already serves arbitrary
+      nesting, and both backup/restore (`listAvatarFiles()`'s recursive walk) and character-pack
+      export (`pack.ts`'s `urlToDataUrl`) were already structure-agnostic — they mirror or fetch
+      whatever's there rather than assuming a layout. No migration needed since no character/world
+      had ever saved a real image before this landed. Verified live: uploaded real image data for
+      an avatar + two sprites + a gallery CG on a test character, confirmed every resulting URL
+      resolved (200) and matched the new nested paths on disk, then confirmed deleting the
+      character removed the entire per-character folder in one shot; repeated for a world
+      (avatar + background) and a persona (still flat).
 - [x] Character/world "packs" export/import (`src/lib/characters/pack.ts`, `.rppack.json`) bundle
       the card, sprites, gallery CGs, `spriteUnlocks`, `giftPreferences`, and the bound world
       (description/rules/lorebook/backgrounds) into one file, inlining every server-hosted image
@@ -271,27 +478,42 @@ below:**
   default the way `affection` was.
 
 ### 10a. World simulation & time
-- [ ] **Calendar**: a repeating 112-day year — 4 seasons × 28 days, each season starting on a
+- [x] **Calendar**: a repeating 112-day year — 4 seasons × 28 days, each season starting on a
       Monday — with a day-of-week and morning/afternoon/evening/night phases. Four fixed annual
-      holidays color the calendar, the social feed, and dates: First Bloom (Spring), Midsummer
-      Night (Summer), the Lantern Festival (Autumn — the most romantic night of the year), and
-      the Long Night (Winter). Needs a new `WorldClock`/`WorldCalendar` concept — nothing tracks
-      an in-world date today; `Chat.createdAt`/`updatedAt` are real wall-clock timestamps only.
+      holidays, one per season at its midpoint (day 14/28): First Bloom (Spring), Midsummer Night
+      (Summer), the Lantern Festival (Autumn), and the Long Night (Winter). Pure deterministic
+      functions in `src/lib/world/calendar.ts` (`getCalendarInfo`), 17 vitest cases covering
+      season/weekday wraparound and holiday placement. **Resolves the anchoring question 10's own
+      intro raises** (does clock/mood state belong on `Character`, `Chat`, or something else): the
+      clock is `World`-level shared state (`WorldCard.currentDay`/`currentPhaseIndex` — two plain
+      integers, one clock per world, shared by every chat and character in it, advanced manually
+      for now via a "World clock" control in `WorldsView`), while weather/mood-of-day are never
+      stored at all — deterministically recomputed from `(worldId or characterId, day)`, so
+      browsing the forecast ahead of time is just calling the function with a larger day number.
+      A day only advances manually today (see the still-open energy-economy bullet below).
 - [ ] **Energy/action economy**: a small daily action pool (3 actions, 4 on weekends). A date, a
       hangout, work shift, spending time with someone ("Together"), or a minigame costs one
       action each — the heaviest work shift costs two — while texting is always free. Spending
       energy is what advances the day's time-of-day phase (not a real-time clock); phases get
       pinned as hard facts inside date scenes and gate when a character's texts can arrive.
       Running out of energy triggers Sleep: a written recap of the day, what happened around town
-      while you weren't looking, and a fresh morning with new weather.
+      while you weren't looking, and a fresh morning with new weather. `advancePhase()`
+      (`calendar.ts`) already implements the phase-rollover mechanics this would call into — what's
+      missing is the action-point ledger and tying it to actual in-chat actions instead of a manual
+      "Advance" button.
 - [ ] **Economy**: money is earned, not handed out — from work shifts, minigames, or wealth
       holdings the player owns — and spent through the gift/item catalog (10d). Needs a
       `Chat`-or-player-scoped currency/ledger beyond today's per-chat `giftCoins`, which currently
       has no earning mechanism at all (`NewChatDialog` just seeds a flat 24).
-- [ ] **Deterministic weather**: every world-day has forecastable weather, browsable a few days
-      ahead (a "Weather" app/panel), seeded so it's reproducible rather than random-per-request.
-      Each character has a mood-of-day plus weather they love or hate, both of which should
-      nudge — not dictate — how a date or hangout plays out.
+- [x] **Deterministic weather**: every world-day has forecastable weather (`getWeather(worldId,
+      day)`, `calendar.ts`), seeded so it's reproducible rather than random-per-request — the same
+      day always reads the same, and tomorrow's forecast is just `getWeather(worldId, day + 1)`.
+      Each character has a mood-of-day (`getMoodOfDay`) plus an authored weather love/hate
+      (`Character.weatherPreferences`, editable in `CharacterEditor`'s "Weather preferences"
+      section) — both feed `describeWorldMoment()`, one deterministic line merged into
+      `worldDescription` (`useChatSession.ts`'s `buildCurrentPrompt`) every turn, nudging tone
+      without ever stating a number or dictating the scene. No standalone "Weather" browsing panel
+      yet — only the current day's forecast is surfaced in the World editor today.
 
 ### 10b. Live date & hangout conversations
 - [ ] **A genuinely live, turn-by-turn date mode**: pick a character and a place, then hold a
@@ -313,17 +535,54 @@ below:**
 - [ ] **Real stakes**: each character has a hidden per-date agenda (what they secretly want from
       the evening); reading it well is rewarded. Hostility or crude propositions can make them
       walk out; a vibe that craters gets a quiet early exit instead of the scene grinding on.
-- [ ] **Save-safe end-of-date scoring**: ending a date runs a separate validated judge pass
-      (mirroring the existing `assessAffectionDelta`/`detectSceneFlags` pattern in
-      `relationshipAssist.ts`) that turns the whole transcript into relationship deltas, a mood,
-      and memories — a flat or hurtful date shouldn't move things forward. Starting a date and
-      never speaking should simply not count.
+- [x] **Save-safe end-of-date scoring** — done. Starting a `kind: 'date'` event card (via
+      `startDateEvent`) now stamps `DateEventCard.startedAt`, marking it a live, scored date rather
+      than the original lightweight event-card flow; the per-turn `updateAffectionFromReply` judge
+      call is suppressed for the whole chat while such a date is active (`inLiveDate` guard in
+      `useChatSession.ts`'s `runGeneration`), so nothing moves turn by turn during the date itself.
+      A new `endDateEvent()` gathers every message since `startedAt`, and — if the transcript is
+      non-empty — runs one whole-scene judge pass (`assessDateOutcome` in `relationshipAssist.ts`,
+      mirroring the existing single-call-delta pattern) that returns clamped -5..5 deltas per
+      dimension, new scene flags, new durable facts, and a short recap, applied atomically once the
+      date ends. Starting a date and never sending a message closes it quietly with no judge call
+      and no movement at all — deliberately not counting a date nobody actually had.
+      `DateEventPanel` shows a distinct "Live date in progress" panel (title/description/an
+      explanatory line that scoring happens once, honestly, at the end) with a single "End date"
+      action while a live date is active, replacing the normal suggest/start UI for that chat.
+      A genuine bug surfaced during live verification and is fixed here too: clearing an optional
+      field through the generic `PUT /api/chats/:id` merge (`{ activeEvent: undefined }`) silently
+      did nothing, because `JSON.stringify` drops `undefined`-valued keys entirely before the
+      request body is ever sent — the server never saw the field, let alone cleared it. Both
+      clearing call sites (`endDateEvent`'s `closeOutEvent`, and the pre-existing
+      `setObjectiveStatus`, which had the same latent bug) now send `activeEvent: null` instead,
+      which `JSON.stringify` preserves; every read site already used `?.`/truthy checks, so `null`
+      reads identically to `undefined` everywhere. Verified live end-to-end via direct API calls
+      (koboldcpp is off in dev): empty-transcript end correctly clears `activeEvent` and the header
+      button/panel revert to normal; non-empty-transcript end correctly attempts the judge call,
+      fails gracefully with a toast when the model is unreachable, and — importantly — leaves the
+      date live rather than half-clearing it, so the player can retry once the model is back.
+      Deliberately deferred, still open below: intent chips, a live rapport indicator/reactive
+      portrait, hidden per-date agendas and walkouts, and hangouts as a distinct non-scored mode —
+      none of those exist yet, only the scoring mechanism itself.
 - [ ] **Hangouts**: the same live conversation mode with the date apparatus switched off — no
       turn-by-turn scoring, no walkouts, no relationship-defining stakes. Still ends with an
       honest read: memories form, and slow-building stats (comfort, trust) grow, on the premise
       that people fall for each other over ordinary time together, not only on defined "dates."
-- [ ] **Difficulty setting**: a Gentle / Normal / Harsh scale that changes how far consequences
-      swing, never what a character says or how a scene opens — a global or per-world setting.
+- [x] **Difficulty setting** — done: a global Gentle / Normal / Harsh setting
+      (`useSettingsStore.relationshipDifficulty`, a segmented control under Settings → Generation →
+      Relationship tracking, next to the existing auto-track toggle). Implemented as a single flat
+      multiplier (`scaleDeltasForDifficulty` in `relationshipAssist.ts`: 0.6x / 1x / 1.6x, rounded to
+      the nearest integer) applied at the one choke point both scoring paths already funnel
+      through — right before a judge call's returned deltas get added to the running
+      affection/stats totals — so it changes how far consequences swing without touching the judge
+      prompts, the character's own generation, or how a scene opens, matching the roadmap's own
+      constraint on this item. Applied uniformly to both `updateAffectionFromReply` (per-turn) and
+      `endDateEvent` (end-of-date), so it can't drift into scoring dates and ordinary chat
+      differently. Kept global rather than per-world, since a per-world control would need its own
+      authoring UI in `WorldsView` for a setting most players will only ever set once. 5 new unit
+      tests (`relationshipAssist.test.ts`) cover all three tiers, rounding, and the zero-delta case;
+      verified live in Settings (selection switches, persists across reload via the existing
+      zustand-persist `rp-settings` key).
 
 ### 10c. Relationship depth & lifecycle
 - [x] **Multi-dimensional bonds** — done; see the checked item in section 2 for the full
@@ -331,13 +590,20 @@ below:**
       `RelationshipStage` ladder, `assessRelationshipDeltas`). Landed ahead of 10b's live-date
       scoring pass rather than alongside it as originally suggested below — the existing per-turn
       judge call in `relationshipAssist.ts` was extended in place instead of waiting.
-- [ ] **Store relationship changes as events, not just a running total**: each judge pass appends
-      a small record (`+4 trust — gave the umbrella she mentioned wanting`) rather than only
-      overwriting `Chat.affection` in place. The seven dimensions are then a derived sum, not the
-      source of truth. This is what makes a relationship's history inspectable/debuggable, keeps
-      forking (section 4) coherent when a branch's relationship state needs to diverge cleanly
-      from its parent's, and is a natural extension of `giftsGiven` already being a running record
-      rather than a scalar.
+- [x] **Store relationship changes as events, not just a running total** — a new append-only
+      `relationship_events` table/store (`server/db.ts`, mirroring the `objectives` table's shape;
+      `RelationshipEvent` in `types.ts`) logs one record per turn that actually moved something:
+      the non-zero deltas, any new scene flags, and a short AI-generated reason
+      (`assessRelationshipMoment` now returns `reason` alongside `deltas`/`newFlags` — one extra
+      JSON field on the same call, not a second round trip). `Chat.relationshipStats`/`affection`
+      stay the fast-read running totals for the hot path (prompt building, unlock checks); the
+      event log is the audit trail alongside them, not a replacement — so this is additive, not
+      "seven dimensions become a derived sum" as originally scoped. Surfaced as a collapsed
+      "History (N)" section in `RelationshipPanel`. Forking (section 4) now clones only the
+      events up to the fork's cutoff message, same as it already does for messages/objectives, so
+      a branch's history reads correctly for its own timeline. Verified live end-to-end (create →
+      list → panel display → cascade-delete on character/chat removal) and wired into
+      backup/restore, which silently would have excluded the new table otherwise.
 - [ ] **Define-the-Relationship ladder**: a player-driven progression — Ask them out (Dating) →
       Become exclusive (Exclusive) → Move in together (Living together) — each unlocked at rising
       warmth. The character decides: they can accept, deflect, or the ask can backfire if it's
@@ -395,19 +661,51 @@ below:**
       bullet above.
 
 ### 10f. Proactive, scheduled characters (the core ask)
-- [ ] **Schedules**: a daily/weekly routine per character (tied to their employment and the
-      time-of-day phases from 10a) — where they are and what they're doing at a given point in
-      the world's day, so "is this character even free right now" becomes a real question. A
-      simple presence status derived from it (available / busy / sleeping / traveling) is a cheap,
-      high-value surface for this in the chat list and character header.
-- [ ] **Typed episodic memory**, not just a bigger summary: beyond today's rolling `Chat.summary`
-      (one running long-term-memory blob), specific memories with a shape — an `event` (who, where,
-      when, what, how it felt), a `promise` (made, to whom, fulfilled or not), a `fact` learned
-      about the player, a `preference` observed — so a character can reference something specific
-      later ("you never did come by like you promised") without it depending on the item happening
-      to still be inside the summarized window. Typed memories are also what makes deterministic
-      retrieval possible ("do I have a `promise` memory involving the player that's unfulfilled")
-      instead of relying on embedding search alone for anything structured.
+- [x] **Schedules** — the explicit prerequisite for proactive outreach below, shipped on its own
+      since it's fully deterministic (no model call) and therefore fully testable/verifiable
+      without a live model loaded, unlike outreach itself. `Character.schedule?: ScheduleEntry[]`
+      (`calendar.ts`): a flat list of `{days?, phase, status, activity, location?}` slots — a
+      day-specific slot beats an "every day" one for the same time-of-day phase, and an
+      unscheduled character (or a scheduled one with no matching slot) just defaults to available,
+      never assumed busy. `getCurrentActivity()` resolves what a character is doing right now by
+      reading the world's shared clock (`WorldCard.currentDay`/`currentPhaseIndex` — the same
+      clock section 10a's weather/mood already read), so it costs nothing new to keep in sync.
+      Authored via a new "Schedule" section in `CharacterEditor` (day-pill toggles, time-of-day/
+      status selects, activity/location fields). Surfaced in two places: `describePresence()`
+      merges a "{{char}} is currently busy — Opening the bakery at Bakery." line into
+      `useChatSession.ts`'s `worldDescription` right alongside the existing weather/mood line
+      (only for a character that actually has a schedule authored, so an unscheduled character
+      doesn't get a generic "is currently free" non-fact injected); `ChatWindow`'s header shows a
+      small presence line under the character's name; and `ChatsPanel`'s chat list shows a small
+      status dot on the character's avatar (accent when available, muted otherwise), title-texted
+      with the current activity — both surfaces the roadmap's original bullet asked for. 8 new
+      tests (`calendar.test.ts`), typecheck clean, full suite (94 tests) green. Verified live
+      end-to-end: authored a schedule through the real `CharacterEditor` UI (not just the API) and
+      confirmed it persisted correctly; advanced the world clock from morning to night and
+      confirmed the header badge, the chat-list dot, and the Prompt Inspector's assembled prompt
+      all correctly switched from "busy — Opening the bakery" to "asleep — Asleep" together.
+- [x] **Durable facts, not just a bigger summary** — the `fact` case of this bullet's original
+      four-way vision (event/promise/fact/preference), built as one flat, uncategorized shape
+      rather than four typed ones: `ChatFact` (`types.ts` — text, active, sourceMessageId,
+      createdAt), a new `chat_facts` table/store, `GET /api/chats/:id/chat-facts` +
+      `POST /api/chat-facts` + `PUT /api/chat-facts/:id` (retiring one sets `active: false`, never
+      deletes, same audit-trail spirit as the relationship event log above). `assessRelationshipMoment`
+      (`relationshipAssist.ts`) now also returns `newFacts: string[]` — one more field on the same
+      combined call, not a fourth round trip — told what's already known so it doesn't
+      re-extract the same fact every turn. **The elegant part**: facts reach the prompt as a
+      synthetic constant lorebook (`useChatSession.ts`'s `buildCurrentPrompt` builds a one-off
+      `Lorebook` from active facts and merges it into the existing `lorebooks` array) rather than a
+      new prompt section — so they get token-budgeted and placed through `activateWorldInfo` for
+      free, AND show up in the Prompt Inspector's existing "World info activated" list with zero
+      new transparency code. Verified live end-to-end (create → shows in World info activated →
+      appears verbatim in the assembled prompt → cascade-deletes with the chat). A "What {char}
+      remembers" section in `RelationshipPanel` shows active facts as click-to-forget chips, plus
+      manual add. **Deliberately simpler than originally scoped**: no `event`/`promise`/`preference`
+      type distinction or structured fields (who/where/when) — just one free-text sentence per
+      fact. Deterministic typed retrieval ("do I have an unfulfilled promise memory") stays open if
+      that distinction turns out to matter in practice; the flat version was cheap to ship and
+      already covers the given example ("Promised to visit again next weekend" reads fine as plain
+      text).
 - [ ] **A runtime state snapshot assembled fresh per generation**: once schedule/mood/memory/
       relationship state exist, they need a compact, consistent block fed into the prompt each
       turn (location, time, current activity, mood, relevant relationship numbers, a handful of
@@ -549,21 +847,85 @@ Done so far (see checked boxes above for detail):
 15. ~~Surfacing actual max-context~~ — `KoboldClient.getEffectiveMaxContext()` replaces the
     hardcoded `4096` in every judge/assist call, and is shown in `ConnectionSettings`/
     `ConnectionBadge` (section 8).
+16. ~~World clock: calendar + deterministic weather/mood~~ — the first actual piece of section 10
+    itself (10a), not pre-10 polish like 1-15 above. `src/lib/world/calendar.ts` (17 tests),
+    `WorldCard.currentDay`/`currentPhaseIndex`, `Character.weatherPreferences`, a "World clock"
+    control in `WorldsView`, and one deterministic line merged into every prompt via
+    `describeWorldMoment()`. Resolves the Character-vs-Chat-vs-World anchoring question section 10's
+    intro raises, for this case: the clock is world-level shared state, weather/mood are never
+    stored at all (recomputed on demand). Energy/action economy and the currency ledger remain
+    open — the clock only advances via a manual control for now, not real play actions.
+17. ~~Relationship state reaching the model, not just unlock gates~~ — `buildRelationshipDescription()`
+    (section 2), plus the two classifier calls it depends on merged into one (`assessRelationshipMoment()`),
+    an `autoTrackRelationship` toggle, and milestone/unlock toasts.
+18. ~~Append-only relationship history + durable facts~~ — `RelationshipEvent` and `ChatFact`
+    (sections 2, 10f): a full audit trail of every stat change/flag/reason, and free-text facts the
+    model is told not to re-discover, both reaching the prompt through existing machinery
+    (facts via a synthetic lorebook, history via a `RelationshipPanel` log) rather than new prompt
+    sections.
+19. ~~World Info / lorebook depth~~ — probability, inclusion groups, regex keys, and recursive
+    scanning added to `activateWorldInfo()` (section 3), bringing it to feature parity with
+    SillyTavern's own activation engine bar sticky/cooldown.
+20. ~~Message search and bookmarks/pinned messages~~ — `SearchPanel.tsx` (this-chat/all-chats),
+    `PinnedMessagesPanel.tsx`, `StoredMessage.pinned`, and a shared scroll-to-message + highlight
+    mechanism used by both (section 4).
+21. ~~Chat export as a readable HTML transcript~~ — `src/lib/export/chatTranscript.ts` (section 4).
+22. ~~Group chats: multiple speaking characters~~ — `Chat.participants`/`StoredMessage.speakerId`,
+    a manual "reply as" picker, and the real per-turn speaker-naming bug it fixed along the way
+    (section 4). Shipped as a deliberately minimal slice — see that bullet for the full list of
+    what's cut (no `Scene` entity, no AI-directed turns, VN sprites stay primary-only).
+23. ~~Schedules: per-character routine + presence status~~ — `Character.schedule`,
+    `getCurrentActivity()`/`describePresence()`, a presence badge in both the chat header and the
+    chat list (section 10f) — the explicit prerequisite for proactive outreach (phase 2 of section
+    10's own suggested order) taken as its own deterministic first slice, the same way the world
+    clock was taken as section 10a's first slice earlier.
+24. ~~Custom expressions + a fixed click bug~~ — user-reported: no way to add an expression beyond
+    the built-in 16, and separately, clicking an expression's box didn't open the file picker at
+    all (a stale implicit `<label>`/multi-input association bug). Both fixed (section 3).
+25. ~~Broadened default expressions with love/arousal range~~ — user-requested: flirty, smitten,
+    yearning, sultry, aroused (section 1).
+26. ~~Two more theme presets, Sakura and Neon Night~~ — the roadmap's own next `[ ]` item in section
+    5 once the curated "next steps" list above ran out of anything unblocked to work on.
+27. ~~Manga/anime font pairing for character name-plates~~ — self-hosted Zen Maru Gothic,
+    deliberately scoped to name-plates only, not editor/settings chrome (section 5).
+28. ~~Save-safe end-of-date scoring~~ — 10b's first slice: `DateEventCard.startedAt` marks a live
+    date, per-turn scoring is suppressed while one's active, and `endDateEvent()`/`assessDateOutcome()`
+    run a single whole-transcript judge pass when it ends (section 10b). Also fixed a genuine latent
+    bug surfaced while verifying it live: clearing `Chat.activeEvent` via the generic PUT-merge API
+    silently did nothing, because `JSON.stringify` drops `undefined`-valued object keys before the
+    request body is even sent — switched both clearing call sites to send `null` instead.
+29. ~~Difficulty setting~~ — a global Gentle/Normal/Harsh scale (`relationshipDifficulty` in
+    `useSettingsStore`) applied as a single delta multiplier at the one choke point both the
+    per-turn and end-of-date scoring paths already share, so it can never touch a judge prompt or
+    a character's own generation (section 10b).
 
-That closes out the last "reasonable next batch." Picking a new one, still deliberately smaller
-than section 10 — roughly in priority order:
-1. Group chats / a `Scene` concept (section 4) — the highest-leverage item left outside section 10:
-   it's an explicit prerequisite for 10c's milestone social-circle ripple, 10e's social-connections
-   authoring, and 10b's dates (proposed as a one-character special case of the same `Scene`
-   machinery) — worth doing once, generically, rather than as three separate bolt-ons later.
-2. Message search and bookmarks/pinned messages (section 4) — small, contained, no design
-   decisions blocking them; a `StoredMessage.pinned?: boolean` and a simple search-through-history
-   view.
-3. Vision-based expression detection (section 8) — the groundwork (images already flow through
+That closes out the last "reasonable next batch," plus a first slice each of section 10a, 10b, and
+10f taken directly afterward since 10's own suggested phase order names them as the foundation
+everything else in that section reads from. What's left, still deliberately smaller than the rest
+of section 10:
+1. Vision-based expression detection (section 8) — the groundwork (images already flow through
    generation end-to-end) has been sitting unused since before this file existed; worth checking
-   what it takes given a vision-capable model is loaded.
-4. Chat export as an HTML/VN-style transcript (section 4) — nice complement to the gallery, no
-   dependencies on anything else in this batch.
+   what it takes given a vision-capable model is loaded. Needs an actual vision-capable model
+   loaded in KoboldCpp to build and verify against — blocked until one is running.
+2. A proper `Scene` entity (location, objective/atmosphere) and turn-policy options beyond fully
+   manual (round-robin, an AI "director," @mention) — the group-chat bullet above deliberately
+   shipped the smallest useful slice of this rather than the full concept; revisit once manual
+   group chats have actually been used enough to know whether the extra machinery is worth it.
+3. Multi-character relationship tracking — today only the primary's affection/stats/gifts/gallery
+   exist; a non-primary participant is a scene NPC with no tracked relationship of their own. Real
+   scope (parallel relationship state per participant, not just one), not a quick follow-up.
+4. The rest of proactive outreach (section 10f) — the runtime-state-snapshot and context-budget-
+   tiers groundwork, then the actual "world tick" + unprompted-message queue + authored restraint.
+   Schedules above is deliberately just the prerequisite; the roadmap's own words for this one still
+   apply — "the single biggest architectural departure from today's request/response chat loop" —
+   and it deserves a real design conversation (how an unprompted message even reaches the player —
+   a notification? an inbox view? — is still completely open) before any code, not a continuation
+   of this incremental batch.
+5. The rest of 10b — a genuinely live, turn-by-turn date/hangout conversation mode (today's "date"
+   is still an ordinary chat with per-turn scoring switched off and one judge pass at the end, not a
+   separate streamed scene), intent chips, a live rapport indicator/reactive portrait, and hidden
+   per-date agendas and walkouts. All deliberately deferred until the scoring mechanism (and its
+   difficulty knob) had actually shipped and been verified.
 
 This list is incremental polish on the app as it exists today. Section 10 (living-world dating
 sim) and section 11 (image-generation backends) are a separate, much larger track — see section

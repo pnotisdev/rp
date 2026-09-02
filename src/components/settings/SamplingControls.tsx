@@ -64,6 +64,10 @@ export function SamplingControls() {
   const setSummaryDetail = useSettingsStore((s) => s.setSummaryDetail)
   const autoDetectTasks = useSettingsStore((s) => s.autoDetectTasks)
   const setAutoDetectTasks = useSettingsStore((s) => s.setAutoDetectTasks)
+  const autoTrackRelationship = useSettingsStore((s) => s.autoTrackRelationship)
+  const setAutoTrackRelationship = useSettingsStore((s) => s.setAutoTrackRelationship)
+  const relationshipDifficulty = useSettingsStore((s) => s.relationshipDifficulty)
+  const setRelationshipDifficulty = useSettingsStore((s) => s.setRelationshipDifficulty)
   const autoSuggestChoices = useSettingsStore((s) => s.autoSuggestChoices)
   const setAutoSuggestChoices = useSettingsStore((s) => s.setAutoSuggestChoices)
 
@@ -173,6 +177,42 @@ export function SamplingControls() {
             label="Auto-detect completed tasks"
             description="A quick check after each reply — conservative by design, so it only ever checks things off, never invents progress"
           />
+        </div>
+      </section>
+
+      <section>
+        <h3 className="mb-1 text-sm font-semibold text-text">Relationship tracking</h3>
+        <p className="mb-3 text-xs text-text-muted">
+          Scores affection and six relationship dimensions after each reply, gating gift/sprite/
+          background/gallery unlocks — turn off for a chat you don't want dating-sim mechanics in.
+        </p>
+        <div className="rounded-2xl bg-bg-elevated p-6">
+          <Toggle
+            checked={autoTrackRelationship}
+            onChange={setAutoTrackRelationship}
+            label="Auto-track relationship"
+            description="Runs in the background right after a reply lands — never blocks or delays it"
+          />
+          <div className="pt-3">
+            <div className="mb-1.5 text-sm text-text">Difficulty</div>
+            <div className="flex gap-2">
+              {(['gentle', 'normal', 'harsh'] as const).map((d) => (
+                <button
+                  key={d}
+                  onClick={() => setRelationshipDifficulty(d)}
+                  className={`flex-1 rounded-xl px-3 py-2 text-sm capitalize transition-colors ${
+                    relationshipDifficulty === d ? 'bg-accent/10 text-accent' : 'bg-bg-sunken text-text-muted'
+                  }`}
+                >
+                  {d}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1.5 text-xs text-text-muted">
+              How far affection and relationship stats swing on any given moment or date — never what
+              a character says or how a scene plays out. Gentle softens the swings, harsh sharpens them.
+            </p>
+          </div>
         </div>
       </section>
 

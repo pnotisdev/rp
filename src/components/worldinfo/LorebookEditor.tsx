@@ -101,14 +101,23 @@ export function LorebookEditor({
           value={book.token_budget ?? 512}
           onChange={(e) => onChange({ ...book, token_budget: Number(e.target.value) })}
         />
+        <Toggle
+          checked={book.recursive_scanning ?? false}
+          onChange={(v) => onChange({ ...book, recursive_scanning: v })}
+          label="Recursive scanning"
+        />
       </div>
+      <p className="mb-3 text-xs text-text-muted">
+        Recursive scanning: activated entries are themselves scanned for further keyword matches, so one entry can
+        pull in another it mentions.
+      </p>
 
       <div className="space-y-4">
         {book.entries.map((entry) => (
           <div key={entry.id} className="rounded-2xl bg-bg-sunken p-6">
             <div className="mb-2 flex items-start justify-between gap-2">
               <TextField
-                label="Keys (comma separated)"
+                label="Keys (comma separated — wrap one in /slashes/ for regex)"
                 value={entry.keys.join(', ')}
                 onChange={(e) =>
                   updateEntry(entry.id!, { keys: e.target.value.split(',').map((k) => k.trim()).filter(Boolean) })
@@ -160,6 +169,33 @@ export function LorebookEditor({
                     })
                   }
                   className="w-16 rounded bg-bg-elevated px-2 py-0.5 text-xs text-text outline-none"
+                />
+              </label>
+              {(entry.activationMode ?? 'keyword') === 'keyword' && (
+                <label className="flex items-center gap-1 text-text-muted" title="Chance a keyword match actually fires">
+                  <span>Chance %</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={entry.probability ?? 100}
+                    onChange={(e) =>
+                      updateEntry(entry.id!, {
+                        probability: Math.max(0, Math.min(100, Number(e.target.value))) || 0,
+                      })
+                    }
+                    className="w-16 rounded bg-bg-elevated px-2 py-0.5 text-xs text-text outline-none"
+                  />
+                </label>
+              )}
+              <label className="flex items-center gap-1 text-text-muted" title="Entries sharing a group are mutually exclusive — only the highest-priority one fires">
+                <span>Group</span>
+                <input
+                  type="text"
+                  value={entry.group ?? ''}
+                  onChange={(e) => updateEntry(entry.id!, { group: e.target.value || undefined })}
+                  placeholder="none"
+                  className="w-24 rounded bg-bg-elevated px-2 py-0.5 text-xs text-text outline-none"
                 />
               </label>
             </div>

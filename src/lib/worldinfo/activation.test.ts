@@ -139,6 +139,133 @@ describe('activateWorldInfo', () => {
   it('returns no activations for an empty book list', () => {
     expect(activateWorldInfo([], 'anything').activated).toEqual([])
   })
+
+  describe('probability', () => {
+    it('never fires a keyword match at probability 0', () => {
+      const b = book([entry({ content: 'X', keys: ['tavern'], probability: 0 })])
+      for (let i = 0; i < 20; i++) {
+        expect(activateWorldInfo([b], 'the tavern was loud').activated).toHaveLength(0)
+      }
+    })
+
+    it('always fires a keyword match at probability 100', () => {
+      const b = book([entry({ content: 'X', keys: ['tavern'], probability: 100 })])
+      for (let i = 0; i < 20; i++) {
+        expect(activateWorldInfo([b], 'the tavern was loud').activated).toHaveLength(1)
+      }
+    })
+
+    it('does not gate "always" entries behind probability', () => {
+      const b = book([entry({ content: 'X', constant: true, activationMode: 'always', probability: 0 })])
+      expect(activateWorldInfo([b], 'text').activated).toHaveLength(1)
+    })
+
+    it('does not gate manual entries behind probability', () => {
+      const b = book([entry({ content: 'X', activationMode: 'manual', enabled: true, probability: 0 })])
+      expect(activateWorldInfo([b], 'text').activated).toHaveLength(1)
+    })
+  })
+
+  describe('regex keys', () => {
+    it('matches a /pattern/flags key as a regex instead of a literal substring', () => {
+      const b = book([entry({ content: 'X', keys: ['/tav(ern|erna)/'] })])
+      expect(activateWorldInfo([b], 'we found a taverna nearby').activated).toHaveLength(1)
+      expect(activateWorldInfo([b], 'no match here').activated).toHaveLength(0)
+    })
+
+    it('honors regex flags such as case-insensitive "i"', () => {
+      const b = book([entry({ content: 'X', keys: ['/tavern/i'] })])
+      expect(activateWorldInfo([b], 'the TAVERN was loud').activated).toHaveLength(1)
+    })
+
+    it('falls back to literal matching for an invalid regex pattern', () => {
+      const b = book([entry({ content: 'X', keys: ['/unterminated'] })])
+      expect(activateWorldInfo([b], 'text with /unterminated inside').activated).toHaveLength(1)
+    })
+  })
+
+  describe('inclusion groups', () => {
+    it('fires only the highest-insertion_order entry in a shared group', () => {
+      const b = book([
+        entry({ content: 'low', constant: true, activationMode: 'always', group: 'reaction', insertion_order: 10 }),
+        entry({ content: 'high', constant: true, activationMode: 'always', group: 'reaction', insertion_order: 90 }),
+      ])
+      const result = activateWorldInfo([b], 'text')
+      expect(result.activated.map((e) => e.content)).toEqual(['high'])
+      expect(result.droppedForGroup.map((e) => e.content)).toEqual(['low'])
+    })
+
+    it('does not cross-exclude entries in different groups', () => {
+      const b = book([
+        entry({ content: 'a', constant: true, activationMode: 'always', group: 'group-a' }),
+        entry({ content: 'b', constant: true, activationMode: 'always', group: 'group-b' }),
+      ])
+      const result = activateWorldInfo([b], 'text')
+      expect(result.activated.map((e) => e.content).sort()).toEqual(['a', 'b'])
+      expect(result.droppedForGroup).toHaveLength(0)
+    })
+
+    it('leaves ungrouped entries unaffected', () => {
+      const b = book([entry({ content: 'solo', constant: true, activationMode: 'always' })])
+      const result = activateWorldInfo([b], 'text')
+      expect(result.activated).toHaveLength(1)
+      expect(result.droppedForGroup).toHaveLength(0)
+    })
+  })
+
+  describe('recursive scanning', () => {
+    it('activates a second entry whose keyword only appears in a first entry\'s content, when recursive_scanning is on', () => {
+      const b: Lorebook = {
+        recursive_scanning: true,
+        entries: [
+          entry({ content: 'The Duke rules from Ashfall Keep.', keys: ['duke'] }),
+          entry({ content: 'Ashfall Keep is a fortress.', keys: ['ashfall keep'] }),
+        ],
+      }
+      const result = activateWorldInfo([b], 'tell me about the duke')
+      expect(result.activated.map((e) => e.content)).toEqual(
+        expect.arrayContaining(['The Duke rules from Ashfall Keep.', 'Ashfall Keep is a fortress.']),
+      )
+    })
+
+    it('does not chain into further entries when recursive_scanning is off', () => {
+      const b: Lorebook = {
+        recursive_scanning: false,
+        entries: [
+          entry({ content: 'The Duke rules from Ashfall Keep.', keys: ['duke'] }),
+          entry({ content: 'Ashfall Keep is a fortress.', keys: ['ashfall keep'] }),
+        ],
+      }
+      const result = activateWorldInfo([b], 'tell me about the duke')
+      expect(result.activated.map((e) => e.content)).toEqual(['The Duke rules from Ashfall Keep.'])
+    })
+
+    it('does not loop forever on a cycle of entries that reference each other', () => {
+      const b: Lorebook = {
+        recursive_scanning: true,
+        entries: [
+          entry({ content: 'Mentions beta.', keys: ['alpha'] }),
+          entry({ content: 'Mentions alpha.', keys: ['beta'] }),
+        ],
+      }
+      const start = Date.now()
+      const result = activateWorldInfo([b], 'alpha')
+      expect(Date.now() - start).toBeLessThan(1000)
+      expect(result.activated.map((e) => e.content).sort()).toEqual(['Mentions alpha.', 'Mentions beta.'])
+    })
+
+    it('never lets always/manual entries recursively trigger further matches', () => {
+      const b: Lorebook = {
+        recursive_scanning: true,
+        entries: [
+          entry({ content: 'Always mentions dragons.', constant: true, activationMode: 'always' }),
+          entry({ content: 'About dragons.', keys: ['dragons'] }),
+        ],
+      }
+      const result = activateWorldInfo([b], 'nothing relevant')
+      expect(result.activated.map((e) => e.content)).toEqual(['Always mentions dragons.'])
+    })
+  })
 })
 
 describe('recentMessagesText', () => {

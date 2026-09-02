@@ -3,18 +3,20 @@ import fs from 'node:fs'
 import path from 'node:path'
 import {
   characterStore,
+  chatFactStore,
   chatStore,
   messageStore,
   newId,
   objectiveStore,
   personaStore,
   presetStore,
+  relationshipEventStore,
   themeStore,
   worldInfoBookStore,
   worldStore,
   avatarsDir,
 } from './db.ts'
-import { removeAvatar, removeAvatarMap, resolveAvatar, resolveAvatarMap } from './avatars.ts'
+import { removeAvatar, resolveAvatar, resolveAvatarMap } from './avatars.ts'
 
 export const app = express()
 app.use(express.json({ limit: '25mb' }))
@@ -22,6 +24,18 @@ app.use('/avatars', express.static(avatarsDir))
 
 function notFound(res: express.Response) {
   res.status(404).json({ error: 'Not found' })
+}
+
+function normalizeCustomExpressions(raw: unknown) {
+  if (!Array.isArray(raw)) return undefined
+  const entries = raw
+    .filter((e): e is Record<string, unknown> => !!e && typeof e === 'object')
+    .map((e) => ({
+      id: typeof e.id === 'string' ? e.id.trim() : '',
+      label: typeof e.label === 'string' && e.label.trim() ? e.label.trim() : 'Custom',
+    }))
+    .filter((e) => !!e.id)
+  return entries.length ? entries : undefined
 }
 
 function normalizeGalleryEntries(id: string, galleryRaw: unknown) {
@@ -44,7 +58,7 @@ function normalizeGalleryEntries(id: string, galleryRaw: unknown) {
           : undefined,
       }
     })
-  const resolvedMap = resolveAvatarMap('gallery', id, mapInput) ?? {}
+  const resolvedMap = resolveAvatarMap('characters', 'gallery', id, mapInput) ?? {}
   return entries.map((g) => ({ ...g, imageUrl: resolvedMap[g.id] || g.imageUrl })).filter((g) => !!g.imageUrl)
 }
 
@@ -89,7 +103,7 @@ app.post('/api/characters', (req, res) => {
   const now = Date.now()
   const id = newId()
   const avatarDataUrl = resolveAvatar('characters', id, req.body.avatarDataUrl)
-  const sprites = resolveAvatarMap('sprites', id, req.body.sprites)
+  const sprites = resolveAvatarMap('characters', 'sprites', id, req.body.sprites)
   const gallery = normalizeGalleryEntries(id, req.body.gallery)
   const created = characterStore.insert({
     id,
@@ -97,10 +111,13 @@ app.post('/api/characters', (req, res) => {
     avatarDataUrl,
     sprites,
     spriteUnlocks: req.body.spriteUnlocks ?? {},
+    customExpressions: normalizeCustomExpressions(req.body.customExpressions),
     giftPreferences: req.body.giftPreferences ?? {},
     gallery,
     relationshipStarters: req.body.relationshipStarters ?? [],
     voice: req.body.voice ?? undefined,
+    weatherPreferences: req.body.weatherPreferences ?? undefined,
+    schedule: Array.isArray(req.body.schedule) ? req.body.schedule : undefined,
     worldId: req.body.worldId || undefined,
     createdAt: now,
     updatedAt: now,
@@ -115,28 +132,40 @@ app.put('/api/characters/:id', (req, res) => {
   if ('card' in req.body) patch.card = req.body.card
   if ('worldId' in req.body) patch.worldId = req.body.worldId || undefined
   if ('avatarDataUrl' in req.body) patch.avatarDataUrl = resolveAvatar('characters', id, req.body.avatarDataUrl)
-  if ('sprites' in req.body) patch.sprites = resolveAvatarMap('sprites', id, req.body.sprites)
+  if ('sprites' in req.body) patch.sprites = resolveAvatarMap('characters', 'sprites', id, req.body.sprites)
   if ('spriteUnlocks' in req.body) patch.spriteUnlocks = req.body.spriteUnlocks ?? {}
+  if ('customExpressions' in req.body) patch.customExpressions = normalizeCustomExpressions(req.body.customExpressions)
   if ('giftPreferences' in req.body) patch.giftPreferences = req.body.giftPreferences ?? {}
   if ('gallery' in req.body) patch.gallery = normalizeGalleryEntries(id, req.body.gallery)
   if ('relationshipStarters' in req.body) patch.relationshipStarters = req.body.relationshipStarters ?? []
   if ('voice' in req.body) patch.voice = req.body.voice ?? undefined
+  if ('weatherPreferences' in req.body) patch.weatherPreferences = req.body.weatherPreferences ?? undefined
+  if ('schedule' in req.body) patch.schedule = Array.isArray(req.body.schedule) ? req.body.schedule : undefined
   const updated = characterStore.update(id, patch)
   res.json(updated)
 })
 
 app.delete('/api/characters/:id', (req, res) => {
   const characterId = req.params.id
-  const existing = characterStore.get(characterId)
   const chats = chatStore.list({ where: 'characterId = ?', params: [characterId] })
   for (const chat of chats) {
     for (const msg of messageStore.list({ where: 'chatId = ?', params: [chat.id] })) messageStore.remove(msg.id as string)
     for (const o of objectiveStore.list({ where: 'chatId = ?', params: [chat.id] })) objectiveStore.remove(o.id as string)
+    for (const e of relationshipEventStore.list({ where: 'chatId = ?', params: [chat.id] })) relationshipEventStore.remove(e.id as string)
+    for (const f of chatFactStore.list({ where: 'chatId = ?', params: [chat.id] })) chatFactStore.remove(f.id as string)
     chatStore.remove(chat.id as string)
   }
+  // A character can also appear as a non-primary group-chat participant — `participants` lives in
+  // the JSON blob, not an indexed column, so this can't be a SQL WHERE; it's a full scan (fine on
+  // a single-user local table). Drop the dangling id from the array rather than deleting the chat.
+  for (const chat of chatStore.list()) {
+    const participants = chat.participants as string[] | undefined
+    if (!participants?.includes(characterId)) continue
+    chatStore.update(chat.id as string, { participants: participants.filter((id) => id !== characterId) })
+  }
+  // Removes the whole per-character folder in one shot — avatar, sprites, and gallery all live
+  // under it together (see server/avatars.ts), so nothing can be left orphaned.
   removeAvatar('characters', characterId)
-  removeAvatarMap('sprites', characterId, Object.keys((existing?.sprites as Record<string, string>) ?? {}))
-  removeAvatarMap('gallery', characterId, ((existing?.gallery as { id: string }[] | undefined) ?? []).map((g) => g.id))
   characterStore.remove(characterId)
   res.status(204).end()
 })
@@ -198,6 +227,7 @@ app.post('/api/chats', (req, res) => {
   const created = chatStore.insert({
     id: newId(),
     characterId: req.body.characterId,
+    participants: Array.isArray(req.body.participants) && req.body.participants.length ? req.body.participants : undefined,
     personaId: req.body.personaId ?? '',
     title: req.body.title,
     affection: Number(req.body.affection ?? 0),
@@ -265,6 +295,24 @@ app.post('/api/chats/:id/fork', (req, res) => {
     objectiveStore.insert({ ...oRest, id: newId(), chatId: newChatId, createdAt: now, updatedAt: now })
   }
 
+  // Only events up to the fork point actually happened in this branch's shared past.
+  const cutoffCreatedAt = keptMessages[keptMessages.length - 1]?.createdAt as number | undefined
+  const sourceEvents = relationshipEventStore.list({ where: 'chatId = ?', params: [sourceChatId], orderBy: 'createdAt' })
+  for (const e of sourceEvents) {
+    if (cutoffCreatedAt !== undefined && (e.createdAt as number) > cutoffCreatedAt) continue
+    const { id: _eid, chatId: _ecid, ...eRest } = e
+    relationshipEventStore.insert({ ...eRest, id: newId(), chatId: newChatId })
+  }
+
+  // Same cutoff rule as events above — a fact learned after the fork point belongs only to the
+  // original timeline.
+  const sourceFacts = chatFactStore.list({ where: 'chatId = ?', params: [sourceChatId], orderBy: 'createdAt' })
+  for (const f of sourceFacts) {
+    if (cutoffCreatedAt !== undefined && (f.createdAt as number) > cutoffCreatedAt) continue
+    const { id: _fid, chatId: _fcid, ...fRest } = f
+    chatFactStore.insert({ ...fRest, id: newId(), chatId: newChatId })
+  }
+
   res.status(201).json(forkedChat)
 })
 
@@ -272,11 +320,27 @@ app.delete('/api/chats/:id', (req, res) => {
   const chatId = req.params.id
   for (const msg of messageStore.list({ where: 'chatId = ?', params: [chatId] })) messageStore.remove(msg.id as string)
   for (const o of objectiveStore.list({ where: 'chatId = ?', params: [chatId] })) objectiveStore.remove(o.id as string)
+  for (const e of relationshipEventStore.list({ where: 'chatId = ?', params: [chatId] })) relationshipEventStore.remove(e.id as string)
+  for (const f of chatFactStore.list({ where: 'chatId = ?', params: [chatId] })) chatFactStore.remove(f.id as string)
   chatStore.remove(chatId)
   res.status(204).end()
 })
 
 // ---- Messages ----
+
+// A plain substring scan over every chat's messages rather than a SQL LIKE, so this never needs
+// to add the JSON `data` blob column to assertSafeClause's identifier allowlist for what is a
+// read-only, non-performance-critical feature on a single-user local database. Must be registered
+// before the `/:id` route below, or Express would match "search" itself as an :id.
+app.get('/api/messages/search', (req, res) => {
+  const q = String(req.query.q ?? '').trim().toLowerCase()
+  if (!q) return res.json([])
+  const hits = messageStore
+    .list({ orderBy: 'createdAt DESC' })
+    .filter((m) => String(m.text ?? '').toLowerCase().includes(q))
+    .slice(0, 50)
+  res.json(hits)
+})
 
 app.get('/api/messages/:id', (req, res) => {
   const row = messageStore.get(req.params.id)
@@ -376,7 +440,7 @@ app.post('/api/worlds', (req, res) => {
   const now = Date.now()
   const id = newId()
   const avatarDataUrl = resolveAvatar('worlds', id, req.body.avatarDataUrl)
-  const backgrounds = resolveAvatarMap('backgrounds', id, req.body.backgrounds)
+  const backgrounds = resolveAvatarMap('worlds', 'backgrounds', id, req.body.backgrounds)
   const created = worldStore.insert({
     id,
     name: req.body.name,
@@ -399,7 +463,7 @@ app.put('/api/worlds/:id', (req, res) => {
   if (!worldStore.get(id)) return notFound(res)
   const patch: Record<string, unknown> = { ...req.body, updatedAt: Date.now() }
   if ('avatarDataUrl' in req.body) patch.avatarDataUrl = resolveAvatar('worlds', id, req.body.avatarDataUrl)
-  if ('backgrounds' in req.body) patch.backgrounds = resolveAvatarMap('backgrounds', id, req.body.backgrounds)
+  if ('backgrounds' in req.body) patch.backgrounds = resolveAvatarMap('worlds', 'backgrounds', id, req.body.backgrounds)
   if ('backgroundUnlocks' in req.body) patch.backgroundUnlocks = req.body.backgroundUnlocks ?? {}
   if ('gifts' in req.body) patch.gifts = normalizeGiftItems(req.body.gifts)
   if ('relationshipThresholds' in req.body) patch.relationshipThresholds = normalizeRelationshipThresholds(req.body.relationshipThresholds)
@@ -409,13 +473,13 @@ app.put('/api/worlds/:id', (req, res) => {
 
 app.delete('/api/worlds/:id', (req, res) => {
   const worldId = req.params.id
-  const existing = worldStore.get(worldId)
   // Un-assign rather than cascade-delete: characters living here lose their world, not their existence.
   for (const c of characterStore.list({ where: 'worldId = ?', params: [worldId] })) {
     characterStore.update(c.id as string, { worldId: undefined })
   }
+  // Removes the whole per-world folder in one shot — avatar and backgrounds live under it
+  // together (see server/avatars.ts), so nothing can be left orphaned.
   removeAvatar('worlds', worldId)
-  removeAvatarMap('backgrounds', worldId, Object.keys((existing?.backgrounds as Record<string, string>) ?? {}))
   worldStore.remove(worldId)
   res.status(204).end()
 })
@@ -453,6 +517,38 @@ app.delete('/api/objectives/:id', (req, res) => {
   res.status(204).end()
 })
 
+// ---- Relationship events ----
+// Append-only audit log alongside the overwritten running totals on Chat — no PUT/DELETE,
+// entries are immutable once logged.
+
+app.get('/api/chats/:id/relationship-events', (req, res) => {
+  res.json(relationshipEventStore.list({ where: 'chatId = ?', params: [req.params.id], orderBy: 'createdAt DESC' }))
+})
+
+app.post('/api/relationship-events', (req, res) => {
+  const created = relationshipEventStore.insert({ ...req.body, id: newId(), createdAt: Date.now() })
+  res.status(201).json(created)
+})
+
+// ---- Chat facts ----
+// Durable, individually-retirable facts — unlike relationship events, these DO support PUT
+// (retiring one sets active: false; the row stays for the audit trail, never DELETEd).
+
+app.get('/api/chats/:id/chat-facts', (req, res) => {
+  res.json(chatFactStore.list({ where: 'chatId = ?', params: [req.params.id], orderBy: 'createdAt DESC' }))
+})
+
+app.post('/api/chat-facts', (req, res) => {
+  const created = chatFactStore.insert({ active: true, ...req.body, id: newId(), createdAt: Date.now() })
+  res.status(201).json(created)
+})
+
+app.put('/api/chat-facts/:id', (req, res) => {
+  const updated = chatFactStore.update(req.params.id, req.body)
+  if (!updated) return notFound(res)
+  res.json(updated)
+})
+
 // ---- Full backup / restore ----
 // One self-contained JSON snapshot of every table plus every avatar/sprite/background file
 // (inlined as base64), so the entire local install can be moved or recovered in one file —
@@ -471,6 +567,8 @@ const BACKUP_STORES = {
   themes: themeStore,
   worlds: worldStore,
   objectives: objectiveStore,
+  relationshipEvents: relationshipEventStore,
+  chatFacts: chatFactStore,
 } as const
 
 function listAvatarFiles(): { relPath: string; base64: string }[] {

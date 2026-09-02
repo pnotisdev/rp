@@ -43,13 +43,27 @@ function decodeImageDataUrl(dataUrl: string): { ext: string; buffer: Buffer } {
   return { ext, buffer }
 }
 
+export type AvatarEntityKind = 'characters' | 'personas' | 'worlds'
+export type AvatarMapSubKind = 'sprites' | 'gallery' | 'backgrounds'
+
 /**
- * `avatarDataUrl` from the client is either a fresh `data:...;base64,...` upload (write
- * it to disk and return a servable path) or an already-served `/avatars/...` path from a
- * previous save (nothing changed — keep it as-is). Anything else (undefined, cleared) is
- * passed through untouched.
+ * Everything belonging to one character or world — its portrait, every sprite/expression, every
+ * gallery CG or background — lives under one folder for that entity
+ * (data/avatars/<kind>/<id>/...), so it's browsable as a single unit on disk and can be deleted in
+ * one shot. Personas never have more than the one image, so they stay a flat
+ * data/avatars/personas/<id>.<ext> instead of a folder-per-persona.
  */
-export function resolveAvatar(kind: string, id: string, avatarDataUrl: unknown): string | undefined {
+function entityDir(kind: AvatarEntityKind, id: string): string {
+  return path.join(avatarsDir, kind, id)
+}
+
+/**
+ * `avatarDataUrl` from the client is either a fresh `data:...;base64,...` upload (write it to
+ * disk and return a servable path) or an already-served `/avatars/...` path from a previous save
+ * (nothing changed — keep it as-is). Anything else (undefined, cleared) is passed through
+ * untouched.
+ */
+export function resolveAvatar(kind: AvatarEntityKind, id: string, avatarDataUrl: unknown): string | undefined {
   if (typeof avatarDataUrl !== 'string' || !avatarDataUrl.startsWith('data:')) {
     return avatarDataUrl as string | undefined
   }
@@ -61,32 +75,50 @@ export function resolveAvatar(kind: string, id: string, avatarDataUrl: unknown):
     throw new Error('Invalid id')
   }
   const { ext, buffer } = decodeImageDataUrl(avatarDataUrl)
-  const dir = path.join(avatarsDir, kind)
-  fs.mkdirSync(dir, { recursive: true })
-  const filePath = path.join(dir, `${id}.${ext}`)
-  fs.writeFileSync(filePath, buffer)
-  return `/avatars/${kind}/${id}.${ext}?t=${Date.now()}`
-}
-
-export function removeAvatar(kind: string, id: string): void {
-  const dir = path.join(avatarsDir, kind)
-  if (!fs.existsSync(dir)) return
-  for (const ext of Object.values(EXT_BY_MIME)) {
-    const filePath = path.join(dir, `${id}.${ext}`)
-    if (fs.existsSync(filePath)) fs.unlinkSync(filePath)
+  if (kind === 'personas') {
+    const dir = path.join(avatarsDir, 'personas')
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(path.join(dir, `${id}.${ext}`), buffer)
+    return `/avatars/personas/${id}.${ext}?t=${Date.now()}`
   }
+  const dir = entityDir(kind, id)
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(path.join(dir, `avatar.${ext}`), buffer)
+  return `/avatars/${kind}/${id}/avatar.${ext}?t=${Date.now()}`
 }
 
-// Keys here are fixed expression/background ids (src/lib/vn/expressions.ts, backgrounds.ts) chosen
-// from a dropdown, never freeform user text — still validated since they end up in a filename.
+/** Removes every image belonging to this entity — for characters/worlds that's the whole per-entity folder (avatar + sprites/gallery or backgrounds together), for a persona just its one flat file. */
+export function removeAvatar(kind: AvatarEntityKind, id: string): void {
+  if (kind === 'personas') {
+    const dir = path.join(avatarsDir, 'personas')
+    if (!fs.existsSync(dir)) return
+    for (const ext of Object.values(EXT_BY_MIME)) {
+      const filePath = path.join(dir, `${id}.${ext}`)
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath)
+    }
+    return
+  }
+  fs.rmSync(entityDir(kind, id), { recursive: true, force: true })
+}
+
+// Keys here are fixed expression/background ids (src/lib/vn/expressions.ts, backgrounds.ts) or a
+// gallery entry's own id, chosen from a dropdown or generated locally — never freeform user text —
+// still validated since they end up in a filename.
 const SAFE_KEY_RE = /^[a-z0-9][a-z0-9-]{0,40}$/i
 
 /**
- * Same idea as resolveAvatar, but for a whole map of tagged images at once (e.g. one
- * sprite per expression, or one background per scene tag). Each entry is resolved
- * independently; entries with an invalid key or unresolvable value are dropped.
+ * Same idea as resolveAvatar, but for a whole tagged set of images at once — one sprite per
+ * expression, one CG per gallery entry, one background per scene tag. Each lives under the owning
+ * entity's own folder, in a subfolder named for what it is
+ * (data/avatars/<kind>/<id>/<subKind>/<key>.<ext>). Each entry is resolved independently; entries
+ * with an invalid key or unresolvable value are dropped.
  */
-export function resolveAvatarMap(kind: string, id: string, map: unknown): Record<string, string> | undefined {
+export function resolveAvatarMap(
+  kind: AvatarEntityKind,
+  subKind: AvatarMapSubKind,
+  id: string,
+  map: unknown,
+): Record<string, string> | undefined {
   if (!UUID_RE.test(id)) throw new Error('Invalid id')
   if (!map || typeof map !== 'object') return undefined
   const result: Record<string, string> = {}
@@ -103,23 +135,10 @@ export function resolveAvatarMap(kind: string, id: string, map: unknown): Record
     } catch (e) {
       throw new Error(`"${key}": ${e instanceof Error ? e.message : String(e)}`)
     }
-    const dir = path.join(avatarsDir, kind)
+    const dir = path.join(entityDir(kind, id), subKind)
     fs.mkdirSync(dir, { recursive: true })
-    const filePath = path.join(dir, `${id}_${key}.${ext}`)
-    fs.writeFileSync(filePath, buffer)
-    result[key] = `/avatars/${kind}/${id}_${key}.${ext}?t=${Date.now()}`
+    fs.writeFileSync(path.join(dir, `${key}.${ext}`), buffer)
+    result[key] = `/avatars/${kind}/${id}/${subKind}/${key}.${ext}?t=${Date.now()}`
   }
   return result
-}
-
-export function removeAvatarMap(kind: string, id: string, keys: string[]): void {
-  const dir = path.join(avatarsDir, kind)
-  if (!fs.existsSync(dir)) return
-  for (const key of keys) {
-    if (!SAFE_KEY_RE.test(key)) continue
-    for (const ext of Object.values(EXT_BY_MIME)) {
-      const filePath = path.join(dir, `${id}_${key}.${ext}`)
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath)
-    }
-  }
 }

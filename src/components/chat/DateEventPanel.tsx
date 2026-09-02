@@ -8,11 +8,13 @@ interface DateEventPanelProps {
   onClose: () => void
   onSuggest: () => Promise<DateEventCard | null>
   onStart: (event: DateEventCard) => Promise<void>
+  onEnd: () => Promise<void>
 }
 
-export function DateEventPanel({ currentEvent, onClose, onSuggest, onStart }: DateEventPanelProps) {
+export function DateEventPanel({ currentEvent, onClose, onSuggest, onStart, onEnd }: DateEventPanelProps) {
   const [event, setEvent] = useState<DateEventCard | null>(currentEvent ?? null)
   const [busy, setBusy] = useState<string | null>(null)
+  const isLiveDate = currentEvent?.kind === 'date' && !!currentEvent.startedAt
 
   const run = async (label: string, fn: () => Promise<void>) => {
     setBusy(label)
@@ -23,6 +25,41 @@ export function DateEventPanel({ currentEvent, onClose, onSuggest, onStart }: Da
     } finally {
       setBusy(null)
     }
+  }
+
+  if (isLiveDate && currentEvent) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+        <div className="w-full max-w-lg rounded-2xl border border-border bg-bg-elevated p-7 themed-shadow">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-text">Live date in progress</h2>
+            <Button variant="ghost" onClick={onClose}>
+              Close
+            </Button>
+          </div>
+          <p className="mb-3 text-xs text-text-muted">
+            Relationship movement is scored once, honestly, when the date ends — not turn by turn
+            while it's happening. A flat or awkward date won't quietly move things forward.
+          </p>
+          <div className="mb-4 rounded-xl bg-bg-sunken p-4">
+            <div className="text-sm font-semibold text-text">{currentEvent.title}</div>
+            {currentEvent.description && <p className="mt-1 text-xs text-text-muted">{currentEvent.description}</p>}
+          </div>
+          <Button
+            variant="primary"
+            onClick={() =>
+              run('end', async () => {
+                await onEnd()
+                onClose()
+              })
+            }
+            disabled={busy !== null}
+          >
+            {busy === 'end' ? 'Ending…' : 'End date'}
+          </Button>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -37,6 +74,7 @@ export function DateEventPanel({ currentEvent, onClose, onSuggest, onStart }: Da
 
         <p className="mb-3 text-xs text-text-muted">
           Generate a scene event card and start it as the active objective. This also biases VN backgrounds to the event location.
+          Starting a "date" card begins a live, end-of-scene-scored date.
         </p>
 
         <div className="mb-4 rounded-xl bg-bg-sunken p-4">

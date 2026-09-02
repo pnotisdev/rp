@@ -3,6 +3,8 @@
 // https://github.com/malfoyslastname/character-card-spec-v2
 
 import type { TtsProviderId } from '@/lib/voice/ttsProviders'
+import type { ScheduleEntry, WeatherPreferences } from '@/lib/world/calendar'
+import type { CustomExpression } from '@/lib/vn/expressions'
 
 export type WorldInfoActivationMode = 'always' | 'keyword' | 'manual'
 
@@ -38,6 +40,10 @@ export interface LorebookEntry {
   case_sensitive?: boolean
   /** Not part of the upstream spec — mirrors ST's always/when-relevant/manual radio. Kept in sync with `constant`. */
   activationMode?: WorldInfoActivationMode
+  /** 0-100 — a keyword match only fires this often even when otherwise matched. Doesn't apply to always/manual entries (see activation.ts). */
+  probability?: number
+  /** Entries sharing a non-empty group name are mutually exclusive — only the highest-priority match in the group fires. */
+  group?: string
   extensions?: Record<string, unknown>
 }
 
@@ -86,6 +92,8 @@ export interface Character {
   sprites?: Record<string, string>
   /** Minimum affection required before an expression sprite can be selected/displayed. */
   spriteUnlocks?: Record<string, number>
+  /** Expression slots beyond the built-in default set (src/lib/vn/expressions.ts) — e.g. a signature expression unique to this character. Their sprites/unlocks live in the same `sprites`/`spriteUnlocks` maps as any default expression. */
+  customExpressions?: CustomExpression[]
   /** Gift preference score per gift id (-2..3) used by the gift economy to affect relationship gain. */
   giftPreferences?: Record<string, number>
   /** Unlockable CG-like gallery entries for this character. */
@@ -94,6 +102,10 @@ export interface Character {
   relationshipStarters?: RelationshipStarter[]
   /** Per-character TTS override — unset fields fall back to the global Settings → Voice config. */
   voice?: { provider?: TtsProviderId; voiceId?: string }
+  /** Weather this character loves/hates (src/lib/world/calendar.ts) — nudges the world-moment prompt line, never dictates it. */
+  weatherPreferences?: WeatherPreferences
+  /** Daily/weekly routine (src/lib/world/calendar.ts) — where they are and what they're doing at a given world day/phase. Only meaningful for a world-bound character, since it reads the world's shared clock. */
+  schedule?: ScheduleEntry[]
   createdAt: number
   updatedAt: number
 }

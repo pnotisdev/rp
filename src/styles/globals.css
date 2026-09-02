@@ -27,6 +27,7 @@
   --chat-blur: 0px;
   --shadow-strength: 1;
   --motion-duration: 150ms;
+  --font-display: 'Zen Maru Gothic', 'Inter Variable', sans-serif;
 }
 
 :root.dark {
@@ -131,6 +132,14 @@ h6 {
 .themed-shadow {
   box-shadow: 0 1px 2px rgb(0 0 0 / calc(0.04 * var(--shadow-strength))),
     0 4px 12px rgb(0 0 0 / calc(0.06 * var(--shadow-strength)));
+}
+
+/* The manga-mood display face — deliberately scoped to character name-plates (VNStage,
+   MessageBubble sender name), not swept across editor/settings chrome, which stays plain Inter. */
+.font-display {
+  font-family: var(--font-display);
+  font-weight: 500;
+  letter-spacing: 0.01em;
 }
 
 .prose-rp em {

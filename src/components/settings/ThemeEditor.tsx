@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { themesApi } from '@/lib/api/client'
 import { useSettingsStore, type AvatarShape, type ChatStyle, type ColorMode } from '@/lib/store/useSettingsStore'
+import { THEME_PRESETS, type ThemePreset } from '@/lib/store/themePresets'
 import { ColorField } from '@/components/ui/ColorField'
 import { Slider } from '@/components/ui/Slider'
 import { Toggle } from '@/components/ui/Toggle'
@@ -113,8 +114,40 @@ export function ThemeEditor() {
     if (data.name) setThemeName(data.name)
   }
 
+  // Only touches color tokens (both light and dark, regardless of which mode is active right now)
+  // — deliberately leaves chatStyle/avatarShape/layout/customCss alone, unlike applying a full
+  // saved theme, since a color-palette preset shouldn't reach into unrelated settings.
+  const applyPreset = (preset: ThemePreset) => {
+    const store = useSettingsStore.getState()
+    Object.entries(preset.light).forEach(([k, v]) => store.setThemeToken(k, v, 'light'))
+    Object.entries(preset.dark).forEach(([k, v]) => store.setThemeToken(k, v, 'dark'))
+  }
+
   return (
     <div className="max-w-2xl space-y-14">
+      <section>
+        <h3 className="mb-3 text-sm font-semibold text-text">Presets</h3>
+        <div className="flex flex-wrap gap-3">
+          {THEME_PRESETS.map((preset) => {
+            const swatch = colorMode === 'light' ? preset.light : preset.dark
+            return (
+              <button
+                key={preset.id}
+                onClick={() => applyPreset(preset)}
+                className="flex items-center gap-2 rounded-xl border border-border bg-bg-elevated px-3 py-2 text-sm text-text transition-colors hover:border-accent"
+                title={`Apply the ${preset.name} color palette`}
+              >
+                <span
+                  className="h-5 w-5 shrink-0 rounded-full border border-border"
+                  style={{ background: `rgb(${swatch['--c-accent']})` }}
+                />
+                {preset.name}
+              </button>
+            )
+          })}
+        </div>
+      </section>
+
       <section>
         <div className="mb-3 flex items-center justify-between">
           <h3 className="text-sm font-semibold text-text">Colors</h3>

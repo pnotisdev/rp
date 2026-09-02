@@ -5,7 +5,7 @@ import type { Character, GalleryEntry, RelationshipStarter } from '@/lib/charact
 import { blankCharacterData } from '@/lib/characters/cardSpec'
 import { downloadJson, downloadPng, fileToDataUrl, importCharacterFile } from '@/lib/characters/importExport'
 import { buildCharacterPack, downloadCharacterPack, importCharacterPack, parseCharacterPackFile } from '@/lib/characters/pack'
-import { DEFAULT_EXPRESSIONS } from '@/lib/vn/expressions'
+import { DEFAULT_EXPRESSIONS, slugifyExpressionId, type CustomExpression } from '@/lib/vn/expressions'
 import { newId } from '@/lib/id'
 import { TextAreaField, TextField } from '@/components/ui/Field'
 import { Button } from '@/components/ui/Button'
@@ -16,6 +16,17 @@ import { TemplateGallery } from './TemplateGallery'
 import { RegenerateFieldButton } from './RegenerateFieldButton'
 import { LorebookEditor } from '@/components/worldinfo/LorebookEditor'
 import { getGiftCatalog } from '@/lib/dating/gifts'
+import {
+  PHASES,
+  WEATHER_KINDS,
+  WEEKDAYS,
+  describeWeather,
+  type DayPhase,
+  type PresenceStatus,
+  type ScheduleEntry,
+  type WeatherKind,
+  type Weekday,
+} from '@/lib/world/calendar'
 
 export function CharacterEditor({
   character,
@@ -30,11 +41,16 @@ export function CharacterEditor({
   const [avatarDataUrl, setAvatarDataUrl] = useState(character?.avatarDataUrl)
   const [sprites, setSprites] = useState<Record<string, string>>(character?.sprites ?? {})
   const [spriteUnlocks, setSpriteUnlocks] = useState<Record<string, number>>(character?.spriteUnlocks ?? {})
+  const [customExpressions, setCustomExpressions] = useState<CustomExpression[]>(character?.customExpressions ?? [])
+  const [newExpressionLabel, setNewExpressionLabel] = useState('')
   const [giftPreferences, setGiftPreferences] = useState<Record<string, number>>(character?.giftPreferences ?? {})
   const [gallery, setGallery] = useState<GalleryEntry[]>(character?.gallery ?? [])
   const [relationshipStarters, setRelationshipStarters] = useState<RelationshipStarter[]>(
     character?.relationshipStarters ?? [],
   )
+  const [weatherLoves, setWeatherLoves] = useState<WeatherKind[]>(character?.weatherPreferences?.loves ?? [])
+  const [weatherHates, setWeatherHates] = useState<WeatherKind[]>(character?.weatherPreferences?.hates ?? [])
+  const [schedule, setSchedule] = useState<ScheduleEntry[]>(character?.schedule ?? [])
   const [voiceProvider, setVoiceProvider] = useState<TtsProviderId | ''>(character?.voice?.provider ?? '')
   const [voiceId, setVoiceId] = useState(character?.voice?.voiceId ?? '')
   const [worldId, setWorldId] = useState(character?.worldId ?? '')
@@ -49,11 +65,16 @@ export function CharacterEditor({
     setAvatarDataUrl(character?.avatarDataUrl)
     setSprites(character?.sprites ?? {})
     setSpriteUnlocks(character?.spriteUnlocks ?? {})
+    setCustomExpressions(character?.customExpressions ?? [])
+    setNewExpressionLabel('')
     setGiftPreferences(character?.giftPreferences ?? {})
     setGallery(character?.gallery ?? [])
     setRelationshipStarters(character?.relationshipStarters ?? [])
     setVoiceProvider(character?.voice?.provider ?? '')
     setVoiceId(character?.voice?.voiceId ?? '')
+    setWeatherLoves(character?.weatherPreferences?.loves ?? [])
+    setWeatherHates(character?.weatherPreferences?.hates ?? [])
+    setSchedule(character?.schedule ?? [])
     setWorldId(character?.worldId ?? '')
   }, [character?.id])
 
@@ -61,6 +82,35 @@ export function CharacterEditor({
     setForm((f) => ({ ...f, [key]: value }))
 
   const voice = voiceProvider || voiceId.trim() ? { provider: voiceProvider || undefined, voiceId: voiceId.trim() || undefined } : undefined
+  const weatherPreferences =
+    weatherLoves.length || weatherHates.length ? { loves: weatherLoves, hates: weatherHates } : undefined
+
+  /** A weather kind can't be loved and hated at once — picking one side clears the other. */
+  const toggleWeather = (kind: WeatherKind, side: 'loves' | 'hates') => {
+    const set = side === 'loves' ? setWeatherLoves : setWeatherHates
+    const other = side === 'loves' ? setWeatherHates : setWeatherLoves
+    set((list) => (list.includes(kind) ? list.filter((k) => k !== kind) : [...list, kind]))
+    other((list) => list.filter((k) => k !== kind))
+  }
+
+  const addScheduleEntry = () => {
+    setSchedule((list) => [...list, { id: newId(), phase: 'morning', status: 'busy', activity: '' }])
+  }
+  const updateScheduleEntry = (id: string, patch: Partial<ScheduleEntry>) => {
+    setSchedule((list) => list.map((e) => (e.id === id ? { ...e, ...patch } : e)))
+  }
+  const removeScheduleEntry = (id: string) => {
+    setSchedule((list) => list.filter((e) => e.id !== id))
+  }
+  const toggleScheduleDay = (id: string, day: Weekday) => {
+    setSchedule((list) =>
+      list.map((e) => {
+        if (e.id !== id) return e
+        const days = e.days ?? []
+        return { ...e, days: days.includes(day) ? days.filter((d) => d !== day) : [...days, day] }
+      }),
+    )
+  }
 
   const save = async () => {
     try {
@@ -70,10 +120,13 @@ export function CharacterEditor({
           avatarDataUrl,
           sprites,
           spriteUnlocks,
+          customExpressions: customExpressions.length ? customExpressions : undefined,
           giftPreferences,
           gallery,
           relationshipStarters,
           voice,
+          weatherPreferences,
+          schedule: schedule.length ? schedule : undefined,
           worldId: worldId || undefined,
         })
         onSaved(character.id)
@@ -83,10 +136,13 @@ export function CharacterEditor({
           avatarDataUrl,
           sprites,
           spriteUnlocks,
+          customExpressions: customExpressions.length ? customExpressions : undefined,
           giftPreferences,
           gallery,
           relationshipStarters,
           voice,
+          weatherPreferences,
+          schedule: schedule.length ? schedule : undefined,
           worldId: worldId || undefined,
         })
         onSaved(created.id)
@@ -137,6 +193,19 @@ export function CharacterEditor({
 
   const setSpriteUnlock = (expressionId: string, minAffection: number) => {
     setSpriteUnlocks((s) => ({ ...s, [expressionId]: Math.max(0, Math.min(100, minAffection)) }))
+  }
+
+  const addCustomExpression = () => {
+    const label = newExpressionLabel.trim()
+    if (!label) return
+    const existingIds = [...DEFAULT_EXPRESSIONS.map((e) => e.id), ...customExpressions.map((e) => e.id)]
+    setCustomExpressions((list) => [...list, { id: slugifyExpressionId(label, existingIds), label }])
+    setNewExpressionLabel('')
+  }
+
+  const removeCustomExpression = (expressionId: string) => {
+    setCustomExpressions((list) => list.filter((e) => e.id !== expressionId))
+    removeSprite(expressionId)
   }
 
   const setGiftPreference = (giftId: string, score: number) => {
@@ -372,54 +441,89 @@ export function CharacterEditor({
 
       <details className="mb-8 rounded-2xl bg-bg-elevated p-6">
         <summary className="cursor-pointer text-sm font-medium text-text">
-          Expressions ({Object.keys(sprites).length}/{DEFAULT_EXPRESSIONS.length})
+          Expressions ({Object.keys(sprites).length}/{DEFAULT_EXPRESSIONS.length + customExpressions.length})
         </summary>
         <p className="mt-2 mb-3 text-xs text-text-muted">
           Upload art per expression so Visual Novel mode can show the right one as the AI tags each
-          reply's mood. Anything left blank falls back to the main avatar.
+          reply's mood. Anything left blank falls back to the main avatar. Add a custom expression
+          for anything the default set doesn't cover — a signature smirk unique to this character,
+          say.
         </p>
         <div className="grid grid-cols-3 gap-3 sm:grid-cols-4">
-          {DEFAULT_EXPRESSIONS.map((exp) => (
-            <label key={exp.id} className="group relative flex cursor-pointer flex-col items-center gap-1">
-              <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-xl border border-dashed border-border bg-bg-sunken text-xl">
-                {sprites[exp.id] ? (
-                  <img src={sprites[exp.id]} className="h-full w-full object-cover" />
+          {[...DEFAULT_EXPRESSIONS, ...customExpressions.map((e) => ({ ...e, emoji: '✨' }))].map((exp) => {
+            const isCustom = customExpressions.some((c) => c.id === exp.id)
+            return (
+              <label key={exp.id} className="group relative flex cursor-pointer flex-col items-center gap-1">
+                <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-xl border border-dashed border-border bg-bg-sunken text-xl">
+                  {sprites[exp.id] ? (
+                    <img src={sprites[exp.id]} className="h-full w-full object-cover" />
+                  ) : (
+                    <span>{exp.emoji}</span>
+                  )}
+                </div>
+                <span className="text-[11px] text-text-muted">{exp.label}</span>
+                {/* Must precede the number input below — a <label> with no htmlFor implicitly
+                    activates whichever labelable descendant comes first in the DOM, so clicking
+                    the box only opens the file picker if this one is first. */}
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  className="hidden"
+                  onChange={(e) => e.target.files?.[0] && handleSpritePick(exp.id, e.target.files[0])}
+                />
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={Number(spriteUnlocks[exp.id] ?? 0)}
+                  onClick={(e) => e.preventDefault()}
+                  onChange={(e) => setSpriteUnlock(exp.id, Number(e.target.value) || 0)}
+                  className="w-16 rounded bg-bg-elevated px-2 py-0.5 text-center text-[11px] text-text outline-none"
+                  title="Unlock affection"
+                />
+                {isCustom ? (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault()
+                      removeCustomExpression(exp.id)
+                    }}
+                    title="Remove this custom expression"
+                    aria-label={`Remove custom expression ${exp.label}`}
+                    className="absolute -right-1 -top-1 hidden h-5 w-5 items-center justify-center rounded-full bg-bg-elevated text-[11px] text-text-muted hover:text-danger group-hover:flex"
+                  >
+                    ✕
+                  </button>
                 ) : (
-                  <span>{exp.emoji}</span>
+                  sprites[exp.id] && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        removeSprite(exp.id)
+                      }}
+                      aria-label={`Remove ${exp.label} sprite image`}
+                      className="absolute -right-1 -top-1 hidden h-5 w-5 items-center justify-center rounded-full bg-bg-elevated text-[11px] text-text-muted hover:text-danger group-hover:flex"
+                    >
+                      ✕
+                    </button>
+                  )
                 )}
-              </div>
-              <span className="text-[11px] text-text-muted">{exp.label}</span>
-              <input
-                type="number"
-                min={0}
-                max={100}
-                value={Number(spriteUnlocks[exp.id] ?? 0)}
-                onClick={(e) => e.preventDefault()}
-                onChange={(e) => setSpriteUnlock(exp.id, Number(e.target.value) || 0)}
-                className="w-16 rounded bg-bg-elevated px-2 py-0.5 text-center text-[11px] text-text outline-none"
-                title="Unlock affection"
-              />
-              <input
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                className="hidden"
-                onChange={(e) => e.target.files?.[0] && handleSpritePick(exp.id, e.target.files[0])}
-              />
-              {sprites[exp.id] && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.preventDefault()
-                    removeSprite(exp.id)
-                  }}
-                  aria-label={`Remove ${exp.label} sprite image`}
-                  className="absolute -right-1 -top-1 hidden h-5 w-5 items-center justify-center rounded-full bg-bg-elevated text-[11px] text-text-muted hover:text-danger group-hover:flex"
-                >
-                  ✕
-                </button>
-              )}
-            </label>
-          ))}
+              </label>
+            )
+          })}
+        </div>
+        <div className="mt-3 flex items-center gap-2">
+          <input
+            value={newExpressionLabel}
+            onChange={(e) => setNewExpressionLabel(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && addCustomExpression()}
+            placeholder="Custom expression name — e.g. Sly grin"
+            className="flex-1 rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none"
+          />
+          <Button onClick={addCustomExpression} disabled={!newExpressionLabel.trim()}>
+            + Add
+          </Button>
         </div>
       </details>
 
@@ -599,6 +703,130 @@ export function CharacterEditor({
             placeholder="Leave blank to use the global voice"
           />
         </div>
+      </details>
+
+      <details className="mb-8 rounded-2xl bg-bg-elevated p-6">
+        <summary className="cursor-pointer text-sm font-medium text-text">Weather preferences</summary>
+        <p className="mt-2 mb-3 text-xs text-text-muted">
+          Nudges the world-clock line fed into the prompt (World editor → World clock) when today's
+          weather matches — never dictates the scene. A kind can only be loved or hated, not both.
+        </p>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <div className="mb-1.5 text-xs font-medium text-text-muted">Loves</div>
+            <div className="flex flex-wrap gap-1.5">
+              {WEATHER_KINDS.map((kind) => (
+                <button
+                  key={kind}
+                  type="button"
+                  onClick={() => toggleWeather(kind, 'loves')}
+                  className={`rounded-full px-3 py-1 text-xs ${weatherLoves.includes(kind) ? 'bg-accent/10 text-accent' : 'bg-bg-sunken text-text-muted'}`}
+                >
+                  {describeWeather(kind)}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="mb-1.5 text-xs font-medium text-text-muted">Hates</div>
+            <div className="flex flex-wrap gap-1.5">
+              {WEATHER_KINDS.map((kind) => (
+                <button
+                  key={kind}
+                  type="button"
+                  onClick={() => toggleWeather(kind, 'hates')}
+                  className={`rounded-full px-3 py-1 text-xs ${weatherHates.includes(kind) ? 'bg-danger/10 text-danger' : 'bg-bg-sunken text-text-muted'}`}
+                >
+                  {describeWeather(kind)}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details className="mb-8 rounded-2xl bg-bg-elevated p-6">
+        <summary className="cursor-pointer text-sm font-medium text-text">Schedule ({schedule.length})</summary>
+        <p className="mt-2 mb-3 text-xs text-text-muted">
+          Where this character is and what they're doing at a given time — reads the world's shared
+          clock (World editor → World clock), so it only does anything for a world-bound character.
+          A day-specific slot beats an "every day" one for the same time of day; leave every day
+          unselected for a slot that applies daily.
+        </p>
+        <div className="space-y-3">
+          {schedule.map((entry) => (
+            <div key={entry.id} className="rounded-xl bg-bg-sunken p-4">
+              <div className="mb-2 flex items-start justify-between gap-2">
+                <div className="flex flex-wrap gap-3">
+                  <label className="flex items-center gap-1.5 text-xs text-text-muted">
+                    <span>Time of day</span>
+                    <select
+                      value={entry.phase}
+                      onChange={(e) => updateScheduleEntry(entry.id, { phase: e.target.value as DayPhase })}
+                      className="rounded-lg bg-bg-elevated px-2 py-1 text-xs text-text outline-none"
+                    >
+                      {PHASES.map((p) => (
+                        <option key={p} value={p}>
+                          {p}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="flex items-center gap-1.5 text-xs text-text-muted">
+                    <span>Status</span>
+                    <select
+                      value={entry.status}
+                      onChange={(e) => updateScheduleEntry(entry.id, { status: e.target.value as PresenceStatus })}
+                      className="rounded-lg bg-bg-elevated px-2 py-1 text-xs text-text outline-none"
+                    >
+                      <option value="available">Available</option>
+                      <option value="busy">Busy</option>
+                      <option value="sleeping">Sleeping</option>
+                      <option value="traveling">Traveling</option>
+                    </select>
+                  </label>
+                </div>
+                <Button variant="ghost" onClick={() => removeScheduleEntry(entry.id)}>
+                  ✕
+                </Button>
+              </div>
+              <div className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <TextField
+                  label="Activity"
+                  value={entry.activity}
+                  onChange={(e) => updateScheduleEntry(entry.id, { activity: e.target.value })}
+                  placeholder="Opening the bakery"
+                />
+                <TextField
+                  label="Location (optional)"
+                  value={entry.location ?? ''}
+                  onChange={(e) => updateScheduleEntry(entry.id, { location: e.target.value || undefined })}
+                  placeholder="The bakery"
+                />
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="mr-1 text-xs text-text-muted">Days:</span>
+                {WEEKDAYS.map((day) => (
+                  <button
+                    key={day}
+                    type="button"
+                    onClick={() => toggleScheduleDay(entry.id, day)}
+                    className={`rounded-full px-2 py-0.5 text-xs capitalize ${
+                      entry.days?.includes(day) ? 'bg-accent/10 text-accent' : 'bg-bg-elevated text-text-muted'
+                    }`}
+                  >
+                    {day.slice(0, 3)}
+                  </button>
+                ))}
+                {!entry.days?.length && <span className="text-xs text-text-muted">(every day)</span>}
+              </div>
+            </div>
+          ))}
+          {schedule.length === 0 && <p className="text-xs text-text-muted">No schedule set — always shows as available.</p>}
+        </div>
+        <Button className="mt-3" onClick={addScheduleEntry}>
+          + Add schedule slot
+        </Button>
       </details>
 
       <details className="mb-8 rounded-2xl bg-bg-elevated p-6">

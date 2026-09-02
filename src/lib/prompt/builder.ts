@@ -37,10 +37,20 @@ export interface PromptBuildInput {
   impersonateAsUser?: boolean
   /** Steers the next reply toward an in-progress goal — injected late (right before generation), same placement as post_history_instructions. */
   activeObjective?: { title: string; description?: string; pendingTasks: string[] }
+  /** A short, natural-language relationship-stage nudge (never raw numbers) — same late placement as activeObjective. Pre-built by the caller since it's dating-sim-specific, not a core builder concern. */
+  relationshipDescription?: string
   /** Expression/background ids the model may tag this reply with (Visual Novel mode) — omitted entirely when empty. */
   sceneOptions?: { expressionIds: string[]; backgroundIds: string[] }
   /** Current relationship score for unlock-gated lore entries. */
   affection?: number
+  /**
+   * Other characters present in the scene (group chats) besides `character` — the one actually
+   * generating this turn. Rendered as a compact roster, not a full identity block each; only
+   * `character` gets the full system_prompt/description/personality/scenario treatment.
+   */
+  participants?: { name: string; description?: string; personality?: string }[]
+  /** Whose turn is being generated — defaults to `character.name`. Only differs in a group chat where a non-primary participant is replying. */
+  nextSpeakerName?: string
 }
 
 export interface PromptBuildResult {
@@ -51,6 +61,7 @@ export interface PromptBuildResult {
   excludedMessageCount: number
   activatedEntries: LorebookEntry[]
   droppedForBudget: LorebookEntry[]
+  droppedForGroup: LorebookEntry[]
 }
 
 export { estimateTokens }
@@ -73,7 +84,7 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
   const sub = (text: string | undefined) => substituteMacros(text ?? '', macroCtx)
 
   const scanText = recentMessagesText(history, scanDepth)
-  const { activated: activatedEntries, droppedForBudget } = activateWorldInfo(
+  const { activated: activatedEntries, droppedForBudget, droppedForGroup } = activateWorldInfo(
     lorebooks,
     scanText,
     manuallyActivatedWorldInfoIds,
@@ -94,6 +105,19 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
   ].filter(Boolean)
   const descriptionBlock = descriptionParts.join('\n')
 
+  const participantsBlock =
+    input.participants && input.participants.length > 0
+      ? [
+          'Also present in this scene:',
+          ...input.participants.map((p) => {
+            const bits = [p.description?.trim(), p.personality?.trim() ? `Personality: ${p.personality.trim()}` : '']
+              .filter(Boolean)
+              .join(' ')
+            return `- ${sub(p.name)}${bits ? `: ${sub(bits)}` : ''}`
+          }),
+        ].join('\n')
+      : ''
+
   const summaryBlock = input.chatSummary?.trim() ? `Story so far: ${sub(input.chatSummary)}` : ''
   const worldBlock = input.worldDescription?.trim() ? sub(input.worldDescription) : ''
 
@@ -113,6 +137,7 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
     worldBlock,
     worldBefore,
     descriptionBlock,
+    participantsBlock,
     worldAfter,
     personaBlock,
     exampleBlock,
@@ -125,6 +150,7 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
   const postHistoryBlock = [
     character.post_history_instructions?.trim() ? sub(character.post_history_instructions) : '',
     buildObjectiveBlock(input.activeObjective, sub),
+    input.relationshipDescription?.trim() ? sub(input.relationshipDescription) : '',
     // The scene tag describes the character's own turn, so it makes no sense when generating the user's line instead.
     input.impersonateAsUser ? '' : buildSceneInstruction(input.sceneOptions),
   ]
@@ -140,7 +166,7 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
     ? `${turnPrefix(continuedTurn!.role, continuedTurn!.name, template)}${continuedTurn!.text}`
     : input.impersonateAsUser
       ? turnPrefix('user', macroCtx.userName, template)
-      : turnPrefix('char', macroCtx.charName, template)
+      : turnPrefix('char', input.nextSpeakerName?.trim() || macroCtx.charName, template)
   const genCueTokens = await countTokens(genCue)
 
   let remaining = contextBudget - fixedTokens - postHistoryTokens - genCueTokens
@@ -176,6 +202,7 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
     excludedMessageCount: excludedCount,
     activatedEntries,
     droppedForBudget,
+    droppedForGroup,
   }
 }
 
@@ -208,7 +235,11 @@ function renderTurn(
   template: InstructTemplate,
   macroCtx: { charName: string; userName: string },
 ): string {
-  const name = msg.role === 'user' ? macroCtx.userName : macroCtx.charName
+  // A char turn is rendered under its own speaker's name (group chats can have several), not
+  // always the scene's primary character — every message already carries its actual speaker's
+  // name (`useChatSession.ts` stamps it at creation time), so this only changes behavior when
+  // that name differs from the primary's.
+  const name = msg.role === 'user' ? macroCtx.userName : msg.name?.trim() || macroCtx.charName
   const prefix = turnPrefix(msg.role, name, template)
   const suffix = msg.role === 'user' ? template.userSuffix : template.assistantSuffix
   return `${prefix}${msg.text}${suffix}`

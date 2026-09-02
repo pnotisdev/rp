@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { GenerationParams } from '@/lib/api/types'
 import type { TtsProviderId } from '@/lib/voice/ttsProviders'
+import type { RelationshipDifficulty } from '@/lib/dating/relationshipAssist'
 
 export type ChatStyle = 'flat' | 'bubbles' | 'document'
 export type AvatarShape = 'circle' | 'square' | 'rounded' | 'rectangle'
@@ -137,6 +138,13 @@ interface SettingsState {
   autoDetectTasks: boolean
   setAutoDetectTasks: (v: boolean) => void
 
+  // dating-sim relationship tracking
+  autoTrackRelationship: boolean
+  setAutoTrackRelationship: (v: boolean) => void
+  /** Global multiplier on how far relationship deltas swing — never what a character says or how a scene opens. */
+  relationshipDifficulty: RelationshipDifficulty
+  setRelationshipDifficulty: (d: RelationshipDifficulty) => void
+
   // roleplay choices
   autoSuggestChoices: boolean
   setAutoSuggestChoices: (v: boolean) => void
@@ -225,6 +233,11 @@ export const useSettingsStore = create<SettingsState>()(
 
       autoDetectTasks: true,
       setAutoDetectTasks: (v) => set({ autoDetectTasks: v }),
+
+      autoTrackRelationship: true,
+      setAutoTrackRelationship: (v) => set({ autoTrackRelationship: v }),
+      relationshipDifficulty: 'normal',
+      setRelationshipDifficulty: (d) => set({ relationshipDifficulty: d }),
 
       autoSuggestChoices: true,
       setAutoSuggestChoices: (v) => set({ autoSuggestChoices: v }),

@@ -5,6 +5,7 @@ import type { GiftItem, GiftRarity, WorldCard } from '@/lib/types'
 import { fileToDataUrl } from '@/lib/characters/importExport'
 import { DEFAULT_BACKGROUNDS } from '@/lib/vn/backgrounds'
 import { formatRelationshipStage, RELATIONSHIP_MILESTONES } from '@/lib/dating/stage'
+import { advancePhase, getCalendarInfo, getWeather, describeWeather, PHASES } from '@/lib/world/calendar'
 import { newId } from '@/lib/id'
 import { TextAreaField, TextField } from '@/components/ui/Field'
 import { Button } from '@/components/ui/Button'
@@ -91,6 +92,8 @@ function WorldEditor({ world, onDone }: { world: WorldCard | null; onDone: () =>
   const [backgroundUnlocks, setBackgroundUnlocks] = useState<Record<string, number>>(base.backgroundUnlocks ?? {})
   const [gifts, setGifts] = useState<GiftItem[]>(base.gifts ?? [])
   const [thresholds, setThresholds] = useState(base.relationshipThresholds ?? {})
+  const [currentDay, setCurrentDay] = useState(base.currentDay ?? 0)
+  const [currentPhaseIndex, setCurrentPhaseIndex] = useState(base.currentPhaseIndex ?? 0)
 
   const save = async () => {
     try {
@@ -105,6 +108,8 @@ function WorldEditor({ world, onDone }: { world: WorldCard | null; onDone: () =>
           backgroundUnlocks,
           gifts,
           relationshipThresholds: thresholds,
+          currentDay,
+          currentPhaseIndex,
         })
       } else {
         await worldsApi.create({
@@ -172,6 +177,19 @@ function WorldEditor({ world, onDone }: { world: WorldCard | null; onDone: () =>
     setBackgroundUnlocks((b) => ({ ...b, [tagId]: Math.max(0, Math.min(100, minAffection)) }))
   }
 
+  const advanceClock = async () => {
+    if (!world) return
+    const next = advancePhase(currentDay, currentPhaseIndex)
+    try {
+      await worldsApi.update(world.id, { currentDay: next.day, currentPhaseIndex: next.phaseIndex })
+    } catch (e) {
+      toastError(errorMessage(e))
+      return
+    }
+    setCurrentDay(next.day)
+    setCurrentPhaseIndex(next.phaseIndex)
+  }
+
   const remove = async () => {
     if (!world) return
     if (!confirm(`Delete ${world.name}? Characters living here will be un-assigned, not deleted.`)) return
@@ -220,6 +238,29 @@ function WorldEditor({ world, onDone }: { world: WorldCard | null; onDone: () =>
         value={rules}
         onChange={(e) => setRules(e.target.value)}
       />
+
+      {world && (
+        <div className="mb-8 rounded-2xl bg-bg-elevated p-6">
+          <div className="mb-1 text-sm font-medium text-text">World clock</div>
+          {(() => {
+            const info = getCalendarInfo(currentDay)
+            const weather = getWeather(world.id, currentDay)
+            return (
+              <p className="mb-3 text-xs text-text-muted">
+                Day {info.day} — {info.weekday}, {info.season} ({info.dayOfSeason}/28)
+                {info.holiday ? <> — <span className="text-accent">{info.holiday}</span></> : null}
+                {' · '}
+                {PHASES[currentPhaseIndex]}, {describeWeather(weather)}. Shared by every chat in this world;
+                advancing it moves every character's mood/weather forward with it.
+              </p>
+            )
+          })()}
+          <Button variant="ghost" onClick={advanceClock}>
+            → Advance to {PHASES[(currentPhaseIndex + 1) % PHASES.length]}
+            {currentPhaseIndex === PHASES.length - 1 ? ' (next day)' : ''}
+          </Button>
+        </div>
+      )}
 
       <details className="mb-8 rounded-2xl bg-bg-elevated p-6">
         <summary className="cursor-pointer text-sm font-medium text-text">

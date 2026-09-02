@@ -2,6 +2,7 @@ import { charactersApi, worldsApi } from '@/lib/api/client'
 import { fileToDataUrl } from './importExport'
 import type { Character, CharacterCardData, GalleryEntry, Lorebook, RelationshipStarter } from './cardSpec'
 import type { GiftItem, WorldCard } from '@/lib/types'
+import type { CustomExpression } from '@/lib/vn/expressions'
 
 const PACK_KIND = 'rp-character-pack'
 const PACK_VERSION = 1
@@ -14,6 +15,7 @@ export interface CharacterPackV1 {
     avatarDataUrl?: string
     sprites?: Record<string, string>
     spriteUnlocks?: Record<string, number>
+    customExpressions?: CustomExpression[]
     giftPreferences?: Record<string, number>
     gallery?: GalleryEntry[]
     relationshipStarters?: RelationshipStarter[]
@@ -33,7 +35,7 @@ export interface CharacterPackV1 {
 }
 
 /** Fetches a same-origin `/avatars/...` URL and inlines it as a data URL; passes data URLs through unchanged. */
-async function urlToDataUrl(url: string | undefined): Promise<string | undefined> {
+export async function urlToDataUrl(url: string | undefined): Promise<string | undefined> {
   if (!url) return undefined
   if (url.startsWith('data:')) return url
   const res = await fetch(url)
@@ -71,6 +73,7 @@ export async function buildCharacterPack(character: Character, world?: WorldCard
       avatarDataUrl,
       sprites,
       spriteUnlocks: character.spriteUnlocks,
+      customExpressions: character.customExpressions,
       giftPreferences: character.giftPreferences,
       gallery: gallery.length ? gallery : undefined,
       relationshipStarters: character.relationshipStarters,
@@ -149,6 +152,7 @@ export async function importCharacterPack(pack: CharacterPackV1): Promise<{ char
     avatarDataUrl: pack.character.avatarDataUrl,
     sprites: pack.character.sprites,
     spriteUnlocks: pack.character.spriteUnlocks,
+    customExpressions: pack.character.customExpressions,
     giftPreferences: pack.character.giftPreferences,
     gallery: pack.character.gallery,
     relationshipStarters: pack.character.relationshipStarters,

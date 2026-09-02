@@ -1,21 +1,24 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
-import { charactersApi, chatsApi, messagesApi, objectivesApi, personasApi, worldInfoBooksApi, worldsApi } from '@/lib/api/client'
+import { charactersApi, chatFactsApi, chatsApi, messagesApi, objectivesApi, personasApi, relationshipEventsApi, worldInfoBooksApi, worldsApi } from '@/lib/api/client'
 import { newId } from '@/lib/id'
-import type { DateEventCard, ObjectiveTask, StoredMessage, WorldCard } from '@/lib/types'
+import type { Chat, DateEventCard, ObjectiveTask, StoredMessage, WorldCard } from '@/lib/types'
 import { collectImageBase64, composeMessageText, type PendingAttachment } from '@/lib/attachments'
 import { KoboldClient, makeGenKey } from '@/lib/api/kobold'
 import { buildPrompt, estimateTokens, type ChatMessage } from '@/lib/prompt/builder'
 import { SUMMARY_MAX_LENGTH, summarizeMessages } from '@/lib/prompt/summarize'
 import { generateChoices } from '@/lib/prompt/choices'
 import { detectCompletedTasks, generateTasks, suggestObjective } from '@/lib/objectives/objectiveAssist'
-import { assessRelationshipDeltas, detectGalleryUnlocks, detectSceneFlags, suggestDateEvent } from '@/lib/dating/relationshipAssist'
+import { assessDateOutcome, assessRelationshipMoment, detectGalleryUnlocks, scaleDeltasForDifficulty, suggestDateEvent } from '@/lib/dating/relationshipAssist'
+import { describePresence, describeWorldMoment, getCurrentActivity } from '@/lib/world/calendar'
 import {
   clampAffection,
   clampStat,
   computeWarmth,
+  formatRelationshipStage,
   getRelationshipStats,
   RELATIONSHIP_DIMENSIONS,
+  RELATIONSHIP_MILESTONES,
   relationshipMilestonesFor,
   relationshipStageForWarmth,
 } from '@/lib/dating/stage'
@@ -26,7 +29,7 @@ import { DEFAULT_EXPRESSION_IDS } from '@/lib/vn/expressions'
 import { DEFAULT_BACKGROUND_IDS } from '@/lib/vn/backgrounds'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import { errorMessage, toastError, toastSuccess } from '@/lib/store/useToastStore'
-import type { Character } from '@/lib/characters/cardSpec'
+import type { Character, Lorebook } from '@/lib/characters/cardSpec'
 import type { ChoiceOption, RelationshipDimension, SceneFlag } from '@/lib/types'
 
 /** Minimum number of newly-eligible messages before auto-summarize bothers running (avoids a summarization call on every single turn). */
@@ -57,6 +60,36 @@ function getUnlockedBackgroundIds(world: WorldCard | undefined, affection: numbe
   return unlocked.length ? unlocked : DEFAULT_BACKGROUND_IDS
 }
 
+/**
+ * Until now, relationship state only ever gated WHICH content is available (lorebook entries,
+ * sprites, backgrounds, gallery) — nothing ever told the model itself how the relationship is
+ * going, so a character's in-character warmth couldn't actually track the numbers under the
+ * hood unless an author happened to write affection-gated lore for every stage. This builds one
+ * short, qualitative nudge (never raw numbers) for the same late "right before generation" slot
+ * the objective block already uses — the placement `builder.ts` itself notes is most effective.
+ */
+function buildRelationshipDescription(
+  chat: Pick<Chat, 'affection' | 'relationshipStats'>,
+  world: WorldCard | undefined,
+  primaryName: string,
+): string | undefined {
+  if (chat.affection === undefined) return undefined
+  const stats = getRelationshipStats(chat)
+  const stage = relationshipStageForWarmth(computeWarmth(chat.affection, stats), relationshipMilestonesFor(world?.relationshipThresholds))
+  const notes: string[] = []
+  if (stats.trust >= 70) notes.push('a deep mutual trust has built up')
+  if (stats.chemistry >= 70) notes.push('there is a strong romantic spark')
+  if (stats.tension >= 60) notes.push('real unresolved tension between them')
+  if (stats.comfort <= 20 && stage !== 'near_strangers') notes.push('things still feel a little unsettled between them')
+  // `primaryName` is spelled out rather than left as a `{{char}}` macro — this stays about the
+  // scene's primary/relationship-tracked character even in a group chat, where `{{char}}` would
+  // otherwise resolve to whoever's currently speaking instead (see resolveSpeaker/buildCurrentPrompt).
+  return [
+    `Relationship: {{user}} and ${primaryName} are at the "${formatRelationshipStage(stage)}" stage${notes.length ? ` — ${notes.join('; ')}` : ''}.`,
+    '(Let this color tone, warmth, and what feels earned right now — never state a number, "affection", or "stage" out loud.)',
+  ].join('\n')
+}
+
 function sanitizeSceneTag(
   scene: SceneTag | undefined,
   unlockedExpressions: string[],
@@ -82,6 +115,8 @@ export function useChatSession(chatId: string | null) {
   const keepRecentMessages = useSettingsStore((s) => s.keepRecentMessages)
   const summaryDetail = useSettingsStore((s) => s.summaryDetail)
   const autoDetectTasks = useSettingsStore((s) => s.autoDetectTasks)
+  const autoTrackRelationship = useSettingsStore((s) => s.autoTrackRelationship)
+  const relationshipDifficulty = useSettingsStore((s) => s.relationshipDifficulty)
   const autoSuggestChoices = useSettingsStore((s) => s.autoSuggestChoices)
   const setActiveChatId = useSettingsStore((s) => s.setActiveChatId)
   const client = useMemo(() => new KoboldClient(baseUrl), [baseUrl])
@@ -93,6 +128,15 @@ export function useChatSession(chatId: string | null) {
     () => (chat ? charactersApi.get(chat.characterId) : Promise.resolve(undefined)),
     [chat?.characterId],
   )
+  // Extra characters in a group chat, beyond the primary — [] for today's ordinary single-character
+  // chats. Fetched by id rather than a batched endpoint since the character list is small (a local,
+  // single-user app) and this reuses the exact same reactive `characters` resource as `character` above.
+  const participantIds = chat?.participants ?? []
+  const participantCharacters = useApiQuery(
+    'characters',
+    () => Promise.all(participantIds.map((id) => charactersApi.get(id))).then((list) => list.filter((c): c is Character => !!c)),
+    [participantIds.join(',')],
+  ) ?? []
   const persona = useApiQuery(
     'personas',
     () => (chat ? personasApi.get(chat.personaId) : Promise.resolve(undefined)),
@@ -109,6 +153,12 @@ export function useChatSession(chatId: string | null) {
     [chatId],
   ) ?? []
   const worldInfoBooks = useApiQuery('world-info-books', () => worldInfoBooksApi.list(), []) ?? []
+  const chatFacts = useApiQuery(
+    'chat-facts',
+    () => (chatId ? chatFactsApi.listByChat(chatId) : Promise.resolve([])),
+    [chatId],
+  ) ?? []
+  const activeFacts = useMemo(() => chatFacts.filter((f) => f.active), [chatFacts])
   const activeObjective = useApiQuery(
     'objectives',
     () => (chatId ? objectivesApi.getActive(chatId) : Promise.resolve(undefined)),
@@ -121,6 +171,27 @@ export function useChatSession(chatId: string | null) {
   const abortRef = useRef<AbortController | null>(null)
   const genKeyRef = useRef<string>('')
   const summarizingRef = useRef(false)
+  // Who a freshly-sent user message's reply gets generated as — null/primary for every ordinary
+  // chat. Only meaningful when `chat.participants` is non-empty (group chats); manual, not
+  // AI-directed, by design (see ROADMAP.md's group-chat scope notes).
+  const [replyAsCharacterId, setReplyAsCharacterId] = useState<string | null>(null)
+  useEffect(() => {
+    setReplyAsCharacterId(null)
+  }, [chatId])
+
+  // Resolves which character's card is "active" (gets the full system_prompt/description/
+  // personality/scenario treatment) for a given speaker id, plus everyone else in the scene as a
+  // compact roster — reused by both prompt-building and generation so they never disagree about
+  // who's speaking.
+  const resolveSpeaker = useCallback(
+    (speakerId: string | null | undefined) => {
+      const sceneCharacters = character ? [character, ...participantCharacters] : participantCharacters
+      const active = (speakerId && sceneCharacters.find((c) => c.id === speakerId)) || character
+      const roster = active ? sceneCharacters.filter((c) => c.id !== active.id) : []
+      return { active, roster }
+    },
+    [character, participantCharacters],
+  )
 
   const countTokens = useCallback(
     async (text: string) => {
@@ -138,23 +209,58 @@ export function useChatSession(chatId: string | null) {
   const buildCurrentPrompt = useCallback(
     async (
       historyForPrompt: ChatMessage[],
-      opts?: { continueLastTurn?: boolean; impersonateAsUser?: boolean },
+      opts?: { continueLastTurn?: boolean; impersonateAsUser?: boolean; speakerId?: string | null },
     ) => {
       if (!character || !chat) return null
+      const { active: speaker, roster } = resolveSpeaker(opts?.speakerId)
+      if (!speaker) return null
       // Read the chat record fresh rather than trusting the reactive `chat` closure, which can
       // be one render behind a summary update that just landed (this fn may be called in the
       // same tick as that write, before useApiQuery's subscription has re-rendered us).
       const freshChat = (await chatsApi.get(chat.id)) ?? chat
-      const lorebooks = character.card.character_book ? [character.card.character_book] : []
+      // Every character present in the scene contributes their own lore, not just whoever's
+      // currently speaking — a roster member's card_book stays active in the background.
+      const lorebooks = [speaker, ...roster].map((c) => c.card.character_book).filter((b): b is Lorebook => !!b)
       const boundBooks = worldInfoBooks
         .filter((b) => b.boundChatIds.length === 0 || b.boundChatIds.includes(freshChat.id))
         .map((b) => b.book)
       const worldLorebook = world?.lorebook ? [world.lorebook] : []
+      // Remembered facts ride through the exact same activation/budget/placement machinery as
+      // any other lorebook — a synthetic constant book, not a new prompt section.
+      const factsLorebook: Lorebook[] = activeFacts.length
+        ? [
+            {
+              name: 'Remembered facts',
+              entries: activeFacts.map((f, i) => ({
+                id: i,
+                keys: [],
+                content: f.text,
+                constant: true,
+                selective: false,
+                insertion_order: 100,
+                enabled: true,
+                activationMode: 'always' as const,
+              })),
+            },
+          ]
+        : []
       const affection = freshChat.affection ?? 0
       const worldDescription = world
         ? [
             world.description?.trim(),
             world.rules?.trim() ? `World rules: ${world.rules.trim()}` : '',
+            describeWorldMoment({
+              worldId: world.id,
+              characterId: speaker.id,
+              day: world.currentDay ?? 0,
+              phaseIndex: world.currentPhaseIndex ?? 0,
+              weatherPreferences: speaker.weatherPreferences,
+            }),
+            // Only worth a prompt line when this character actually has a schedule authored —
+            // otherwise every character would get a generic "is currently free" non-fact.
+            speaker.schedule?.length
+              ? describePresence(getCurrentActivity(speaker.schedule, world.currentDay ?? 0, world.currentPhaseIndex ?? 0))
+              : '',
             freshChat.activeEvent?.title
               ? `Current event: ${freshChat.activeEvent.title}${freshChat.activeEvent.description ? ` — ${freshChat.activeEvent.description}` : ''}`
               : '',
@@ -179,16 +285,23 @@ export function useChatSession(chatId: string | null) {
               pendingTasks: pendingTasks.map((t) => t.description),
             }
           : undefined
+      // Only makes sense when the primary is the one actually speaking — it's a nudge about
+      // {{user}}'s relationship with the primary specifically, not something a non-primary
+      // participant's own dialogue should be steered by.
+      const relationshipDescription =
+        autoTrackRelationship && speaker.id === character.id
+          ? buildRelationshipDescription(freshChat, world, character.card.name)
+          : undefined
 
       const contextBudget = sampler.max_context_length - sampler.max_length - 32
       return buildPrompt({
-        character: character.card,
+        character: speaker.card,
         personaName: persona?.name || 'You',
         personaDescription: persona?.description || '',
         history: recentHistory,
         chatSummary: freshChat.summary,
         worldDescription,
-        lorebooks: [...worldLorebook, ...lorebooks, ...boundBooks],
+        lorebooks: [...worldLorebook, ...lorebooks, ...boundBooks, ...factsLorebook],
         template,
         contextBudget: Math.max(contextBudget, 256),
         scanDepth: 8,
@@ -196,14 +309,35 @@ export function useChatSession(chatId: string | null) {
         continueLastTurn: opts?.continueLastTurn,
         impersonateAsUser: opts?.impersonateAsUser,
         activeObjective: objectiveForPrompt,
+        relationshipDescription,
         sceneOptions: {
+          // VN scene-tagging stays keyed on the primary for now — per-participant sprites are a
+          // separate, larger lift (VNStage is built entirely around one character's sprite state).
           expressionIds: getUnlockedExpressionIds(character, affection),
           backgroundIds: getUnlockedBackgroundIds(world, affection),
         },
         affection,
+        participants: roster.length
+          ? roster.map((c) => ({ name: c.card.name, description: c.card.description, personality: c.card.personality }))
+          : undefined,
+        nextSpeakerName: speaker.card.name,
       })
     },
-    [activeObjective, character, chat, countTokens, messages, persona, sampler, template, world, worldInfoBooks],
+    [
+      activeFacts,
+      activeObjective,
+      autoTrackRelationship,
+      character,
+      chat,
+      countTokens,
+      messages,
+      persona,
+      resolveSpeaker,
+      sampler,
+      template,
+      world,
+      worldInfoBooks,
+    ],
   )
 
   const updateMemorySummary = useCallback(
@@ -280,26 +414,31 @@ export function useChatSession(chatId: string | null) {
       const currentAffection = freshChat.affection ?? 0
       const currentStats = getRelationshipStats(freshChat)
       const existingFlags = new Set((freshChat.sceneFlags ?? []) as SceneFlag[])
-      const deltas = await assessRelationshipDeltas(client, {
+      const { deltas: rawDeltas, newFlags, reason, newFacts } = await assessRelationshipMoment(client, {
         history,
         latestReply,
         charName: character.card.name,
         userName: persona?.name || 'You',
         current: { affection: currentAffection, ...currentStats },
+        knownFacts: activeFacts.map((f) => f.text),
       })
-      const newFlags = await detectSceneFlags(client, {
-        history,
-        latestReply,
-        charName: character.card.name,
-        userName: persona?.name || 'You',
-      })
+      const deltas = scaleDeltasForDifficulty(rawDeltas, relationshipDifficulty)
       newFlags.forEach((flag) => existingFlags.add(flag))
+      if (newFacts.length > 0) {
+        const sourceMessageId = history[history.length - 1]?.id
+        for (const text of newFacts) {
+          chatFactsApi.create({ chatId: chatIdForRelationship, text, sourceMessageId }).catch(() => {})
+        }
+      }
       const affection = clampAffection(currentAffection + deltas.affection)
       const nextStats = { ...currentStats }
       for (const dim of RELATIONSHIP_DIMENSIONS) nextStats[dim] = clampStat(currentStats[dim] + deltas[dim])
+      const milestones = relationshipMilestonesFor(world?.relationshipThresholds)
+      const previousStage = relationshipStageForWarmth(computeWarmth(currentAffection, currentStats), milestones)
       const warmth = computeWarmth(affection, nextStats)
-      const relationshipStage = relationshipStageForWarmth(warmth, relationshipMilestonesFor(world?.relationshipThresholds))
+      const relationshipStage = relationshipStageForWarmth(warmth, milestones)
       const unlockedSet = new Set(freshChat.unlockedGalleryIds ?? [])
+      const previouslyUnlockedIds = new Set(unlockedSet)
       const lockedGallery = (character.gallery ?? []).filter(
         (g) => !unlockedSet.has(g.id) && hasRequiredFlags(g.requiredFlags, existingFlags),
       )
@@ -325,8 +464,34 @@ export function useChatSession(chatId: string | null) {
         giftCoins: nextCoins,
         unlockedGalleryIds: [...unlockedSet],
       })
+      // Append-only history alongside the overwritten running totals above — answers "why is
+      // trust 62 now" instead of only ever showing the current number. Only log when a dimension
+      // or flag genuinely moved; gallery/coin bookkeeping alone isn't relationship movement.
+      if (!noStatChange || newFlags.length > 0) {
+        const changedDeltas = Object.fromEntries(Object.entries(deltas).filter(([, v]) => v !== 0))
+        relationshipEventsApi
+          .create({
+            chatId: chatIdForRelationship,
+            reason: reason ?? 'The relationship shifted during this exchange',
+            deltas: changedDeltas,
+            newFlags: newFlags.length ? newFlags : undefined,
+            sourceMessageId: history[history.length - 1]?.id,
+          })
+          .catch(() => {})
+      }
+      // Quiet, player-facing rewards — these are milestones worth surfacing, unlike the raw
+      // scene flags (internal bookkeeping) or per-turn stat deltas (would be constant noise).
+      const stageOrder = RELATIONSHIP_MILESTONES.map((m) => m.stage)
+      if (stageOrder.indexOf(relationshipStage) > stageOrder.indexOf(previousStage)) {
+        toastSuccess(`${character.card.name}'s relationship with you is now "${formatRelationshipStage(relationshipStage)}"`)
+      }
+      for (const id of unlockedSet) {
+        if (previouslyUnlockedIds.has(id)) continue
+        const entry = character.gallery?.find((g) => g.id === id)
+        toastSuccess(`New gallery scene unlocked: ${entry?.title ?? 'untitled'}`)
+      }
     },
-    [character, client, persona?.name, world],
+    [activeFacts, character, client, persona?.name, relationshipDifficulty, world],
   )
 
   const buyGift = useCallback(
@@ -355,8 +520,8 @@ export function useChatSession(chatId: string | null) {
       name: m.name,
       text: m.text,
     }))
-    return buildCurrentPrompt(historyForPrompt)
-  }, [buildCurrentPrompt, messages])
+    return buildCurrentPrompt(historyForPrompt, { speakerId: replyAsCharacterId })
+  }, [buildCurrentPrompt, messages, replyAsCharacterId])
 
   /** Best-effort: proposes a few next-move options for the user, attached to the char message they follow from. Never blocks the reply. */
   const suggestChoicesForMessage = useCallback(
@@ -404,9 +569,15 @@ export function useChatSession(chatId: string | null) {
       historyForPrompt: ChatMessage[],
       targetMessageId: string,
       images: string[] = [],
-      opts?: { continuing?: boolean },
+      opts?: { continuing?: boolean; speakerId?: string | null },
     ) => {
       if (!character || !chat) return
+      const { active: speaker } = resolveSpeaker(opts?.speakerId)
+      if (!speaker) return
+      // Relationship tracking, objective-progress-driven choices, and gift-aware choice
+      // suggestions are all scoped to the primary's relationship — skip them for a turn a
+      // non-primary participant spoke, rather than silently attributing their lines to it.
+      const isPrimarySpeaker = speaker.id === character.id
       const continuing = !!opts?.continuing
       const existingText = continuing ? (historyForPrompt[historyForPrompt.length - 1]?.text ?? '') : ''
       setIsGenerating(true)
@@ -418,7 +589,7 @@ export function useChatSession(chatId: string | null) {
       abortRef.current = abort
 
       try {
-        let built = await buildCurrentPrompt(historyForPrompt, { continueLastTurn: continuing })
+        let built = await buildCurrentPrompt(historyForPrompt, { continueLastTurn: continuing, speakerId: opts?.speakerId })
         if (!built) throw new Error('Could not build prompt: missing character or chat.')
 
         // The budget was already tight for THIS turn, not just future ones — fold the
@@ -427,7 +598,7 @@ export function useChatSession(chatId: string | null) {
         // right when it matters most.
         if (autoSummarize && built.excludedMessageCount > 0) {
           await updateMemorySummary({ force: true })
-          const rebuilt = await buildCurrentPrompt(historyForPrompt, { continueLastTurn: continuing })
+          const rebuilt = await buildCurrentPrompt(historyForPrompt, { continueLastTurn: continuing, speakerId: opts?.speakerId })
           if (rebuilt) built = rebuilt
         }
 
@@ -503,10 +674,15 @@ export function useChatSession(chatId: string | null) {
           detectAndMarkTasks(chat.id, combined).catch(() => {})
         }
         const relationshipHistory = continuing
-          ? [...historyForPrompt.slice(0, -1), { id: targetMessageId, role: 'char' as const, name: character.card.name, text: combined }]
-          : [...historyForPrompt, { id: targetMessageId, role: 'char' as const, name: character.card.name, text: combined }]
-        updateAffectionFromReply(chat.id, relationshipHistory, combined).catch(() => {})
-        if (autoSuggestChoices) {
+          ? [...historyForPrompt.slice(0, -1), { id: targetMessageId, role: 'char' as const, name: speaker.card.name, text: combined }]
+          : [...historyForPrompt, { id: targetMessageId, role: 'char' as const, name: speaker.card.name, text: combined }]
+        // A live, scored date (10b) suppresses the normal per-turn drip-feed — its outcome is
+        // resolved once, at the end, by endDateEvent's own assessDateOutcome pass instead.
+        const inLiveDate = chat.activeEvent?.kind === 'date' && !!chat.activeEvent.startedAt
+        if (autoTrackRelationship && isPrimarySpeaker && !inLiveDate) {
+          updateAffectionFromReply(chat.id, relationshipHistory, combined).catch(() => {})
+        }
+        if (autoSuggestChoices && isPrimarySpeaker) {
           suggestChoicesForMessage(targetMessageId, relationshipHistory).catch(() => {})
         }
       } catch (e) {
@@ -524,12 +700,14 @@ export function useChatSession(chatId: string | null) {
       autoDetectTasks,
       autoSummarize,
       autoSuggestChoices,
+      autoTrackRelationship,
       buildCurrentPrompt,
       character,
       chat,
       client,
       countTokens,
       detectAndMarkTasks,
+      resolveSpeaker,
       sampler,
       suggestChoicesForMessage,
       template,
@@ -592,12 +770,15 @@ export function useChatSession(chatId: string | null) {
       await messagesApi.create(userMsg)
 
       // createdAt is offset by 1ms and sent explicitly so this reply always sorts after the
-      // user's turn even though both are created in the same synchronous burst.
+      // user's turn even though both are created in the same synchronous burst. `replyAsCharacterId`
+      // only ever differs from the primary in a group chat — every ordinary chat leaves it null.
+      const { active: speaker } = resolveSpeaker(replyAsCharacterId)
       const charMsg: StoredMessage = {
         id: newId(),
         chatId,
         role: 'char',
-        name: character?.card.name || 'Character',
+        name: speaker?.card.name || character?.card.name || 'Character',
+        speakerId: speaker && speaker.id !== character?.id ? speaker.id : undefined,
         text: '',
         createdAt: now + 1,
         swipes: [],
@@ -611,9 +792,9 @@ export function useChatSession(chatId: string | null) {
         name: m.name,
         text: m.text,
       }))
-      await runGeneration(historyForPrompt, charMsg.id, apiImages)
+      await runGeneration(historyForPrompt, charMsg.id, apiImages, { speakerId: replyAsCharacterId })
     },
-    [character, chatId, isGenerating, messages, persona, runGeneration, world],
+    [character, chatId, isGenerating, messages, persona, replyAsCharacterId, resolveSpeaker, runGeneration, world],
   )
 
   const regenerate = useCallback(
@@ -629,7 +810,9 @@ export function useChatSession(chatId: string | null) {
         text: m.text,
       }))
       await messagesApi.update(messageId, { text: '' })
-      await runGeneration(historyForPrompt, messageId, latestImages(priorMessages))
+      // Regenerating keeps whoever originally said it, rather than letting a regenerate silently
+      // switch the speaker — that's a distinct, explicit action (editing the message).
+      await runGeneration(historyForPrompt, messageId, latestImages(priorMessages), { speakerId: messages[idx].speakerId })
     },
     [isGenerating, messages, runGeneration],
   )
@@ -657,7 +840,7 @@ export function useChatSession(chatId: string | null) {
           activeSwipe: newSwipes.length - 1,
           text: '',
         })
-        await runGeneration(historyForPrompt, messageId, latestImages(priorMessages))
+        await runGeneration(historyForPrompt, messageId, latestImages(priorMessages), { speakerId: msg.speakerId })
         return
       }
       const nextIndex = direction === 'left' ? Math.max(0, current - 1) : Math.min(swipes.length - 1, current + 1)
@@ -679,7 +862,7 @@ export function useChatSession(chatId: string | null) {
       name: m.name,
       text: m.text,
     }))
-    await runGeneration(historyForPrompt, last.id, latestImages(messages), { continuing: true })
+    await runGeneration(historyForPrompt, last.id, latestImages(messages), { continuing: true, speakerId: last.speakerId })
   }, [isGenerating, messages, runGeneration])
 
   const canContinue =
@@ -763,7 +946,9 @@ export function useChatSession(chatId: string | null) {
     async (status: 'completed' | 'abandoned') => {
       if (!activeObjective) return
       await objectivesApi.update(activeObjective.id, { status })
-      if (chatId) await chatsApi.update(chatId, { activeEvent: undefined })
+      // `null`, not `undefined` — JSON.stringify drops undefined-valued keys entirely, so the
+      // server would never see this field in the PATCH body and the stale activeEvent would stick.
+      if (chatId) await chatsApi.update(chatId, { activeEvent: null })
     },
     [activeObjective, chatId],
   )
@@ -795,10 +980,117 @@ export function useChatSession(chatId: string | null) {
     async (event: DateEventCard) => {
       if (!chatId || !event.title.trim() || !event.objectiveTitle.trim()) return
       await createObjective(event.objectiveTitle, event.objectiveDescription ?? event.description ?? '', 'ai')
-      await chatsApi.update(chatId, { activeEvent: event })
+      // Stamped on every event regardless of kind — harmless metadata for gift/milestone cards,
+      // which never read it — but for a `kind: 'date'` card its presence is what marks this as a
+      // live, scored date (10b) rather than the original lightweight event-card flow, and its
+      // value is the cutoff `endDateEvent` uses to gather this date's own transcript.
+      await chatsApi.update(chatId, { activeEvent: { ...event, startedAt: Date.now() } })
     },
     [chatId, createObjective],
   )
+
+  /**
+   * Ends an active `kind: 'date'` event with a single validated judge pass over the whole scene's
+   * transcript (10b's "save-safe end-of-date scoring") rather than the per-turn drip-feed ordinary
+   * chat gets — see `assessDateOutcome`. A date with no messages since it started just closes
+   * quietly, no judge call and no relationship movement: starting a date and never speaking
+   * shouldn't count for or against anything.
+   */
+  const endDateEvent = useCallback(async () => {
+    if (!chatId || !character) return
+    const freshChat = await chatsApi.get(chatId)
+    const event = freshChat?.activeEvent
+    if (!freshChat || !event?.startedAt) return
+    const startedAt = event.startedAt
+
+    const closeOutEvent = async () => {
+      // `null`, not `undefined` — see the note on the other clearing call site above.
+      await chatsApi.update(chatId, { activeEvent: null })
+      if (activeObjective) await objectivesApi.update(activeObjective.id, { status: 'completed' })
+    }
+
+    const transcript: ChatMessage[] = messages
+      .filter((m) => m.createdAt >= startedAt && m.text.trim())
+      .map((m) => ({ id: m.id, role: m.role, name: m.name, text: m.text }))
+    if (transcript.length === 0) {
+      await closeOutEvent()
+      toastSuccess(`${event.title} ended without anything happening.`)
+      return
+    }
+
+    const currentAffection = freshChat.affection ?? 0
+    const currentStats = getRelationshipStats(freshChat)
+    const existingFlags = new Set((freshChat.sceneFlags ?? []) as SceneFlag[])
+    const outcome = await assessDateOutcome(client, {
+      transcript,
+      eventTitle: event.title,
+      charName: character.card.name,
+      userName: persona?.name || 'You',
+      current: { affection: currentAffection, ...currentStats },
+      knownFacts: activeFacts.map((f) => f.text),
+    })
+    const deltas = scaleDeltasForDifficulty(outcome.deltas, relationshipDifficulty)
+    outcome.newFlags.forEach((flag) => existingFlags.add(flag))
+    if (outcome.newFacts.length > 0) {
+      const sourceMessageId = transcript[transcript.length - 1]?.id
+      for (const text of outcome.newFacts) {
+        chatFactsApi.create({ chatId, text, sourceMessageId }).catch(() => {})
+      }
+    }
+    const affection = clampAffection(currentAffection + deltas.affection)
+    const nextStats = { ...currentStats }
+    for (const dim of RELATIONSHIP_DIMENSIONS) nextStats[dim] = clampStat(currentStats[dim] + deltas[dim])
+    const milestones = relationshipMilestonesFor(world?.relationshipThresholds)
+    const previousStage = relationshipStageForWarmth(computeWarmth(currentAffection, currentStats), milestones)
+    const warmth = computeWarmth(affection, nextStats)
+    const relationshipStage = relationshipStageForWarmth(warmth, milestones)
+
+    const unlockedSet = new Set(freshChat.unlockedGalleryIds ?? [])
+    const previouslyUnlockedIds = new Set(unlockedSet)
+    const lockedGallery = (character.gallery ?? []).filter(
+      (g) => !unlockedSet.has(g.id) && hasRequiredFlags(g.requiredFlags, existingFlags),
+    )
+    if (lockedGallery.length > 0) {
+      const unlockedIds = await detectGalleryUnlocks(client, {
+        character,
+        locked: lockedGallery,
+        affection,
+        latestReply: outcome.recap,
+      })
+      unlockedIds.forEach((id) => unlockedSet.add(id))
+    }
+
+    await chatsApi.update(chatId, {
+      affection,
+      relationshipStats: nextStats,
+      relationshipStage,
+      sceneFlags: [...existingFlags],
+      unlockedGalleryIds: [...unlockedSet],
+    })
+    await closeOutEvent()
+
+    const changedDeltas = Object.fromEntries(Object.entries(deltas).filter(([, v]) => v !== 0))
+    relationshipEventsApi
+      .create({
+        chatId,
+        reason: `${event.title}: ${outcome.recap}`,
+        deltas: changedDeltas,
+        newFlags: outcome.newFlags.length ? outcome.newFlags : undefined,
+        sourceMessageId: transcript[transcript.length - 1]?.id,
+      })
+      .catch(() => {})
+
+    toastSuccess(outcome.recap)
+    const stageOrder = RELATIONSHIP_MILESTONES.map((m) => m.stage)
+    if (stageOrder.indexOf(relationshipStage) > stageOrder.indexOf(previousStage)) {
+      toastSuccess(`${character.card.name}'s relationship with you is now "${formatRelationshipStage(relationshipStage)}"`)
+    }
+    for (const id of unlockedSet) {
+      if (previouslyUnlockedIds.has(id)) continue
+      const entry = character.gallery?.find((g) => g.id === id)
+      toastSuccess(`New gallery scene unlocked: ${entry?.title ?? 'untitled'}`)
+    }
+  }, [activeFacts, activeObjective, character, chatId, client, messages, persona?.name, relationshipDifficulty, world])
 
   const forkChat = useCallback(
     async (messageId?: string) => {
@@ -827,6 +1119,11 @@ export function useChatSession(chatId: string | null) {
     await messagesApi.remove(messageId)
   }, [])
 
+  const togglePinMessage = useCallback(async (messageId: string) => {
+    const msg = await messagesApi.get(messageId)
+    await messagesApi.update(messageId, { pinned: !msg?.pinned })
+  }, [])
+
   const abortGeneration = useCallback(async () => {
     abortRef.current?.abort()
     if (genKeyRef.current) await client.abort(genKeyRef.current)
@@ -839,6 +1136,9 @@ export function useChatSession(chatId: string | null) {
     persona,
     world,
     activeObjective,
+    participantCharacters,
+    replyAsCharacterId,
+    setReplyAsCharacterId,
     messages,
     isGenerating,
     streamingText,
@@ -848,6 +1148,7 @@ export function useChatSession(chatId: string | null) {
     swipe,
     editMessage,
     deleteMessage,
+    togglePinMessage,
     abortGeneration,
     previewPrompt,
     updateMemorySummary,
@@ -862,6 +1163,7 @@ export function useChatSession(chatId: string | null) {
     suggestObjectiveIdea,
     suggestDateEventIdea,
     startDateEvent,
+    endDateEvent,
     regenerateChoices,
     buyGift,
     forkChat,
