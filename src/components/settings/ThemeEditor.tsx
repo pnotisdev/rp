@@ -272,6 +272,13 @@ export function ThemeEditor() {
                   <Button variant="ghost" onClick={() => applyImported(t.tokens as unknown as Record<string, unknown>)}>
                     Apply
                   </Button>
+                  <Button
+                    variant="ghost"
+                    onClick={() => themesApi.update(t.id, { name: themeName, tokens: fullThemeExport() as unknown as Record<string, string> })}
+                    title="Overwrite this saved theme with the current editor state"
+                  >
+                    Update
+                  </Button>
                   <Button variant="ghost" onClick={() => themesApi.remove(t.id)}>
                     Delete
                   </Button>

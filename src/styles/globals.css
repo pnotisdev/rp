@@ -103,6 +103,17 @@ h6 {
   .cursor-blink { animation: none; opacity: 1; }
 }
 
+@keyframes vn-sprite-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+.vn-sprite {
+  animation: vn-sprite-bob 6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .vn-sprite { animation: none; }
+}
+
 /* thin, theme-aware scrollbars */
 * {
   scrollbar-width: thin;

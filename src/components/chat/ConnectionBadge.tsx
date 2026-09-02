@@ -3,13 +3,13 @@ import { useSettingsStore } from '@/lib/store/useSettingsStore'
 
 export function ConnectionBadge() {
   const baseUrl = useSettingsStore((s) => s.baseUrl)
-  const { status, model } = useConnectionStatus(baseUrl)
+  const { status, model, maxContext } = useConnectionStatus(baseUrl)
 
   const color =
     status === 'online' ? 'bg-green-500' : status === 'offline' ? 'bg-danger' : 'bg-yellow-500'
   const tooltip =
     status === 'online'
-      ? `Connected — ${model || baseUrl}`
+      ? `Connected — ${model || baseUrl}${maxContext !== null ? ` (${maxContext.toLocaleString()} ctx)` : ''}`
       : status === 'offline'
         ? `Not reachable — ${baseUrl}`
         : `Checking ${baseUrl}…`

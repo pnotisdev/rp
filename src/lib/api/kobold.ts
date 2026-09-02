@@ -7,16 +7,33 @@ import type {
 } from './types'
 import { KoboldApiError } from './types'
 
+// Background judge/choice calls (relationshipAssist.ts, choices.ts, objectiveAssist.ts,
+// aiAssist.ts) never pass their own AbortSignal — without this, a hung KoboldCpp connection
+// wedges them indefinitely. The interactive reply-generation flow always passes its own
+// user-controlled signal (tied to the Stop button), so it's untouched by this: a caller-supplied
+// signal is used as-is, with no extra timeout layered on top of it.
+const DEFAULT_TIMEOUT_MS = 30000
+
 async function req<T>(baseUrl: string, path: string, init?: RequestInit): Promise<T> {
+  const hasOwnSignal = !!init?.signal
+  const controller = hasOwnSignal ? undefined : new AbortController()
+  const timeout = controller ? setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS) : undefined
   let res: Response
   try {
-    res = await fetch(joinUrl(baseUrl, path), init)
+    res = await fetch(joinUrl(baseUrl, path), { ...init, signal: init?.signal ?? controller?.signal })
   } catch (e) {
     // An intentional abort (Stop button) isn't "server unreachable" — don't mislabel it.
     if (init?.signal?.aborted) throw e
+    if (controller?.signal.aborted) {
+      throw new KoboldApiError(
+        `${path} timed out after ${DEFAULT_TIMEOUT_MS / 1000}s waiting for KoboldCpp at ${baseUrl}.`,
+      )
+    }
     throw new KoboldApiError(
       `Could not reach KoboldCpp at ${baseUrl}. Is the server running and reachable?`,
     )
+  } finally {
+    if (timeout) clearTimeout(timeout)
   }
   if (!res.ok) {
     const body = await res.text().catch(() => '')
@@ -36,6 +53,8 @@ export function makeGenKey(): string {
 export class KoboldClient {
   constructor(public baseUrl: string) {}
 
+  private cachedMaxContext: number | undefined
+
   async getVersion(): Promise<KoboldVersionInfo> {
     return req(this.baseUrl, '/api/extra/version')
   }
@@ -53,6 +72,26 @@ export class KoboldClient {
   async getTrueMaxContextLength(): Promise<number> {
     const r = await req<{ value: number }>(this.baseUrl, '/api/extra/true_max_context_length')
     return r.value
+  }
+
+  /**
+   * The judge/assist calls (relationship scoring, choice generation, objective planning, lore
+   * suggestions, card field regeneration) each fire their own short `generate()` outside the
+   * main chat's configured sampler, and used to hardcode `max_context_length: 4096` — wrong for
+   * a smaller-context model (an invalid oversized request) and needlessly restrictive for a
+   * bigger one. This asks the server what's actually loaded instead, caching the answer on this
+   * instance (one extra request per `KoboldClient`, not per judge call) and falling back to
+   * `fallback` if the server is unreachable or doesn't support the endpoint.
+   */
+  async getEffectiveMaxContext(fallback = 4096): Promise<number> {
+    if (this.cachedMaxContext !== undefined) return this.cachedMaxContext
+    try {
+      const value = await this.getTrueMaxContextLength()
+      this.cachedMaxContext = value > 0 ? value : fallback
+    } catch {
+      this.cachedMaxContext = fallback
+    }
+    return this.cachedMaxContext
   }
 
   async getPerf(): Promise<PerfInfo> {

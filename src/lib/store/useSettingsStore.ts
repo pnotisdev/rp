@@ -137,6 +137,10 @@ interface SettingsState {
   autoDetectTasks: boolean
   setAutoDetectTasks: (v: boolean) => void
 
+  // roleplay choices
+  autoSuggestChoices: boolean
+  setAutoSuggestChoices: (v: boolean) => void
+
   // companion voice
   ttsProvider: TtsProviderId
   ttsApiKey: string
@@ -221,6 +225,9 @@ export const useSettingsStore = create<SettingsState>()(
 
       autoDetectTasks: true,
       setAutoDetectTasks: (v) => set({ autoDetectTasks: v }),
+
+      autoSuggestChoices: true,
+      setAutoSuggestChoices: (v) => set({ autoSuggestChoices: v }),
 
       ttsProvider: 'koboldcpp',
       ttsApiKey: '',

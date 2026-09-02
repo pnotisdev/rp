@@ -7,21 +7,21 @@
   "scripts": {
     "dev": "concurrently -n client,server -c blue,green \"npm:dev:client\" \"npm:dev:server\"",
     "dev:client": "vite",
-    "dev:server": "tsx watch server/index.ts",
+    "dev:server": "tsx watch --experimental-sqlite server/index.ts",
     "build": "tsc --noEmit -p tsconfig.json && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.server.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.server.json",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.3.0",
-    "better-sqlite3": "^13.0.3",
     "express": "^5.2.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "zustand": "^4.5.5"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^9.6.0",
     "@types/express": "^5.0.6",
     "@types/node": "^26.4.0",
     "@types/react": "^18.3.12",
@@ -33,9 +33,7 @@
     "tailwindcss": "^3.4.14",
     "tsx": "^4.23.13",
     "typescript": "^5.6.3",
-    "vite": "^5.4.10"
-  },
-  "allowScripts": {
-    "better-sqlite3@13.0.3": true
+    "vite": "^5.4.10",
+    "vitest": "^3.2.7"
   }
 }

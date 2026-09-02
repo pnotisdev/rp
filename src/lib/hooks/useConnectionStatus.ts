@@ -7,6 +7,7 @@ export function useConnectionStatus(baseUrl: string) {
   const [status, setStatus] = useState<ConnectionStatus>('checking')
   const [model, setModel] = useState<string | null>(null)
   const [version, setVersion] = useState<string | null>(null)
+  const [maxContext, setMaxContext] = useState<number | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -20,11 +21,18 @@ export function useConnectionStatus(baseUrl: string) {
         setStatus('online')
         setVersion(v.version)
         setModel(m)
+        // Best-effort and separate from the required version/model check above — an older
+        // KoboldCpp build without this extra endpoint shouldn't be reported as "offline".
+        client
+          .getTrueMaxContextLength()
+          .then((c) => !cancelled && setMaxContext(c))
+          .catch(() => !cancelled && setMaxContext(null))
       } catch {
         if (!cancelled) {
           setStatus('offline')
           setModel(null)
           setVersion(null)
+          setMaxContext(null)
         }
       }
     }
@@ -37,5 +45,5 @@ export function useConnectionStatus(baseUrl: string) {
     }
   }, [baseUrl])
 
-  return { status, model, version }
+  return { status, model, version, maxContext }
 }

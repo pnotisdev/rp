@@ -2,7 +2,27 @@
 // exported from/imported into SillyTavern round-trip without loss.
 // https://github.com/malfoyslastname/character-card-spec-v2
 
+import type { TtsProviderId } from '@/lib/voice/ttsProviders'
+
 export type WorldInfoActivationMode = 'always' | 'keyword' | 'manual'
+
+export interface RelationshipStarter {
+  id: string
+  /** Short picker label, e.g. "Childhood friends". */
+  label: string
+  /** Seeds the chat's long-term memory (`Chat.summary`) so the model has this backstory from message one. */
+  blurb: string
+  startingAffection: number
+}
+
+export interface GalleryEntry {
+  id: string
+  title: string
+  imageUrl: string
+  unlockAffection: number
+  unlockHint?: string
+  requiredFlags?: string[]
+}
 
 export interface LorebookEntry {
   id?: number
@@ -62,6 +82,18 @@ export interface Character {
   avatarDataUrl?: string
   /** The world this character lives in, if any — not part of the portable card spec, so it lives here rather than on `card`. */
   worldId?: string
+  /** Expression art keyed by id (src/lib/vn/expressions.ts) — falls back to the main avatar when missing. */
+  sprites?: Record<string, string>
+  /** Minimum affection required before an expression sprite can be selected/displayed. */
+  spriteUnlocks?: Record<string, number>
+  /** Gift preference score per gift id (-2..3) used by the gift economy to affect relationship gain. */
+  giftPreferences?: Record<string, number>
+  /** Unlockable CG-like gallery entries for this character. */
+  gallery?: GalleryEntry[]
+  /** Optional narrative starting points offered when creating a new chat with this character. */
+  relationshipStarters?: RelationshipStarter[]
+  /** Per-character TTS override — unset fields fall back to the global Settings → Voice config. */
+  voice?: { provider?: TtsProviderId; voiceId?: string }
   createdAt: number
   updatedAt: number
 }

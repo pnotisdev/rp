@@ -4,7 +4,6 @@ import type { AiLoreSubject } from '@/lib/characters/aiAssist'
 
 const GENERATE_PARAMS = {
   max_length: 400,
-  max_context_length: 4096,
   temperature: 0.7,
   top_p: 0.95,
   top_k: 0,
@@ -35,7 +34,7 @@ export async function generateTasks(
     'JSON:',
   ].join('\n\n')
 
-  const text = await client.generate({ ...GENERATE_PARAMS, prompt })
+  const text = await client.generate({ ...GENERATE_PARAMS, max_context_length: await client.getEffectiveMaxContext(), prompt })
   const parsed = parseLenientJson(text)
   if (!Array.isArray(parsed)) throw new Error('Model did not return a JSON array of tasks')
   return parsed.filter((t): t is string => typeof t === 'string' && t.trim().length > 0)
@@ -56,7 +55,7 @@ export async function suggestObjective(
     'JSON:',
   ].join('\n\n')
 
-  const text = await client.generate({ ...GENERATE_PARAMS, prompt })
+  const text = await client.generate({ ...GENERATE_PARAMS, max_context_length: await client.getEffectiveMaxContext(), prompt })
   const parsed = parseLenientJson(text)
   if (!parsed || typeof parsed !== 'object') throw new Error('Model did not return a JSON object')
   const obj = parsed as Record<string, unknown>
@@ -91,6 +90,7 @@ export async function detectCompletedTasks(
     ...GENERATE_PARAMS,
     max_length: 60,
     temperature: 0.2,
+    max_context_length: await client.getEffectiveMaxContext(),
     prompt,
   })
   const parsed = parseLenientJson(text)

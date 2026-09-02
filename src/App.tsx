@@ -7,7 +7,9 @@ import { CharactersView } from '@/components/characters/CharactersView'
 import { WorldsView } from '@/components/worlds/WorldsView'
 import { PersonasView } from '@/components/personas/PersonasView'
 import { WorldInfoView } from '@/components/worldinfo/WorldInfoView'
+import { GalleryView } from '@/components/gallery/GalleryView'
 import { SettingsView } from '@/components/settings/SettingsView'
+import { ToastViewport } from '@/components/ui/ToastViewport'
 import { useApplyTheme } from '@/lib/hooks/useApplyTheme'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 
@@ -32,8 +34,10 @@ export default function App() {
         {view === 'worlds' && <WorldsView />}
         {view === 'personas' && <PersonasView />}
         {view === 'worldinfo' && <WorldInfoView />}
+        {view === 'gallery' && <GalleryView />}
         {view === 'settings' && <SettingsView />}
       </div>
+      <ToastViewport />
     </div>
   )
 }

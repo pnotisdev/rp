@@ -94,6 +94,7 @@ export function Composer({
                 <button
                   onClick={() => removeAttachment(i)}
                   title="Remove"
+                  aria-label={`Remove attachment ${a.name}`}
                   className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-bg-elevated text-[11px] text-text-muted opacity-0 transition-opacity hover:text-danger group-hover:opacity-100"
                 >
                   ✕
@@ -131,6 +132,7 @@ export function Composer({
               onClick={() => fileRef.current?.click()}
               disabled={disabled}
               title="Attach images or text files for the model to read"
+              aria-label="Attach images or text files"
               className="flex h-8 w-8 items-center justify-center rounded-full font-mono text-base text-text-muted transition-colors hover:bg-bg-elevated hover:text-text disabled:opacity-40"
             >
               +
@@ -139,6 +141,7 @@ export function Composer({
               onClick={onContinue}
               disabled={disabled || isGenerating || !canContinue}
               title="Continue the last reply"
+              aria-label="Continue the last reply"
               className="flex h-8 w-8 items-center justify-center rounded-full font-mono text-sm text-text-muted transition-colors hover:bg-bg-elevated hover:text-text disabled:opacity-40"
             >
               »
@@ -147,6 +150,7 @@ export function Composer({
               onClick={handleImpersonate}
               disabled={disabled || isGenerating || impersonating}
               title="Suggest what you'd say next"
+              aria-label="Suggest what you'd say next"
               className="flex h-8 w-8 items-center justify-center rounded-full font-mono text-sm text-text-muted transition-colors hover:bg-bg-elevated hover:text-text disabled:opacity-40"
             >
               {impersonating ? '…' : '@'}

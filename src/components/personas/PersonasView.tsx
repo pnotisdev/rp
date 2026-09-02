@@ -5,6 +5,7 @@ import type { Persona } from '@/lib/types'
 import { fileToDataUrl } from '@/lib/characters/importExport'
 import { TextAreaField, TextField } from '@/components/ui/Field'
 import { Button } from '@/components/ui/Button'
+import { errorMessage, toastError } from '@/lib/store/useToastStore'
 
 export function PersonasView() {
   const personas = useApiQuery('personas', () => personasApi.list(), []) ?? []
@@ -55,10 +56,15 @@ function PersonaEditor({ persona, onDone }: { persona: Persona | null; onDone: (
   const [avatarDataUrl, setAvatarDataUrl] = useState(persona?.avatarDataUrl)
 
   const save = async () => {
-    if (persona) {
-      await personasApi.update(persona.id, { name, description, avatarDataUrl })
-    } else {
-      await personasApi.create({ name, description, avatarDataUrl })
+    try {
+      if (persona) {
+        await personasApi.update(persona.id, { name, description, avatarDataUrl })
+      } else {
+        await personasApi.create({ name, description, avatarDataUrl })
+      }
+    } catch (e) {
+      toastError(errorMessage(e))
+      return
     }
     onDone()
   }
@@ -76,9 +82,9 @@ function PersonaEditor({ persona, onDone }: { persona: Persona | null; onDone: (
         ← Back
       </Button>
       <div className="mb-6 flex items-center gap-4">
-        <label className="cursor-pointer">
+        <label className="cursor-pointer" aria-label="Change persona avatar">
           {avatarDataUrl ? (
-            <img src={avatarDataUrl} className="h-20 w-20 rounded-full object-cover border border-border" />
+            <img src={avatarDataUrl} alt="" className="h-20 w-20 rounded-full object-cover border border-border" />
           ) : (
             <div className="flex h-20 w-20 items-center justify-center rounded-full border border-dashed border-border text-xs text-text-muted">
               Avatar

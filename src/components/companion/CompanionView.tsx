@@ -77,7 +77,13 @@ export function CompanionView() {
         let blob: Blob
         try {
           blob = await synthesizeSpeech(
-            { provider: ttsProvider, apiKey: ttsApiKey, baseUrl: ttsBaseUrl, region: ttsRegion, voice: ttsVoice },
+            {
+              provider: character?.voice?.provider ?? ttsProvider,
+              apiKey: ttsApiKey,
+              baseUrl: ttsBaseUrl,
+              region: ttsRegion,
+              voice: character?.voice?.voiceId || ttsVoice,
+            },
             text,
             baseUrl,
           )
@@ -268,6 +274,7 @@ export function CompanionView() {
       <button
         onClick={handleMicTap}
         disabled={micDisabled}
+        aria-label={PHASE_LABEL[phase]}
         className={`flex h-24 w-24 items-center justify-center rounded-full font-mono text-2xl transition-transform active:scale-95 ${
           phase === 'listening'
             ? 'bg-danger text-white animate-pulse'

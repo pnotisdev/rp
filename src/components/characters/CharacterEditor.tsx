@@ -1,15 +1,21 @@
 import { useEffect, useState } from 'react'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { charactersApi, worldsApi } from '@/lib/api/client'
-import type { Character } from '@/lib/characters/cardSpec'
+import type { Character, GalleryEntry, RelationshipStarter } from '@/lib/characters/cardSpec'
 import { blankCharacterData } from '@/lib/characters/cardSpec'
 import { downloadJson, downloadPng, fileToDataUrl, importCharacterFile } from '@/lib/characters/importExport'
+import { buildCharacterPack, downloadCharacterPack, importCharacterPack, parseCharacterPackFile } from '@/lib/characters/pack'
+import { DEFAULT_EXPRESSIONS } from '@/lib/vn/expressions'
+import { newId } from '@/lib/id'
 import { TextAreaField, TextField } from '@/components/ui/Field'
 import { Button } from '@/components/ui/Button'
+import { errorMessage, toastError, toastSuccess } from '@/lib/store/useToastStore'
+import { TTS_PROVIDER_LABELS, type TtsProviderId } from '@/lib/voice/ttsProviders'
 import { GenerateCharacterDialog } from './GenerateCharacterDialog'
 import { TemplateGallery } from './TemplateGallery'
 import { RegenerateFieldButton } from './RegenerateFieldButton'
 import { LorebookEditor } from '@/components/worldinfo/LorebookEditor'
+import { getGiftCatalog } from '@/lib/dating/gifts'
 
 export function CharacterEditor({
   character,
@@ -22,28 +28,71 @@ export function CharacterEditor({
 }) {
   const [form, setForm] = useState(character?.card ?? blankCharacterData())
   const [avatarDataUrl, setAvatarDataUrl] = useState(character?.avatarDataUrl)
+  const [sprites, setSprites] = useState<Record<string, string>>(character?.sprites ?? {})
+  const [spriteUnlocks, setSpriteUnlocks] = useState<Record<string, number>>(character?.spriteUnlocks ?? {})
+  const [giftPreferences, setGiftPreferences] = useState<Record<string, number>>(character?.giftPreferences ?? {})
+  const [gallery, setGallery] = useState<GalleryEntry[]>(character?.gallery ?? [])
+  const [relationshipStarters, setRelationshipStarters] = useState<RelationshipStarter[]>(
+    character?.relationshipStarters ?? [],
+  )
+  const [voiceProvider, setVoiceProvider] = useState<TtsProviderId | ''>(character?.voice?.provider ?? '')
+  const [voiceId, setVoiceId] = useState(character?.voice?.voiceId ?? '')
   const [worldId, setWorldId] = useState(character?.worldId ?? '')
   const [showGenerate, setShowGenerate] = useState(false)
   const [showTemplates, setShowTemplates] = useState(false)
   const [importError, setImportError] = useState<string | null>(null)
   const worlds = useApiQuery('worlds', () => worldsApi.list(), []) ?? []
+  const editingWorld = worlds.find((w) => w.id === worldId)
 
   useEffect(() => {
     setForm(character?.card ?? blankCharacterData())
     setAvatarDataUrl(character?.avatarDataUrl)
+    setSprites(character?.sprites ?? {})
+    setSpriteUnlocks(character?.spriteUnlocks ?? {})
+    setGiftPreferences(character?.giftPreferences ?? {})
+    setGallery(character?.gallery ?? [])
+    setRelationshipStarters(character?.relationshipStarters ?? [])
+    setVoiceProvider(character?.voice?.provider ?? '')
+    setVoiceId(character?.voice?.voiceId ?? '')
     setWorldId(character?.worldId ?? '')
   }, [character?.id])
 
   const set = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) =>
     setForm((f) => ({ ...f, [key]: value }))
 
+  const voice = voiceProvider || voiceId.trim() ? { provider: voiceProvider || undefined, voiceId: voiceId.trim() || undefined } : undefined
+
   const save = async () => {
-    if (character) {
-      await charactersApi.update(character.id, { card: form, avatarDataUrl, worldId: worldId || undefined })
-      onSaved(character.id)
-    } else {
-      const created = await charactersApi.create({ card: form, avatarDataUrl, worldId: worldId || undefined })
-      onSaved(created.id)
+    try {
+      if (character) {
+        await charactersApi.update(character.id, {
+          card: form,
+          avatarDataUrl,
+          sprites,
+          spriteUnlocks,
+          giftPreferences,
+          gallery,
+          relationshipStarters,
+          voice,
+          worldId: worldId || undefined,
+        })
+        onSaved(character.id)
+      } else {
+        const created = await charactersApi.create({
+          card: form,
+          avatarDataUrl,
+          sprites,
+          spriteUnlocks,
+          giftPreferences,
+          gallery,
+          relationshipStarters,
+          voice,
+          worldId: worldId || undefined,
+        })
+        onSaved(created.id)
+      }
+    } catch (e) {
+      toastError(errorMessage(e))
     }
   }
 
@@ -68,6 +117,66 @@ export function CharacterEditor({
     setAvatarDataUrl(await fileToDataUrl(file))
   }
 
+  const handleSpritePick = async (expressionId: string, file: File) => {
+    const dataUrl = await fileToDataUrl(file)
+    setSprites((s) => ({ ...s, [expressionId]: dataUrl }))
+  }
+
+  const removeSprite = (expressionId: string) => {
+    setSprites((s) => {
+      const next = { ...s }
+      delete next[expressionId]
+      return next
+    })
+    setSpriteUnlocks((s) => {
+      const next = { ...s }
+      delete next[expressionId]
+      return next
+    })
+  }
+
+  const setSpriteUnlock = (expressionId: string, minAffection: number) => {
+    setSpriteUnlocks((s) => ({ ...s, [expressionId]: Math.max(0, Math.min(100, minAffection)) }))
+  }
+
+  const setGiftPreference = (giftId: string, score: number) => {
+    setGiftPreferences((prev) => ({ ...prev, [giftId]: Math.max(-2, Math.min(3, score)) }))
+  }
+
+  const addGalleryEntry = () => {
+    setGallery((g) => [
+      ...g,
+      { id: newId(), title: `CG ${g.length + 1}`, imageUrl: '', unlockAffection: 40, unlockHint: '' },
+    ])
+  }
+
+  const updateGalleryEntry = (id: string, patch: Partial<GalleryEntry>) => {
+    setGallery((g) => g.map((item) => (item.id === id ? { ...item, ...patch } : item)))
+  }
+
+  const removeGalleryEntry = (id: string) => {
+    setGallery((g) => g.filter((item) => item.id !== id))
+  }
+
+  const pickGalleryImage = async (id: string, file: File) => {
+    updateGalleryEntry(id, { imageUrl: await fileToDataUrl(file) })
+  }
+
+  const addRelationshipStarter = () => {
+    setRelationshipStarters((s) => [
+      ...s,
+      { id: newId(), label: `Starter ${s.length + 1}`, blurb: '', startingAffection: 0 },
+    ])
+  }
+
+  const updateRelationshipStarter = (id: string, patch: Partial<RelationshipStarter>) => {
+    setRelationshipStarters((s) => s.map((item) => (item.id === id ? { ...item, ...patch } : item)))
+  }
+
+  const removeRelationshipStarter = (id: string) => {
+    setRelationshipStarters((s) => s.filter((item) => item.id !== id))
+  }
+
   const handleImportFile = async (file: File) => {
     setImportError(null)
     try {
@@ -79,12 +188,34 @@ export function CharacterEditor({
     }
   }
 
+  const exportPack = async () => {
+    if (!character) return
+    try {
+      const boundWorld = worlds.find((w) => w.id === character.worldId)
+      const pack = await buildCharacterPack(character, boundWorld)
+      downloadCharacterPack(pack)
+    } catch (e) {
+      toastError(errorMessage(e))
+    }
+  }
+
+  const handleImportPackFile = async (file: File) => {
+    try {
+      const pack = await parseCharacterPackFile(file)
+      const { character: created } = await importCharacterPack(pack)
+      toastSuccess(`Imported "${created.card.name}"${pack.world ? ' with its world' : ''}.`)
+      onSaved(created.id)
+    } catch (e) {
+      toastError(errorMessage(e))
+    }
+  }
+
   return (
     <div className="mx-auto max-w-2xl p-8">
       <div className="mb-6 flex items-center gap-4">
-        <label className="cursor-pointer">
+        <label className="cursor-pointer" aria-label="Change character avatar">
           {avatarDataUrl ? (
-            <img src={avatarDataUrl} className="h-20 w-20 rounded-xl object-cover border border-border" />
+            <img src={avatarDataUrl} alt="" className="h-20 w-20 rounded-xl object-cover border border-border" />
           ) : (
             <div className="flex h-20 w-20 items-center justify-center rounded-xl border border-dashed border-border text-xs text-text-muted">
               Avatar
@@ -133,6 +264,27 @@ export function CharacterEditor({
         {!character && <Button onClick={() => setShowTemplates(true)}>Start from a template</Button>}
         <Button onClick={() => downloadJson(form)}>Export JSON</Button>
         <Button onClick={() => downloadPng(form, avatarDataUrl)}>Export PNG</Button>
+        {character && (
+          <Button onClick={exportPack} title="Bundles the card, sprites, gallery CGs, gift preferences, and bound world into one file">
+            Export pack
+          </Button>
+        )}
+        {!character && (
+          <label>
+            <input
+              type="file"
+              accept=".json"
+              className="hidden"
+              onChange={(e) => e.target.files?.[0] && handleImportPackFile(e.target.files[0])}
+            />
+            <span
+              className="inline-block rounded-xl bg-bg-sunken px-3.5 py-1.5 text-sm text-text cursor-pointer hover:opacity-80"
+              title="Restores a character exported with 'Export pack', including sprites, gallery CGs, and its bound world"
+            >
+              Import pack (.rppack.json)
+            </span>
+          </label>
+        )}
       </div>
       {importError && <p className="mb-3 text-xs text-danger">{importError}</p>}
 
@@ -168,7 +320,7 @@ export function CharacterEditor({
       />
       <TextAreaField
         label="Alternate greetings"
-        hint="One per line — offered as swipes on the opening message."
+        hint="One per line. Optional gate prefix: [affection>=40] Your line"
         rows={3}
         value={(form.alternate_greetings ?? []).join('\n')}
         onChange={(e) => set('alternate_greetings', e.target.value.split('\n').filter(Boolean))}
@@ -214,6 +366,237 @@ export function CharacterEditor({
             rows={2}
             value={form.creator_notes ?? ''}
             onChange={(e) => set('creator_notes', e.target.value)}
+          />
+        </div>
+      </details>
+
+      <details className="mb-8 rounded-2xl bg-bg-elevated p-6">
+        <summary className="cursor-pointer text-sm font-medium text-text">
+          Expressions ({Object.keys(sprites).length}/{DEFAULT_EXPRESSIONS.length})
+        </summary>
+        <p className="mt-2 mb-3 text-xs text-text-muted">
+          Upload art per expression so Visual Novel mode can show the right one as the AI tags each
+          reply's mood. Anything left blank falls back to the main avatar.
+        </p>
+        <div className="grid grid-cols-3 gap-3 sm:grid-cols-4">
+          {DEFAULT_EXPRESSIONS.map((exp) => (
+            <label key={exp.id} className="group relative flex cursor-pointer flex-col items-center gap-1">
+              <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-xl border border-dashed border-border bg-bg-sunken text-xl">
+                {sprites[exp.id] ? (
+                  <img src={sprites[exp.id]} className="h-full w-full object-cover" />
+                ) : (
+                  <span>{exp.emoji}</span>
+                )}
+              </div>
+              <span className="text-[11px] text-text-muted">{exp.label}</span>
+              <input
+                type="number"
+                min={0}
+                max={100}
+                value={Number(spriteUnlocks[exp.id] ?? 0)}
+                onClick={(e) => e.preventDefault()}
+                onChange={(e) => setSpriteUnlock(exp.id, Number(e.target.value) || 0)}
+                className="w-16 rounded bg-bg-elevated px-2 py-0.5 text-center text-[11px] text-text outline-none"
+                title="Unlock affection"
+              />
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                className="hidden"
+                onChange={(e) => e.target.files?.[0] && handleSpritePick(exp.id, e.target.files[0])}
+              />
+              {sprites[exp.id] && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault()
+                    removeSprite(exp.id)
+                  }}
+                  aria-label={`Remove ${exp.label} sprite image`}
+                  className="absolute -right-1 -top-1 hidden h-5 w-5 items-center justify-center rounded-full bg-bg-elevated text-[11px] text-text-muted hover:text-danger group-hover:flex"
+                >
+                  ✕
+                </button>
+              )}
+            </label>
+          ))}
+        </div>
+      </details>
+
+      <details className="mb-8 rounded-2xl bg-bg-elevated p-6">
+        <summary className="cursor-pointer text-sm font-medium text-text">
+          CG Gallery ({gallery.length})
+        </summary>
+        <p className="mt-2 mb-3 text-xs text-text-muted">
+          Unlockable images shown in the Gallery tab. They unlock by affection threshold and/or story beat detection.
+        </p>
+        <div className="space-y-3">
+          {gallery.map((entry) => (
+            <div key={entry.id} className="rounded-xl bg-bg-sunken p-3">
+              <div className="mb-2 flex items-start gap-3">
+                <label className="cursor-pointer" aria-label="Change gallery CG image">
+                  {entry.imageUrl ? (
+                    <img src={entry.imageUrl} alt="" className="h-16 w-24 rounded object-cover" />
+                  ) : (
+                    <div className="flex h-16 w-24 items-center justify-center rounded border border-dashed border-border text-xs text-text-muted">
+                      CG
+                    </div>
+                  )}
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    className="hidden"
+                    onChange={(e) => e.target.files?.[0] && pickGalleryImage(entry.id, e.target.files[0])}
+                  />
+                </label>
+                <div className="flex-1">
+                  <TextField
+                    label="Title"
+                    value={entry.title}
+                    onChange={(e) => updateGalleryEntry(entry.id, { title: e.target.value })}
+                  />
+                </div>
+                <Button variant="ghost" onClick={() => removeGalleryEntry(entry.id)}>
+                  Remove
+                </Button>
+              </div>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <TextField
+                  label="Unlock hint"
+                  value={entry.unlockHint ?? ''}
+                  onChange={(e) => updateGalleryEntry(entry.id, { unlockHint: e.target.value })}
+                  placeholder="e.g. Confess under the lanterns"
+                />
+                <TextField
+                  label="Unlock affection"
+                  type="number"
+                  value={entry.unlockAffection}
+                  onChange={(e) =>
+                    updateGalleryEntry(entry.id, {
+                      unlockAffection: Math.max(0, Math.min(100, Number(e.target.value) || 0)),
+                    })
+                  }
+                />
+                <TextField
+                  label="Required scene flags"
+                  value={(entry.requiredFlags ?? []).join(', ')}
+                  onChange={(e) =>
+                    updateGalleryEntry(entry.id, {
+                      requiredFlags: e.target.value
+                        .split(',')
+                        .map((v) => v.trim())
+                        .filter(Boolean),
+                    })
+                  }
+                  placeholder="first_date, confession"
+                />
+              </div>
+            </div>
+          ))}
+          <Button onClick={addGalleryEntry}>+ Add CG entry</Button>
+        </div>
+      </details>
+
+      <details className="mb-8 rounded-2xl bg-bg-elevated p-6">
+        <summary className="cursor-pointer text-sm font-medium text-text">Gift preferences</summary>
+        <p className="mt-2 mb-3 text-xs text-text-muted">
+          Controls how much affection each gift tends to add: -2 disliked, 0 neutral, 3 favorite.
+        </p>
+        <div className="space-y-2">
+          {getGiftCatalog(editingWorld).map((gift) => (
+            <div key={gift.id} className="grid grid-cols-1 items-center gap-2 rounded-xl bg-bg-sunken p-3 sm:grid-cols-[1fr_120px]">
+              <div>
+                <div className="text-sm text-text">{gift.name}</div>
+                <div className="text-xs text-text-muted">{gift.rarity}</div>
+              </div>
+              <input
+                type="number"
+                min={-2}
+                max={3}
+                value={Number(giftPreferences[gift.id] ?? 0)}
+                onChange={(e) => setGiftPreference(gift.id, Number(e.target.value) || 0)}
+                className="w-full rounded-xl bg-bg-elevated px-3 py-2 text-sm text-text outline-none"
+              />
+            </div>
+          ))}
+        </div>
+      </details>
+
+      <details className="mb-8 rounded-2xl bg-bg-elevated p-6">
+        <summary className="cursor-pointer text-sm font-medium text-text">
+          Relationship starters ({relationshipStarters.length})
+        </summary>
+        <p className="mt-2 mb-3 text-xs text-text-muted">
+          Optional narrative starting points offered when creating a new chat with this character
+          (e.g. "Childhood friends" vs. "Just met") — instead of every chat beginning from the
+          same blank slate. The blurb seeds the chat's long-term memory, so the model knows the
+          backstory from the first reply.
+        </p>
+        <div className="space-y-3">
+          {relationshipStarters.map((starter) => (
+            <div key={starter.id} className="rounded-xl bg-bg-sunken p-3">
+              <div className="mb-2 flex items-start gap-2">
+                <TextField
+                  label="Label"
+                  value={starter.label}
+                  onChange={(e) => updateRelationshipStarter(starter.id, { label: e.target.value })}
+                  className="flex-1"
+                />
+                <TextField
+                  label="Starting affection"
+                  type="number"
+                  value={starter.startingAffection}
+                  onChange={(e) =>
+                    updateRelationshipStarter(starter.id, {
+                      startingAffection: Math.max(0, Math.min(100, Number(e.target.value) || 0)),
+                    })
+                  }
+                  className="w-36"
+                />
+                <Button variant="ghost" onClick={() => removeRelationshipStarter(starter.id)} className="mt-5">
+                  Remove
+                </Button>
+              </div>
+              <TextAreaField
+                label="Blurb"
+                rows={2}
+                value={starter.blurb}
+                onChange={(e) => updateRelationshipStarter(starter.id, { blurb: e.target.value })}
+                placeholder="e.g. We grew up next door to each other and have been close ever since."
+              />
+            </div>
+          ))}
+          <Button onClick={addRelationshipStarter}>+ Add starter</Button>
+        </div>
+      </details>
+
+      <details className="mb-8 rounded-2xl bg-bg-elevated p-6">
+        <summary className="cursor-pointer text-sm font-medium text-text">Voice</summary>
+        <p className="mt-2 mb-3 text-xs text-text-muted">
+          Overrides the global Settings → Voice provider/voice for this character in Companion
+          mode. Leave blank to use the global default for everyone.
+        </p>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-text-muted">Provider override</span>
+            <select
+              value={voiceProvider}
+              onChange={(e) => setVoiceProvider(e.target.value as TtsProviderId | '')}
+              className="w-full rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none"
+            >
+              <option value="">Use global default</option>
+              {Object.entries(TTS_PROVIDER_LABELS).map(([id, label]) => (
+                <option key={id} value={id}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <TextField
+            label="Voice / speaker ID override"
+            value={voiceId}
+            onChange={(e) => setVoiceId(e.target.value)}
+            placeholder="Leave blank to use the global voice"
           />
         </div>
       </details>

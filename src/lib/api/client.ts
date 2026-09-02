@@ -10,17 +10,35 @@ import type {
   WorldInfoBook,
 } from '@/lib/types'
 
+// The local API server runs on the same machine, but a wedged Node process (or a very large
+// backup/restore payload) shouldn't be able to hang a call forever with no way out.
+const DEFAULT_TIMEOUT_MS = 15000
+
 async function request<T>(
   method: string,
   path: string,
   body?: unknown,
-  opts?: { notFoundIsUndefined?: boolean },
+  opts?: { notFoundIsUndefined?: boolean; timeoutMs?: number },
 ): Promise<T> {
-  const res = await fetch(`/api${path}`, {
-    method,
-    headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  })
+  const timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  let res: Response
+  try {
+    res = await fetch(`/api${path}`, {
+      method,
+      headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    })
+  } catch (e) {
+    if (controller.signal.aborted) {
+      throw new Error(`${method} ${path} timed out after ${timeoutMs / 1000}s`)
+    }
+    throw e
+  } finally {
+    clearTimeout(timeout)
+  }
   if (res.status === 404 && opts?.notFoundIsUndefined) return undefined as T
   if (!res.ok) {
     const text = await res.text().catch(() => '')
@@ -92,6 +110,16 @@ export const chatsApi = {
     invalidate('messages')
     invalidate('objectives')
   },
+  // Creates a new chat that branches off this one, carrying its relationship/gift/gallery
+  // state and a copy of the transcript up to (and including) `messageId` — or the whole
+  // transcript, if omitted.
+  async fork(id: string, messageId?: string): Promise<Chat> {
+    const result = await request<Chat>('POST', `/chats/${id}/fork`, { messageId })
+    invalidate('chats')
+    invalidate('messages')
+    invalidate('objectives')
+    return result
+  },
 }
 export const worldInfoBooksApi = makeResource<WorldInfoBook>('world-info-books', '/world-info-books')
 export const presetsApi = makeResource<SamplerPreset>('presets', '/presets')
@@ -110,6 +138,32 @@ export const messagesApi = {
   ...makeResource<StoredMessage>('messages', '/messages'),
   listByChat(chatId: string): Promise<StoredMessage[]> {
     return request<StoredMessage[]>('GET', `/chats/${chatId}/messages`)
+  },
+}
+
+// A full backup/restore inlines every avatar/sprite/background as base64 — on a
+// data-heavy install this can legitimately take much longer than the default timeout.
+const BACKUP_TIMEOUT_MS = 120000
+
+export const backupApi = {
+  fetchBackup(): Promise<unknown> {
+    return request<unknown>('GET', '/backup', undefined, { timeoutMs: BACKUP_TIMEOUT_MS })
+  },
+  async restore(backup: unknown): Promise<void> {
+    await request<void>('POST', '/restore', backup, { timeoutMs: BACKUP_TIMEOUT_MS })
+    for (const resource of [
+      'characters',
+      'personas',
+      'chats',
+      'messages',
+      'world-info-books',
+      'presets',
+      'themes',
+      'worlds',
+      'objectives',
+    ]) {
+      invalidate(resource)
+    }
   },
 }
 

@@ -64,6 +64,8 @@ export function SamplingControls() {
   const setSummaryDetail = useSettingsStore((s) => s.setSummaryDetail)
   const autoDetectTasks = useSettingsStore((s) => s.autoDetectTasks)
   const setAutoDetectTasks = useSettingsStore((s) => s.setAutoDetectTasks)
+  const autoSuggestChoices = useSettingsStore((s) => s.autoSuggestChoices)
+  const setAutoSuggestChoices = useSettingsStore((s) => s.setAutoSuggestChoices)
 
   const presets = useApiQuery('presets', () => presetsApi.list(), []) ?? []
   const [presetName, setPresetName] = useState('My preset')
@@ -170,6 +172,22 @@ export function SamplingControls() {
             onChange={setAutoDetectTasks}
             label="Auto-detect completed tasks"
             description="A quick check after each reply — conservative by design, so it only ever checks things off, never invents progress"
+          />
+        </div>
+      </section>
+
+      <section>
+        <h3 className="mb-1 text-sm font-semibold text-text">Roleplay choices</h3>
+        <p className="mb-3 text-xs text-text-muted">
+          A few suggested next lines/actions appear above the composer after each reply — pick one to
+          steer the scene forward, or ignore them and write your own.
+        </p>
+        <div className="rounded-2xl bg-bg-elevated p-6">
+          <Toggle
+            checked={autoSuggestChoices}
+            onChange={setAutoSuggestChoices}
+            label="Suggest choices after each reply"
+            description="Runs in the background right after a reply lands — never blocks or delays it"
           />
         </div>
       </section>

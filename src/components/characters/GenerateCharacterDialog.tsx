@@ -3,6 +3,7 @@ import { KoboldClient } from '@/lib/api/kobold'
 import { normalizeCardJson, type CharacterCardData } from '@/lib/characters/cardSpec'
 import { parseLenientJson } from '@/lib/jsonRepair'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
+import { errorMessage, toastError } from '@/lib/store/useToastStore'
 import { Button } from '@/components/ui/Button'
 import { TextAreaField } from '@/components/ui/Field'
 
@@ -20,13 +21,13 @@ export function GenerateCharacterDialog({
   const baseUrl = useSettingsStore((s) => s.baseUrl)
   const [brief, setBrief] = useState('')
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [failed, setFailed] = useState(false)
   const [rawOutput, setRawOutput] = useState('')
 
   const generate = async () => {
     if (!brief.trim()) return
     setBusy(true)
-    setError(null)
+    setFailed(false)
     setRawOutput('')
     try {
       const client = new KoboldClient(baseUrl)
@@ -34,7 +35,7 @@ export function GenerateCharacterDialog({
       const text = await client.generate({
         prompt,
         max_length: 1024,
-        max_context_length: 4096,
+        max_context_length: await client.getEffectiveMaxContext(),
         temperature: 0.8,
         top_p: 0.95,
         top_k: 0,
@@ -53,11 +54,8 @@ export function GenerateCharacterDialog({
       if (!card.name.trim()) card.name = brief.trim().slice(0, 40) || 'New Character'
       onGenerated(card)
     } catch (e) {
-      setError(
-        e instanceof Error
-          ? `${e.message} — the model's output wasn't valid JSON. Try again, or try a lower-temperature/more instruction-following model.`
-          : String(e),
-      )
+      setFailed(true)
+      toastError(`${errorMessage(e)} — the model's output wasn't valid JSON. Try again, or try a lower-temperature/more instruction-following model.`)
     } finally {
       setBusy(false)
     }
@@ -77,25 +75,20 @@ export function GenerateCharacterDialog({
           onChange={(e) => setBrief(e.target.value)}
           placeholder="e.g. a grumpy dwarven blacksmith who secretly writes poetry, gruff but soft-hearted"
         />
-        {error && (
-          <div className="mb-3 rounded-xl bg-danger/10 p-3 text-xs text-danger">
-            {error}
-            {rawOutput && (
-              <details className="mt-1.5">
-                <summary className="cursor-pointer">Raw model output</summary>
-                <pre className="mt-1.5 max-h-48 overflow-y-auto whitespace-pre-wrap rounded-lg bg-bg-sunken p-2 text-text">
-                  {rawOutput}
-                </pre>
-              </details>
-            )}
-          </div>
+        {failed && rawOutput && (
+          <details className="mb-3 rounded-xl bg-bg-sunken p-3 text-xs text-text-muted">
+            <summary className="cursor-pointer">Raw model output</summary>
+            <pre className="mt-1.5 max-h-48 overflow-y-auto whitespace-pre-wrap rounded-lg bg-bg-elevated p-2 text-text">
+              {rawOutput}
+            </pre>
+          </details>
         )}
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
           <Button variant="primary" onClick={generate} disabled={busy || !brief.trim()}>
-            {busy ? 'Generating…' : error ? 'Retry' : 'Generate'}
+            {busy ? 'Generating…' : failed ? 'Retry' : 'Generate'}
           </Button>
         </div>
       </div>

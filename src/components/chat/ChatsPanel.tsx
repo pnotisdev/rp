@@ -44,8 +44,9 @@ export function ChatsPanel({
                 </div>
               )}
               <div className="min-w-0 flex-1">
-                <div className="truncate text-sm text-text">
-                  {character ? chat.title : `${chat.title} (character deleted)`}
+                <div className="flex items-center gap-1 truncate text-sm text-text">
+                  {chat.parentChatId && <span title="Forked from another chat">⑂</span>}
+                  <span className="truncate">{character ? chat.title : `${chat.title} (character deleted)`}</span>
                 </div>
                 <div className="truncate text-xs text-text-muted">
                   {new Date(chat.updatedAt).toLocaleString()}

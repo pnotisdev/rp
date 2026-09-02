@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3'
+import { DatabaseSync, type SQLInputValue } from 'node:sqlite'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -9,9 +9,13 @@ export const dataDir = path.resolve(__dirname, '..', 'data')
 export const avatarsDir = path.join(dataDir, 'avatars')
 fs.mkdirSync(avatarsDir, { recursive: true })
 
-export const db = new Database(path.join(dataDir, 'rp.db'))
-db.pragma('journal_mode = WAL')
-db.pragma('foreign_keys = ON')
+// Node's built-in SQLite (stable API since v22.5, run behind --experimental-sqlite until it's
+// unflagged) — replaces better-sqlite3, whose prebuilt native binary crashed the process outright
+// (STATUS_ACCESS_VIOLATION) on some Windows/Node combinations, this one included. Being built
+// into Node itself instead of a separately-downloaded .node binary avoids that whole class of bug.
+export const db = new DatabaseSync(path.join(dataDir, 'rp.db'))
+db.exec('PRAGMA journal_mode = WAL')
+db.exec('PRAGMA foreign_keys = ON')
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS characters (
@@ -86,6 +90,12 @@ db.exec(`
 
 type Row = Record<string, unknown>
 
+// Every value that actually reaches a bind site here is a string, number, or null (ids,
+// timestamps, a JSON blob) — this is a type-only cast, not a runtime coercion.
+function bind(v: unknown): SQLInputValue {
+  return v as SQLInputValue
+}
+
 interface ColumnSpec {
   name: string
 }
@@ -148,7 +158,7 @@ function createStore(table: string, columns: ColumnSpec[]) {
       let sql = `SELECT * FROM ${table}`
       if (opts?.where) sql += ` WHERE ${opts.where}`
       if (opts?.orderBy) sql += ` ORDER BY ${opts.orderBy}`
-      const rows = db.prepare(sql).all(...(opts?.params ?? [])) as Row[]
+      const rows = db.prepare(sql).all(...(opts?.params ?? []).map(bind)) as Row[]
       return rows.map(fromRow)
     },
     get(id: string): Row | undefined {
@@ -156,18 +166,22 @@ function createStore(table: string, columns: ColumnSpec[]) {
       return row ? fromRow(row) : undefined
     },
     insert(obj: Row): Row {
-      insertStmt.run(obj.id, ...columnNames.map((c) => obj[c] ?? null), blobOf(obj))
+      insertStmt.run(bind(obj.id), ...columnNames.map((c) => bind(obj[c] ?? null)), blobOf(obj))
       return obj
     },
     update(id: string, patch: Row): Row | undefined {
       const existing = getStmt.get(id) as Row | undefined
       if (!existing) return undefined
       const merged: Row = { ...fromRow(existing), ...patch, id }
-      updateStmt.run(...columnNames.map((c) => merged[c] ?? null), blobOf(merged), id)
+      updateStmt.run(...columnNames.map((c) => bind(merged[c] ?? null)), blobOf(merged), id)
       return merged
     },
     remove(id: string): void {
       deleteStmt.run(id)
+    },
+    /** Deletes every row in this table — used only by full-database restore. */
+    clear(): void {
+      db.exec(`DELETE FROM ${table}`)
     },
   }
 }

@@ -1,6 +1,6 @@
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 
-export type ViewId = 'chat' | 'companion' | 'characters' | 'worlds' | 'personas' | 'worldinfo' | 'settings'
+export type ViewId = 'chat' | 'companion' | 'characters' | 'worlds' | 'personas' | 'worldinfo' | 'gallery' | 'settings'
 
 const NAV: { id: ViewId; label: string; icon: string }[] = [
   { id: 'chat', label: 'Chat', icon: '>_' },
@@ -9,6 +9,7 @@ const NAV: { id: ViewId; label: string; icon: string }[] = [
   { id: 'worlds', label: 'Worlds', icon: '~' },
   { id: 'personas', label: 'Personas', icon: '@' },
   { id: 'worldinfo', label: 'World Info', icon: '¶' },
+  { id: 'gallery', label: 'Gallery', icon: '[]' },
   { id: 'settings', label: 'Settings', icon: '{}' },
 ]
 
@@ -27,6 +28,7 @@ export function Sidebar({ view, onChange }: { view: ViewId; onChange: (v: ViewId
           key={item.id}
           onClick={() => onChange(item.id)}
           title={item.label}
+          aria-label={item.label}
           className={`flex items-center rounded-xl text-xs transition-colors ${
             expanded ? 'gap-3 px-3 py-2.5' : 'h-10 w-10 justify-center'
           } ${
@@ -43,6 +45,7 @@ export function Sidebar({ view, onChange }: { view: ViewId; onChange: (v: ViewId
       <button
         onClick={() => setExpanded(!expanded)}
         title={expanded ? 'Collapse sidebar' : 'Expand sidebar'}
+        aria-label={expanded ? 'Collapse sidebar' : 'Expand sidebar'}
         className={`mt-auto flex items-center rounded-xl font-mono text-xs text-text-muted transition-colors hover:bg-bg-sunken hover:text-text ${
           expanded ? 'justify-start gap-3 px-3 py-2.5' : 'h-10 w-10 justify-center'
         }`}

@@ -33,6 +33,7 @@ interface MessageBubbleProps {
   onDelete: () => void
   onRegenerate: () => void
   onSwipe: (dir: 'left' | 'right') => void
+  onFork: () => void
 }
 
 export function MessageBubble({
@@ -44,6 +45,7 @@ export function MessageBubble({
   onDelete,
   onRegenerate,
   onSwipe,
+  onFork,
 }: MessageBubbleProps) {
   const chatStyle = useSettingsStore((s) => s.chatStyle)
   const avatarShape = useSettingsStore((s) => s.avatarShape)
@@ -106,23 +108,31 @@ export function MessageBubble({
       {showTokenCounts && message.tokenCount ? <span>{message.tokenCount} tok</span> : null}
       {canSwipe && (
         <span className="flex items-center gap-1">
-          <button onClick={() => onSwipe('left')} className="hover:text-text" disabled={(message.activeSwipe ?? 0) === 0}>
+          <button
+            onClick={() => onSwipe('left')}
+            className="hover:text-text"
+            disabled={(message.activeSwipe ?? 0) === 0}
+            aria-label="Previous swipe"
+          >
             ‹
           </button>
           <span>
             {(message.activeSwipe ?? 0) + 1}/{swipes.length}
           </span>
-          <button onClick={() => onSwipe('right')} className="hover:text-text">
+          <button onClick={() => onSwipe('right')} className="hover:text-text" aria-label="Next swipe">
             ›
           </button>
         </span>
       )}
       {!isStreaming && (
         <>
-          <button onClick={onRegenerate} className="hover:text-text" title="Regenerate">
+          <button onClick={onRegenerate} className="hover:text-text" title="Regenerate" aria-label="Regenerate">
             ⟲
           </button>
-          <button onClick={onDelete} className="hover:text-danger" title="Delete">
+          <button onClick={onFork} className="hover:text-text" title="Fork chat from here" aria-label="Fork chat from here">
+            ⑂
+          </button>
+          <button onClick={onDelete} className="hover:text-danger" title="Delete" aria-label="Delete message">
             ✕
           </button>
         </>

@@ -3,8 +3,9 @@ import { ConnectionSettings } from './ConnectionSettings'
 import { ThemeEditor } from './ThemeEditor'
 import { SamplingControls } from './SamplingControls'
 import { VoiceSettings } from './VoiceSettings'
+import { DataSettings } from './DataSettings'
 
-type Tab = 'connection' | 'appearance' | 'generation' | 'voice'
+type Tab = 'connection' | 'appearance' | 'generation' | 'voice' | 'data'
 
 export function SettingsView() {
   const [tab, setTab] = useState<Tab>('connection')
@@ -18,6 +19,7 @@ export function SettingsView() {
             ['appearance', 'Appearance'],
             ['generation', 'Generation'],
             ['voice', 'Voice'],
+            ['data', 'Data'],
           ] as [Tab, string][]
         ).map(([id, label]) => (
           <button
@@ -35,6 +37,7 @@ export function SettingsView() {
       {tab === 'appearance' && <ThemeEditor />}
       {tab === 'generation' && <SamplingControls />}
       {tab === 'voice' && <VoiceSettings />}
+      {tab === 'data' && <DataSettings />}
     </div>
   )
 }

@@ -2,6 +2,7 @@ import type { CharacterCardData, Lorebook, LorebookEntry } from '@/lib/character
 import { substituteMacros } from '@/lib/characters/macros'
 import { activateWorldInfo, recentMessagesText } from '@/lib/worldinfo/activation'
 import { estimateTokens } from '@/lib/tokenEstimate'
+import { buildSceneInstruction } from '@/lib/vn/sceneTag'
 import type { InstructTemplate } from './instructTemplates'
 
 export interface ChatMessage {
@@ -36,6 +37,10 @@ export interface PromptBuildInput {
   impersonateAsUser?: boolean
   /** Steers the next reply toward an in-progress goal — injected late (right before generation), same placement as post_history_instructions. */
   activeObjective?: { title: string; description?: string; pendingTasks: string[] }
+  /** Expression/background ids the model may tag this reply with (Visual Novel mode) — omitted entirely when empty. */
+  sceneOptions?: { expressionIds: string[]; backgroundIds: string[] }
+  /** Current relationship score for unlock-gated lore entries. */
+  affection?: number
 }
 
 export interface PromptBuildResult {
@@ -72,6 +77,7 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
     lorebooks,
     scanText,
     manuallyActivatedWorldInfoIds,
+    input.affection ?? 0,
   )
   const before = activatedEntries.filter((e) => e.position !== 'after_char')
   const after = activatedEntries.filter((e) => e.position === 'after_char')
@@ -119,6 +125,8 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
   const postHistoryBlock = [
     character.post_history_instructions?.trim() ? sub(character.post_history_instructions) : '',
     buildObjectiveBlock(input.activeObjective, sub),
+    // The scene tag describes the character's own turn, so it makes no sense when generating the user's line instead.
+    input.impersonateAsUser ? '' : buildSceneInstruction(input.sceneOptions),
   ]
     .filter(Boolean)
     .join('\n\n')

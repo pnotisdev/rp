@@ -53,7 +53,7 @@ export async function regenerateCardField(
   const text = await client.generate({
     prompt,
     max_length: 300,
-    max_context_length: 4096,
+    max_context_length: await client.getEffectiveMaxContext(),
     temperature: 0.85,
     top_p: 0.95,
     top_k: 0,
@@ -97,7 +97,7 @@ export async function suggestLoreEntries(
   const text = await client.generate({
     prompt,
     max_length: 600,
-    max_context_length: 4096,
+    max_context_length: await client.getEffectiveMaxContext(),
     temperature: 0.8,
     top_p: 0.95,
     top_k: 0,

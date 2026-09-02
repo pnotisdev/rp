@@ -39,6 +39,7 @@ export function RegenerateFieldButton({
         onClick={run}
         disabled={busy}
         title="Regenerate this field with AI, keeping it consistent with the rest of the card"
+        aria-label="Regenerate this field with AI"
         className="font-mono text-xs text-text-muted transition-colors hover:text-accent disabled:opacity-40"
       >
         {busy ? '…' : '⟲'}

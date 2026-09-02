@@ -3,6 +3,7 @@ import type { Lorebook, LorebookEntry, WorldInfoActivationMode } from '@/lib/cha
 import { suggestLoreEntries, type AiLoreSubject } from '@/lib/characters/aiAssist'
 import { KoboldClient } from '@/lib/api/kobold'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
+import { errorMessage, toastError } from '@/lib/store/useToastStore'
 import { Button } from '@/components/ui/Button'
 import { Toggle } from '@/components/ui/Toggle'
 import { TextAreaField, TextField } from '@/components/ui/Field'
@@ -23,7 +24,6 @@ export function LorebookEditor({
 }) {
   const baseUrl = useSettingsStore((s) => s.baseUrl)
   const [suggesting, setSuggesting] = useState(false)
-  const [suggestError, setSuggestError] = useState<string | null>(null)
 
   const updateEntry = (id: number, patch: Partial<LorebookEntry>) => {
     onChange({
@@ -50,7 +50,6 @@ export function LorebookEditor({
   const suggestWithAi = async () => {
     if (!aiContext || suggesting) return
     setSuggesting(true)
-    setSuggestError(null)
     try {
       const client = new KoboldClient(baseUrl)
       const suggestions = await suggestLoreEntries(client, aiContext, book.entries)
@@ -78,7 +77,7 @@ export function LorebookEditor({
       }
       onChange(nextBook)
     } catch (e) {
-      setSuggestError(e instanceof Error ? e.message : String(e))
+      toastError(errorMessage(e))
     } finally {
       setSuggesting(false)
     }
@@ -145,6 +144,24 @@ export function LorebookEditor({
                 onChange={(v) => updateEntry(entry.id!, { enabled: v })}
                 label="Enabled"
               />
+              <label className="flex items-center gap-1 text-text-muted">
+                <span>Unlock @</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={Number((entry.extensions as Record<string, unknown> | undefined)?.affectionMin ?? 0)}
+                  onChange={(e) =>
+                    updateEntry(entry.id!, {
+                      extensions: {
+                        ...(entry.extensions ?? {}),
+                        affectionMin: Math.max(0, Math.min(100, Number(e.target.value) || 0)),
+                      },
+                    })
+                  }
+                  className="w-16 rounded bg-bg-elevated px-2 py-0.5 text-xs text-text outline-none"
+                />
+              </label>
             </div>
           </div>
         ))}
@@ -159,7 +176,6 @@ export function LorebookEditor({
           </Button>
         )}
       </div>
-      {suggestError && <p className="mt-2 text-xs text-danger">{suggestError}</p>}
     </div>
   )
 }

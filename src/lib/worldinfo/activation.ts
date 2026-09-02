@@ -29,6 +29,7 @@ export function activateWorldInfo(
   books: Lorebook[],
   recentText: string,
   manuallyActivatedIds: Set<number> = new Set(),
+  affection = 0,
 ): WorldInfoActivationResult {
   const haystackLower = recentText.toLowerCase()
   const activated: LorebookEntry[] = []
@@ -37,8 +38,13 @@ export function activateWorldInfo(
   for (const book of books) {
     const matched: LorebookEntry[] = []
     for (const entry of book.entries) {
-      if (!entry.enabled) continue
       const mode = entry.activationMode ?? (entry.constant ? 'always' : 'keyword')
+      // Manual-mode entries have their own enabled-or-manually-activated check below — gating
+      // on `enabled` here too would make the manuallyActivatedIds branch of that check
+      // unreachable for an entry the creator left toggled off.
+      if (mode !== 'manual' && !entry.enabled) continue
+      const requiredAffection = Number((entry.extensions as Record<string, unknown> | undefined)?.affectionMin ?? 0)
+      if (Number.isFinite(requiredAffection) && affection < requiredAffection) continue
       if (mode === 'always') {
         matched.push(entry)
         continue
