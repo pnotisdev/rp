@@ -12,6 +12,8 @@ async function req<T>(baseUrl: string, path: string, init?: RequestInit): Promis
   try {
     res = await fetch(joinUrl(baseUrl, path), init)
   } catch (e) {
+    // An intentional abort (Stop button) isn't "server unreachable" — don't mislabel it.
+    if (init?.signal?.aborted) throw e
     throw new KoboldApiError(
       `Could not reach KoboldCpp at ${baseUrl}. Is the server running and reachable?`,
     )
@@ -86,14 +88,20 @@ export class KoboldClient {
     onToken: (token: string, full: string) => void,
     signal?: AbortSignal,
   ): Promise<string> {
-    const res = await fetch(joinUrl(this.baseUrl, '/api/extra/generate/stream'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
-      signal,
-    }).catch(() => {
+    let res: Response
+    try {
+      res = await fetch(joinUrl(this.baseUrl, '/api/extra/generate/stream'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+        signal,
+      })
+    } catch (e) {
+      // An intentional abort (Stop button) isn't "server unreachable" — there's no partial
+      // text to save yet since streaming hadn't started, but don't mislabel it as a crash.
+      if (signal?.aborted) return ''
       throw new KoboldApiError(`Could not reach KoboldCpp at ${this.baseUrl} for streaming.`)
-    })
+    }
     if (!res.ok || !res.body) {
       const body = await res.text().catch(() => '')
       throw new KoboldApiError(`generate/stream failed (${res.status}): ${body.slice(0, 300)}`)
@@ -104,32 +112,39 @@ export class KoboldClient {
     let buffer = ''
     let full = ''
 
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
 
-      let sepIndex: number
-      while ((sepIndex = buffer.indexOf('\n\n')) !== -1) {
-        const rawEvent = buffer.slice(0, sepIndex)
-        buffer = buffer.slice(sepIndex + 2)
+        let sepIndex: number
+        while ((sepIndex = buffer.indexOf('\n\n')) !== -1) {
+          const rawEvent = buffer.slice(0, sepIndex)
+          buffer = buffer.slice(sepIndex + 2)
 
-        const dataLines = rawEvent
-          .split('\n')
-          .filter((l) => l.startsWith('data:'))
-          .map((l) => l.slice(5).trim())
-        if (dataLines.length === 0) continue
-        const dataStr = dataLines.join('\n')
-        try {
-          const parsed = JSON.parse(dataStr) as { token?: string }
-          if (typeof parsed.token === 'string') {
-            full += parsed.token
-            onToken(parsed.token, full)
+          const dataLines = rawEvent
+            .split('\n')
+            .filter((l) => l.startsWith('data:'))
+            .map((l) => l.slice(5).trim())
+          if (dataLines.length === 0) continue
+          const dataStr = dataLines.join('\n')
+          try {
+            const parsed = JSON.parse(dataStr) as { token?: string }
+            if (typeof parsed.token === 'string') {
+              full += parsed.token
+              onToken(parsed.token, full)
+            }
+          } catch {
+            // ignore malformed/keepalive events
           }
-        } catch {
-          // ignore malformed/keepalive events
         }
       }
+    } catch (e) {
+      // Stopped mid-stream — keep whatever text had already arrived instead of throwing
+      // it away; the caller treats an aborted stream the same as a short completed one.
+      if (signal?.aborted) return full
+      throw e
     }
     return full
   }

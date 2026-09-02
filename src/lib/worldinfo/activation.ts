@@ -30,7 +30,7 @@ export function activateWorldInfo(
   recentText: string,
   manuallyActivatedIds: Set<number> = new Set(),
 ): WorldInfoActivationResult {
-  const haystack = recentText.toLowerCase()
+  const haystackLower = recentText.toLowerCase()
   const activated: LorebookEntry[] = []
   const droppedForBudget: LorebookEntry[] = []
 
@@ -51,7 +51,7 @@ export function activateWorldInfo(
         }
         continue
       }
-      if (matchesKeywords(entry, haystack)) {
+      if (matchesKeywords(entry, recentText, haystackLower)) {
         matched.push(entry)
       }
     }
@@ -76,11 +76,11 @@ export function activateWorldInfo(
   return { activated, droppedForBudget }
 }
 
-function matchesKeywords(entry: LorebookEntry, haystackLower: string): boolean {
+function matchesKeywords(entry: LorebookEntry, haystackOriginal: string, haystackLower: string): boolean {
   if (entry.keys.length === 0) return false
   const test = (k: string) => {
     const needle = entry.case_sensitive ? k : k.toLowerCase()
-    const hay = entry.case_sensitive ? haystackLower : haystackLower
+    const hay = entry.case_sensitive ? haystackOriginal : haystackLower
     return needle.length > 0 && hay.includes(needle)
   }
   const primaryHit = entry.keys.some(test)

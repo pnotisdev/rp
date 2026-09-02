@@ -251,11 +251,17 @@ export function useChatSession(chatId: string | null) {
           if (rebuilt) built = rebuilt
         }
 
+        // The template's own turn-boundary tokens (e.g. ChatML's <|im_end|>) must reach
+        // the sampler or the model has no signal to stop at its own turn — merged with
+        // whatever the user additionally set in Settings, not replacing it.
+        const stopSequence = [...new Set([...template.stopSequences, ...(sampler.stop_sequence ?? [])])]
+
         let newText = ''
         try {
           newText = await client.generateStream(
             {
               ...sampler,
+              stop_sequence: stopSequence,
               prompt: built.prompt,
               genkey,
               images: images.length ? images : undefined,
@@ -265,8 +271,9 @@ export function useChatSession(chatId: string | null) {
           )
         } catch (streamErr) {
           // Fall back to non-streaming generate (some builds/proxies block SSE).
+          console.warn('Streaming generation failed, falling back to non-streaming:', streamErr)
           newText = await client.generate(
-            { ...sampler, prompt: built.prompt, genkey, images: images.length ? images : undefined },
+            { ...sampler, stop_sequence: stopSequence, prompt: built.prompt, genkey, images: images.length ? images : undefined },
             abort.signal,
           )
         }
@@ -310,12 +317,24 @@ export function useChatSession(chatId: string | null) {
         setGeneratingMessageId(null)
       }
     },
-    [autoDetectTasks, autoSummarize, buildCurrentPrompt, character, chat, client, countTokens, detectAndMarkTasks, updateMemorySummary],
+    [
+      autoDetectTasks,
+      autoSummarize,
+      buildCurrentPrompt,
+      character,
+      chat,
+      client,
+      countTokens,
+      detectAndMarkTasks,
+      sampler,
+      template,
+      updateMemorySummary,
+    ],
   )
 
   const sendUserMessage = useCallback(
     async (text: string, attachments: PendingAttachment[] = []) => {
-      if (!chatId) return
+      if (!chatId || isGenerating) return
       const composedText = composeMessageText(text, attachments).trim()
       const apiImages = collectImageBase64(attachments)
       if (!composedText && apiImages.length === 0) return
@@ -357,11 +376,12 @@ export function useChatSession(chatId: string | null) {
       }))
       await runGeneration(historyForPrompt, charMsg.id, apiImages)
     },
-    [character, chatId, messages, persona, runGeneration],
+    [character, chatId, isGenerating, messages, persona, runGeneration],
   )
 
   const regenerate = useCallback(
     async (messageId: string) => {
+      if (isGenerating) return
       const idx = messages.findIndex((m) => m.id === messageId)
       if (idx === -1) return
       const priorMessages = messages.slice(0, idx)
@@ -374,7 +394,7 @@ export function useChatSession(chatId: string | null) {
       await messagesApi.update(messageId, { text: '' })
       await runGeneration(historyForPrompt, messageId, latestImages(priorMessages))
     },
-    [messages, runGeneration],
+    [isGenerating, messages, runGeneration],
   )
 
   const swipe = useCallback(
@@ -384,6 +404,7 @@ export function useChatSession(chatId: string | null) {
       const swipes = msg.swipes ?? [msg.text]
       const current = msg.activeSwipe ?? 0
       if (direction === 'right' && current === swipes.length - 1) {
+        if (isGenerating) return
         // generate a brand new swipe
         const idx = messages.findIndex((m) => m.id === messageId)
         const priorMessages = messages.slice(0, idx)
@@ -405,7 +426,7 @@ export function useChatSession(chatId: string | null) {
       const nextIndex = direction === 'left' ? Math.max(0, current - 1) : Math.min(swipes.length - 1, current + 1)
       await messagesApi.update(messageId, { activeSwipe: nextIndex, text: swipes[nextIndex] })
     },
-    [messages, runGeneration],
+    [isGenerating, messages, runGeneration],
   )
 
   const continueMessage = useCallback(async () => {

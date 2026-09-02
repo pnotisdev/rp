@@ -97,6 +97,24 @@ interface ColumnSpec {
  * full relational schema isn't warranted for a single-user local app, but plain
  * flat files can't be queried or sorted, which is why this sits in between.
  */
+const SQL_CLAUSE_KEYWORDS = new Set(['AND', 'OR', 'NOT', 'IS', 'NULL', 'ASC', 'DESC', 'IN', 'LIKE'])
+
+/**
+ * Every current where/orderBy call site is a hardcoded literal, so this isn't exploitable
+ * today — but nothing stops a future call site from building one out of a request field,
+ * and column/clause identifiers can't be parameterized with `?` placeholders. Reject any
+ * identifier-shaped token that isn't one of this table's own columns or a known-safe
+ * SQL keyword, so that class of bug can't become a real SQL injection later.
+ */
+function assertSafeClause(kind: 'where' | 'orderBy', clause: string, columnNames: string[]): void {
+  const allowedIdentifiers = new Set(['id', ...columnNames])
+  const tokens = clause.match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? []
+  for (const token of tokens) {
+    if (allowedIdentifiers.has(token) || SQL_CLAUSE_KEYWORDS.has(token.toUpperCase())) continue
+    throw new Error(`Unsafe SQL ${kind} clause: unrecognized identifier "${token}"`)
+  }
+}
+
 function createStore(table: string, columns: ColumnSpec[]) {
   const columnNames = columns.map((c) => c.name)
   const insertColumns = ['id', ...columnNames, 'data']
@@ -125,6 +143,8 @@ function createStore(table: string, columns: ColumnSpec[]) {
 
   return {
     list(opts?: { where?: string; params?: unknown[]; orderBy?: string }): Row[] {
+      if (opts?.where) assertSafeClause('where', opts.where, columnNames)
+      if (opts?.orderBy) assertSafeClause('orderBy', opts.orderBy, columnNames)
       let sql = `SELECT * FROM ${table}`
       if (opts?.where) sql += ` WHERE ${opts.where}`
       if (opts?.orderBy) sql += ` ORDER BY ${opts.orderBy}`

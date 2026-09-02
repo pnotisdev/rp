@@ -51,12 +51,12 @@ app.post('/api/characters', (req, res) => {
 
 app.put('/api/characters/:id', (req, res) => {
   const id = req.params.id
+  if (!characterStore.get(id)) return notFound(res)
   const patch: Record<string, unknown> = { updatedAt: Date.now() }
   if ('card' in req.body) patch.card = req.body.card
   if ('worldId' in req.body) patch.worldId = req.body.worldId || undefined
   if ('avatarDataUrl' in req.body) patch.avatarDataUrl = resolveAvatar('characters', id, req.body.avatarDataUrl)
   const updated = characterStore.update(id, patch)
-  if (!updated) return notFound(res)
   res.json(updated)
 })
 
@@ -94,12 +94,12 @@ app.post('/api/personas', (req, res) => {
 
 app.put('/api/personas/:id', (req, res) => {
   const id = req.params.id
+  if (!personaStore.get(id)) return notFound(res)
   const patch: Record<string, unknown> = {}
   if ('name' in req.body) patch.name = req.body.name
   if ('description' in req.body) patch.description = req.body.description
   if ('avatarDataUrl' in req.body) patch.avatarDataUrl = resolveAvatar('personas', id, req.body.avatarDataUrl)
   const updated = personaStore.update(id, patch)
-  if (!updated) return notFound(res)
   res.json(updated)
 })
 
@@ -262,10 +262,10 @@ app.post('/api/worlds', (req, res) => {
 
 app.put('/api/worlds/:id', (req, res) => {
   const id = req.params.id
+  if (!worldStore.get(id)) return notFound(res)
   const patch: Record<string, unknown> = { ...req.body, updatedAt: Date.now() }
   if ('avatarDataUrl' in req.body) patch.avatarDataUrl = resolveAvatar('worlds', id, req.body.avatarDataUrl)
   const updated = worldStore.update(id, patch)
-  if (!updated) return notFound(res)
   res.json(updated)
 })
 
@@ -306,4 +306,12 @@ app.put('/api/objectives/:id', (req, res) => {
   const updated = objectiveStore.update(req.params.id, { ...req.body, updatedAt: Date.now() })
   if (!updated) return notFound(res)
   res.json(updated)
+})
+
+// Catches synchronous throws from any route above (malformed ids, missing required
+// fields hitting a NOT NULL column, etc.) and returns clean JSON instead of Express's
+// default HTML error page with a leaked stack trace. Must be registered last.
+app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error(err)
+  res.status(400).json({ error: err instanceof Error ? err.message : 'Request failed' })
 })
