@@ -36,7 +36,7 @@ export function VoiceSettings() {
             <select
               value={ttsProvider}
               onChange={(e) => setVoiceConfig({ ttsProvider: e.target.value as TtsProviderId })}
-              className="w-full rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none"
+              className="w-full rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40"
             >
               {PROVIDERS.map((p) => (
                 <option key={p} value={p}>

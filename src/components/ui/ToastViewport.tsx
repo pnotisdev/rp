@@ -29,7 +29,7 @@ function Toast({ id, message, variant }: ToastItem) {
   return (
     <div
       role={variant === 'error' ? 'alert' : 'status'}
-      className={`pointer-events-auto flex items-start gap-3 rounded-xl border px-4 py-3 text-xs shadow-lg themed-shadow ${VARIANT_CLASSES[variant]}`}
+      className={`animate-toast-in pointer-events-auto flex items-start gap-3 rounded-xl border px-4 py-3 text-xs shadow-lg themed-shadow ${VARIANT_CLASSES[variant]}`}
     >
       <span className="flex-1 whitespace-pre-wrap">{message}</span>
       <button

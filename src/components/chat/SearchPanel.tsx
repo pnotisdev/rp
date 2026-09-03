@@ -3,6 +3,7 @@ import type { StoredMessage } from '@/lib/types'
 import { charactersApi, chatsApi, messagesApi } from '@/lib/api/client'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { Modal } from '@/components/ui/Modal'
+import { SegmentedControl } from '@/components/ui/SegmentedControl'
 
 interface SearchPanelProps {
   /** The currently open chat — its own matches jump in-place instead of "switching" to it. */
@@ -65,21 +66,18 @@ export function SearchPanel({ chatId, messages, onClose, onJumpToMessage, onJump
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search for a word or phrase…"
-          className="mb-3 rounded-xl bg-bg-sunken px-3.5 py-2.5 text-sm text-text outline-none"
+          className="mb-3 w-full rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40 placeholder:text-text-muted/55"
         />
-        <div className="mb-3 flex gap-2 text-xs">
-          <button
-            onClick={() => setScope('chat')}
-            className={`rounded-lg px-2.5 py-1 ${scope === 'chat' ? 'bg-accent/15 text-accent' : 'bg-bg-sunken text-text-muted'}`}
-          >
-            This chat
-          </button>
-          <button
-            onClick={() => setScope('all')}
-            className={`rounded-lg px-2.5 py-1 ${scope === 'all' ? 'bg-accent/15 text-accent' : 'bg-bg-sunken text-text-muted'}`}
-          >
-            All chats
-          </button>
+        <div className="mb-3">
+          <SegmentedControl
+            size="sm"
+            options={[
+              { value: 'chat', label: 'This chat' },
+              { value: 'all', label: 'All chats' },
+            ]}
+            value={scope}
+            onChange={setScope}
+          />
         </div>
         <div className="flex-1 space-y-2 overflow-y-auto">
           {!q && <p className="py-8 text-center text-xs text-text-muted">Start typing to search.</p>}

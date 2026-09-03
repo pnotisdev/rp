@@ -1,15 +1,55 @@
 import { useRef, useState } from 'react'
+import { Plus, X } from 'lucide-react'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { themesApi } from '@/lib/api/client'
-import { useSettingsStore, type AvatarShape, type ChatStyle, type ColorMode } from '@/lib/store/useSettingsStore'
+import {
+  DEFAULT_THEME_TOKENS,
+  DEFAULT_THEME_TOKENS_DARK,
+  useSettingsStore,
+  type AvatarShape,
+  type ChatStyle,
+  type ColorMode,
+} from '@/lib/store/useSettingsStore'
 import { THEME_PRESETS, type ThemePreset } from '@/lib/store/themePresets'
 import { ColorField } from '@/components/ui/ColorField'
 import { Slider } from '@/components/ui/Slider'
 import { Toggle } from '@/components/ui/Toggle'
+import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { Button } from '@/components/ui/Button'
 import { TextAreaField, TextField } from '@/components/ui/Field'
 import { Section } from '@/components/ui/Section'
 import { SettingsPage } from '@/components/ui/SettingsPage'
+
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
+
+// "Default" sits in the same Presets row as the built-in palettes so reverting is exactly as
+// discoverable as applying — a user who picked Sakura from this row looks for the way back here,
+// not for a faint ghost button far below the swatch list.
+const DEFAULT_PRESET: ThemePreset = {
+  id: 'default',
+  name: 'Default',
+  light: DEFAULT_THEME_TOKENS,
+  dark: DEFAULT_THEME_TOKENS_DARK,
+}
+
+/** Which preset in `presets` the current tokens exactly match (defaults + that preset's overrides), or null if hand-edited. */
+function matchingPresetId(
+  presets: ThemePreset[],
+  light: Record<string, string>,
+  dark: Record<string, string>,
+): string | null {
+  const eq = (a: Record<string, string>, b: Record<string, string>) =>
+    Object.keys(b).every((k) => a[k] === b[k])
+  for (const p of presets) {
+    if (
+      eq(light, { ...DEFAULT_THEME_TOKENS, ...p.light }) &&
+      eq(dark, { ...DEFAULT_THEME_TOKENS_DARK, ...p.dark })
+    ) {
+      return p.id
+    }
+  }
+  return null
+}
 
 const COLOR_KEYS: { key: string; label: string }[] = [
   { key: '--c-bg', label: 'Background' },
@@ -35,7 +75,11 @@ export function ThemeEditor() {
   const themeTokensLight = useSettingsStore((s) => s.themeTokensLight)
   const themeTokensDark = useSettingsStore((s) => s.themeTokensDark)
   const setThemeToken = useSettingsStore((s) => s.setThemeToken)
+  const applyThemePreset = useSettingsStore((s) => s.applyThemePreset)
   const resetTheme = useSettingsStore((s) => s.resetTheme)
+  const customThemePresets = useSettingsStore((s) => s.customThemePresets)
+  const addCustomThemePreset = useSettingsStore((s) => s.addCustomThemePreset)
+  const removeCustomThemePreset = useSettingsStore((s) => s.removeCustomThemePreset)
 
   const chatStyle = useSettingsStore((s) => s.chatStyle)
   const setChatStyle = useSettingsStore((s) => s.setChatStyle)
@@ -63,6 +107,8 @@ export function ThemeEditor() {
   const tokens = colorMode === 'light' ? themeTokensLight : themeTokensDark
   const savedThemes = useApiQuery('themes', () => themesApi.list(), []) ?? []
   const [themeName, setThemeName] = useState('My theme')
+  const [savingPreset, setSavingPreset] = useState(false)
+  const [presetName, setPresetName] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
 
   const fullThemeExport = () => ({
@@ -124,53 +170,113 @@ export function ThemeEditor() {
 
   // Only touches color tokens (both light and dark, regardless of which mode is active right now)
   // — deliberately leaves chatStyle/avatarShape/layout/customCss alone, unlike applying a full
-  // saved theme, since a color-palette preset shouldn't reach into unrelated settings.
+  // saved theme, since a color-palette preset shouldn't reach into unrelated settings. "Default"
+  // is just the preset whose overrides are the built-in palette, so it goes through the same path.
   const applyPreset = (preset: ThemePreset) => {
-    const store = useSettingsStore.getState()
-    Object.entries(preset.light).forEach(([k, v]) => store.setThemeToken(k, v, 'light'))
-    Object.entries(preset.dark).forEach(([k, v]) => store.setThemeToken(k, v, 'dark'))
+    if (preset.id === 'default') resetTheme()
+    else applyThemePreset(preset.light, preset.dark)
+  }
+
+  const allPresets = [DEFAULT_PRESET, ...THEME_PRESETS, ...customThemePresets]
+  const activePreset = matchingPresetId(allPresets, themeTokensLight, themeTokensDark)
+
+  const saveCurrentAsPreset = () => {
+    addCustomThemePreset(presetName)
+    setPresetName('')
+    setSavingPreset(false)
   }
 
   return (
     <SettingsPage>
-      <Section title="Presets" surface="bare">
-        <div className="flex flex-wrap gap-3">
-          {THEME_PRESETS.map((preset) => {
+      <Section
+        title="Presets"
+        description="A starting palette — every swatch below stays editable afterward. Pick Default to undo one, or save the colours you've tuned as a preset of your own."
+        surface="bare"
+      >
+        <div className="flex flex-wrap items-center gap-3">
+          {allPresets.map((preset) => {
             const swatch = colorMode === 'light' ? preset.light : preset.dark
+            const isActive = activePreset === preset.id
+            const isCustom = customThemePresets.some((p) => p.id === preset.id)
             return (
-              <button
-                key={preset.id}
-                onClick={() => applyPreset(preset)}
-                className="flex items-center gap-2 rounded-xl border border-border bg-bg-elevated px-3 py-2 text-sm text-text transition-colors hover:border-accent"
-                title={`Apply the ${preset.name} color palette`}
-              >
-                <span
-                  className="h-5 w-5 shrink-0 rounded-full border border-border"
-                  style={{ background: `rgb(${swatch['--c-accent']})` }}
-                />
-                {preset.name}
-              </button>
+              <div key={preset.id} className="group relative">
+                <button
+                  onClick={() => applyPreset(preset)}
+                  aria-pressed={isActive}
+                  className={`flex items-center gap-2 rounded-xl border py-2 pl-3 text-sm transition-colors ${
+                    isCustom ? 'pr-8' : 'pr-3'
+                  } ${
+                    isActive
+                      ? 'border-accent bg-accent/10 text-accent'
+                      : 'border-border bg-bg-elevated text-text hover:border-accent'
+                  }`}
+                  title={
+                    preset.id === 'default' ? 'Restore the built-in palette' : `Apply the ${preset.name} palette`
+                  }
+                >
+                  <span
+                    className="h-5 w-5 shrink-0 rounded-full border border-border"
+                    style={{ background: `rgb(${swatch['--c-accent'] ?? DEFAULT_THEME_TOKENS['--c-accent']})` }}
+                  />
+                  {preset.name}
+                </button>
+                {isCustom && (
+                  <button
+                    onClick={() => removeCustomThemePreset(preset.id)}
+                    title={`Delete the "${preset.name}" preset`}
+                    aria-label={`Delete the ${preset.name} preset`}
+                    className="absolute right-1 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-lg text-text-muted opacity-0 transition-opacity hover:bg-danger/10 hover:text-danger focus-visible:opacity-100 group-hover:opacity-100"
+                  >
+                    <X size={13} strokeWidth={2} />
+                  </button>
+                )}
+              </div>
             )
           })}
+
+          {savingPreset ? (
+            <span className="flex items-center gap-1.5">
+              <input
+                autoFocus
+                value={presetName}
+                onChange={(e) => setPresetName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') saveCurrentAsPreset()
+                  if (e.key === 'Escape') setSavingPreset(false)
+                }}
+                placeholder="Preset name"
+                className="w-36 rounded-xl bg-bg-sunken px-3 py-1.5 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40 placeholder:text-text-muted/55"
+              />
+              <Button variant="primary" onClick={saveCurrentAsPreset}>
+                Save
+              </Button>
+              <Button variant="ghost" onClick={() => setSavingPreset(false)}>
+                Cancel
+              </Button>
+            </span>
+          ) : (
+            <button
+              onClick={() => setSavingPreset(true)}
+              className="flex items-center gap-1.5 rounded-xl border border-dashed border-border px-3 py-2 text-sm text-text-muted transition-colors hover:border-accent hover:text-text"
+            >
+              <Plus size={14} strokeWidth={2} />
+              Save current colours
+            </button>
+          )}
         </div>
       </Section>
 
       <Section
         title="Colors"
         action={
-          <div className="flex rounded-lg border border-border p-0.5">
-            {(['light', 'dark'] as ColorMode[]).map((m) => (
-              <button
-                key={m}
-                onClick={() => setColorMode(m)}
-                className={`rounded px-3 py-1 text-xs capitalize ${
-                  colorMode === m ? 'bg-accent text-accent-text' : 'text-text-muted'
-                }`}
-              >
-                {m}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl
+            options={[
+              { value: 'light', label: 'Light' },
+              { value: 'dark', label: 'Dark' },
+            ]}
+            value={colorMode}
+            onChange={(m) => setColorMode(m as ColorMode)}
+          />
         }
       >
         {COLOR_KEYS.map(({ key, label }) => (
@@ -187,33 +293,19 @@ export function ThemeEditor() {
       </Section>
 
       <Section title="Chat style" surface="bare">
-        <div className="flex gap-2">
-          {(['flat', 'bubbles', 'document'] as ChatStyle[]).map((s) => (
-            <button
-              key={s}
-              onClick={() => setChatStyle(s)}
-              className={`flex-1 rounded-lg border px-3 py-2 text-sm capitalize ${
-                chatStyle === s ? 'border-accent bg-accent/10 text-accent' : 'border-border text-text-muted'
-              }`}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
+        <SegmentedControl
+          fill
+          options={(['flat', 'bubbles', 'document'] as ChatStyle[]).map((s) => ({ value: s, label: cap(s) }))}
+          value={chatStyle}
+          onChange={(s) => setChatStyle(s as ChatStyle)}
+        />
         <div className="mb-2 mt-4 text-sm font-semibold text-text">Avatar style</div>
-        <div className="flex gap-2">
-          {(['circle', 'rounded', 'square', 'rectangle'] as AvatarShape[]).map((s) => (
-            <button
-              key={s}
-              onClick={() => setAvatarShape(s)}
-              className={`flex-1 rounded-lg border px-3 py-2 text-sm capitalize ${
-                avatarShape === s ? 'border-accent bg-accent/10 text-accent' : 'border-border text-text-muted'
-              }`}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
+        <SegmentedControl
+          fill
+          options={(['circle', 'rounded', 'square', 'rectangle'] as AvatarShape[]).map((s) => ({ value: s, label: cap(s) }))}
+          value={avatarShape}
+          onChange={(s) => setAvatarShape(s as AvatarShape)}
+        />
       </Section>
 
       <Section title="Layout">

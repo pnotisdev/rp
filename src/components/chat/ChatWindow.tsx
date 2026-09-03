@@ -28,6 +28,7 @@ import {
   relationshipMilestonesFor,
   relationshipStageForWarmth,
 } from '@/lib/dating/stage'
+import { ChatToolbar, type ChatToolbarAction } from './ChatToolbar'
 import { MessageLog } from './MessageLog'
 import { VNStage } from './VNStage'
 import { ChoiceList } from './ChoiceList'
@@ -210,51 +211,69 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
 
   // Built once, rendered twice: as the ordinary header's toolbar (tone="chrome") in normal mode,
   // and folded into VNStage's own floating overlay (tone="glass") in VN mode — same actions, same
-  // order, so the two modes never drift apart into different feature sets.
+  // order, so the two modes never drift apart into different feature sets. Only the `primary`
+  // actions render as icons; the rest collapse into a single "•••" overflow menu (ChatToolbar).
   const toolbarTone = visualNovelMode ? 'glass' : 'chrome'
-  const toolbar = (
-    <>
-      <IconButton tone={toolbarTone} icon={Heart} title="Open relationship panel" onClick={() => setShowRelationship(true)} />
-      {/* 10e's content/feature flag: an author-level opt-out, not something that unlocks with more
-          warmth like every other gate in this app — so the trigger is hidden entirely rather than
-          just disabled, the same way a character with no active date shows no badge at all. */}
-      {!character?.dateModeOptOut && (
-        <IconButton
-          tone={toolbarTone}
-          icon={CalendarHeart}
-          title={chat.activeEvent?.title ? `Event: ${chat.activeEvent.title}` : 'Create a date/event scenario'}
-          active={!!chat.activeEvent}
-          onClick={() => setShowEvent(true)}
-        />
-      )}
-      <IconButton
-        tone={toolbarTone}
-        icon={Target}
-        title={activeObjective ? `Objective: ${activeObjective.title}` : 'Set an objective for this chat'}
-        active={!!activeObjective}
-        onClick={() => setShowObjective(true)}
-      />
-      <IconButton
-        tone={toolbarTone}
-        icon={NotebookPen}
-        title={chat.authorNote?.text ? "Author's note (set)" : "Author's note — a steering note for this chat"}
-        active={!!chat.authorNote?.text}
-        onClick={() => setShowAuthorNote(true)}
-      />
-      <IconButton tone={toolbarTone} icon={ScrollText} title="Inspect the exact prompt and memory sent to the model" onClick={() => setShowInspector(true)} />
-      <IconButton
-        tone={toolbarTone}
-        icon={Star}
-        title={pinnedCount > 0 ? `${pinnedCount} pinned moment${pinnedCount === 1 ? '' : 's'}` : 'Pinned moments'}
-        active={pinnedCount > 0}
-        onClick={() => setShowPinned(true)}
-      />
-      <IconButton tone={toolbarTone} icon={Search} title="Search messages" onClick={() => setShowSearch(true)} />
-      <IconButton tone={toolbarTone} icon={Backpack} title="Bag — give a gift you already own" onClick={() => setShowBag(true)} />
-      <IconButton tone={toolbarTone} icon={Wrench} title="Director view — inspect and adjust world/relationship state directly" onClick={() => setShowDirector(true)} />
-      <IconButton tone={toolbarTone} icon={Download} title="Export this chat as a readable HTML transcript" onClick={exportTranscript} disabled={exporting} />
-    </>
-  )
+  const toolbarActions: ChatToolbarAction[] = [
+    {
+      key: 'relationship',
+      icon: Heart,
+      label: 'Relationship',
+      priority: 'primary',
+      onClick: () => setShowRelationship(true),
+    },
+    {
+      key: 'event',
+      icon: CalendarHeart,
+      label: chat.activeEvent?.title ? `Event: ${chat.activeEvent.title}` : 'Start a date or event',
+      priority: 'primary',
+      active: !!chat.activeEvent,
+      // 10e's content/feature flag: an author-level opt-out, not something that unlocks with more
+      // warmth like every other gate in this app — so the trigger is hidden entirely rather than
+      // just disabled, the same way a character with no active date shows no badge at all.
+      hidden: !!character?.dateModeOptOut,
+      onClick: () => setShowEvent(true),
+    },
+    {
+      key: 'objective',
+      icon: Target,
+      label: activeObjective ? `Objective: ${activeObjective.title}` : 'Set an objective',
+      priority: 'primary',
+      active: !!activeObjective,
+      onClick: () => setShowObjective(true),
+    },
+    {
+      key: 'author-note',
+      icon: NotebookPen,
+      label: chat.authorNote?.text ? "Author's note (set)" : "Author's note",
+      active: !!chat.authorNote?.text,
+      onClick: () => setShowAuthorNote(true),
+    },
+    {
+      key: 'pinned',
+      icon: Star,
+      label: pinnedCount > 0 ? `Pinned moments (${pinnedCount})` : 'Pinned moments',
+      active: pinnedCount > 0,
+      onClick: () => setShowPinned(true),
+    },
+    { key: 'search', icon: Search, label: 'Search messages', onClick: () => setShowSearch(true) },
+    { key: 'bag', icon: Backpack, label: 'Bag — give a gift you own', onClick: () => setShowBag(true) },
+    { key: 'inspector', icon: ScrollText, label: 'Inspect prompt & memory', onClick: () => setShowInspector(true) },
+    {
+      key: 'director',
+      icon: Wrench,
+      label: 'Director — adjust world & relationship state',
+      onClick: () => setShowDirector(true),
+    },
+    {
+      key: 'export',
+      icon: Download,
+      label: exporting ? 'Exporting…' : 'Export as HTML transcript',
+      disabled: exporting,
+      onClick: exportTranscript,
+    },
+  ]
+  const toolbar = <ChatToolbar tone={toolbarTone} actions={toolbarActions} />
 
   const parentChatLink = chat.parentChatId ? (
     <button
@@ -349,30 +368,25 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
                   </span>
                 )}
               </div>
-              <div className="mt-1 flex min-w-0 items-center gap-2">
+              <div className="mt-1 flex min-w-0 items-center gap-2 text-[11px] uppercase tracking-wide text-text-muted">
                 <div className="h-1.5 w-24 shrink-0 overflow-hidden rounded-full bg-bg-sunken">
                   <div
                     className="h-full rounded-full bg-romance transition-[width] duration-500"
                     style={{ width: `${warmth}%` }}
                   />
                 </div>
-                <span className="truncate text-[11px] uppercase tracking-wide text-text-muted">
-                  {formatRelationshipStage(relationshipStage)} • {warmth}
-                </span>
+                {/* Stage label truncates first on a narrow header; the warmth number never does —
+                    it's the piece that actually changes turn to turn. */}
+                <span className="truncate">{formatRelationshipStage(relationshipStage)}</span>
+                <span className="shrink-0 tabular-nums text-text">{warmth}</span>
               </div>
             </div>
           </div>
+          {/* Just the primary actions plus a "•••" overflow now, so the whole row fits beside the
+              title block even at 375px without the horizontal-scroll hack the ten-icon version
+              needed — and the overflow dropdown can't be clipped by an `overflow-x-auto` ancestor. */}
           <div className="flex shrink-0 items-center gap-1">
-            {/* The full icon toolbar doesn't fit next to a title block on a phone-width screen —
-                scrolls horizontally there rather than overflowing the header or crushing the
-                title down to nothing. Measured live at 375px: `shrink-0` on this row's own parent
-                means the toolbar's cap directly sets how much space the title block has left, not
-                just how much of the toolbar itself is visible — 45vw (169px) left the title area
-                only ~119px wide, still enough to wrap "near strangers • 6" onto two lines and
-                truncate the character's name to a single letter. Tightened the cap; the toolbar
-                still scrolls to reach every icon, just shows fewer before scrolling. A real
-                "what's essential on mobile" icon-set pass stays the bigger follow-up. */}
-            <div className="flex max-w-[30vw] items-center gap-1 overflow-x-auto sm:max-w-none">{toolbar}</div>
+            {toolbar}
             <div className="mx-1.5 h-5 w-px bg-border" />
             <ConnectionBadge />
           </div>

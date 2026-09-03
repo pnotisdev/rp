@@ -19,13 +19,15 @@ export function Toggle({ checked, onChange, label, description }: ToggleProps) {
         role="switch"
         aria-checked={checked}
         onClick={() => onChange(!checked)}
-        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
-          checked ? 'bg-accent' : 'bg-bg-sunken border border-border'
+        className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors ${
+          checked ? 'border-accent bg-accent' : 'border-border bg-bg-sunken'
         }`}
       >
+        {/* Knob colour is picked to stay visible in all four theme × state combinations — a plain
+            white knob vanished against the near-white `bg-bg-sunken` of the off state in light mode. */}
         <span
-          className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
-            checked ? 'translate-x-5' : 'translate-x-0'
+          className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full shadow-sm transition-transform ${
+            checked ? 'translate-x-5 bg-accent-text' : 'translate-x-0 bg-text-muted'
           }`}
         />
       </button>

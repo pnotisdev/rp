@@ -182,12 +182,10 @@ export function VNStage({
       />
       {showPetals && <SakuraPetals />}
 
-      {/* The full desktop toolbar (9 icons + Log) is too wide for any phone screen to show as one
-          static row — max-w + overflow-x-auto keeps it from spilling off-screen (this pill is
-          `absolute right-4`, so an unbounded width pushes its *left* edge past the viewport)
-          rather than a real "what's essential on mobile" redesign, which is a bigger, more
-          opinionated change than this pass's scope. */}
-      <div className="absolute right-4 top-4 z-20 flex h-9 max-w-[calc(100vw-2rem)] items-center gap-1 overflow-x-auto rounded-full bg-black/40 pl-1 pr-1 backdrop-blur-sm">
+      {/* The toolbar is now just a few primary icons plus a "•••" overflow, so it fits any phone
+          width as one static row — no more horizontal-scroll clipping (which also clipped the
+          overflow dropdown, since a non-visible overflow-x forces overflow-y to auto too). */}
+      <div className="absolute right-4 top-4 z-20 flex h-9 items-center gap-1 rounded-full bg-black/40 pl-1 pr-1 backdrop-blur-sm">
         {onBack && (
           <>
             <button

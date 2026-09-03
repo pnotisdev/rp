@@ -17,6 +17,7 @@ import { EditorShell, type EditorTab } from '@/components/ui/EditorShell'
 import { ListEditor } from '@/components/ui/ListEditor'
 import { FileButton } from '@/components/ui/FileButton'
 import { errorMessage, toastError, toastSuccess } from '@/lib/store/useToastStore'
+import { confirmDialog } from '@/lib/store/useConfirmStore'
 import { TTS_PROVIDER_LABELS, type TtsProviderId } from '@/lib/voice/ttsProviders'
 import { BUILTIN_INSTRUCT_TEMPLATES } from '@/lib/prompt/instructTemplates'
 import { GenerateCharacterDialog } from './GenerateCharacterDialog'
@@ -89,7 +90,6 @@ export function CharacterEditor({
   const [showGenerate, setShowGenerate] = useState(false)
   const [showTemplates, setShowTemplates] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [importError, setImportError] = useState<string | null>(null)
   const worlds = useApiQuery('worlds', () => worldsApi.list(), []) ?? []
   const editingWorld = worlds.find((w) => w.id === worldId)
   const customInstructTemplates = useApiQuery('instruct-templates', () => instructTemplatesApi.list(), []) ?? []
@@ -209,7 +209,13 @@ export function CharacterEditor({
 
   const remove = async () => {
     if (!character) return
-    if (!confirm(`Delete ${character.card.name} and all of their chats? This cannot be undone.`)) return
+    const ok = await confirmDialog({
+      title: `Delete ${character.card.name}?`,
+      body: 'This also deletes every chat with this character. It cannot be undone.',
+      confirmLabel: 'Delete character',
+      tone: 'danger',
+    })
+    if (!ok) return
     await charactersApi.remove(character.id)
     onDeleted()
   }
@@ -319,11 +325,10 @@ export function CharacterEditor({
   }
 
   const handleImportFile = async (file: File) => {
-    setImportError(null)
     try {
       applyImport(await importCharacterFile(file))
     } catch (e) {
-      setImportError(e instanceof Error ? e.message : String(e))
+      toastError(errorMessage(e))
     }
   }
 
@@ -421,7 +426,6 @@ export function CharacterEditor({
               </>
             )}
           </div>
-          {importError && <p className="text-xs text-danger">{importError}</p>}
 
           <div className="flex items-start gap-4">
             <label
@@ -643,7 +647,7 @@ export function CharacterEditor({
               onChange={(e) => setNewExpressionLabel(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && addCustomExpression()}
               placeholder="Custom expression name — e.g. Sly grin"
-              className="flex-1 rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent focus:ring-accent/40"
+              className="flex-1 rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40"
             />
             <Button onClick={addCustomExpression} disabled={!newExpressionLabel.trim()} className="flex items-center gap-1.5">
               <Plus size={14} strokeWidth={2} />

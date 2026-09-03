@@ -226,7 +226,7 @@ export function CompanionView() {
         <select
           onChange={(e) => setChatId(e.target.value || null)}
           defaultValue=""
-          className="w-full max-w-xs rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none"
+          className="w-full max-w-xs rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40"
         >
           <option value="">Select a chat…</option>
           {chats.map((c) => (

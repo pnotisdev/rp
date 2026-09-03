@@ -104,6 +104,74 @@ h6 {
   background-color: rgb(var(--c-accent) / 0.35);
 }
 
+/* Native form controls (checkbox, radio, range) pick up the theme accent instead of the
+   browser's default blue/grey — set once here rather than a per-instance `accent-*` class. */
+input[type='checkbox'],
+input[type='radio'],
+input[type='range'] {
+  accent-color: rgb(var(--c-accent));
+}
+input[type='checkbox'],
+input[type='radio'] {
+  cursor: pointer;
+}
+
+/* Inline code — one style everywhere it appears in prose, instead of a hand-rolled
+   `rounded bg-bg-sunken px-1` on some and a bare unstyled `<code>` on others. */
+code {
+  border-radius: 0.375rem;
+  background-color: rgb(var(--c-bg-sunken));
+  padding: 0.1em 0.35em;
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.85em;
+}
+
+/*
+  One consistent keyboard-focus affordance for every interactive element, in one place instead of
+  a per-component `focus-visible:` class that half the buttons in the app were missing. Only shows
+  for keyboard navigation (`:focus-visible`, never a plain mouse `:focus`), matching the reference
+  screens' "focus ring, not a border-colour change" convention. Text controls (input/textarea/
+  select) opt out here because they render their own inset ring via the shared Field control class.
+*/
+:focus:not(:focus-visible) {
+  outline: none;
+}
+:focus-visible {
+  outline: 2px solid rgb(var(--c-accent) / 0.6);
+  outline-offset: 2px;
+}
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[contenteditable]:focus-visible {
+  outline: none;
+}
+
+/* Modal panels and toasts ease in rather than snapping — both are covered for free by the
+   `:root.reduced-motion *` duration override above and the reduced-motion media query below. */
+@keyframes overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes panel-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-overlay-in { animation: overlay-in 120ms ease-out; }
+.animate-panel-in { animation: panel-in 160ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.animate-toast-in { animation: toast-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+@media (prefers-reduced-motion: reduce) {
+  .animate-overlay-in,
+  .animate-panel-in,
+  .animate-toast-in {
+    animation: none;
+  }
+}
+
 @keyframes cursor-blink {
   0%, 45% { opacity: 1; }
   50%, 95% { opacity: 0; }

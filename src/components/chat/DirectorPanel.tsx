@@ -161,10 +161,13 @@ export function DirectorPanel({ chat, character, world, onClose }: DirectorPanel
   }
 
   return (
-    <Modal onClose={onClose} title="Director view" size="2xl" scrollable>
-      <p className="mb-4 text-xs text-text-muted">
-        A read-only inspector plus manual world-state controls, for testing without playing through it turn by turn.
-      </p>
+    <Modal
+      onClose={onClose}
+      title="Director view"
+      description="A read-only inspector plus manual world-state controls, for testing without playing through it turn by turn."
+      size="2xl"
+      scrollable
+    >
       <div className="grid grid-cols-1 gap-4 overflow-y-auto md:grid-cols-2">
         <Section title="World & time" surface="sunken" className="md:col-span-2">
           {world ? (

@@ -15,7 +15,7 @@ export function ColorField({ label, value, onChange, alpha, onAlphaChange }: Col
         type="color"
         value={tripletToHex(value)}
         onChange={(e) => onChange(hexToTriplet(e.target.value))}
-        className="h-8 w-8 shrink-0 cursor-pointer rounded border border-border bg-transparent p-0"
+        className="h-8 w-8 shrink-0 cursor-pointer rounded-lg border border-border bg-transparent p-0"
       />
       <span className="text-sm text-text flex-1">{label}</span>
       {onAlphaChange && (

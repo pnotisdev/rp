@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { charactersApi, chatsApi, personasApi } from '@/lib/api/client'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
+import { ViewShell } from '@/components/ui/ViewShell'
+import { EmptyState } from '@/components/ui/EmptyState'
 
 export function GalleryView() {
   const characters = useApiQuery('characters', () => charactersApi.list(), []) ?? []
@@ -33,20 +35,17 @@ export function GalleryView() {
   }, [chatsForFilter])
 
   return (
-    <div className="flex-1 overflow-y-auto p-8">
-      <div className="mb-6 flex items-end justify-between gap-3">
-        <div>
-          <h2 className="text-sm font-semibold text-text">Gallery</h2>
-          <p className="mt-1 text-xs text-text-muted">
-            Unlock CGs by raising affection and hitting key story beats in chat events.
-          </p>
-        </div>
-        <label className="text-xs text-text-muted">
+    <ViewShell
+      title="Gallery"
+      width="wide"
+      description="CG art unlocks as a relationship deepens — by raising affection and hitting key story beats in chat events."
+      actions={
+        <label className="flex items-center gap-2 text-xs text-text-muted">
           Persona
           <select
             value={personaFilter}
             onChange={(e) => setPersonaFilter(e.target.value)}
-            className="ml-2 rounded-lg bg-bg-sunken px-2 py-1 text-xs text-text outline-none"
+            className="rounded-lg bg-bg-sunken px-2.5 py-1.5 text-xs text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40"
           >
             <option value="all">All personas</option>
             {personas.map((p) => (
@@ -56,8 +55,8 @@ export function GalleryView() {
             ))}
           </select>
         </label>
-      </div>
-
+      }
+    >
       <div className="space-y-8">
         {characters.map((character) => {
           const gallery = character.gallery ?? []
@@ -145,11 +144,12 @@ export function GalleryView() {
         })}
       </div>
 
-      {characters.every((c) => !(c.gallery?.length)) && (
-        <div className="rounded-2xl bg-bg-elevated p-6 text-sm text-text-muted">
-          No gallery entries yet. Add CG images in a character's editor, then unlock them through affection milestones and story beats.
-        </div>
+      {characters.every((c) => !c.gallery?.length) && (
+        <EmptyState>
+          No gallery art yet. Add CG images in a character's editor (Dating sim tab), then unlock them
+          through affection milestones and story beats in chat.
+        </EmptyState>
       )}
-    </div>
+    </ViewShell>
   )
 }

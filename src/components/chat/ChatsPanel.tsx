@@ -8,6 +8,7 @@ import type { Character } from '@/lib/characters/cardSpec'
 import type { Chat } from '@/lib/types'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import { errorMessage, toastError } from '@/lib/store/useToastStore'
+import { confirmDialog } from '@/lib/store/useConfirmStore'
 import { NewChatDialog } from './NewChatDialog'
 import { Button } from '@/components/ui/Button'
 
@@ -99,7 +100,13 @@ export function ChatsPanel({
 
   const deleteChat = async (chat: Chat) => {
     setMenuForId(null)
-    if (!confirm(`Delete "${chat.title}"? This removes the whole conversation and can't be undone.`)) return
+    const ok = await confirmDialog({
+      title: `Delete "${chat.title}"?`,
+      body: "This removes the whole conversation and can't be undone.",
+      confirmLabel: 'Delete chat',
+      tone: 'danger',
+    })
+    if (!ok) return
     setBusyId(chat.id)
     try {
       await chatsApi.remove(chat.id)

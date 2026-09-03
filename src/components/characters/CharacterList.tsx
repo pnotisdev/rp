@@ -4,6 +4,8 @@ import { charactersApi } from '@/lib/api/client'
 import type { Character } from '@/lib/characters/cardSpec'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import { Button } from '@/components/ui/Button'
+import { ViewShell } from '@/components/ui/ViewShell'
+import { EmptyState } from '@/components/ui/EmptyState'
 
 const UNTAGGED = 'Untagged'
 
@@ -35,19 +37,21 @@ export function CharacterList({
   const visible = tagsAsFolders && activeFolder ? groups.get(activeFolder) ?? [] : filtered
 
   return (
-    <div className="mx-auto w-full max-w-4xl flex-1 overflow-y-auto p-8">
-      <div className="mb-6 flex items-center justify-between gap-3">
-        <h2 className="font-display text-lg text-text">Characters</h2>
+    <ViewShell
+      title="Characters"
+      width="wide"
+      actions={
         <Button variant="primary" onClick={onCreateNew}>
           New character
         </Button>
-      </div>
+      }
+    >
       <div className="mb-6">
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search characters…"
-          className="w-full max-w-xs rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40"
+          className="w-full max-w-xs rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40 placeholder:text-text-muted/55"
         />
       </div>
 
@@ -92,17 +96,20 @@ export function CharacterList({
           </button>
         ))}
         {visible.length === 0 && (
-          <div className="col-span-full rounded-2xl border border-dashed border-border px-6 py-16 text-center">
-            <p className="mx-auto mb-4 max-w-sm text-sm text-text-muted">
-              No characters yet. Create one from scratch, start from a bundled template, generate one
-              with AI, or import a SillyTavern card.
-            </p>
-            <Button variant="primary" onClick={onCreateNew}>
-              New character
-            </Button>
-          </div>
+          <EmptyState
+            className="col-span-full"
+            action={
+              <Button variant="primary" onClick={onCreateNew}>
+                New character
+              </Button>
+            }
+          >
+            {search || activeFolder
+              ? 'No characters match that filter.'
+              : 'No characters yet. Create one from scratch, start from a bundled template, generate one with AI, or import a SillyTavern card.'}
+          </EmptyState>
         )}
       </div>
-    </div>
+    </ViewShell>
   )
 }

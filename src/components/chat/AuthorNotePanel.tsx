@@ -47,15 +47,16 @@ export function AuthorNotePanel({
   }
 
   return (
-    <Modal onClose={onClose} title="Author's note" size="lg" scrollable>
+    <Modal
+      onClose={onClose}
+      title="Author's note"
+      description={
+        'A steering note for this chat only — folded into every prompt without ever becoming something a character "said". Good for tone ("keep replies short and tense"), a detail the model keeps forgetting, or a scene direction. It travels with this conversation, not the character card. Clear the text to turn it off.'
+      }
+      size="lg"
+      scrollable
+    >
       <div className="flex-1 overflow-y-auto">
-        <p className="mb-4 text-xs text-text-muted">
-          A steering note for this chat only — folded into every prompt without ever becoming
-          something a character "said". Good for tone ("keep replies short and tense"), a detail the
-          model keeps forgetting, or a scene direction. It travels with this conversation, not the
-          character card. Clear the text to turn it off.
-        </p>
-
         <TextAreaField
           label="Note"
           rows={4}

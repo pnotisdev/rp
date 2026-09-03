@@ -87,7 +87,7 @@ export function NewChatDialog({
             setStarterId('')
             setParticipantIds((prev) => prev.filter((id) => id !== e.target.value))
           }}
-          className="mb-3 w-full rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none"
+          className="mb-3 w-full rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40"
         >
           <option value="">Select a character…</option>
           {characters.map((c) => (
@@ -133,13 +133,13 @@ export function NewChatDialog({
               value={personaName}
               onChange={(e) => setPersonaName(e.target.value)}
               placeholder="Your name (optional)"
-              className="mb-2 w-full rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent focus:ring-accent/40"
+              className="mb-2 w-full rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40"
             />
             <input
               value={personaDescription}
               onChange={(e) => setPersonaDescription(e.target.value)}
               placeholder="A line about who you are (optional)"
-              className="w-full rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent focus:ring-accent/40"
+              className="w-full rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40"
             />
             <p className="mt-1.5 text-[11px] text-text-muted">
               {personaName.trim()
@@ -153,7 +153,7 @@ export function NewChatDialog({
             <select
               value={personaId}
               onChange={(e) => setPersonaId(e.target.value)}
-              className="mb-4 w-full rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none"
+              className="mb-4 w-full rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40"
             >
               <option value="">Default (You)</option>
               {personas.map((p) => (
@@ -171,7 +171,7 @@ export function NewChatDialog({
             <select
               value={starterId}
               onChange={(e) => setStarterId(e.target.value)}
-              className="w-full rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none"
+              className="w-full rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40"
             >
               <option value="">Blank slate — near strangers, 0 affection</option>
               {starters.map((s) => (

@@ -97,7 +97,13 @@ export function Composer({
 
   return (
     <div className={vn ? 'w-full' : 'border-t border-border bg-bg-elevated p-3'}>
-      <div className={vn ? 'w-full' : 'mx-auto max-w-chat rounded-2xl bg-bg-sunken p-2.5'}>
+      <div
+        className={
+          vn
+            ? 'w-full'
+            : 'mx-auto max-w-chat rounded-2xl bg-bg-sunken p-2.5 ring-1 ring-transparent transition-shadow focus-within:ring-accent/30'
+        }
+      >
         {composerError && <p className="mb-2 px-1.5 text-xs text-danger">{composerError}</p>}
         {attachments.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-2 px-1">
@@ -156,7 +162,7 @@ export function Composer({
                 onChange={(e) => onChangeReplyAs?.(e.target.value)}
                 title="Reply as"
                 aria-label="Reply as"
-                className={`mr-1 rounded-full px-2.5 py-1.5 text-xs outline-none ${
+                className={`mr-1 rounded-full px-2.5 py-1.5 text-xs outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40 ${
                   vn ? 'bg-white/10 text-white/80' : 'bg-bg-elevated text-text-muted hover:text-text'
                 }`}
               >

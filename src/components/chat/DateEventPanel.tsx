@@ -33,11 +33,12 @@ export function DateEventPanel({ currentEvent, energyRemaining, onClose, onSugge
 
   if (isLiveDate && currentEvent) {
     return (
-      <Modal onClose={onClose} title="Live date in progress" size="lg">
-          <p className="mb-3 text-xs text-text-muted">
-            Relationship movement is scored once, honestly, when the date ends — not turn by turn
-            while it's happening. A flat or awkward date won't quietly move things forward.
-          </p>
+      <Modal
+        onClose={onClose}
+        title="Live date in progress"
+        description="Relationship movement is scored once, honestly, when the date ends — not turn by turn while it's happening. A flat or awkward date won't quietly move things forward."
+        size="lg"
+      >
           <div className="mb-4 rounded-xl bg-bg-sunken p-4">
             <div className="text-sm font-semibold text-text">{currentEvent.title}</div>
             {currentEvent.description && <p className="mt-1 text-xs text-text-muted">{currentEvent.description}</p>}
@@ -59,12 +60,12 @@ export function DateEventPanel({ currentEvent, energyRemaining, onClose, onSugge
   }
 
   return (
-    <Modal onClose={onClose} title="Date / Event" size="lg">
-        <p className="mb-3 text-xs text-text-muted">
-          Generate a scene event card and start it as the active objective. This also biases VN backgrounds to the event location.
-          Starting a "date" card begins a live, end-of-scene-scored date.
-        </p>
-
+    <Modal
+      onClose={onClose}
+      title="Date / Event"
+      description={'Generate a scene event card and start it as the active objective. This also biases VN backgrounds to the event location. Starting a "date" card begins a live, end-of-scene-scored date.'}
+      size="lg"
+    >
         <div className="mb-4 rounded-xl bg-bg-sunken p-4">
           {event ? (
             <>
@@ -75,8 +76,8 @@ export function DateEventPanel({ currentEvent, energyRemaining, onClose, onSugge
               </div>
               {event.objectiveDescription && <p className="mt-1 text-xs text-text-muted">{event.objectiveDescription}</p>}
               <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-text-muted">
-                {event.kind && <span className="rounded bg-bg-elevated px-2 py-0.5 uppercase">{event.kind}</span>}
-                {event.backgroundId && <span className="rounded bg-bg-elevated px-2 py-0.5">bg: {event.backgroundId}</span>}
+                {event.kind && <span className="rounded-md bg-bg-elevated px-2 py-0.5 uppercase">{event.kind}</span>}
+                {event.backgroundId && <span className="rounded-md bg-bg-elevated px-2 py-0.5">bg: {event.backgroundId}</span>}
               </div>
             </>
           ) : (

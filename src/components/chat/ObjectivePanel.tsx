@@ -3,6 +3,7 @@ import type { Objective } from '@/lib/types'
 import { Button } from '@/components/ui/Button'
 import { TextAreaField, TextField } from '@/components/ui/Field'
 import { Modal } from '@/components/ui/Modal'
+import { errorMessage, toastError } from '@/lib/store/useToastStore'
 
 interface ObjectivePanelProps {
   activeObjective: Objective | undefined
@@ -29,15 +30,13 @@ export function ObjectivePanel({
   const [description, setDescription] = useState('')
   const [newTask, setNewTask] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
 
   const run = async (label: string, fn: () => Promise<void>) => {
     setBusy(label)
-    setError(null)
     try {
       await fn()
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      toastError(errorMessage(e))
     } finally {
       setBusy(null)
     }
@@ -47,15 +46,19 @@ export function ObjectivePanel({
   const done = activeObjective?.tasks.filter((t) => t.status === 'done') ?? []
 
   return (
-    <Modal onClose={onClose} title="Objective" size="lg" scrollable>
-        {error && <p className="mb-3 text-xs text-danger">{error}</p>}
-
+    <Modal
+      onClose={onClose}
+      title="Objective"
+      description={
+        !activeObjective
+          ? "Set a goal for this roleplay to work toward. The character's replies get steered toward it, and tasks check off automatically as they happen in the scene."
+          : undefined
+      }
+      size="lg"
+      scrollable
+    >
         {!activeObjective ? (
           <div className="flex-1 overflow-y-auto">
-            <p className="mb-4 text-xs text-text-muted">
-              Set a goal for this roleplay to work toward. The character's replies will be steered toward
-              it, and tasks get checked off automatically as they happen in the scene.
-            </p>
             <TextField label="Title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Help Mira find her missing satchel" />
             <TextAreaField
               label="Description"

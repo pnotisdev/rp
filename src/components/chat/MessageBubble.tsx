@@ -4,6 +4,7 @@ import type { StoredMessage } from '@/lib/types'
 import { useSettingsStore, type AvatarShape } from '@/lib/store/useSettingsStore'
 import { messageAnchorId } from '@/lib/scrollToMessage'
 import { renderMessageText } from '@/lib/text/messageText'
+import { confirmDialog } from '@/lib/store/useConfirmStore'
 
 function avatarClass(shape: AvatarShape): string {
   switch (shape) {
@@ -104,7 +105,7 @@ export function MessageBubble({
         if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) commitEdit()
         if (e.key === 'Escape') setEditing(false)
       }}
-      className="w-full resize-none rounded bg-bg-sunken p-2 text-sm text-text outline-none"
+      className="w-full resize-none rounded-xl bg-bg-sunken p-2.5 text-sm text-text outline-none ring-1 ring-accent/40"
       rows={Math.min(12, Math.max(2, draft.split('\n').length))}
     />
   ) : (
@@ -177,10 +178,14 @@ export function MessageBubble({
             <GitFork size={13} strokeWidth={2} />
           </button>
           <button
-            onClick={() => {
-              if (confirm('Rewind to here? This deletes this message and everything after it in this chat — the discarded messages are not kept anywhere, unlike forking.')) {
-                onRewind()
-              }
+            onClick={async () => {
+              const ok = await confirmDialog({
+                title: 'Rewind to here?',
+                body: 'Deletes this message and everything after it in this chat. Unlike forking, the discarded messages are not kept anywhere.',
+                confirmLabel: 'Rewind',
+                tone: 'danger',
+              })
+              if (ok) onRewind()
             }}
             className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-bg-sunken hover:text-danger"
             title="Rewind to here (delete this and everything after)"

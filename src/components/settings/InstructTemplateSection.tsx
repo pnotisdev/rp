@@ -64,7 +64,7 @@ export function InstructTemplateSection() {
           <select
             value={instructTemplateId}
             onChange={(e) => setInstructTemplateId(e.target.value)}
-            className="w-full rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none"
+            className="w-full rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40"
           >
             <optgroup label="Builtin">
               {BUILTIN_INSTRUCT_TEMPLATES.map((t) => (

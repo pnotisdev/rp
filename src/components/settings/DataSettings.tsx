@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { downloadBackup, restoreBackupFile } from '@/lib/backup'
 import { errorMessage, toastError, toastSuccess } from '@/lib/store/useToastStore'
+import { confirmDialog } from '@/lib/store/useConfirmStore'
 import { Button } from '@/components/ui/Button'
 import { Section } from '@/components/ui/Section'
 import { SettingsPage } from '@/components/ui/SettingsPage'
@@ -21,9 +22,12 @@ export function DataSettings() {
   }
 
   const runRestore = async (file: File) => {
-    const confirmed = confirm(
-      'This replaces every character, chat, world, and setting in this app with what\'s in the backup file — everything currently here will be permanently lost. This cannot be undone. Continue?',
-    )
+    const confirmed = await confirmDialog({
+      title: 'Replace everything with this backup?',
+      body: "Every character, chat, world, and setting currently in this app is permanently overwritten with what's in the file. This cannot be undone.",
+      confirmLabel: 'Restore and reload',
+      tone: 'danger',
+    })
     if (!confirmed) return
     setBusy('restore')
     try {

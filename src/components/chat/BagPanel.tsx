@@ -42,10 +42,13 @@ export function BagPanel({
   const ownedItems = itemCatalog.filter((i) => (itemInventory[i.id] ?? 0) > 0)
 
   return (
-    <Modal onClose={onClose} title="Bag" size="lg" scrollable>
-        <p className="mb-3 text-xs text-text-muted">
-          Gifts you already own — give one to {characterName} now, in person. Buy more from the relationship panel.
-        </p>
+    <Modal
+      onClose={onClose}
+      title="Bag"
+      description={`Gifts you already own — give one to ${characterName} now, in person. Buy more from the relationship panel.`}
+      size="lg"
+      scrollable
+    >
         <div className="space-y-2 overflow-y-auto">
           {ownedGifts.map((gift) => (
             <div key={gift.id} className="flex items-center justify-between rounded-xl bg-bg-sunken p-3">
@@ -69,8 +72,8 @@ export function BagPanel({
 
         {itemCatalog.length > 0 && (
           <>
-            <p className="mt-5 mb-3 text-xs text-text-muted">
-              Items — used on the spot for their effect, not given in a scene.
+            <p className="mb-3 mt-6 text-sm font-medium text-text">
+              Items <span className="font-normal text-text-muted">— used on the spot for their effect, not given in a scene.</span>
             </p>
             <div className="space-y-2 overflow-y-auto">
               {ownedItems.map((item) => (

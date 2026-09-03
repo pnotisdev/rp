@@ -13,6 +13,7 @@ import { WorldInfoView } from '@/components/worldinfo/WorldInfoView'
 import { GalleryView } from '@/components/gallery/GalleryView'
 import { SettingsView } from '@/components/settings/SettingsView'
 import { ToastViewport } from '@/components/ui/ToastViewport'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { chatsApi } from '@/lib/api/client'
 import { useApplyTheme } from '@/lib/hooks/useApplyTheme'
@@ -120,6 +121,7 @@ export default function App() {
         {view === 'settings' && <SettingsView />}
       </div>
       <ToastViewport />
+      <ConfirmDialog />
       {showPalette && (
         <CommandPalette
           onClose={() => setShowPalette(false)}

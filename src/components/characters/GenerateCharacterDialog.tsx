@@ -5,6 +5,7 @@ import { parseLenientJson } from '@/lib/jsonRepair'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import { errorMessage, toastError } from '@/lib/store/useToastStore'
 import { Button } from '@/components/ui/Button'
+import { Modal } from '@/components/ui/Modal'
 import { TextAreaField } from '@/components/ui/Field'
 
 const SYSTEM_INSTRUCTION = `You write character cards for a roleplay app. Given a short brief, output ONLY a single JSON object (no markdown fences, no commentary before or after) with exactly these fields, ALL of which are plain strings (never arrays or nested objects): name, description, personality, scenario, first_mes, mes_example, creator_notes — plus one array field, "tags", which is an array of short lowercase strings. "description" covers appearance and background. "personality" is a concise trait list capturing how they speak, act and feel. "first_mes" is the character's opening line in-character, written in their voice. "mes_example" is a SINGLE STRING (not an array!) containing 1-2 short example exchanges demonstrating their exact speech pattern, using {{user}} and {{char}} as placeholders, with \\n between lines.
@@ -62,36 +63,35 @@ export function GenerateCharacterDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-lg rounded-2xl border border-border bg-bg-elevated p-7 themed-shadow">
-        <h2 className="mb-1 text-sm font-semibold text-text">Generate a character with AI</h2>
-        <p className="mb-3 text-xs text-text-muted">
-          Describe who you want; the connected model will draft a full card for you to review and edit.
-        </p>
-        <TextAreaField
-          label="Brief"
-          rows={3}
-          value={brief}
-          onChange={(e) => setBrief(e.target.value)}
-          placeholder="e.g. a grumpy dwarven blacksmith who secretly writes poetry, gruff but soft-hearted"
-        />
-        {failed && rawOutput && (
-          <details className="mb-3 rounded-xl bg-bg-sunken p-3 text-xs text-text-muted">
-            <summary className="cursor-pointer">Raw model output</summary>
-            <pre className="mt-1.5 max-h-48 overflow-y-auto whitespace-pre-wrap rounded-lg bg-bg-elevated p-2 text-text">
-              {rawOutput}
-            </pre>
-          </details>
-        )}
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={onClose} disabled={busy}>
-            Cancel
-          </Button>
-          <Button variant="primary" onClick={generate} disabled={busy || !brief.trim()}>
-            {busy ? 'Generating…' : failed ? 'Retry' : 'Generate'}
-          </Button>
-        </div>
+    <Modal
+      onClose={onClose}
+      title="Generate a character with AI"
+      description="Describe who you want; the connected model will draft a full card for you to review and edit."
+      size="lg"
+    >
+      <TextAreaField
+        label="Brief"
+        rows={3}
+        value={brief}
+        onChange={(e) => setBrief(e.target.value)}
+        placeholder="e.g. a grumpy dwarven blacksmith who secretly writes poetry, gruff but soft-hearted"
+      />
+      {failed && rawOutput && (
+        <details className="mb-3 rounded-xl bg-bg-sunken p-3 text-xs text-text-muted">
+          <summary className="cursor-pointer">Raw model output</summary>
+          <pre className="mt-1.5 max-h-48 overflow-y-auto whitespace-pre-wrap rounded-lg bg-bg-elevated p-2 text-text">
+            {rawOutput}
+          </pre>
+        </details>
+      )}
+      <div className="flex justify-end gap-2">
+        <Button variant="ghost" onClick={onClose} disabled={busy}>
+          Cancel
+        </Button>
+        <Button variant="primary" onClick={generate} disabled={busy || !brief.trim()}>
+          {busy ? 'Generating…' : failed ? 'Retry' : 'Generate'}
+        </Button>
       </div>
-    </div>
+    </Modal>
   )
 }

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { ChevronLeft } from 'lucide-react'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { charactersApi, worldInfoBooksApi, worldsApi } from '@/lib/api/client'
 import { isGlobalBook } from '@/lib/worldinfo/scope'
@@ -7,6 +8,9 @@ import { LorebookEditor } from './LorebookEditor'
 import { BookScopePicker } from './BookScopePicker'
 import { Button } from '@/components/ui/Button'
 import { Section } from '@/components/ui/Section'
+import { ViewShell } from '@/components/ui/ViewShell'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { confirmDialog } from '@/lib/store/useConfirmStore'
 
 function scopeSummary(
   book: WorldInfoBook,
@@ -46,16 +50,24 @@ export function WorldInfoView() {
   }
 
   const removeBook = async (id: string) => {
-    if (!confirm('Delete this world info book?')) return
+    const book = books.find((b) => b.id === id)
+    const ok = await confirmDialog({
+      title: `Delete "${book?.book.name || 'this book'}"?`,
+      body: 'Its entries are removed from every chat they were active in. This cannot be undone.',
+      confirmLabel: 'Delete book',
+      tone: 'danger',
+    })
+    if (!ok) return
     await worldInfoBooksApi.remove(id)
     if (activeId === id) setActiveId(null)
   }
 
   if (active) {
     return (
-      <div className="mx-auto w-full max-w-3xl flex-1 overflow-y-auto p-8">
-        <Button variant="ghost" onClick={() => setActiveId(null)} className="mb-6 -ml-2">
-          ← All books
+      <div className="mx-auto w-full max-w-3xl flex-1 overflow-y-auto p-6 sm:p-8">
+        <Button variant="ghost" onClick={() => setActiveId(null)} className="mb-6 -ml-2 flex items-center gap-1">
+          <ChevronLeft size={15} strokeWidth={2} />
+          All books
         </Button>
 
         <Section title="Scope" description="Where this book's entries are eligible to activate." className="mb-8">
@@ -76,19 +88,15 @@ export function WorldInfoView() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl flex-1 overflow-y-auto p-8">
-      <div className="mb-2 flex items-center justify-between">
-        <h2 className="text-lg font-display text-text">World Info</h2>
+    <ViewShell
+      title="World Info"
+      description="Standalone lorebooks — locations, factions, history, world rules. A book with no scope is available to every chat; scope it to a character or world to keep unrelated lore out. Lore that belongs to one character lives on the character card instead."
+      actions={
         <Button variant="primary" onClick={createBook}>
           New book
         </Button>
-      </div>
-      <p className="mb-8 max-w-lg text-sm text-text-muted">
-        Standalone lorebooks — locations, factions, history, world rules. A book with no scope is
-        available to every chat; scope it to a character or world to keep unrelated lore out.
-        Lore that belongs to one character lives on the character card instead.
-      </p>
-
+      }
+    >
       <div className="space-y-2">
         {books.map((b) => (
           <div
@@ -113,14 +121,18 @@ export function WorldInfoView() {
           </div>
         ))}
         {books.length === 0 && (
-          <div className="rounded-xl border border-dashed border-border px-5 py-12 text-center">
-            <p className="text-sm text-text-muted">No world info books yet.</p>
-            <Button variant="primary" onClick={createBook} className="mt-4">
-              Create your first book
-            </Button>
-          </div>
+          <EmptyState
+            action={
+              <Button variant="primary" onClick={createBook}>
+                Create your first book
+              </Button>
+            }
+          >
+            No standalone world info books yet. Most lore can live on a character or world instead —
+            reach for a book when the same lore spans several of them.
+          </EmptyState>
         )}
       </div>
-    </div>
+    </ViewShell>
   )
 }

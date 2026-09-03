@@ -15,6 +15,8 @@ const SIZE_CLASSES: Record<ModalSize, string> = {
 interface ModalProps {
   onClose: () => void
   title: string
+  /** One short paragraph under the title — what this panel is for. Stays pinned above the body (doesn't scroll away with it), rendered at `text-sm` so multi-line help copy is actually comfortable to read. */
+  description?: ReactNode
   size?: ModalSize
   /** Caps the panel at one consistent height so tall content scrolls internally instead of ever overflowing the viewport — leave off for a short, static-height form. Scroll regions within stay up to the content (a single body, or several independent ones, e.g. a fixed summary above a scrolling list). */
   scrollable?: boolean
@@ -31,7 +33,16 @@ interface ModalProps {
  * (it used to be, near-identically, in a dozen places, with small unintentional drift between
  * them — mb-3 vs mb-4 on the header, 80/85/88vh caps, p-6 vs p-4 inner cards).
  */
-export function Modal({ onClose, title, size = 'lg', scrollable, hideHeaderClose, headerExtra, children }: ModalProps) {
+export function Modal({
+  onClose,
+  title,
+  description,
+  size = 'lg',
+  scrollable,
+  hideHeaderClose,
+  headerExtra,
+  children,
+}: ModalProps) {
   // Section 15's "discoverable keyboard shortcuts" — Escape-to-close, added once here rather than
   // per-panel, so every modal built on this shell (there are over a dozen) gets it for free.
   useEffect(() => {
@@ -43,11 +54,11 @@ export function Modal({ onClose, title, size = 'lg', scrollable, hideHeaderClose
   }, [onClose])
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+    <div className="animate-overlay-in fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
       <div
-        className={`flex w-full flex-col rounded-2xl border border-border bg-bg-elevated p-7 themed-shadow ${SIZE_CLASSES[size]} ${scrollable ? 'max-h-[85vh]' : ''}`}
+        className={`animate-panel-in flex w-full flex-col rounded-2xl border border-border bg-bg-elevated p-7 themed-shadow ${SIZE_CLASSES[size]} ${scrollable ? 'max-h-[85vh]' : ''}`}
       >
-        <div className="mb-4 flex shrink-0 items-center justify-between gap-4">
+        <div className={`flex shrink-0 items-center justify-between gap-4 ${description ? 'mb-2' : 'mb-4'}`}>
           <h2 className="text-sm font-semibold text-text">{title}</h2>
           <div className="flex items-center gap-2">
             {headerExtra}
@@ -58,6 +69,9 @@ export function Modal({ onClose, title, size = 'lg', scrollable, hideHeaderClose
             )}
           </div>
         </div>
+        {description && (
+          <p className="mb-4 shrink-0 text-sm leading-relaxed text-text-muted">{description}</p>
+        )}
         {children}
       </div>
     </div>

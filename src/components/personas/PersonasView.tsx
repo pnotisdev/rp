@@ -7,7 +7,10 @@ import { fileToDataUrl } from '@/lib/characters/importExport'
 import { TextAreaField, TextField } from '@/components/ui/Field'
 import { Button } from '@/components/ui/Button'
 import { EditorShell } from '@/components/ui/EditorShell'
+import { ViewShell } from '@/components/ui/ViewShell'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { errorMessage, toastError } from '@/lib/store/useToastStore'
+import { confirmDialog } from '@/lib/store/useConfirmStore'
 
 export function PersonasView() {
   const personas = useApiQuery('personas', () => personasApi.list(), []) ?? []
@@ -18,17 +21,20 @@ export function PersonasView() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl flex-1 overflow-y-auto p-8">
-      <div className="mb-2 flex items-center justify-between">
-        <h2 className="font-display text-lg text-text">Personas</h2>
+    <ViewShell
+      title="Personas"
+      description={
+        <>
+          A persona is who you play as in a chat — your name and a short description, used as{' '}
+          {'{{user}}'} context. Pick one when starting a chat.
+        </>
+      }
+      actions={
         <Button variant="primary" onClick={() => setEditing('new')}>
           New persona
         </Button>
-      </div>
-      <p className="mb-8 max-w-lg text-sm text-text-muted">
-        A persona is who you play as in a chat — your name and a short description, used as{' '}
-        {'{{user}}'} context. Pick one when starting a chat.
-      </p>
+      }
+    >
       <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4">
         {personas.map((p) => (
           <button
@@ -47,15 +53,20 @@ export function PersonasView() {
           </button>
         ))}
         {personas.length === 0 && (
-          <div className="col-span-full rounded-2xl border border-dashed border-border px-6 py-14 text-center">
-            <p className="mb-4 text-sm text-text-muted">No personas yet.</p>
-            <Button variant="primary" onClick={() => setEditing('new')}>
-              Create your first persona
-            </Button>
-          </div>
+          <EmptyState
+            className="col-span-full"
+            action={
+              <Button variant="primary" onClick={() => setEditing('new')}>
+                Create your first persona
+              </Button>
+            }
+          >
+            No personas yet. If you start a chat without one, the app just tells the model your name
+            is "You" — a persona gives it something to work with.
+          </EmptyState>
         )}
       </div>
-    </div>
+    </ViewShell>
   )
 }
 
@@ -81,7 +92,13 @@ function PersonaEditor({ persona, onDone }: { persona: Persona | null; onDone: (
 
   const remove = async () => {
     if (!persona) return
-    if (!confirm(`Delete persona ${persona.name}?`)) return
+    const ok = await confirmDialog({
+      title: `Delete persona "${persona.name}"?`,
+      body: 'Chats you played as this persona keep their history but lose the persona link.',
+      confirmLabel: 'Delete persona',
+      tone: 'danger',
+    })
+    if (!ok) return
     await personasApi.remove(persona.id)
     onDone()
   }

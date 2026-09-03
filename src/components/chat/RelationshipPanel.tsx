@@ -23,8 +23,9 @@ import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { Section } from '@/components/ui/Section'
 import { SelectField } from '@/components/ui/Field'
+import { confirmDialog } from '@/lib/store/useConfirmStore'
 
-const ALL_STAT_KEYS = ['affection', 'trust', 'chemistry', 'comfort', 'respect', 'curiosity', 'tension'] as const
+const ALL_STAT_KEYS =['affection', 'trust', 'chemistry', 'comfort', 'respect', 'curiosity', 'tension'] as const
 
 const DIMENSION_LABELS: Record<(typeof ALL_STAT_KEYS)[number], string> = {
   affection: 'Affection',
@@ -101,7 +102,13 @@ export function RelationshipPanel({ chat, character, world, onClose, onBuyGift, 
   }
 
   const handleEnd = async () => {
-    if (!confirm(`End things with ${character?.card.name ?? 'them'}? This can be undone later, but it leaves a lasting mark on the relationship.`)) return
+    const ok = await confirmDialog({
+      title: `End things with ${character?.card.name ?? 'them'}?`,
+      body: 'This can be reconciled later, but it leaves a lasting mark on the relationship.',
+      confirmLabel: 'End the relationship',
+      tone: 'danger',
+    })
+    if (!ok) return
     setEnding(true)
     try {
       await onEndRelationship()

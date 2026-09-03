@@ -2656,6 +2656,78 @@ Done so far (see checked boxes above for detail):
     close at all, so this one change reaches every panel built on it. See section 13's checked item
     for the full writeup, including what was deliberately left out of the original wish list and why.
 
+91. ~~App-wide UI/UX polish pass~~ — user asked to "work through the UI/UX, polish it completely,"
+    with koboldcpp offline again ruling out roleplay-dependent work. A consistency + refinement
+    sweep, not new features, all verified live in the browser (light and dark) plus
+    typecheck/build/248 tests green:
+    - **Keyboard-focus affordance, app-wide** — a single `:focus-visible` outline rule in
+      `globals.css` (accent ring, keyboard-only, text controls opt out to their own inset ring)
+      replaces the per-component `focus-visible:` class that *most* buttons in the app never had.
+    - **Styled confirm dialog** — new `confirmDialog()` (`useConfirmStore.ts`) + `<ConfirmDialog>`
+      (mounted once in `App.tsx` beside `<ToastViewport>`) replaces all 8 `window.confirm()` call
+      sites (character/persona/world/book delete, chat delete, message rewind, end-relationship,
+      backup restore) with a theme-aware dialog on the app's own surface — Escape / backdrop to
+      cancel, danger tone for destructive actions. `Button` became `forwardRef` for its autofocus.
+    - **Chat header toolbar declutter** — the ten-icon row (which #71/#88 could only make
+      horizontally scroll) is now `ChatToolbar.tsx`: three primary icons (relationship, event,
+      objective) plus a "•••" overflow menu carrying the rest *with text labels* — calmer at rest
+      and more discoverable than a wall of tooltip-only glyphs. Built once, still rendered in both
+      the ordinary header (`tone="chrome"`) and VN mode's glass pill (`tone="glass"`); the
+      `overflow-x-auto` clip hack is gone from both (it also would have clipped the new dropdown).
+      This is the "what's essential" toolbar redesign #71 explicitly deferred.
+    - **Shared view frame** — new `<ViewShell>` (title, description, right-aligned action, one
+      column width, one responsive padding) + `<EmptyState>` unify Characters / Worlds / Personas /
+      World Info / Gallery / Settings, which had drifted to three heading treatments and two
+      container widths (Gallery had a small `text-sm` heading and no centered column at all).
+    - **Entrance animations** — `Modal`, `CommandPalette`, and toasts now ease in (`animate-panel-in`
+      / `animate-overlay-in` / `animate-toast-in` in `globals.css`, all covered by the existing
+      reduced-motion overrides), plus a `backdrop-blur-sm` behind every overlay.
+    - **Smaller consistency fixes** — `Toggle` knob recoloured so it stays visible in all four
+      theme×state combinations (a white knob vanished against the near-white off-state track in
+      light mode); new `<SegmentedControl>` replaces three hand-rolled variants in the Theme editor;
+      `focus:ring` added to every remaining bare `<select>`/`<input>` that lacked one; a handful of
+      stray `rounded` (16px, between `xl` and `2xl`) corrected to the intended tier.
+
+    Second sweep, same request ("one more check for design, UI/UX, user friendliness, standardisation"):
+    - **`Modal` gained a `description` slot** — the one-paragraph "what this panel does" copy that
+      every panel hand-rolled as `<p className="mb-3 text-xs text-text-muted">` (13 of them) is now
+      a prop, rendered once at `text-sm leading-relaxed` and pinned above the body so it doesn't
+      scroll away. `text-xs` for multi-sentence help copy was just hard to read. Converted
+      ObjectivePanel, AuthorNotePanel, DateEventPanel (×2), BagPanel, DirectorPanel,
+      GenerateCharacterDialog, TemplateGallery, WorldTemplateGallery.
+    - **Four hand-rolled modals folded into `<Modal>`** — `TemplateGallery`, `WorldTemplateGallery`,
+      and `GenerateCharacterDialog` each had their own `fixed inset-0 … bg-black/40` backdrop + panel
+      with no Escape-to-close and no entrance animation; now they get all of it for free.
+    - **Native form controls themed globally** — `input[type=checkbox|radio|range]` pick up
+      `accent-color: rgb(var(--c-accent))` (+ `cursor: pointer` on checkbox/radio) from one rule in
+      `globals.css` instead of a per-instance `accent-*` class on some and browser-blue on others.
+    - **Inline `<code>` styled globally** — one `code {}` rule (rounded, sunken bg, mono, 0.85em)
+      replaces a hand-rolled `rounded bg-bg-sunken px-1` on one and a bare unstyled `<code>` on another.
+    - **`SegmentedControl` reused** for the search-scope toggle (`SearchPanel`), and its `size="sm"`
+      variant added for panel-header toggles; `ObjectivePanel`/`CharacterEditor` import failures
+      routed through `toastError` instead of the last two remaining local inline-error banners.
+
+92. ~~Theme presets: a "Default" chip + user-created presets~~ — user-reported: after clicking a
+    built-in preset (Sakura/Neon Night/High Contrast) there was no obvious way back — the only
+    revert was a faint ghost "Reset to defaults" button buried below fifteen colour swatches, while
+    presets are applied from a prominent chip row at the top. Two parts:
+    - **"Default" is now a chip in that same row**, first, highlighted (`aria-pressed` + accent
+      border) whenever the current tokens match a preset exactly — so reverting is as discoverable
+      as applying, and the row doubles as a "which preset am I on" indicator. `matchingPresetId()`
+      does the comparison; the ghost reset button stays as a secondary path for someone mid-edit.
+    - **Presets now apply as a *complete* palette** — new `applyThemePreset(light, dark)` store
+      action layers the preset's overrides onto the full defaults, so switching between presets
+      can't accumulate stray tokens and a preset that omits a token (all three built-ins omit
+      `success`/`warning`/`romance`) no longer leaves the previous palette's clashing value behind.
+      `resetTheme()` is its clean inverse.
+    - **User-created presets** — `customThemePresets: ThemePreset[]` in `useSettingsStore` (persisted
+      to `rp-settings` like every other setting), a "+ Save current colours" control in the Presets
+      section snapshots the live light+dark token maps under a name, and each custom chip gets a
+      hover-`×` to delete. Colours only — deliberately not the full `chatStyle`/layout/`customCss`
+      bundle the separate "Save / share theme" library handles. Verified live end-to-end: tuned a
+      colour, saved it as a preset, applied Default then the custom preset (accent tracked both
+      ways), deleted it, and confirmed it survives a reload.
+
 That closes out the last "reasonable next batch," plus sections 10a, 10c, and 10d in full and a first
 slice each of 10b and 10f taken directly afterward since 10's own suggested phase order names them
 as the foundation everything else in that section reads from. What's left, still deliberately
@@ -2712,11 +2784,10 @@ world templates in full), ~~mobile/responsive re-audit (no new bugs) + instruct-
 part (c)~~ (#77, closing out the prompt/context template manager in full).
 
 Still unblocked and worth doing next, roughly in order: **the rest of mobile/responsive** — every
-editor/settings screen beyond the core chat surface (re-audited at 375px in #77, still clean), and
-the toolbar icon-set redesign #71 explicitly deferred (today's fix scrolls instead of picks, and
-now has more icons to scroll past than it did at #71); **manga-style SFX bursts** (section 5) or
-**background music per scene** (section 6) for VN polish, now that the UI-SFX groundwork (#66)
-exists to build on. **Proactive outreach itself**
+editor/settings screen beyond the core chat surface (re-audited at 375px in #77, still clean); the
+toolbar icon-set redesign #71/#88 deferred is now done (#91, an overflow menu). **Manga-style SFX
+bursts** (section 5) or **background music per scene** (section 6) for VN polish, now that the
+UI-SFX groundwork (#66) exists to build on. **Proactive outreach itself**
 (10f, the actual headline of section 10) is next in line for a design conversation, not more
 unattended coding — specifically, how an unprompted message even reaches the player (a
 notification? a separate inbox view? injected straight into the chat as if they just texted?) is

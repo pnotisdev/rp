@@ -118,7 +118,8 @@ export function WelcomeView({
             <div className="space-y-3 text-xs text-text-muted">
               <p>
                 Start KoboldCpp with a model loaded, then check again. Running it on another machine? Launch it with{' '}
-                <code className="rounded bg-bg-sunken px-1 py-0.5">--host 0.0.0.0</code> and put that machine's address
+                <code className="rounded-md bg-bg-sunken px-1 py-0.5 font-mono text-[11px]">--host 0.0.0.0</code> and put that machine's
+                address
                 below.
               </p>
               <div className="flex gap-2">
@@ -127,7 +128,7 @@ export function WelcomeView({
                   onChange={(e) => setUrlDraft(e.target.value)}
                   onBlur={() => urlDraft !== baseUrl && applyUrl(urlDraft)}
                   placeholder="http://localhost:5001"
-                  className="flex-1 rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent focus:ring-accent/40"
+                  className="flex-1 rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40"
                 />
                 <Button onClick={() => applyUrl(urlDraft)}>Check</Button>
               </div>

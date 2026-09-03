@@ -4,6 +4,7 @@ import type { GenerationParams } from '@/lib/api/types'
 import type { TtsProviderId } from '@/lib/voice/ttsProviders'
 import type { RelationshipDifficulty } from '@/lib/dating/relationshipAssist'
 import type { QuickReply, RegexScript } from '@/lib/types'
+import type { ThemePreset } from '@/lib/store/themePresets'
 import type { PromptSectionId } from '@/lib/prompt/builder'
 import { DEFAULT_PROMPT_SECTIONS } from '@/lib/prompt/builder'
 
@@ -97,7 +98,15 @@ interface SettingsState {
   themeTokensDark: Record<string, string>
   setColorMode: (m: ColorMode) => void
   setThemeToken: (key: string, value: string, mode: ColorMode) => void
+  /** Apply a colour preset: a complete palette every time (defaults + the preset's overrides),
+   *  so switching presets can't accumulate stray tokens and `resetTheme()` is its clean inverse. */
+  applyThemePreset: (light: Record<string, string>, dark: Record<string, string>) => void
   resetTheme: () => void
+  /** User-saved colour palettes, shown in the Presets row alongside the built-ins. Snapshots the
+   *  full light+dark token maps as they are right now (colours only — never chatStyle/layout/CSS). */
+  customThemePresets: ThemePreset[]
+  addCustomThemePreset: (name: string) => void
+  removeCustomThemePreset: (id: string) => void
 
   // layout / toggles
   chatStyle: ChatStyle
@@ -239,11 +248,31 @@ export const useSettingsStore = create<SettingsState>()(
             [key]: value,
           },
         }) as Partial<SettingsState>),
+      applyThemePreset: (light, dark) =>
+        set({
+          themeTokensLight: { ...DEFAULT_THEME_TOKENS, ...light },
+          themeTokensDark: { ...DEFAULT_THEME_TOKENS_DARK, ...dark },
+        }),
       resetTheme: () =>
         set({
           themeTokensLight: { ...DEFAULT_THEME_TOKENS },
           themeTokensDark: { ...DEFAULT_THEME_TOKENS_DARK },
         }),
+      customThemePresets: [],
+      addCustomThemePreset: (name) =>
+        set((s) => ({
+          customThemePresets: [
+            ...s.customThemePresets,
+            {
+              id: `custom-${Date.now().toString(36)}`,
+              name: name.trim() || `Preset ${s.customThemePresets.length + 1}`,
+              light: { ...s.themeTokensLight },
+              dark: { ...s.themeTokensDark },
+            },
+          ],
+        })),
+      removeCustomThemePreset: (id) =>
+        set((s) => ({ customThemePresets: s.customThemePresets.filter((p) => p.id !== id) })),
 
       chatStyle: 'flat',
       avatarShape: 'rounded',

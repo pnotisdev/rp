@@ -14,8 +14,11 @@ import { Button } from '@/components/ui/Button'
 import { Chip } from '@/components/ui/Chip'
 import { Section } from '@/components/ui/Section'
 import { EditorShell, type EditorTab } from '@/components/ui/EditorShell'
+import { ViewShell } from '@/components/ui/ViewShell'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { ListEditor } from '@/components/ui/ListEditor'
 import { errorMessage, toastError } from '@/lib/store/useToastStore'
+import { confirmDialog } from '@/lib/store/useConfirmStore'
 import { LorebookEditor } from '@/components/worldinfo/LorebookEditor'
 import { WorldTemplateGallery } from './WorldTemplateGallery'
 
@@ -81,7 +84,16 @@ export function WorldsView({
   }
 
   return (
-    <div className="mx-auto w-full max-w-4xl flex-1 overflow-y-auto p-8">
+    <ViewShell
+      title="Worlds"
+      width="wide"
+      description="A world is a shared setting — its tone, its rules, its lore, and its scene backgrounds. Any number of characters can live in one; assign a world from the character's editor."
+      actions={
+        <Button variant="primary" onClick={() => setShowTemplateGallery(true)}>
+          New world
+        </Button>
+      }
+    >
       {showTemplateGallery && (
         <WorldTemplateGallery
           onChoose={(template) => {
@@ -92,16 +104,6 @@ export function WorldsView({
           onClose={() => setShowTemplateGallery(false)}
         />
       )}
-      <div className="mb-2 flex items-center justify-between">
-        <h2 className="font-display text-lg text-text">Worlds</h2>
-        <Button variant="primary" onClick={() => setShowTemplateGallery(true)}>
-          New world
-        </Button>
-      </div>
-      <p className="mb-8 max-w-lg text-sm text-text-muted">
-        A world is a shared setting — its tone, its rules, its lore, and its scene backgrounds. Any
-        number of characters can live in one; assign a world from the character's editor.
-      </p>
 
       <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4">
         {worlds.map((w) => (
@@ -126,16 +128,20 @@ export function WorldsView({
           </button>
         ))}
         {worlds.length === 0 && (
-          <div className="col-span-full rounded-2xl border border-dashed border-border px-6 py-16 text-center">
-            <Globe size={28} strokeWidth={1.25} className="mx-auto mb-3 text-text-muted" />
-            <p className="mb-4 text-sm text-text-muted">No worlds yet.</p>
-            <Button variant="primary" onClick={() => setSelected('new')}>
-              Create your first world
-            </Button>
-          </div>
+          <EmptyState
+            className="col-span-full"
+            action={
+              <Button variant="primary" onClick={() => setShowTemplateGallery(true)}>
+                Create your first world
+              </Button>
+            }
+          >
+            No worlds yet. Start from a template — Freeform RP, Visual Novel, Dating Sim, or Slice of
+            Life — and reshape it from there.
+          </EmptyState>
         )}
       </div>
-    </div>
+    </ViewShell>
   )
 }
 
@@ -299,7 +305,13 @@ function WorldEditor({
 
   const remove = async () => {
     if (!world) return
-    if (!confirm(`Delete ${world.name}? Characters living here will be un-assigned, not deleted.`)) return
+    const ok = await confirmDialog({
+      title: `Delete "${world.name}"?`,
+      body: 'Characters living here are un-assigned, not deleted. This cannot be undone.',
+      confirmLabel: 'Delete world',
+      tone: 'danger',
+    })
+    if (!ok) return
     await worldsApi.remove(world.id)
     onDone()
   }

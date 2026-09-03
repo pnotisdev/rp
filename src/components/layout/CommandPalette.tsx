@@ -125,9 +125,12 @@ export function CommandPalette({
   let runningIndex = -1
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 pt-[15vh]" onClick={onClose}>
+    <div
+      className="animate-overlay-in fixed inset-0 z-50 flex items-start justify-center bg-black/40 pt-[15vh] backdrop-blur-sm"
+      onClick={onClose}
+    >
       <div
-        className="w-full max-w-lg overflow-hidden rounded-2xl border border-border bg-bg-elevated themed-shadow"
+        className="animate-panel-in w-full max-w-lg overflow-hidden rounded-2xl border border-border bg-bg-elevated themed-shadow"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-2.5 border-b border-border px-4 py-3">
