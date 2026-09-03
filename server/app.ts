@@ -84,12 +84,35 @@ function normalizeGiftItems(raw: unknown) {
 }
 
 const RELATIONSHIP_DELTA_KEYS = new Set(['affection', 'trust', 'chemistry', 'comfort', 'respect', 'curiosity', 'tension'])
-const SCENE_FLAGS = new Set(['first_date', 'confession', 'jealousy', 'promise'])
+/** The 4 flags always available regardless of world — mirrors `stage.ts`'s `SCENE_FLAGS` on the client. A world's own `customSceneFlags` extend this set per-world; see `normalizeItemDefs`'s `allowedFlags` param. */
+const DEFAULT_SCENE_FLAGS = new Set(['first_date', 'confession', 'jealousy', 'promise'])
 
-/** 10d's item catalog — validates the effect union so a malformed save can never persist an item with no usable effect. */
-function normalizeItemEffect(raw: unknown): { kind: string; dimension?: string; flag?: string; amount?: number } {
+/** 10e's scene-flag authoring — drops any entry missing a label (mirrors `normalizeSocialConnections`'s "drop if missing the one field it's meaningless without" shape). Descriptions are allowed empty (the client nudges for one, but doesn't hard-require it) rather than silently discarding an otherwise-valid flag. */
+function normalizeCustomSceneFlags(raw: unknown): { id: string; label: string; description: string }[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .filter((f): f is Record<string, unknown> => !!f && typeof f === 'object')
+    .map((f, i) => ({
+      id: typeof f.id === 'string' && f.id.trim() ? f.id.trim() : `flag-${i}`,
+      label: typeof f.label === 'string' ? f.label.trim() : '',
+      description: typeof f.description === 'string' ? f.description.trim() : '',
+    }))
+    .filter((f) => !!f.label)
+}
+
+/**
+ * 10d's item catalog — validates the effect union so a malformed save can never persist an item
+ * with no usable effect. `allowedFlags` is the built-in 4 plus whichever custom flags this same
+ * world save request just defined — a "Set scene flag" effect referencing an id outside that set
+ * (a typo, or a flag deleted in the same edit that removed it) falls through to the default
+ * relationship-nudge branch below, same as an unrecognized flag always has.
+ */
+function normalizeItemEffect(
+  raw: unknown,
+  allowedFlags: Set<string>,
+): { kind: string; dimension?: string; flag?: string; amount?: number } {
   const obj = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
-  if (obj.kind === 'flag' && SCENE_FLAGS.has(obj.flag as string)) {
+  if (obj.kind === 'flag' && allowedFlags.has(obj.flag as string)) {
     return { kind: 'flag', flag: obj.flag as string }
   }
   if (obj.kind === 'currency') {
@@ -107,7 +130,7 @@ function normalizeItemEffect(raw: unknown): { kind: string; dimension?: string; 
   }
 }
 
-function normalizeItemDefs(raw: unknown) {
+function normalizeItemDefs(raw: unknown, allowedFlags: Set<string>) {
   if (!Array.isArray(raw)) return []
   return raw
     .filter((i): i is Record<string, unknown> => !!i && typeof i === 'object')
@@ -118,7 +141,7 @@ function normalizeItemDefs(raw: unknown) {
       price: Math.max(0, Number(i.price) || 0),
       tags: Array.isArray(i.tags) ? i.tags.filter((t): t is string => typeof t === 'string' && !!t.trim()) : [],
       description: typeof i.description === 'string' ? i.description : undefined,
-      effect: normalizeItemEffect(i.effect),
+      effect: normalizeItemEffect(i.effect, allowedFlags),
     }))
 }
 
@@ -557,6 +580,8 @@ app.post('/api/worlds', (req, res) => {
   const id = newId()
   const avatarDataUrl = resolveAvatar('worlds', id, req.body.avatarDataUrl)
   const backgrounds = resolveAvatarMap('worlds', 'backgrounds', id, req.body.backgrounds)
+  const customSceneFlags = normalizeCustomSceneFlags(req.body.customSceneFlags)
+  const allowedFlags = new Set([...DEFAULT_SCENE_FLAGS, ...customSceneFlags.map((f) => f.id)])
   const created = worldStore.insert({
     id,
     name: req.body.name,
@@ -567,7 +592,8 @@ app.post('/api/worlds', (req, res) => {
     backgrounds,
     backgroundUnlocks: req.body.backgroundUnlocks ?? {},
     gifts: normalizeGiftItems(req.body.gifts),
-    items: normalizeItemDefs(req.body.items),
+    items: normalizeItemDefs(req.body.items, allowedFlags),
+    customSceneFlags,
     relationshipThresholds: normalizeRelationshipThresholds(req.body.relationshipThresholds),
     createdAt: now,
     updatedAt: now,
@@ -577,13 +603,25 @@ app.post('/api/worlds', (req, res) => {
 
 app.put('/api/worlds/:id', (req, res) => {
   const id = req.params.id
-  if (!worldStore.get(id)) return notFound(res)
+  const existing = worldStore.get(id)
+  if (!existing) return notFound(res)
   const patch: Record<string, unknown> = { ...req.body, updatedAt: Date.now() }
   if ('avatarDataUrl' in req.body) patch.avatarDataUrl = resolveAvatar('worlds', id, req.body.avatarDataUrl)
   if ('backgrounds' in req.body) patch.backgrounds = resolveAvatarMap('worlds', 'backgrounds', id, req.body.backgrounds)
   if ('backgroundUnlocks' in req.body) patch.backgroundUnlocks = req.body.backgroundUnlocks ?? {}
   if ('gifts' in req.body) patch.gifts = normalizeGiftItems(req.body.gifts)
-  if ('items' in req.body) patch.items = normalizeItemDefs(req.body.items)
+  if ('customSceneFlags' in req.body) patch.customSceneFlags = normalizeCustomSceneFlags(req.body.customSceneFlags)
+  if ('items' in req.body) {
+    // Validate against whichever custom flags are actually in effect after this same request —
+    // the just-normalized ones if this save also touched customSceneFlags, otherwise the world's
+    // existing ones — so an item referencing a custom flag saved in the very same request isn't
+    // wrongly rejected as "unrecognized" just because of normalization order.
+    const customFlags = (
+      'customSceneFlags' in patch ? patch.customSceneFlags : existing.customSceneFlags
+    ) as { id: string }[] | undefined
+    const allowedFlags = new Set([...DEFAULT_SCENE_FLAGS, ...(customFlags ?? []).map((f) => f.id)])
+    patch.items = normalizeItemDefs(req.body.items, allowedFlags)
+  }
   if ('relationshipThresholds' in req.body) patch.relationshipThresholds = normalizeRelationshipThresholds(req.body.relationshipThresholds)
   const updated = worldStore.update(id, patch)
   res.json(updated)

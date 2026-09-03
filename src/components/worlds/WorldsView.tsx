@@ -2,10 +2,10 @@ import { useState } from 'react'
 import { Globe } from 'lucide-react'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { worldsApi } from '@/lib/api/client'
-import type { GiftItem, GiftRarity, ItemDef, ItemEffect, RelationshipDimension, WorldCard } from '@/lib/types'
+import type { CustomSceneFlag, GiftItem, GiftRarity, ItemDef, ItemEffect, RelationshipDimension, WorldCard } from '@/lib/types'
 import { fileToDataUrl } from '@/lib/characters/importExport'
 import { DEFAULT_BACKGROUNDS } from '@/lib/vn/backgrounds'
-import { formatRelationshipStage, RELATIONSHIP_MILESTONES } from '@/lib/dating/stage'
+import { combinedSceneFlags, formatRelationshipStage, RELATIONSHIP_MILESTONES } from '@/lib/dating/stage'
 import { advancePhase, getCalendarInfo, getEnergyRemaining, getMaxEnergyForDay, getWeather, describeWeather, PHASES } from '@/lib/world/calendar'
 import { newId } from '@/lib/id'
 import { TextAreaField, TextField } from '@/components/ui/Field'
@@ -23,7 +23,6 @@ const RELATIONSHIP_DELTA_DIMENSIONS: ('affection' | RelationshipDimension)[] = [
   'curiosity',
   'tension',
 ]
-const SCENE_FLAG_OPTIONS = ['first_date', 'confession', 'jealousy', 'promise'] as const
 const EDITABLE_STAGES = ['acquaintances', 'warming_up', 'getting_close', 'close', 'sweethearts'] as const
 const DEFAULT_THRESHOLDS = Object.fromEntries(RELATIONSHIP_MILESTONES.map((m) => [m.stage, m.at])) as Record<
   (typeof EDITABLE_STAGES)[number] | 'near_strangers',
@@ -105,6 +104,7 @@ function WorldEditor({ world, onDone }: { world: WorldCard | null; onDone: () =>
   const [backgroundUnlocks, setBackgroundUnlocks] = useState<Record<string, number>>(base.backgroundUnlocks ?? {})
   const [gifts, setGifts] = useState<GiftItem[]>(base.gifts ?? [])
   const [items, setItems] = useState<ItemDef[]>(base.items ?? [])
+  const [customSceneFlags, setCustomSceneFlags] = useState<CustomSceneFlag[]>(base.customSceneFlags ?? [])
   const [thresholds, setThresholds] = useState(base.relationshipThresholds ?? {})
   const [currentDay, setCurrentDay] = useState(base.currentDay ?? 0)
   const [currentPhaseIndex, setCurrentPhaseIndex] = useState(base.currentPhaseIndex ?? 0)
@@ -129,6 +129,7 @@ function WorldEditor({ world, onDone }: { world: WorldCard | null; onDone: () =>
           backgroundUnlocks,
           gifts,
           items,
+          customSceneFlags,
           relationshipThresholds: thresholds,
         })
       } else {
@@ -142,6 +143,7 @@ function WorldEditor({ world, onDone }: { world: WorldCard | null; onDone: () =>
           backgroundUnlocks,
           gifts,
           items,
+          customSceneFlags,
           relationshipThresholds: thresholds,
         })
       }
@@ -192,6 +194,26 @@ function WorldEditor({ world, onDone }: { world: WorldCard | null; onDone: () =>
 
   const removeItem = (id: string) => {
     setItems((list) => list.filter((i) => i.id !== id))
+  }
+
+  const addCustomSceneFlag = () => {
+    setCustomSceneFlags((list) => [...list, { id: newId(), label: `Flag ${list.length + 1}`, description: '' }])
+  }
+
+  const updateCustomSceneFlag = (id: string, patch: Partial<CustomSceneFlag>) => {
+    setCustomSceneFlags((list) => list.map((f) => (f.id === id ? { ...f, ...patch } : f)))
+  }
+
+  const removeCustomSceneFlag = (id: string) => {
+    setCustomSceneFlags((list) => list.filter((f) => f.id !== id))
+    // An item's "Set scene flag" effect referencing the removed flag would otherwise silently
+    // keep pointing at a dead id — fall it back to the always-available default the same way
+    // `setItemEffectKind` seeds a fresh flag effect, rather than leaving an item that can never
+    // actually fire (the server would reject the unrecognized id and coerce it to a different
+    // effect kind entirely on next save, which is far more surprising than this).
+    setItems((list) =>
+      list.map((i) => (i.effect.kind === 'flag' && i.effect.flag === id ? { ...i, effect: { kind: 'flag', flag: 'first_date' } } : i)),
+    )
   }
 
   const setThreshold = (stage: (typeof EDITABLE_STAGES)[number], value: string) => {
@@ -537,12 +559,12 @@ function WorldEditor({ world, onDone }: { world: WorldCard | null; onDone: () =>
                     <span className="mb-1 block text-xs font-medium text-text-muted">Flag</span>
                     <select
                       value={item.effect.flag}
-                      onChange={(e) => setItemEffectField(item.id, { flag: e.target.value as (typeof SCENE_FLAG_OPTIONS)[number] })}
+                      onChange={(e) => setItemEffectField(item.id, { flag: e.target.value })}
                       className="w-full rounded-xl bg-bg-elevated px-3 py-2 text-sm text-text outline-none"
                     >
-                      {SCENE_FLAG_OPTIONS.map((f) => (
-                        <option key={f} value={f}>
-                          {f.replace('_', ' ')}
+                      {combinedSceneFlags(customSceneFlags).map((f) => (
+                        <option key={f.id} value={f.id}>
+                          {f.label}
                         </option>
                       ))}
                     </select>
@@ -560,6 +582,44 @@ function WorldEditor({ world, onDone }: { world: WorldCard | null; onDone: () =>
             </div>
           ))}
           <Button onClick={addItem}>+ Add item</Button>
+        </div>
+      </details>
+
+      <details className="mb-8 rounded-2xl bg-bg-elevated p-6">
+        <summary className="cursor-pointer text-sm font-medium text-text">
+          Custom scene flags ({customSceneFlags.length})
+        </summary>
+        <p className="mt-2 mb-3 text-xs text-text-muted">
+          Beyond the 4 built-in flags (first date, confession, jealousy, promise) that always
+          exist — a world can add its own branching-memory flags for beats specific to its own
+          story. Each needs a description so the AI classifier has an actual bar for when it
+          should fire, the same way the built-in 4 do; a vague one invites false positives.
+        </p>
+        <div className="space-y-3">
+          {customSceneFlags.map((flag) => (
+            <div key={flag.id} className="rounded-xl bg-bg-sunken p-3">
+              <div className="mb-2 flex items-start gap-2">
+                <TextField
+                  label="Label"
+                  value={flag.label}
+                  onChange={(e) => updateCustomSceneFlag(flag.id, { label: e.target.value })}
+                  placeholder="e.g. Moved in together"
+                  className="flex-1"
+                />
+                <Button variant="ghost" onClick={() => removeCustomSceneFlag(flag.id)} className="mt-5">
+                  Remove
+                </Button>
+              </div>
+              <TextAreaField
+                label="Description (the classifier's bar for firing)"
+                rows={2}
+                value={flag.description}
+                onChange={(e) => updateCustomSceneFlag(flag.id, { description: e.target.value })}
+                placeholder="e.g. They explicitly agreed to share a home, not just spending a lot of time at each other's place"
+              />
+            </div>
+          ))}
+          <Button onClick={addCustomSceneFlag}>+ Add custom flag</Button>
         </div>
       </details>
 

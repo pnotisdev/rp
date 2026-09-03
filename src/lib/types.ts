@@ -27,7 +27,28 @@ export type RelationshipStage =
  */
 export type RelationshipDimension = 'trust' | 'chemistry' | 'comfort' | 'respect' | 'curiosity' | 'tension'
 
-export type SceneFlag = 'first_date' | 'confession' | 'jealousy' | 'promise'
+/**
+ * Not a closed literal union — `stage.ts`'s `SCENE_FLAGS` still names the 4 built-in defaults
+ * (first_date/confession/jealousy/promise, each with a glossary entry the AI classifier reads),
+ * but a flag actually stored here can also be the `id` of a world's own `CustomSceneFlag` (see
+ * below). Mirrors how `GalleryEntry.requiredFlags` was already a plain `string[]` — nothing that
+ * reads a stored flag ever assumed a fixed 4-value set, so widening this to `string` needed no
+ * changes anywhere flags are read, only where new ones are authored/glossaried.
+ */
+export type SceneFlag = string
+
+/**
+ * A world-authored scene flag beyond the 4 built-in defaults (10c's original "scene-flag
+ * authoring" gap) — additive, the same shape as `CustomExpression`: the built-in defaults keep
+ * working exactly as before, this just gives a world its own extra ones on top. `description` is
+ * the classifier-facing bar for when it should fire (mirrors `FLAG_GLOSSARY`'s built-in entries);
+ * `label` is the player-facing name shown in the Relationship panel's checklist.
+ */
+export interface CustomSceneFlag {
+  id: string
+  label: string
+  description: string
+}
 
 /**
  * 10c's "Define-the-Relationship ladder" — a player-driven progression, separate from the
@@ -242,6 +263,8 @@ export interface WorldCard {
   items?: ItemDef[]
   /** Overrides the default warmth thresholds for characters living here. Unset stages fall back to the default. */
   relationshipThresholds?: Partial<Record<Exclude<RelationshipStage, 'near_strangers'>, number>>
+  /** World-authored scene flags beyond the 4 built-in defaults — see `CustomSceneFlag`. */
+  customSceneFlags?: CustomSceneFlag[]
   /** Absolute day count in the shared 112-day calendar (src/lib/world/calendar.ts) — 0 if the clock has never been advanced. */
   currentDay?: number
   /** Index into calendar.ts's PHASES (morning/afternoon/evening/night) — 0 if never advanced. */

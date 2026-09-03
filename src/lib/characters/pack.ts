@@ -1,7 +1,7 @@
 import { charactersApi, worldsApi } from '@/lib/api/client'
 import { fileToDataUrl } from './importExport'
 import type { Character, CharacterCardData, GalleryEntry, Lorebook, RelationshipStarter, SocialConnection } from './cardSpec'
-import type { GiftItem, WorldCard } from '@/lib/types'
+import type { CustomSceneFlag, GiftItem, ItemDef, WorldCard } from '@/lib/types'
 import type { CustomExpression } from '@/lib/vn/expressions'
 import type { ScheduleEntry, WeatherPreferences } from '@/lib/world/calendar'
 
@@ -45,6 +45,8 @@ export interface CharacterPackV1 {
     backgrounds?: Record<string, string>
     backgroundUnlocks?: Record<string, number>
     gifts?: GiftItem[]
+    items?: ItemDef[]
+    customSceneFlags?: CustomSceneFlag[]
     relationshipThresholds?: WorldCard['relationshipThresholds']
   }
 }
@@ -124,6 +126,8 @@ export async function buildCharacterPack(character: Character, world?: WorldCard
       backgrounds,
       backgroundUnlocks: world.backgroundUnlocks,
       gifts: world.gifts,
+      items: world.items,
+      customSceneFlags: world.customSceneFlags,
       relationshipThresholds: world.relationshipThresholds,
     }
   }
@@ -173,6 +177,8 @@ export async function importCharacterPack(pack: CharacterPackV1): Promise<{ char
       backgrounds: pack.world.backgrounds,
       backgroundUnlocks: pack.world.backgroundUnlocks,
       gifts: pack.world.gifts,
+      items: pack.world.items,
+      customSceneFlags: pack.world.customSceneFlags,
       relationshipThresholds: pack.world.relationshipThresholds,
     })
   }

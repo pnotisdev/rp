@@ -1,7 +1,7 @@
 import { KoboldClient } from '@/lib/api/kobold'
 import { parseLenientJson } from '@/lib/jsonRepair'
 import type { Character } from '@/lib/characters/cardSpec'
-import type { DateEventCard, RelationshipDimension, SceneFlag } from '@/lib/types'
+import type { CustomSceneFlag, DateEventCard, RelationshipDimension, SceneFlag } from '@/lib/types'
 import type { ChatMessage } from '@/lib/prompt/builder'
 import { RELATIONSHIP_DIMENSIONS, SCENE_FLAGS } from '@/lib/dating/stage'
 
@@ -64,8 +64,15 @@ const FLAG_GLOSSARY: Record<SceneFlag, string> = {
   promise: 'a specific, meaningful promise was made that the story should remember later',
 }
 
-function describeFlags(): string {
-  return SCENE_FLAGS.map((f) => `${f} (${FLAG_GLOSSARY[f]})`).join('; ')
+/** World-authored flags (see `CustomSceneFlag`) get the same glossary treatment as the built-in 4 — their own `description` is the classifier's bar for firing, same idea as `FLAG_GLOSSARY`. */
+function describeFlags(customFlags?: CustomSceneFlag[]): string {
+  const builtIn = SCENE_FLAGS.map((f) => `${f} (${FLAG_GLOSSARY[f]})`)
+  const custom = (customFlags ?? []).map((f) => `${f.id} (${f.description})`)
+  return [...builtIn, ...custom].join('; ')
+}
+
+function allowedFlagIds(customFlags?: CustomSceneFlag[]): Set<string> {
+  return new Set([...SCENE_FLAGS, ...(customFlags ?? []).map((f) => f.id)])
 }
 
 const ZERO_DELTAS: RelationshipDeltas = Object.fromEntries(DELTA_KEYS.map((k) => [k, 0])) as RelationshipDeltas
@@ -117,6 +124,8 @@ export async function assessRelationshipMoment(
     current: RelationshipDeltas
     /** Facts already known, so the model doesn't re-extract the same thing every turn. */
     knownFacts?: string[]
+    /** World-authored flags beyond the 4 built-in defaults (see `CustomSceneFlag`) — glossaried and validated exactly like the built-ins. */
+    customFlags?: CustomSceneFlag[]
   },
 ): Promise<RelationshipMoment> {
   const prompt = [
@@ -125,7 +134,7 @@ export async function assessRelationshipMoment(
     `Recent context:\n${recentText(params.history, params.charName, params.userName, 8)}`,
     `Latest reply from ${params.charName}:\n${params.latestReply}`,
     `Dimension meanings: ${DELTA_KEYS.map((k) => `${k} = ${DIMENSION_GLOSSARY[k]}`).join('; ')}.`,
-    `Known route flags: ${describeFlags()}.`,
+    `Known route flags: ${describeFlags(params.customFlags)}.`,
     params.knownFacts?.length ? `Facts already remembered (don't repeat these): ${params.knownFacts.join('; ')}.` : '',
     'Return ONLY a minified JSON object: {"deltas":{ one integer -2..2 per dimension key },"newFlags":[ any newly-established flags from the known set, or [] ],"reason":"...","newFacts":[ any new durable facts, or [] ]}.',
     'Only move a dimension if this specific exchange clearly affected it — leave the rest at 0. Most turns should move only one or two dimensions and add no new flags.',
@@ -146,9 +155,9 @@ export async function assessRelationshipMoment(
     const v = Number(deltasObj[key])
     deltas[key] = [-2, -1, 0, 1, 2].includes(v) ? v : 0
   }
-  const allowed = new Set(SCENE_FLAGS)
+  const allowed = allowedFlagIds(params.customFlags)
   const newFlags = Array.isArray(obj.newFlags)
-    ? obj.newFlags.filter((f): f is SceneFlag => typeof f === 'string' && allowed.has(f as SceneFlag))
+    ? obj.newFlags.filter((f): f is SceneFlag => typeof f === 'string' && allowed.has(f))
     : []
   const reason = typeof obj.reason === 'string' && obj.reason.trim() ? obj.reason.trim().slice(0, 160) : undefined
   const newFacts = Array.isArray(obj.newFacts)
@@ -217,6 +226,7 @@ export async function assessDateOutcome(
     userName: string
     current: RelationshipDeltas
     knownFacts?: string[]
+    customFlags?: CustomSceneFlag[]
   },
 ): Promise<DateOutcome> {
   // Cap at the last 24 turns — plenty for a single date scene, and keeps the prompt bounded even
@@ -229,7 +239,7 @@ export async function assessDateOutcome(
     `Current scores (0-100 each): ${DELTA_KEYS.map((k) => `${k}=${params.current[k]}`).join(', ')}.`,
     `Full transcript of the date:\n${transcriptText || '(nothing was said)'}`,
     `Dimension meanings: ${DELTA_KEYS.map((k) => `${k} = ${DIMENSION_GLOSSARY[k]}`).join('; ')}.`,
-    `Known route flags: ${describeFlags()}.`,
+    `Known route flags: ${describeFlags(params.customFlags)}.`,
     params.knownFacts?.length ? `Facts already remembered (don't repeat these): ${params.knownFacts.join('; ')}.` : '',
     'Return ONLY a minified JSON object: {"deltas":{ one integer -5..5 per dimension key, judged across the WHOLE date, not per line },"newFlags":[ any newly-established flags from the known set, or [] ],"recap":"...","newFacts":[ any new durable facts, or [] ]}.',
     'Judge the date honestly: a flat, awkward, one-sided, or hurtful date should score low or even negative deltas, not a token positive bump just for happening. A genuinely warm, attentive date should score well across the relevant dimensions.',
@@ -250,9 +260,9 @@ export async function assessDateOutcome(
     const v = Number(deltasObj[key])
     deltas[key] = Number.isInteger(v) ? Math.max(-5, Math.min(5, v)) : 0
   }
-  const allowed = new Set(SCENE_FLAGS)
+  const allowed = allowedFlagIds(params.customFlags)
   const newFlags = Array.isArray(obj.newFlags)
-    ? obj.newFlags.filter((f): f is SceneFlag => typeof f === 'string' && allowed.has(f as SceneFlag))
+    ? obj.newFlags.filter((f): f is SceneFlag => typeof f === 'string' && allowed.has(f))
     : []
   const recap = typeof obj.recap === 'string' && obj.recap.trim() ? obj.recap.trim().slice(0, 400) : 'The date came to an end.'
   const newFacts = Array.isArray(obj.newFacts)

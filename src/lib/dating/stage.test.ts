@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   applyBreakupScar,
   canAskForCommitment,
+  combinedSceneFlags,
   commitmentTierThreshold,
   crossedMilestone,
   evaluateRelationshipRisk,
@@ -22,6 +23,25 @@ const zeroStats = (overrides: Partial<Record<RelationshipDimension, number>> = {
   curiosity: 50,
   tension: 0,
   ...overrides,
+})
+
+describe('combinedSceneFlags', () => {
+  it('returns just the 4 built-in defaults when no custom flags are given', () => {
+    const result = combinedSceneFlags()
+    expect(result.map((f) => f.id)).toEqual(['first_date', 'confession', 'jealousy', 'promise'])
+    expect(result.find((f) => f.id === 'first_date')?.label).toBe('first date')
+  })
+
+  it('appends a world\'s custom flags after the built-in defaults, using their own label', () => {
+    const result = combinedSceneFlags([{ id: 'moved-in', label: 'Moved in together', description: 'they now share a home' }])
+    expect(result.map((f) => f.id)).toEqual(['first_date', 'confession', 'jealousy', 'promise', 'moved-in'])
+    expect(result.find((f) => f.id === 'moved-in')?.label).toBe('Moved in together')
+  })
+
+  it('does not mutate the built-in default label formatting for custom flags (no underscore-to-space transform applied)', () => {
+    const result = combinedSceneFlags([{ id: 'has_underscore', label: 'has_underscore', description: '' }])
+    expect(result.find((f) => f.id === 'has_underscore')?.label).toBe('has_underscore')
+  })
 })
 
 describe('crossedMilestone', () => {

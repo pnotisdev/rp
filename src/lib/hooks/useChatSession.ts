@@ -593,6 +593,7 @@ export function useChatSession(chatId: string | null) {
         userName: persona?.name || 'You',
         current: { affection: currentAffection, ...currentStats },
         knownFacts: activeFacts.map((f) => f.text),
+        customFlags: world?.customSceneFlags,
       })
       const deltas = scaleDeltasForDifficulty(rawDeltas, relationshipDifficulty)
       newFlags.forEach((flag) => existingFlags.add(flag))
@@ -1426,6 +1427,7 @@ export function useChatSession(chatId: string | null) {
       userName: persona?.name || 'You',
       current: { affection: currentAffection, ...currentStats },
       knownFacts: activeFacts.map((f) => f.text),
+      customFlags: world?.customSceneFlags,
     })
     const deltas = scaleDeltasForDifficulty(outcome.deltas, relationshipDifficulty)
     outcome.newFlags.forEach((flag) => existingFlags.add(flag))

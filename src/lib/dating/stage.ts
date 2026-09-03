@@ -1,6 +1,7 @@
 import type {
   Chat,
   CommitmentStatus,
+  CustomSceneFlag,
   RelationshipDimension,
   RelationshipStage,
   RelationshipWarning,
@@ -19,8 +20,16 @@ export const RELATIONSHIP_MILESTONES: { stage: RelationshipStage; at: number }[]
   { stage: 'sweethearts', at: 90 },
 ]
 
-/** Canonical set of branching scene-memory flags the AI classifier can detect. */
+/** Canonical set of built-in branching scene-memory flags the AI classifier can detect — always available, regardless of world. See `combinedSceneFlags` for the full set including a world's own custom ones. */
 export const SCENE_FLAGS: SceneFlag[] = ['first_date', 'confession', 'jealousy', 'promise']
+
+/** The 4 built-in flags plus whatever a world has authored on top, as {id, label} pairs — the one place both the UI (Relationship panel checklist, item "set flag" picker) and the AI classifier (relationshipAssist.ts) should read the full available set from, so they can never drift apart. */
+export function combinedSceneFlags(customFlags?: CustomSceneFlag[]): { id: string; label: string }[] {
+  return [
+    ...SCENE_FLAGS.map((f) => ({ id: f, label: f.replace(/_/g, ' ') })),
+    ...(customFlags ?? []).map((f) => ({ id: f.id, label: f.label })),
+  ]
+}
 
 /** 10c's Define-the-Relationship ladder, lowest first. Separate from `RELATIONSHIP_MILESTONES` — warmth only ever gates when a tier can be *asked for*, never grants it automatically. */
 export const COMMITMENT_ORDER: CommitmentStatus[] = ['none', 'dating', 'exclusive', 'living_together']

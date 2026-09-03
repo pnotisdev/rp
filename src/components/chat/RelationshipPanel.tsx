@@ -12,11 +12,11 @@ import {
   computeWarmth,
   formatCommitmentStatus,
   formatRelationshipStage,
+  combinedSceneFlags,
   getRelationshipStats,
   nextCommitmentTier,
   relationshipMilestonesFor,
   relationshipStageForWarmth,
-  SCENE_FLAGS,
 } from '@/lib/dating/stage'
 import type { CommitmentStatus } from '@/lib/types'
 import { Button } from '@/components/ui/Button'
@@ -82,7 +82,7 @@ export function RelationshipPanel({ chat, character, world, onClose, onBuyGift, 
   const itemCatalog = getItemCatalog(world)
   const gallery = character?.gallery ?? []
   const upcoming = upcomingGallery(gallery, unlocked, affection, flags)
-  const knownFlags = SCENE_FLAGS
+  const knownFlags = combinedSceneFlags(world?.customSceneFlags)
   const commitmentStatus = chat.commitmentStatus ?? 'none'
   const nextTier = nextCommitmentTier(commitmentStatus)
   const eligibleForNextTier = nextTier ? canAskForCommitment(nextTier, warmth, milestones) : false
@@ -222,8 +222,8 @@ export function RelationshipPanel({ chat, character, world, onClose, onBuyGift, 
           <Section title="Scene flags" surface="sunken">
             <div className="flex flex-wrap gap-2">
               {knownFlags.map((f) => (
-                <span key={f} className={`rounded-lg px-2 py-1 text-xs ${flags.has(f) ? 'bg-romance/15 text-romance' : 'bg-bg-elevated text-text-muted'}`}>
-                  {f.replace('_', ' ')}
+                <span key={f.id} className={`rounded-lg px-2 py-1 text-xs ${flags.has(f.id) ? 'bg-romance/15 text-romance' : 'bg-bg-elevated text-text-muted'}`}>
+                  {f.label}
                 </span>
               ))}
             </div>

@@ -80,9 +80,8 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
       Thresholds are now authorable per world too: `WorldCard.relationshipThresholds` (optional
       per-stage overrides, editable in `WorldsView`) feeds `relationshipMilestonesFor()`, used
       everywhere a stage is computed (`useChatSession`, `NewChatDialog`, `RelationshipPanel`).
-      Scene-flag authoring (custom flags beyond the fixed 4) is still open — flags are a closed
-      union threaded through the AI classifier prompt, gallery `requiredFlags`, and the panel
-      checklist, so making them dynamic is a larger, separate type-system change.
+      Scene-flag authoring (custom flags beyond the fixed 4) — done; see the item-53-adjacent
+      changelog entry in section 9 for the full writeup.
 - [x] **Gift catalog is a single fixed global array** — `WorldCard.gifts?: GiftItem[]` overrides
       the built-in `DEFAULT_GIFT_CATALOG` (`gifts.ts`) for any character living in that world, with
       basic CRUD (add/edit/remove name, rarity, price) in the `WorldsView` editor. `getGiftCatalog(world)`
@@ -673,6 +672,52 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
         caught immediately since I was watching the response, fixed by scoping the query to the
         specific `<details>` block, demo data restored. 158 tests passing, clean typecheck, clean
         production build.
+- [x] **Scene-flag authoring — custom flags beyond the fixed 4** (closes the gap noted in section
+      2 and item 7). Picked over the other equally-"still open" follow-up candidate (lorebook
+      sticky/cooldown) after actually sizing both first: sticky/cooldown needs a stable per-chat-
+      per-entry key across lorebook sources, and this app's lorebook arrays have no such key today
+      — worse, a group chat's speaker-first array ordering can reorder turn to turn, so even a
+      positional-index key would be unsafe. Scene flags had a clean, already-proven path instead:
+      the exact same additive shape as "custom expressions" (item 24) — the 4 built-ins keep
+      working exactly as before, a world just adds its own on top, and the generic machinery reads
+      whatever's actually present rather than assuming a closed set.
+      - **`SceneFlag` (`types.ts`) widened from a 4-value literal union to plain `string`** — a
+        genuinely zero-breakage change (confirmed by typechecking immediately after, before
+        touching any call site): nothing was doing exhaustiveness-checking on it, and
+        `Record<SceneFlag, string>` (the classifier's `FLAG_GLOSSARY`) stays valid with exactly 4
+        keys under `Record<string, string>` too. New `CustomSceneFlag { id, label, description }`
+        and `WorldCard.customSceneFlags?: CustomSceneFlag[]`.
+      - **One shared source of truth**: `combinedSceneFlags(customFlags?)` (`stage.ts`) returns
+        the 4 built-ins plus a world's own as `{id, label}` pairs — used by both the AI classifier
+        glossary (`relationshipAssist.ts`'s `describeFlags()`/`allowedFlagIds()`, now taking an
+        optional `customFlags` param on `assessRelationshipMoment`/`assessDateOutcome`) and every
+        UI surface (`RelationshipPanel`'s checklist, `WorldsView`'s item "Set scene flag" picker),
+        so the classifier's known-flag set and what's actually selectable in the UI can never
+        drift apart the way two independently-hardcoded lists eventually would.
+      - **New "Custom scene flags" `WorldsView` section** — label + description per flag (the
+        description is the classifier's bar for firing, same job `FLAG_GLOSSARY`'s built-in
+        entries already do), CRUD matching the existing gift/item list pattern. Removing a custom
+        flag that an item's effect references falls that item back to the same default a
+        freshly-created flag effect gets, rather than leaving a dangling reference an item could
+        never actually fire (the same "don't silently corrupt a record via an orphaned reference"
+        bar as section 9's other fixes).
+      - **Server-side validation actually extended, not just the UI** — `normalizeItemEffect`
+        previously validated a "set flag" effect against a fixed 4-value `Set`; an item
+        referencing a would-be-valid custom flag would have silently fallen through to a
+        completely different effect kind (a relationship nudge) with no error, the exact silent-
+        corruption bug class fixed elsewhere this session. Now takes an `allowedFlags` set built
+        from the built-in 4 plus whichever custom flags are in effect after the *same* request
+        (handles a world's custom flags and its items being saved together in one PUT).
+      - `.rppack.json` world bundle gained `customSceneFlags` — and, spotted as a genuinely
+        pre-existing adjacent gap while touching this exact file, `items` too (the world pack
+        never carried the item catalog at all before this).
+      - 3 new tests (`stage.test.ts`: default-only, default+custom, no accidental label mangling).
+        Verified live end-to-end against the real seeded world: added a custom flag ("Study date
+        confessed") through the actual `WorldsView` UI, confirmed it appears in an item's flag
+        picker and the `RelationshipPanel` checklist with its own label, set a real item to use it
+        and confirmed the server accepted (not silently substituted) the custom id, then restored
+        the world to its exact original seed state. 161 tests passing, clean typecheck, clean
+        production build.
 
 ## 10. Major expansion: a living-world dating sim
 
@@ -1198,7 +1243,7 @@ Done so far (see checked boxes above for detail):
    this machine; swapped for Node's built-in `node:sqlite` (section 9).
 7. ~~Authorable relationship thresholds + gift catalog CRUD~~ — `WorldCard.relationshipThresholds`
    and `WorldCard.gifts[]` (section 2), the harder half of item 1 above plus the gift-catalog item.
-   Scene-flag authoring (custom flags beyond the fixed 4) remains open — noted in section 2.
+   Scene-flag authoring (custom flags beyond the fixed 4) shipped later, as item 54.
 8. ~~Accessibility pass + theme/objective API gaps~~ — `aria-label`s added throughout (section 9);
    `PUT /api/themes/:id` and `DELETE /api/objectives/:id` (section 9).
 9. ~~One-click full backup/restore~~ — `GET /api/backup` / `POST /api/restore`, Settings → Data
@@ -1511,6 +1556,14 @@ Done so far (see checked boxes above for detail):
     the full writeup. Deliberately left the other three 10e bullets untouched: "guaranteed
     expression coverage" is entangled with 10b's live-date mode, which doesn't exist yet;
     "AI-assisted authoring" and "world templates" are separate, sizable pieces of their own.
+54. ~~Scene-flag authoring — custom flags beyond the fixed 4~~ — user asked to pick up "the
+    easiest first" between this and lorebook sticky/cooldown, both flagged by the roadmap as
+    deliberately-narrow still-open follow-ups; sizing both first (rather than guessing) surfaced a
+    real risk in sticky/cooldown — no stable per-entry key exists across this app's lorebook
+    sources, and a group chat's array ordering isn't even stable turn to turn — that made scene
+    flags the clearly smaller, lower-risk pick, additive on top of the existing 4 the same way
+    custom expressions (item 24) were additive on top of the default 16. See section 9's changelog
+    for the full writeup.
 
 That closes out the last "reasonable next batch," plus sections 10a, 10c, and 10d in full and a first
 slice each of 10b and 10f taken directly afterward since 10's own suggested phase order names them
