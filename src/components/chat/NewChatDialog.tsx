@@ -30,9 +30,16 @@ export function NewChatDialog({
   const worlds = useApiQuery('worlds', () => worldsApi.list(), []) ?? []
   const [characterId, setCharacterId] = useState<string>(initialCharacterId)
   const [personaId, setPersonaId] = useState<string>('')
+  const [personaName, setPersonaName] = useState('')
+  const [personaDescription, setPersonaDescription] = useState('')
   const [greetingIndex, setGreetingIndex] = useState(0)
   const [starterId, setStarterId] = useState<string>('')
   const [participantIds, setParticipantIds] = useState<string[]>([])
+  const [busy, setBusy] = useState(false)
+
+  // A first-ever chat has no personas to pick from — offer a one-line "who you are" inline instead
+  // of sending the model a bare hardcoded "You" (see ROADMAP §13 / the persona-get-route bug, #41).
+  const noPersonas = personas.length === 0
 
   const toggleParticipant = (id: string) => {
     setParticipantIds((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]))
@@ -51,8 +58,27 @@ export function NewChatDialog({
     : []
 
   const create = async () => {
-    const persona = personas.find((p) => p.id === personaId)
+    if (!character || busy) return
+    setBusy(true)
+    try {
+      await doCreate()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const doCreate = async () => {
     if (!character) return
+    // Resolve the persona: an existing pick, or a fresh one minted from the inline name/description.
+    let resolvedPersonaId = personaId
+    let persona = personas.find((p) => p.id === personaId)
+    if (noPersonas && personaName.trim()) {
+      persona = await personasApi.create({
+        name: personaName.trim(),
+        description: personaDescription.trim(),
+      })
+      resolvedPersonaId = persona.id
+    }
     const startingAffection = starter?.startingAffection ?? 0
     // A starter describes existing closeness, not built-up conflict or a curiosity spike, so it
     // only seeds the four warmth-composing dimensions — curiosity/tension stay at a neutral 0.
@@ -63,7 +89,7 @@ export function NewChatDialog({
     const chat = await chatsApi.create({
       characterId,
       participants: participantIds.length ? participantIds : undefined,
-      personaId: personaId || '',
+      personaId: resolvedPersonaId || '',
       title: character.card.name,
       affection: startingAffection,
       relationshipStats: startingStats,
@@ -141,19 +167,44 @@ export function NewChatDialog({
           </div>
         )}
 
-        <label className="mb-1 block text-xs text-text-muted">Persona</label>
-        <select
-          value={personaId}
-          onChange={(e) => setPersonaId(e.target.value)}
-          className="mb-4 w-full rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none"
-        >
-          <option value="">Default (You)</option>
-          {personas.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
+        {noPersonas ? (
+          <div className="mb-4">
+            <label className="mb-1 block text-xs text-text-muted">Chatting as</label>
+            <input
+              value={personaName}
+              onChange={(e) => setPersonaName(e.target.value)}
+              placeholder="Your name (optional)"
+              className="mb-2 w-full rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent focus:ring-accent/40"
+            />
+            <input
+              value={personaDescription}
+              onChange={(e) => setPersonaDescription(e.target.value)}
+              placeholder="A line about who you are (optional)"
+              className="w-full rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent focus:ring-accent/40"
+            />
+            <p className="mt-1.5 text-[11px] text-text-muted">
+              {personaName.trim()
+                ? 'Saved as a reusable persona — the model addresses you by this.'
+                : "Leave blank and you're just “You”. Even a name gives the model something to work with."}
+            </p>
+          </div>
+        ) : (
+          <>
+            <label className="mb-1 block text-xs text-text-muted">Persona</label>
+            <select
+              value={personaId}
+              onChange={(e) => setPersonaId(e.target.value)}
+              className="mb-4 w-full rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none"
+            >
+              <option value="">Default (You)</option>
+              {personas.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </>
+        )}
 
         {starters.length > 0 && (
           <div className="mb-4">
@@ -200,8 +251,8 @@ export function NewChatDialog({
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="primary" onClick={create} disabled={!characterId}>
-            Start chat
+          <Button variant="primary" onClick={create} disabled={!characterId || busy}>
+            {busy ? 'Starting…' : 'Start chat'}
           </Button>
         </div>
     </Modal>

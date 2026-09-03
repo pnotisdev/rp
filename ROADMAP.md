@@ -1292,11 +1292,13 @@ changelog #49), and nothing points the user at it.
       "use the bundled character" ask wanted. (`ChatsPanel`'s own "No chats yet." line is now
       unreachable — `ChatSurface` renders the Welcome screen instead — but left in as a defensive
       fallback.)
-- [ ] **Persona nudge** — a chat created with no persona sends the model a hardcoded `'You'` with
-      no description (`NewChatDialog` defaults to "Default (You)"). Item 41's writeup shows how
-      much persona quality actually changes the prompt. Prompt for a one-line persona on first
-      chat, or ship a default "You" persona with an editable blurb instead of a bare fallback
-      string.
+- [x] **Persona nudge** — done. When there are no personas yet, `NewChatDialog` swaps the
+      "Default (You)" dropdown for two inline optional fields — "Your name" and "A line about who
+      you are" — and on start it mints a reusable persona from them and links the chat to it (so
+      the model gets a real name/description instead of the hardcoded `'You'`, per item 41). Blank
+      is still fine (falls back to "You"). Once a persona exists the normal dropdown returns.
+      Verified live: "Kai / A transfer student…" round-tripped into a saved persona linked to the
+      new chat, header showed "as Kai".
 - [~] **Inline help on the dense authoring screens** — largely addressed by the authoring-UI
       rebuild (changelog #57): `CharacterEditor`'s ~15 stacked `<details>` are now 7 tabbed
       sections (Identity / Life / Visual novel / Dating sim / World sim / Voice / Advanced), each
@@ -1847,6 +1849,10 @@ Done so far (see checked boxes above for detail):
     field, and a "Chat with Sumire" card that opens `NewChatDialog` pre-selected. Also closes
     section 13's "actionable empty states" (the zero-chats case was its last unfinished slice).
     Verified live end-to-end. Multi-screen stepper + forced persona step deliberately skipped.
+63. ~~Persona nudge~~ — section 13. `NewChatDialog`, when no personas exist, offers inline
+    "Your name" / "a line about you" fields and mints a reusable persona from them on start,
+    instead of silently sending the model a hardcoded "You". Once a persona exists, the normal
+    dropdown returns. ~40 lines, one file.
 
 That closes out the last "reasonable next batch," plus sections 10a, 10c, and 10d in full and a first
 slice each of 10b and 10f taken directly afterward since 10's own suggested phase order names them
@@ -1892,9 +1898,9 @@ indicator~~ (#60), ~~read CCv3 character cards~~ (#61), ~~first-run Welcome scre
 empty states~~ (#62).
 
 Still unblocked and worth doing next, roughly in order: a **prompt/instruct-template manager**
-(section 14, smallest slice first: duplicate + edit an instruct template); the **persona nudge**
-(section 13 — a default editable "You" persona instead of a bare fallback string); **manga-style
-SFX bursts** (section 5) or **background music per scene** (section 6) for VN polish. **World
-templates** (section 10e) is the structural key to section 13's
+(section 14, smallest slice first: duplicate + edit an instruct template); **manga-style SFX
+bursts** (section 5) or **background music per scene** (section 6) for VN polish; **UI SFX +
+`reducedAudio` setting** (section 6). **World templates** (section 10e) is the structural key to
+section 13's
 "which toggles do I want" problem and is worth pulling forward out of 10's phase order. Mobile/
 responsive (section 14) is larger but is the single biggest limiter on who can use the app at all.
