@@ -103,6 +103,47 @@ export interface ChatFact {
   createdAt: number
 }
 
+/**
+ * A per-chat steering note injected into the prompt at a chosen position — SillyTavern's
+ * Author's Note. Distinct from `CharacterCardData.post_history_instructions`, which is card-level
+ * (shared by every chat with that character) and not editable mid-conversation: this is scoped to
+ * one `Chat`, editable any time, and never rendered as something a character "said". A blank
+ * `text` is inert (the whole field is cleared to `null` rather than persisted empty).
+ */
+export interface AuthorNote {
+  text: string
+  /**
+   * Where in the assembled prompt the note lands:
+   * - `before_char` — just before the character's identity block; lightest, setting-level framing.
+   * - `after_char` — after the card/examples, before the chat history; medium.
+   * - `at_depth` — inserted `depth` messages up from the latest turn; strongest, and `depth` 0-2
+   *   is the most immediate steer (mirrors ST's default "in-chat @ depth 4").
+   */
+  position: 'before_char' | 'after_char' | 'at_depth'
+  /** Only meaningful for `position: 'at_depth'` — how many messages up from the latest to insert it. */
+  depth: number
+}
+
+/**
+ * A user-defined find/replace rule applied to message text — SillyTavern's and RisuAI's regex
+ * scripts. `target` decides where it runs: `display` rewrites only what's shown on screen (trim
+ * artifacts, restyle narration), `prompt` rewrites only the history text fed back to the model
+ * (strip a persistent tic the model keeps copying), `both` does each. The stored message is never
+ * altered, so a rule is always reversible by disabling it.
+ */
+export interface RegexScript {
+  id: string
+  name: string
+  /** A JS regex source string. Applied globally (an implicit `g` flag); add other flags in `flags`. */
+  find: string
+  /** Replacement string — supports `$1`/`$<name>` backrefs, and `\n` for a newline. */
+  replace: string
+  /** Extra regex flags beyond the implicit `g` (e.g. `i`, `s`, `m`). */
+  flags?: string
+  target: 'display' | 'prompt' | 'both'
+  enabled: boolean
+}
+
 export type GiftRarity = 'common' | 'uncommon' | 'rare' | 'epic'
 
 export interface GiftItem {
@@ -218,6 +259,8 @@ export interface Chat {
   /** How many times this relationship has broken up (deliberately or from unresolved strain) — the "lasting scar" persists as this counter plus a one-time stat hit at break time, not a literal permanent ceiling. */
   breakupCount?: number
   sceneFlags?: SceneFlag[]
+  /** Per-chat steering note (SillyTavern's Author's Note) — see `AuthorNote`. Unset = none. */
+  authorNote?: AuthorNote
   giftCoins?: number
   giftInventory?: Record<string, number>
   giftsGiven?: Record<string, number>
@@ -239,8 +282,16 @@ export interface WorldInfoBook {
   id: string
   name: string
   book: Lorebook
-  /** Chat ids this global book is bound to; empty = available to all chats. */
+  /**
+   * Scoping for this standalone book. When `boundChatIds`, `boundCharacterIds`, and
+   * `boundWorldIds` are ALL empty the book is global — active in every chat (the original
+   * behaviour, and what every book created before scoping existed still gets). Otherwise the book
+   * is active only for a chat that matches: its own id is in `boundChatIds`, its primary
+   * character is in `boundCharacterIds`, or that character's world is in `boundWorldIds`.
+   */
   boundChatIds: string[]
+  boundCharacterIds?: string[]
+  boundWorldIds?: string[]
   createdAt: number
 }
 

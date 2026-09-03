@@ -145,6 +145,12 @@ function normalizeItemDefs(raw: unknown, allowedFlags: Set<string>) {
     }))
 }
 
+/** A deduped array of non-empty string ids, always an array (never undefined) — for World Info book scoping. */
+function normalizeIdArray(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  return [...new Set(raw.filter((v): v is string => typeof v === 'string' && !!v.trim()).map((v) => v.trim()))]
+}
+
 /** A trimmed, non-empty-string array or undefined — used for the free-text `giftLikes`/`giftDislikes` lists. */
 function normalizeStringArray(raw: unknown): string[] | undefined {
   if (!Array.isArray(raw)) return undefined
@@ -510,12 +516,23 @@ app.get('/api/world-info-books', (_req, res) => {
 })
 
 app.post('/api/world-info-books', (req, res) => {
-  const created = worldInfoBookStore.insert({ ...req.body, id: req.body.id || newId(), createdAt: Date.now() })
+  const created = worldInfoBookStore.insert({
+    ...req.body,
+    id: req.body.id || newId(),
+    boundChatIds: normalizeIdArray(req.body.boundChatIds),
+    boundCharacterIds: normalizeIdArray(req.body.boundCharacterIds),
+    boundWorldIds: normalizeIdArray(req.body.boundWorldIds),
+    createdAt: Date.now(),
+  })
   res.status(201).json(created)
 })
 
 app.put('/api/world-info-books/:id', (req, res) => {
-  const updated = worldInfoBookStore.update(req.params.id, req.body)
+  const patch: Record<string, unknown> = { ...req.body }
+  for (const key of ['boundChatIds', 'boundCharacterIds', 'boundWorldIds'] as const) {
+    if (key in req.body) patch[key] = normalizeIdArray(req.body[key])
+  }
+  const updated = worldInfoBookStore.update(req.params.id, patch)
   if (!updated) return notFound(res)
   res.json(updated)
 })

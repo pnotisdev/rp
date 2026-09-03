@@ -91,8 +91,12 @@ export function PromptInspector({
               </p>
             ) : (
               <ul className="mb-5 space-y-1 text-xs">
-                {result.activatedEntries.map((e) => (
-                  <li key={e.id} className="rounded-lg bg-bg-sunken px-2.5 py-1.5">
+                {/* Entry ids are only unique within one lorebook — the synthetic "Remembered
+                    facts" book uses id 0,1,2… which collides with low ids from an imported
+                    character/world book. This list is display-only and never reorders, so the
+                    map index is a safe stable key. */}
+                {result.activatedEntries.map((e, i) => (
+                  <li key={i} className="rounded-lg bg-bg-sunken px-2.5 py-1.5">
                     <span className="font-medium text-text">{e.keys.join(', ') || '(no keys)'}</span>
                     <span className="text-text-muted"> — {e.content.slice(0, 80)}</span>
                   </li>

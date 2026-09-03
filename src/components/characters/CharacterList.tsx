@@ -35,17 +35,20 @@ export function CharacterList({
   const visible = tagsAsFolders && activeFolder ? groups.get(activeFolder) ?? [] : filtered
 
   return (
-    <div className="flex-1 overflow-y-auto p-8">
-      <div className="mb-8 flex items-center justify-between gap-3">
+    <div className="mx-auto w-full max-w-4xl flex-1 overflow-y-auto p-8">
+      <div className="mb-6 flex items-center justify-between gap-3">
+        <h2 className="font-display text-lg text-text">Characters</h2>
+        <Button variant="primary" onClick={onCreateNew}>
+          New character
+        </Button>
+      </div>
+      <div className="mb-6">
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search characters…"
-          className="max-w-xs flex-1 rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40"
+          className="w-full max-w-xs rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40"
         />
-        <Button variant="primary" onClick={onCreateNew}>
-          + New character
-        </Button>
       </div>
 
       {tagsAsFolders && groups.size > 1 && (
@@ -68,33 +71,35 @@ export function CharacterList({
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-6 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4">
         {visible.map((c) => (
           <button
             key={c.id}
             onClick={() => onSelect(c)}
-            className="themed-shadow group rounded-2xl bg-bg-elevated p-4 text-left transition-transform hover:-translate-y-0.5"
+            className="themed-shadow group rounded-2xl bg-bg-elevated p-3 text-left transition-transform hover:-translate-y-0.5"
           >
             <div className="portrait-frame mb-3 aspect-[3/4] w-full rounded-xl">
               {c.avatarDataUrl ? (
-                <img src={c.avatarDataUrl} className="h-full w-full object-cover" />
+                <img src={c.avatarDataUrl} alt="" className="h-full w-full object-cover" />
               ) : (
                 <div className="flex h-full w-full items-center justify-center bg-bg-sunken text-2xl text-text-muted">
                   {c.card.name.slice(0, 1).toUpperCase()}
                 </div>
               )}
             </div>
-            <div className="truncate text-sm font-medium text-text">{c.card.name}</div>
+            <div className="truncate px-1 text-sm font-medium text-text">{c.card.name}</div>
             <div className="truncate text-xs text-text-muted">{c.card.creator || ' '}</div>
           </button>
         ))}
         {visible.length === 0 && (
-          <div className="col-span-full py-16 text-center text-sm text-text-muted">
-            <p className="mb-3">
-              No characters yet. Click <b className="text-text">+ New character</b> to get started — from
-              there you can write one from scratch, start from a bundled template, generate one with AI,
-              or import a SillyTavern card.
+          <div className="col-span-full rounded-2xl border border-dashed border-border px-6 py-16 text-center">
+            <p className="mx-auto mb-4 max-w-sm text-sm text-text-muted">
+              No characters yet. Create one from scratch, start from a bundled template, generate one
+              with AI, or import a SillyTavern card.
             </p>
+            <Button variant="primary" onClick={onCreateNew}>
+              New character
+            </Button>
           </div>
         )}
       </div>

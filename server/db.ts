@@ -17,6 +17,15 @@ export const db = new DatabaseSync(path.join(dataDir, 'rp.db'))
 db.exec('PRAGMA journal_mode = WAL')
 db.exec('PRAGMA foreign_keys = ON')
 
+/**
+ * Fold the write-ahead log back into rp.db so the main database file is self-contained and
+ * current. WAL writes are already durable on disk (in rp.db-wal); this just means the primary
+ * file alone is enough for a manual copy/backup. Called on clean server shutdown.
+ */
+export function checkpointDb(): void {
+  db.exec('PRAGMA wal_checkpoint(TRUNCATE)')
+}
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS characters (
     id TEXT PRIMARY KEY,

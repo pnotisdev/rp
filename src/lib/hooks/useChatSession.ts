@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { charactersApi, chatFactsApi, chatsApi, messagesApi, objectivesApi, personasApi, relationshipEventsApi, worldInfoBooksApi, worldsApi } from '@/lib/api/client'
 import { newId } from '@/lib/id'
-import type { Chat, CommitmentStatus, DateEventCard, ObjectiveTask, RelationshipStage, StoredMessage, WorldCard } from '@/lib/types'
+import type { AuthorNote, Chat, CommitmentStatus, DateEventCard, ObjectiveTask, RelationshipStage, StoredMessage, WorldCard } from '@/lib/types'
 import { collectImageBase64, composeMessageText, type PendingAttachment } from '@/lib/attachments'
 import { KoboldClient, makeGenKey } from '@/lib/api/kobold'
 import { buildPrompt, estimateTokens, type ChatMessage } from '@/lib/prompt/builder'
@@ -48,6 +48,7 @@ import { getInstructTemplate } from '@/lib/prompt/instructTemplates'
 import { extractSceneTag, stripSceneTagForDisplay, type SceneTag } from '@/lib/vn/sceneTag'
 import { DEFAULT_EXPRESSION_IDS } from '@/lib/vn/expressions'
 import { DEFAULT_BACKGROUND_IDS } from '@/lib/vn/backgrounds'
+import { bookAppliesToChat } from '@/lib/worldinfo/scope'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import { errorMessage, toastError, toastInfo, toastSuccess } from '@/lib/store/useToastStore'
 import type { Character, Lorebook } from '@/lib/characters/cardSpec'
@@ -289,6 +290,7 @@ export function useChatSession(chatId: string | null) {
   const autoTrackRelationship = useSettingsStore((s) => s.autoTrackRelationship)
   const relationshipDifficulty = useSettingsStore((s) => s.relationshipDifficulty)
   const autoSuggestChoices = useSettingsStore((s) => s.autoSuggestChoices)
+  const regexScripts = useSettingsStore((s) => s.regexScripts)
   const setActiveChatId = useSettingsStore((s) => s.setActiveChatId)
   const client = useMemo(() => new KoboldClient(baseUrl), [baseUrl])
   const template = getInstructTemplate(instructTemplateId)
@@ -350,6 +352,32 @@ export function useChatSession(chatId: string | null) {
     setReplyAsCharacterId(null)
   }, [chatId])
 
+  // Background "assist" work kicked off after a reply lands — memory summary, objective checks,
+  // relationship scoring, choice suggestions. Each is its own model call, and on a local
+  // single-GPU KoboldCpp server they queue up (and ahead of the next reply), so the roadmap
+  // wants the wait legible rather than a result that silently pops in seconds later. `key -> label`.
+  const [assistTasks, setAssistTasks] = useState<Record<string, string>>({})
+  useEffect(() => {
+    setAssistTasks({})
+  }, [chatId])
+  const runAssist = useCallback((key: string, label: string, fn: () => Promise<unknown>) => {
+    setAssistTasks((t) => ({ ...t, [key]: label }))
+    void Promise.resolve()
+      .then(fn)
+      .catch(() => {})
+      .finally(() =>
+        setAssistTasks((t) => {
+          if (!(key in t)) return t
+          const { [key]: _drop, ...rest } = t
+          return rest
+        }),
+      )
+  }, [])
+  // Fixed order so the strip doesn't reshuffle as tasks finish at different times.
+  const assistActivity = ['relationship', 'choices', 'tasks', 'summary']
+    .map((k) => assistTasks[k])
+    .filter((label): label is string => !!label)
+
   // Resolves which character's card is "active" (gets the full system_prompt/description/
   // personality/scenario treatment) for a given speaker id, plus everyone else in the scene as a
   // compact roster — reused by both prompt-building and generation so they never disagree about
@@ -393,7 +421,13 @@ export function useChatSession(chatId: string | null) {
       // currently speaking — a roster member's card_book stays active in the background.
       const lorebooks = [speaker, ...roster].map((c) => c.card.character_book).filter((b): b is Lorebook => !!b)
       const boundBooks = worldInfoBooks
-        .filter((b) => b.boundChatIds.length === 0 || b.boundChatIds.includes(freshChat.id))
+        .filter((b) =>
+          bookAppliesToChat(b, {
+            chatId: freshChat.id,
+            characterId: character.id,
+            worldId: character.worldId,
+          }),
+        )
         .map((b) => b.book)
       const worldLorebook = world?.lorebook ? [world.lorebook] : []
       // Remembered facts ride through the exact same activation/budget/placement machinery as
@@ -482,6 +516,8 @@ export function useChatSession(chatId: string | null) {
         impersonateAsUser: opts?.impersonateAsUser,
         activeObjective: objectiveForPrompt,
         relationshipDescription,
+        authorNote: freshChat.authorNote,
+        regexScripts,
         sceneOptions: {
           // VN scene-tagging stays keyed on the primary for now — per-participant sprites are a
           // separate, larger lift (VNStage is built entirely around one character's sprite state).
@@ -504,6 +540,7 @@ export function useChatSession(chatId: string | null) {
       countTokens,
       messages,
       persona,
+      regexScripts,
       resolveSpeaker,
       sampler,
       template,
@@ -896,6 +933,20 @@ export function useChatSession(chatId: string | null) {
     return buildCurrentPrompt(historyForPrompt, { speakerId: replyAsCharacterId })
   }, [buildCurrentPrompt, messages, replyAsCharacterId])
 
+  /**
+   * Save (or clear) this chat's Author's Note. A blank note is stored as `null`, not an empty
+   * object — `JSON.stringify` drops `undefined` keys before the request is sent, so clearing has
+   * to send an explicit `null` for the server's merge to actually overwrite the old value (same
+   * guard as `activeEvent`; see ROADMAP §9 / changelog #28).
+   */
+  const updateAuthorNote = useCallback(
+    async (note: AuthorNote | null) => {
+      if (!chatId) return
+      await chatsApi.update(chatId, { authorNote: note && note.text.trim() ? note : null })
+    },
+    [chatId],
+  )
+
   /** Best-effort: proposes a few next-move options for the user, attached to the char message they follow from. Never blocks the reply. */
   const suggestChoicesForMessage = useCallback(
     async (messageId: string, historyForChoices: ChatMessage[]) => {
@@ -1041,24 +1092,31 @@ export function useChatSession(chatId: string | null) {
           })
         }
         await chatsApi.update(chat.id, {}) // bumps updatedAt so the chat resorts to the top
-        if (autoSummarize) {
-          // Fire-and-forget: keeps long-term memory warm without blocking the reply that just landed.
-          updateMemorySummary().catch(() => {})
-        }
-        if (autoDetectTasks) {
-          detectAndMarkTasks(chat.id, combined).catch(() => {})
-        }
+
+        // Post-reply assists. Each is fire-and-forget (never blocks the reply that just landed) but
+        // routed through `runAssist` so the chat can show which ones are still running — on a local
+        // single-GPU server they queue up on the model, and their results otherwise appear with no
+        // warning that they were coming.
         const relationshipHistory = continuing
           ? [...historyForPrompt.slice(0, -1), { id: targetMessageId, role: 'char' as const, name: speaker.card.name, text: combined }]
           : [...historyForPrompt, { id: targetMessageId, role: 'char' as const, name: speaker.card.name, text: combined }]
         // A live, scored date (10b) suppresses the normal per-turn drip-feed — its outcome is
         // resolved once, at the end, by endDateEvent's own assessDateOutcome pass instead.
         const inLiveDate = chat.activeEvent?.kind === 'date' && !!chat.activeEvent.startedAt
+
         if (autoTrackRelationship && isPrimarySpeaker && !inLiveDate) {
-          updateAffectionFromReply(chat.id, relationshipHistory, combined).catch(() => {})
+          runAssist('relationship', 'Updating relationship', () =>
+            updateAffectionFromReply(chat.id, relationshipHistory, combined),
+          )
         }
         if (autoSuggestChoices && isPrimarySpeaker) {
-          suggestChoicesForMessage(targetMessageId, relationshipHistory).catch(() => {})
+          runAssist('choices', 'Suggesting replies', () => suggestChoicesForMessage(targetMessageId, relationshipHistory))
+        }
+        if (autoDetectTasks) {
+          runAssist('tasks', 'Checking objective', () => detectAndMarkTasks(chat.id, combined))
+        }
+        if (autoSummarize) {
+          runAssist('summary', 'Updating memory', () => updateMemorySummary())
         }
       } catch (e) {
         toastError(errorMessage(e))
@@ -1086,6 +1144,7 @@ export function useChatSession(chatId: string | null) {
       countTokens,
       detectAndMarkTasks,
       resolveSpeaker,
+      runAssist,
       sampler,
       suggestChoicesForMessage,
       template,
@@ -1568,6 +1627,7 @@ export function useChatSession(chatId: string | null) {
     isGenerating,
     streamingText,
     generatingMessageId,
+    assistActivity,
     sendUserMessage,
     regenerate,
     swipe,
@@ -1576,6 +1636,7 @@ export function useChatSession(chatId: string | null) {
     togglePinMessage,
     abortGeneration,
     previewPrompt,
+    updateAuthorNote,
     updateMemorySummary,
     continueMessage,
     canContinue,

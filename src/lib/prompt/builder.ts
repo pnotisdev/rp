@@ -3,6 +3,8 @@ import { substituteMacros } from '@/lib/characters/macros'
 import { activateWorldInfo, recentMessagesText } from '@/lib/worldinfo/activation'
 import { estimateTokens } from '@/lib/tokenEstimate'
 import { buildSceneInstruction } from '@/lib/vn/sceneTag'
+import { applyRegexScripts } from '@/lib/text/regexScripts'
+import type { RegexScript } from '@/lib/types'
 import type { InstructTemplate } from './instructTemplates'
 
 export interface ChatMessage {
@@ -41,6 +43,15 @@ export interface PromptBuildInput {
   activeObjective?: { title: string; description?: string; pendingTasks: string[] }
   /** A short, natural-language relationship-stage nudge (never raw numbers) — same late placement as activeObjective. Pre-built by the caller since it's dating-sim-specific, not a core builder concern. */
   relationshipDescription?: string
+  /**
+   * SillyTavern-style Author's Note — a per-chat steering line placed at a chosen point in the
+   * prompt (see `AuthorNote` in `types.ts`). Macro-substituted here like any other text field;
+   * a blank/whitespace `text` is ignored entirely. `at_depth` is injected into the chat history
+   * `depth` turns up from the latest; `before_char`/`after_char` sit in the fixed identity region.
+   */
+  authorNote?: { text: string; position: 'before_char' | 'after_char' | 'at_depth'; depth: number }
+  /** User-defined find/replace rules applied (prompt target) to each history turn's text before it's rendered into the prompt. */
+  regexScripts?: RegexScript[]
   /** Expression/background ids the model may tag this reply with (Visual Novel mode) — omitted entirely when empty. */
   sceneOptions?: { expressionIds: string[]; backgroundIds: string[] }
   /** Current relationship score for unlock-gated lore entries. */
@@ -138,19 +149,29 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
   const worldBefore = before.map((e) => sub(e.content)).join('\n')
   const worldAfter = after.map((e) => sub(e.content)).join('\n')
 
+  // SillyTavern's Author's Note. `before_char`/`after_char` sit in the fixed region below;
+  // `at_depth` is spliced into the trimmed history further down. A blank note is a no-op.
+  const authorNoteText = input.authorNote?.text?.trim() ? sub(input.authorNote.text) : ''
+  const authorNotePosition = input.authorNote?.position ?? 'at_depth'
+  const authorNoteDepth = Math.max(0, Math.floor(Number(input.authorNote?.depth) || 0))
+
   const fixedSections = [
     systemBlock,
     summaryBlock,
     worldBlock,
     worldBefore,
+    authorNoteText && authorNotePosition === 'before_char' ? authorNoteText : '',
     descriptionBlock,
     participantsBlock,
     worldAfter,
     personaBlock,
     exampleBlock,
+    authorNoteText && authorNotePosition === 'after_char' ? authorNoteText : '',
   ].filter(Boolean)
   const fixedText = fixedSections.join('\n\n')
   const fixedTokens = await countTokens(fixedText)
+  const authorNoteAtDepthTokens =
+    authorNoteText && authorNotePosition === 'at_depth' ? await countTokens(authorNoteText) : 0
 
   // Injected right before generation — same "late" placement as ST's post-history-instructions,
   // which is exactly where steering toward an in-progress objective is most effective.
@@ -170,20 +191,20 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
   const historyForTrimming = continuing ? history.slice(0, -1) : history
 
   const genCue = continuing
-    ? `${turnPrefix(continuedTurn!.role, continuedTurn!.name, template)}${continuedTurn!.text}`
+    ? `${turnPrefix(continuedTurn!.role, continuedTurn!.name, template)}${applyRegexScripts(continuedTurn!.text, input.regexScripts, 'prompt')}`
     : input.impersonateAsUser
       ? turnPrefix('user', macroCtx.userName, template)
       : turnPrefix('char', input.nextSpeakerName?.trim() || macroCtx.charName, template)
   const genCueTokens = await countTokens(genCue)
 
-  let remaining = contextBudget - fixedTokens - postHistoryTokens - genCueTokens
+  let remaining = contextBudget - fixedTokens - postHistoryTokens - genCueTokens - authorNoteAtDepthTokens
   const includedTurns: { text: string; tokens: number }[] = []
   let excludedCount = 0
 
   // Walk newest -> oldest, keep what fits; always keep at least the latest turn.
   for (let i = historyForTrimming.length - 1; i >= 0; i--) {
     const msg = historyForTrimming[i]
-    const rendered = renderTurn(msg, template, macroCtx)
+    const rendered = renderTurn(msg, template, macroCtx, input.regexScripts)
     const tokens = await countTokens(rendered)
     if (tokens <= remaining || includedTurns.length === 0) {
       includedTurns.push({ text: rendered, tokens })
@@ -193,6 +214,13 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
     }
   }
   includedTurns.reverse()
+
+  // Author's Note "at depth": drop it in as its own line `depth` turns up from the latest — depth
+  // 0 is right before the generation cue, higher values blend it further back into the transcript.
+  if (authorNoteAtDepthTokens > 0) {
+    const insertAt = Math.max(0, includedTurns.length - authorNoteDepth)
+    includedTurns.splice(insertAt, 0, { text: `${authorNoteText}\n\n`, tokens: authorNoteAtDepthTokens })
+  }
 
   const historyText = includedTurns.map((t) => t.text).join('')
   const tailParts = [historyText, postHistoryBlock].filter(Boolean)
@@ -241,6 +269,7 @@ function renderTurn(
   msg: ChatMessage,
   template: InstructTemplate,
   macroCtx: { charName: string; userName: string },
+  regexScripts?: RegexScript[],
 ): string {
   // A char turn is rendered under its own speaker's name (group chats can have several), not
   // always the scene's primary character — every message already carries its actual speaker's
@@ -249,5 +278,5 @@ function renderTurn(
   const name = msg.role === 'user' ? macroCtx.userName : msg.name?.trim() || macroCtx.charName
   const prefix = turnPrefix(msg.role, name, template)
   const suffix = msg.role === 'user' ? template.userSuffix : template.assistantSuffix
-  return `${prefix}${msg.text}${suffix}`
+  return `${prefix}${applyRegexScripts(msg.text, regexScripts, 'prompt')}${suffix}`
 }

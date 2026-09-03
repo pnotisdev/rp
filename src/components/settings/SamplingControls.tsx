@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/Button'
 import { TextField } from '@/components/ui/Field'
 import { Section } from '@/components/ui/Section'
 import { SettingsPage } from '@/components/ui/SettingsPage'
+import { RegexScriptsSection } from './RegexScriptsSection'
 
 // Simple-mode sliders derive several raw params from one intuitive 0-100 value each.
 function creativityToParams(v: number) {
@@ -125,7 +126,7 @@ export function SamplingControls() {
           checked={autoSummarize}
           onChange={setAutoSummarize}
           label="Auto-summarize older history"
-          description="Runs after each reply, and proactively if a turn is about to hit the context limit"
+          description="One model call, but only once enough new history has built up (not every reply), plus immediately if a turn is about to overflow the context limit"
         />
         <Slider
           label="Keep verbatim"
@@ -167,7 +168,7 @@ export function SamplingControls() {
           checked={autoDetectTasks}
           onChange={setAutoDetectTasks}
           label="Auto-detect completed tasks"
-          description="A quick check after each reply — conservative by design, so it only ever checks things off, never invents progress"
+          description="One model call after a reply, only while an objective is active — conservative, so it only ticks things off, never invents progress"
         />
       </Section>
 
@@ -179,7 +180,7 @@ export function SamplingControls() {
           checked={autoTrackRelationship}
           onChange={setAutoTrackRelationship}
           label="Auto-track relationship"
-          description="Runs in the background right after a reply lands — never blocks or delays it"
+          description="A model call after each reply. It won't hold up the reply you just got, but on a local single-GPU server it queues with the other post-reply assists ahead of your next message — the chat shows a strip while it runs."
         />
         <div className="pt-3">
           <div className="mb-1.5 text-sm text-text">Difficulty</div>
@@ -211,7 +212,7 @@ export function SamplingControls() {
           checked={autoSuggestChoices}
           onChange={setAutoSuggestChoices}
           label="Suggest choices after each reply"
-          description="Runs in the background right after a reply lands — never blocks or delays it"
+          description="One model call after each reply. Same as relationship tracking, it shares the GPU with your next message — turn it off for pure freeform writing."
         />
       </Section>
 
@@ -333,6 +334,8 @@ export function SamplingControls() {
           </div>
         )}
       </Section>
+
+      <RegexScriptsSection />
     </SettingsPage>
   )
 }

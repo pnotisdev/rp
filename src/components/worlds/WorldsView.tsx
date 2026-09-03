@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Globe } from 'lucide-react'
+import { Globe, ImagePlus } from 'lucide-react'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { worldsApi } from '@/lib/api/client'
 import type { CustomSceneFlag, GiftItem, GiftRarity, ItemDef, ItemEffect, RelationshipDimension, WorldCard } from '@/lib/types'
@@ -8,8 +8,11 @@ import { DEFAULT_BACKGROUNDS } from '@/lib/vn/backgrounds'
 import { combinedSceneFlags, formatRelationshipStage, RELATIONSHIP_MILESTONES } from '@/lib/dating/stage'
 import { advancePhase, getCalendarInfo, getEnergyRemaining, getMaxEnergyForDay, getWeather, describeWeather, PHASES } from '@/lib/world/calendar'
 import { newId } from '@/lib/id'
-import { TextAreaField, TextField } from '@/components/ui/Field'
+import { NumberField, SelectField, TextAreaField, TextField } from '@/components/ui/Field'
 import { Button } from '@/components/ui/Button'
+import { Section } from '@/components/ui/Section'
+import { EditorShell, type EditorTab } from '@/components/ui/EditorShell'
+import { ListEditor } from '@/components/ui/ListEditor'
 import { errorMessage, toastError } from '@/lib/store/useToastStore'
 import { LorebookEditor } from '@/components/worldinfo/LorebookEditor'
 
@@ -28,9 +31,7 @@ const DEFAULT_THRESHOLDS = Object.fromEntries(RELATIONSHIP_MILESTONES.map((m) =>
   (typeof EDITABLE_STAGES)[number] | 'near_strangers',
   number
 >
-const DEFAULT_STAGE_HINT = EDITABLE_STAGES.map((s) => `${formatRelationshipStage(s)} ${DEFAULT_THRESHOLDS[s]}`).join(
-  ', ',
-)
+const DEFAULT_STAGE_HINT = EDITABLE_STAGES.map((s) => `${formatRelationshipStage(s)} ${DEFAULT_THRESHOLDS[s]}`).join(', ')
 
 function blankWorld(): Omit<WorldCard, 'id' | 'createdAt' | 'updatedAt'> {
   return {
@@ -46,55 +47,69 @@ export function WorldsView() {
   const [selected, setSelected] = useState<WorldCard | 'new' | null>(null)
 
   if (selected) {
-    return (
-      <WorldEditor
-        world={selected === 'new' ? null : selected}
-        onDone={() => setSelected(null)}
-      />
-    )
+    return <WorldEditor world={selected === 'new' ? null : selected} onDone={() => setSelected(null)} />
   }
 
   return (
-    <div className="flex-1 overflow-y-auto p-8">
-      <div className="mb-8 flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-text">Worlds</h2>
+    <div className="mx-auto w-full max-w-4xl flex-1 overflow-y-auto p-8">
+      <div className="mb-2 flex items-center justify-between">
+        <h2 className="font-display text-lg text-text">Worlds</h2>
         <Button variant="primary" onClick={() => setSelected('new')}>
-          + New world
+          New world
         </Button>
       </div>
-      <div className="grid grid-cols-2 gap-6 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+      <p className="mb-8 max-w-lg text-sm text-text-muted">
+        A world is a shared setting — its tone, its rules, its lore, and its scene backgrounds. Any
+        number of characters can live in one; assign a world from the character's editor.
+      </p>
+
+      <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4">
         {worlds.map((w) => (
           <button
             key={w.id}
             onClick={() => setSelected(w)}
-            className="themed-shadow group rounded-2xl bg-bg-elevated p-4 text-left transition-transform hover:-translate-y-0.5"
+            className="themed-shadow group rounded-2xl bg-bg-elevated p-3 text-left transition-transform hover:-translate-y-0.5"
           >
-            <div className="portrait-frame mb-3 aspect-[3/4] w-full rounded-xl">
+            <div className="portrait-frame mb-3 aspect-[4/3] w-full rounded-xl">
               {w.avatarDataUrl ? (
-                <img src={w.avatarDataUrl} className="h-full w-full object-cover" />
+                <img src={w.avatarDataUrl} alt="" className="h-full w-full object-cover" />
               ) : (
                 <div className="flex h-full w-full items-center justify-center bg-bg-sunken text-text-muted">
-                  <Globe size={28} strokeWidth={1.5} />
+                  <Globe size={26} strokeWidth={1.5} />
                 </div>
               )}
             </div>
-            <div className="truncate text-sm font-medium text-text">{w.name}</div>
-            <div className="truncate text-xs text-text-muted">{w.lorebook.entries.length} lore entries</div>
+            <div className="truncate px-1 text-sm font-medium text-text">{w.name}</div>
+            <div className="truncate px-1 text-xs text-text-muted">
+              {w.lorebook.entries.length} {w.lorebook.entries.length === 1 ? 'lore entry' : 'lore entries'}
+            </div>
           </button>
         ))}
         {worlds.length === 0 && (
-          <p className="col-span-full py-16 text-center text-sm text-text-muted">
-            No worlds yet. A world holds the setting and shared lore that any number of characters can
-            live in — create one, then assign it to a character from that character's editor.
-          </p>
+          <div className="col-span-full rounded-2xl border border-dashed border-border px-6 py-16 text-center">
+            <Globe size={28} strokeWidth={1.25} className="mx-auto mb-3 text-text-muted" />
+            <p className="mb-4 text-sm text-text-muted">No worlds yet.</p>
+            <Button variant="primary" onClick={() => setSelected('new')}>
+              Create your first world
+            </Button>
+          </div>
         )}
       </div>
     </div>
   )
 }
 
+const WORLD_TABS: EditorTab[] = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'lore', label: 'Lore' },
+  { id: 'scenes', label: 'Scenes' },
+  { id: 'dating', label: 'Dating sim' },
+  { id: 'clock', label: 'Clock' },
+]
+
 function WorldEditor({ world, onDone }: { world: WorldCard | null; onDone: () => void }) {
   const base = world ?? { id: '', createdAt: 0, updatedAt: 0, ...blankWorld() }
+  const [tab, setTab] = useState('overview')
   const [name, setName] = useState(base.name)
   const [description, setDescription] = useState(base.description)
   const [rules, setRules] = useState(base.rules ?? '')
@@ -109,75 +124,59 @@ function WorldEditor({ world, onDone }: { world: WorldCard | null; onDone: () =>
   const [currentDay, setCurrentDay] = useState(base.currentDay ?? 0)
   const [currentPhaseIndex, setCurrentPhaseIndex] = useState(base.currentPhaseIndex ?? 0)
   const [advancing, setAdvancing] = useState(false)
+  const [saving, setSaving] = useState(false)
 
   const save = async () => {
+    setSaving(true)
+    // The world clock (currentDay/currentPhaseIndex) is deliberately excluded — this editor only
+    // reads it once at mount for display; a live chat advances the real clock independently, and
+    // sending the stale mount-time snapshot here would roll it back.
+    const payload = {
+      name,
+      description,
+      rules,
+      lorebook,
+      avatarDataUrl,
+      backgrounds,
+      backgroundUnlocks,
+      gifts,
+      items,
+      customSceneFlags,
+      relationshipThresholds: thresholds,
+    }
     try {
-      if (world) {
-        // Deliberately does NOT send currentDay/currentPhaseIndex: this editor only ever reads
-        // them into local state once, at mount, for display — a live chat's own actions (dates,
-        // energy spend) advance the world's real clock independently via `advanceClock` below and
-        // its own narrowly-scoped PUT. Including the stale mount-time snapshot here would silently
-        // roll the clock back to whatever it was when this editor happened to be opened, discarding
-        // any progress made elsewhere in the meantime.
-        await worldsApi.update(world.id, {
-          name,
-          description,
-          rules,
-          lorebook,
-          avatarDataUrl,
-          backgrounds,
-          backgroundUnlocks,
-          gifts,
-          items,
-          customSceneFlags,
-          relationshipThresholds: thresholds,
-        })
-      } else {
-        await worldsApi.create({
-          name,
-          description,
-          rules,
-          lorebook,
-          avatarDataUrl,
-          backgrounds,
-          backgroundUnlocks,
-          gifts,
-          items,
-          customSceneFlags,
-          relationshipThresholds: thresholds,
-        })
-      }
+      if (world) await worldsApi.update(world.id, payload)
+      else await worldsApi.create(payload)
     } catch (e) {
       toastError(errorMessage(e))
       return
+    } finally {
+      setSaving(false)
     }
     onDone()
   }
 
-  const addGift = () => {
+  const addGift = () =>
     setGifts((g) => [...g, { id: newId(), name: `Gift ${g.length + 1}`, rarity: 'common', price: 5, tags: [] }])
-  }
-
-  const updateGift = (id: string, patch: Partial<GiftItem>) => {
+  const updateGift = (id: string, patch: Partial<GiftItem>) =>
     setGifts((g) => g.map((item) => (item.id === id ? { ...item, ...patch } : item)))
-  }
+  const removeGift = (id: string) => setGifts((g) => g.filter((item) => item.id !== id))
 
-  const removeGift = (id: string) => {
-    setGifts((g) => g.filter((item) => item.id !== id))
-  }
-
-  const addItem = () => {
+  const addItem = () =>
     setItems((list) => [
       ...list,
-      { id: newId(), name: `Item ${list.length + 1}`, rarity: 'common', price: 5, tags: [], effect: { kind: 'relationship', dimension: 'affection', amount: 1 } },
+      {
+        id: newId(),
+        name: `Item ${list.length + 1}`,
+        rarity: 'common',
+        price: 5,
+        tags: [],
+        effect: { kind: 'relationship', dimension: 'affection', amount: 1 },
+      },
     ])
-  }
-
-  const updateItem = (id: string, patch: Partial<ItemDef>) => {
+  const updateItem = (id: string, patch: Partial<ItemDef>) =>
     setItems((list) => list.map((i) => (i.id === id ? { ...i, ...patch } : i)))
-  }
-
-  /** Switching effect kind replaces the effect with clean defaults, rather than merging, so a leftover `dimension`/`flag`/`amount` from the previous kind never lingers unseen in what gets saved. */
+  /** Switching effect kind replaces the effect wholesale so no stale field from the old kind lingers in what's saved. */
   const setItemEffectKind = (id: string, kind: ItemEffect['kind']) => {
     const next: ItemEffect =
       kind === 'flag'
@@ -187,30 +186,17 @@ function WorldEditor({ world, onDone }: { world: WorldCard | null; onDone: () =>
           : { kind: 'relationship', dimension: 'affection', amount: 1 }
     updateItem(id, { effect: next })
   }
-
-  const setItemEffectField = (id: string, patch: Partial<ItemEffect>) => {
+  const setItemEffectField = (id: string, patch: Partial<ItemEffect>) =>
     setItems((list) => list.map((i) => (i.id === id ? { ...i, effect: { ...i.effect, ...patch } as ItemEffect } : i)))
-  }
+  const removeItem = (id: string) => setItems((list) => list.filter((i) => i.id !== id))
 
-  const removeItem = (id: string) => {
-    setItems((list) => list.filter((i) => i.id !== id))
-  }
-
-  const addCustomSceneFlag = () => {
+  const addCustomSceneFlag = () =>
     setCustomSceneFlags((list) => [...list, { id: newId(), label: `Flag ${list.length + 1}`, description: '' }])
-  }
-
-  const updateCustomSceneFlag = (id: string, patch: Partial<CustomSceneFlag>) => {
+  const updateCustomSceneFlag = (id: string, patch: Partial<CustomSceneFlag>) =>
     setCustomSceneFlags((list) => list.map((f) => (f.id === id ? { ...f, ...patch } : f)))
-  }
-
   const removeCustomSceneFlag = (id: string) => {
     setCustomSceneFlags((list) => list.filter((f) => f.id !== id))
-    // An item's "Set scene flag" effect referencing the removed flag would otherwise silently
-    // keep pointing at a dead id — fall it back to the always-available default the same way
-    // `setItemEffectKind` seeds a fresh flag effect, rather than leaving an item that can never
-    // actually fire (the server would reject the unrecognized id and coerce it to a different
-    // effect kind entirely on next save, which is far more surprising than this).
+    // Fall any item pointing at the removed flag back to a default, so it isn't left with a dead reference.
     setItems((list) =>
       list.map((i) => (i.effect.kind === 'flag' && i.effect.flag === id ? { ...i, effect: { kind: 'flag', flag: 'first_date' } } : i)),
     )
@@ -219,20 +205,17 @@ function WorldEditor({ world, onDone }: { world: WorldCard | null; onDone: () =>
   const setThreshold = (stage: (typeof EDITABLE_STAGES)[number], value: string) => {
     setThresholds((t) => {
       const next = { ...t }
-      if (value.trim() === '') {
-        delete next[stage]
-      } else {
-        next[stage] = Math.max(0, Math.min(100, Number(value) || 0))
-      }
+      if (value.trim() === '') delete next[stage]
+      else next[stage] = Math.max(0, Math.min(100, Number(value) || 0))
       return next
     })
   }
 
   const handleBackgroundPick = async (tagId: string, file: File) => {
+    setBackgrounds((b) => ({ ...b, [tagId]: '' }))
     const dataUrl = await fileToDataUrl(file)
     setBackgrounds((b) => ({ ...b, [tagId]: dataUrl }))
   }
-
   const removeBackground = (tagId: string) => {
     setBackgrounds((b) => {
       const next = { ...b }
@@ -245,16 +228,10 @@ function WorldEditor({ world, onDone }: { world: WorldCard | null; onDone: () =>
       return next
     })
   }
-
-  const setBackgroundUnlock = (tagId: string, minAffection: number) => {
+  const setBackgroundUnlock = (tagId: string, minAffection: number) =>
     setBackgroundUnlocks((b) => ({ ...b, [tagId]: Math.max(0, Math.min(100, minAffection)) }))
-  }
 
   const advanceClock = async () => {
-    // Guards against a fast double-click firing two requests off the same stale closed-over
-    // currentDay/currentPhaseIndex (state only updates after the await below) — without this the
-    // second click silently computed and requested the identical "next phase" as the first
-    // instead of actually advancing an extra step.
     if (!world || advancing) return
     setAdvancing(true)
     const next = advancePhase(currentDay, currentPhaseIndex)
@@ -277,377 +254,371 @@ function WorldEditor({ world, onDone }: { world: WorldCard | null; onDone: () =>
     onDone()
   }
 
+  const tabs = WORLD_TABS.filter((t) => t.id !== 'clock' || world).map((t) =>
+    t.id === 'lore' ? { ...t, badge: lorebook.entries.length } : t,
+  )
+
   return (
-    <div className="mx-auto max-w-2xl p-8">
-      <Button variant="ghost" onClick={onDone} className="mb-6">
-        ← Back to worlds
-      </Button>
-
-      <div className="mb-6 flex items-center gap-4">
-        <label className="cursor-pointer" aria-label="Change cover image">
-          {avatarDataUrl ? (
-            <img src={avatarDataUrl} alt="" className="h-20 w-20 rounded-xl object-cover" />
+    <EditorShell
+      onBack={onDone}
+      backLabel="Worlds"
+      eyebrow="World"
+      title={name || 'Untitled world'}
+      tabs={tabs}
+      activeTab={tab}
+      onTabChange={setTab}
+      footer={
+        <>
+          {world ? (
+            <Button variant="danger" onClick={remove}>
+              Delete world
+            </Button>
           ) : (
-            <div className="flex h-20 w-20 items-center justify-center rounded-xl border border-dashed border-border text-xs text-text-muted">
-              Cover
-            </div>
+            <span />
           )}
-          <input
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={async (e) => e.target.files?.[0] && setAvatarDataUrl(await fileToDataUrl(e.target.files[0]))}
-          />
-        </label>
-        <div className="flex-1">
-          <TextField label="Name" value={name} onChange={(e) => setName(e.target.value)} />
-        </div>
-      </div>
-
-      <TextAreaField
-        label="Description"
-        hint="Setting, tone, atmosphere — always included for any character living here."
-        rows={4}
-        value={description}
-        onChange={(e) => setDescription(e.target.value)}
-      />
-      <TextAreaField
-        label="Rules"
-        hint="Hard constraints the model should never contradict — magic system, tech level, taboos."
-        rows={3}
-        value={rules}
-        onChange={(e) => setRules(e.target.value)}
-      />
-
-      {world && (
-        <div className="mb-8 rounded-2xl bg-bg-elevated p-6">
-          <div className="mb-1 text-sm font-medium text-text">World clock</div>
-          {(() => {
-            const info = getCalendarInfo(currentDay)
-            const weather = getWeather(world.id, currentDay)
-            return (
-              <p className="mb-3 text-xs text-text-muted">
-                Day {info.day} — {info.weekday}, {info.season} ({info.dayOfSeason}/28)
-                {info.holiday ? <> — <span className="text-accent">{info.holiday}</span></> : null}
-                {' · '}
-                {PHASES[currentPhaseIndex]}, {describeWeather(weather)}. Shared by every chat in this world;
-                advancing it moves every character's mood/weather forward with it.
-                <br />
-                {getEnergyRemaining(currentDay, currentPhaseIndex)}/{getMaxEnergyForDay(currentDay)} actions left
-                today — starting a date spends one; running out ends the day.
-              </p>
-            )
-          })()}
-          <Button variant="ghost" onClick={advanceClock} disabled={advancing}>
-            → Advance to {PHASES[(currentPhaseIndex + 1) % PHASES.length]}
-            {currentPhaseIndex === PHASES.length - 1 ? ' (next day)' : ''}
+          <Button variant="primary" onClick={save} disabled={!name.trim() || saving}>
+            {saving ? 'Saving…' : world ? 'Save changes' : 'Create world'}
           </Button>
-          <p className="mt-1.5 text-[11px] text-text-muted">
-            This button is a manual authoring/testing step — it doesn't spend an action.
-          </p>
+        </>
+      }
+    >
+      {tab === 'overview' && (
+        <div className="space-y-6">
+          <div className="flex items-start gap-4">
+            <label
+              className="portrait-frame group relative flex h-24 w-32 shrink-0 cursor-pointer items-center justify-center rounded-xl border border-dashed border-border bg-bg-sunken"
+              aria-label="Change cover image"
+            >
+              {avatarDataUrl ? (
+                <img src={avatarDataUrl} alt="" className="h-full w-full rounded-xl object-cover" />
+              ) : (
+                <span className="flex flex-col items-center gap-1 text-[11px] text-text-muted">
+                  <ImagePlus size={18} strokeWidth={1.5} />
+                  Cover
+                </span>
+              )}
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={async (e) => e.target.files?.[0] && setAvatarDataUrl(await fileToDataUrl(e.target.files[0]))}
+              />
+            </label>
+            <div className="flex-1">
+              <TextField label="Name" value={name} onChange={(e) => setName(e.target.value)} />
+            </div>
+          </div>
+
+          <TextAreaField
+            label="Description"
+            hint="Setting, tone, atmosphere — always included for any character living here."
+            rows={5}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+          />
+          <TextAreaField
+            label="Rules"
+            hint="Hard constraints the model should never contradict — magic system, tech level, taboos."
+            rows={3}
+            value={rules}
+            onChange={(e) => setRules(e.target.value)}
+          />
         </div>
       )}
 
-      <details className="mb-8 rounded-2xl bg-bg-elevated p-6">
-        <summary className="cursor-pointer text-sm font-medium text-text">
-          Scene backgrounds ({Object.keys(backgrounds).length}/{DEFAULT_BACKGROUNDS.length})
-        </summary>
-        <p className="mt-2 mb-3 text-xs text-text-muted">
-          Upload art per location so Visual Novel mode can show the right one as the AI tags each
-          reply's setting. Anything left blank falls back to a placeholder gradient.
-        </p>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-          {DEFAULT_BACKGROUNDS.map((bg) => (
-            <label key={bg.id} className="group relative flex cursor-pointer flex-col items-center gap-1">
-              <div className="flex aspect-video w-full items-center justify-center overflow-hidden rounded-xl border border-dashed border-border bg-bg-sunken text-xs text-text-muted">
-                {backgrounds[bg.id] ? (
-                  <img src={backgrounds[bg.id]} className="h-full w-full object-cover" />
-                ) : (
-                  <span>{bg.label}</span>
-                )}
+      {tab === 'lore' && (
+        <Section
+          title="World lore"
+          description="Keyword- or always-on entries about this setting, shared by every character living here."
+          surface="bare"
+        >
+          <LorebookEditor
+            book={lorebook}
+            onChange={setLorebook}
+            aiContext={{ name, description, extra: rules ? `World rules: ${rules}` : undefined }}
+          />
+        </Section>
+      )}
+
+      {tab === 'scenes' && (
+        <Section
+          title="Scene backgrounds"
+          description="Art per location for Visual Novel mode. The model tags each reply's setting; anything left blank falls back to a placeholder gradient."
+          surface="bare"
+        >
+          <p className="mb-4 text-xs text-text-muted">
+            {Object.keys(backgrounds).length}/{DEFAULT_BACKGROUNDS.length} set. The number under each is
+            the warmth needed before that background can appear.
+          </p>
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+            {DEFAULT_BACKGROUNDS.map((bg) => (
+              <div key={bg.id} className="space-y-1.5">
+                <label className="portrait-frame group relative block aspect-video cursor-pointer overflow-hidden rounded-xl border border-dashed border-border bg-bg-sunken">
+                  {backgrounds[bg.id] ? (
+                    <img src={backgrounds[bg.id]} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <span className="flex h-full w-full items-center justify-center gap-1 text-[11px] text-text-muted">
+                      <ImagePlus size={14} strokeWidth={1.5} />
+                      {bg.label}
+                    </span>
+                  )}
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    className="hidden"
+                    onChange={(e) => e.target.files?.[0] && handleBackgroundPick(bg.id, e.target.files[0])}
+                  />
+                  {backgrounds[bg.id] && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        removeBackground(bg.id)
+                      }}
+                      aria-label={`Remove ${bg.label} background`}
+                      className="absolute right-1.5 top-1.5 hidden h-6 w-6 items-center justify-center rounded-lg bg-bg-elevated/90 text-text-muted hover:text-danger group-hover:flex"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </label>
+                <div className="flex items-center justify-between gap-2 px-0.5">
+                  <span className="truncate text-[11px] text-text-muted">{bg.label}</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={Number(backgroundUnlocks[bg.id] ?? 0)}
+                    onChange={(e) => setBackgroundUnlock(bg.id, Number(e.target.value) || 0)}
+                    className="w-12 rounded-md bg-bg-sunken px-1.5 py-0.5 text-center text-[11px] text-text outline-none"
+                    aria-label={`Unlock warmth for ${bg.label}`}
+                  />
+                </div>
               </div>
-              <span className="text-[11px] text-text-muted">{bg.label}</span>
-              <input
-                type="number"
-                min={0}
-                max={100}
-                value={Number(backgroundUnlocks[bg.id] ?? 0)}
-                onClick={(e) => e.preventDefault()}
-                onChange={(e) => setBackgroundUnlock(bg.id, Number(e.target.value) || 0)}
-                className="w-16 rounded bg-bg-elevated px-2 py-0.5 text-center text-[11px] text-text outline-none"
-                title="Unlock affection"
-              />
-              <input
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                className="hidden"
-                onChange={(e) => e.target.files?.[0] && handleBackgroundPick(bg.id, e.target.files[0])}
-              />
-              {backgrounds[bg.id] && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.preventDefault()
-                    removeBackground(bg.id)
-                  }}
-                  aria-label={`Remove ${bg.label} background image`}
-                  className="absolute -right-1 -top-1 hidden h-5 w-5 items-center justify-center rounded-full bg-bg-elevated text-[11px] text-text-muted hover:text-danger group-hover:flex"
-                >
-                  ✕
-                </button>
-              )}
-            </label>
-          ))}
-        </div>
-      </details>
+            ))}
+          </div>
+        </Section>
+      )}
 
-      <details className="mb-8 rounded-2xl bg-bg-elevated p-6">
-        <summary className="cursor-pointer text-sm font-medium text-text">
-          Relationship thresholds
-        </summary>
-        <p className="mt-2 mb-3 text-xs text-text-muted">
-          Warmth needed for each stage, for any character living here. Leave a field blank to use
-          the default ({DEFAULT_STAGE_HINT}).
-        </p>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-          {EDITABLE_STAGES.map((stage) => (
-            <label key={stage} className="block">
-              <span className="mb-1 block text-xs font-medium capitalize text-text-muted">
-                {formatRelationshipStage(stage)}
-              </span>
-              <input
-                type="number"
-                min={0}
-                max={100}
-                placeholder={String(DEFAULT_THRESHOLDS[stage])}
-                value={thresholds[stage] ?? ''}
-                onChange={(e) => setThreshold(stage, e.target.value)}
-                className="w-full rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none"
-              />
-            </label>
-          ))}
-        </div>
-      </details>
-
-      <details className="mb-8 rounded-2xl bg-bg-elevated p-6">
-        <summary className="cursor-pointer text-sm font-medium text-text">
-          Gift catalog ({gifts.length === 0 ? 'default' : gifts.length})
-        </summary>
-        <p className="mt-2 mb-3 text-xs text-text-muted">
-          Overrides the default gift shop for any character living here. Leave empty to use the
-          built-in default catalog.
-        </p>
-        <div className="space-y-2">
-          {gifts.map((gift) => (
-            <div key={gift.id} className="grid grid-cols-1 items-end gap-2 rounded-xl bg-bg-sunken p-3 sm:grid-cols-[1fr_120px_90px_auto]">
-              <TextField
-                label="Name"
-                value={gift.name}
-                onChange={(e) => updateGift(gift.id, { name: e.target.value })}
-              />
-              <label className="block">
-                <span className="mb-1 block text-xs font-medium text-text-muted">Rarity</span>
-                <select
-                  value={gift.rarity}
-                  onChange={(e) => updateGift(gift.id, { rarity: e.target.value as GiftRarity })}
-                  className="w-full rounded-xl bg-bg-elevated px-3 py-2 text-sm text-text outline-none"
-                >
-                  {GIFT_RARITIES.map((r) => (
-                    <option key={r} value={r}>
-                      {r}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <TextField
-                label="Price"
-                type="number"
-                value={gift.price}
-                onChange={(e) => updateGift(gift.id, { price: Math.max(0, Number(e.target.value) || 0) })}
-              />
-              <Button variant="ghost" onClick={() => removeGift(gift.id)}>
-                Remove
-              </Button>
+      {tab === 'dating' && (
+        <div className="space-y-10">
+          <Section
+            title="Relationship thresholds"
+            description={`Warmth needed for each stage, for any character living here. Blank uses the default (${DEFAULT_STAGE_HINT}).`}
+            surface="bare"
+          >
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+              {EDITABLE_STAGES.map((stage) => (
+                <NumberField
+                  key={stage}
+                  label={formatRelationshipStage(stage)}
+                  min={0}
+                  max={100}
+                  placeholder={String(DEFAULT_THRESHOLDS[stage])}
+                  value={thresholds[stage] ?? ''}
+                  onChange={(e) => setThreshold(stage, e.target.value)}
+                />
+              ))}
             </div>
-          ))}
-          <Button onClick={addGift}>+ Add gift</Button>
-        </div>
-      </details>
+          </Section>
 
-      <details className="mb-8 rounded-2xl bg-bg-elevated p-6">
-        <summary className="cursor-pointer text-sm font-medium text-text">
-          Item catalog ({items.length})
-        </summary>
-        <p className="mt-2 mb-3 text-xs text-text-muted">
-          Consumables and trinkets, separate from gifts — used from the Bag for an immediate,
-          authored effect (a relationship nudge, a scene flag, or coins) rather than given to a
-          character in a scene. No built-in default catalog; leave empty for no items at all.
-        </p>
-        <div className="space-y-2">
-          {items.map((item) => (
-            <div key={item.id} className="space-y-2 rounded-xl bg-bg-sunken p-3">
-              <div className="grid grid-cols-1 items-end gap-2 sm:grid-cols-[1fr_120px_90px_auto]">
-                <TextField label="Name" value={item.name} onChange={(e) => updateItem(item.id, { name: e.target.value })} />
-                <label className="block">
-                  <span className="mb-1 block text-xs font-medium text-text-muted">Rarity</span>
-                  <select
-                    value={item.rarity}
-                    onChange={(e) => updateItem(item.id, { rarity: e.target.value as GiftRarity })}
-                    className="w-full rounded-xl bg-bg-elevated px-3 py-2 text-sm text-text outline-none"
+          <Section
+            title="Gift catalog"
+            description="Overrides the default gift shop for characters living here. Leave empty to use the built-in catalog."
+            surface="bare"
+          >
+            <ListEditor
+              items={gifts}
+              getKey={(g) => g.id}
+              onAdd={addGift}
+              onRemove={(g) => removeGift(g.id)}
+              addLabel="Add gift"
+              emptyHint="No custom gifts — the built-in catalog is used."
+              renderItem={(gift) => (
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-[1fr_140px_100px]">
+                  <TextField label="Name" value={gift.name} onChange={(e) => updateGift(gift.id, { name: e.target.value })} />
+                  <SelectField
+                    label="Rarity"
+                    value={gift.rarity}
+                    onChange={(e) => updateGift(gift.id, { rarity: e.target.value as GiftRarity })}
                   >
                     {GIFT_RARITIES.map((r) => (
                       <option key={r} value={r}>
                         {r}
                       </option>
                     ))}
-                  </select>
-                </label>
-                <TextField
-                  label="Price"
-                  type="number"
-                  value={item.price}
-                  onChange={(e) => updateItem(item.id, { price: Math.max(0, Number(e.target.value) || 0) })}
-                />
-                <Button variant="ghost" onClick={() => removeItem(item.id)}>
-                  Remove
-                </Button>
-              </div>
-              <div className="grid grid-cols-1 items-end gap-2 sm:grid-cols-3">
-                <label className="block">
-                  <span className="mb-1 block text-xs font-medium text-text-muted">Effect</span>
-                  <select
-                    value={item.effect.kind}
-                    onChange={(e) => setItemEffectKind(item.id, e.target.value as ItemEffect['kind'])}
-                    className="w-full rounded-xl bg-bg-elevated px-3 py-2 text-sm text-text outline-none"
-                  >
-                    <option value="relationship">Relationship boost</option>
-                    <option value="flag">Set scene flag</option>
-                    <option value="currency">Grant coins</option>
-                  </select>
-                </label>
-                {item.effect.kind === 'relationship' && (
-                  <>
-                    <label className="block">
-                      <span className="mb-1 block text-xs font-medium text-text-muted">Dimension</span>
-                      <select
-                        value={item.effect.dimension}
-                        onChange={(e) => setItemEffectField(item.id, { dimension: e.target.value as (typeof RELATIONSHIP_DELTA_DIMENSIONS)[number] })}
-                        className="w-full rounded-xl bg-bg-elevated px-3 py-2 text-sm text-text outline-none"
-                      >
-                        {RELATIONSHIP_DELTA_DIMENSIONS.map((d) => (
-                          <option key={d} value={d}>
-                            {d}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <TextField
-                      label="Amount"
-                      type="number"
-                      step={1}
-                      value={item.effect.amount}
-                      onChange={(e) =>
-                        setItemEffectField(item.id, {
-                          amount: Math.max(-10, Math.min(10, Math.round(Number(e.target.value) || 0))),
-                        })
-                      }
-                    />
-                  </>
-                )}
-                {item.effect.kind === 'flag' && (
-                  <label className="block">
-                    <span className="mb-1 block text-xs font-medium text-text-muted">Flag</span>
-                    <select
-                      value={item.effect.flag}
-                      onChange={(e) => setItemEffectField(item.id, { flag: e.target.value })}
-                      className="w-full rounded-xl bg-bg-elevated px-3 py-2 text-sm text-text outline-none"
+                  </SelectField>
+                  <NumberField
+                    label="Price"
+                    value={gift.price}
+                    onChange={(e) => updateGift(gift.id, { price: Math.max(0, Number(e.target.value) || 0) })}
+                  />
+                </div>
+              )}
+            />
+          </Section>
+
+          <Section
+            title="Item catalog"
+            description="Consumables used from the Bag for an immediate authored effect — separate from gifts, which are given to a character in a scene."
+            surface="bare"
+          >
+            <ListEditor
+              items={items}
+              getKey={(i) => i.id}
+              onAdd={addItem}
+              onRemove={(i) => removeItem(i.id)}
+              addLabel="Add item"
+              emptyHint="No items yet."
+              renderItem={(item) => (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-[1fr_140px_100px]">
+                    <TextField label="Name" value={item.name} onChange={(e) => updateItem(item.id, { name: e.target.value })} />
+                    <SelectField
+                      label="Rarity"
+                      value={item.rarity}
+                      onChange={(e) => updateItem(item.id, { rarity: e.target.value as GiftRarity })}
                     >
-                      {combinedSceneFlags(customSceneFlags).map((f) => (
-                        <option key={f.id} value={f.id}>
-                          {f.label}
+                      {GIFT_RARITIES.map((r) => (
+                        <option key={r} value={r}>
+                          {r}
                         </option>
                       ))}
-                    </select>
-                  </label>
-                )}
-                {item.effect.kind === 'currency' && (
+                    </SelectField>
+                    <NumberField
+                      label="Price"
+                      value={item.price}
+                      onChange={(e) => updateItem(item.id, { price: Math.max(0, Number(e.target.value) || 0) })}
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    <SelectField
+                      label="Effect"
+                      value={item.effect.kind}
+                      onChange={(e) => setItemEffectKind(item.id, e.target.value as ItemEffect['kind'])}
+                    >
+                      <option value="relationship">Relationship boost</option>
+                      <option value="flag">Set scene flag</option>
+                      <option value="currency">Grant coins</option>
+                    </SelectField>
+                    {item.effect.kind === 'relationship' && (
+                      <>
+                        <SelectField
+                          label="Dimension"
+                          value={item.effect.dimension}
+                          onChange={(e) =>
+                            setItemEffectField(item.id, {
+                              dimension: e.target.value as (typeof RELATIONSHIP_DELTA_DIMENSIONS)[number],
+                            })
+                          }
+                        >
+                          {RELATIONSHIP_DELTA_DIMENSIONS.map((d) => (
+                            <option key={d} value={d}>
+                              {d}
+                            </option>
+                          ))}
+                        </SelectField>
+                        <NumberField
+                          label="Amount"
+                          value={item.effect.amount}
+                          onChange={(e) =>
+                            setItemEffectField(item.id, {
+                              amount: Math.max(-10, Math.min(10, Math.round(Number(e.target.value) || 0))),
+                            })
+                          }
+                        />
+                      </>
+                    )}
+                    {item.effect.kind === 'flag' && (
+                      <SelectField
+                        label="Flag"
+                        value={item.effect.flag}
+                        onChange={(e) => setItemEffectField(item.id, { flag: e.target.value })}
+                      >
+                        {combinedSceneFlags(customSceneFlags).map((f) => (
+                          <option key={f.id} value={f.id}>
+                            {f.label}
+                          </option>
+                        ))}
+                      </SelectField>
+                    )}
+                    {item.effect.kind === 'currency' && (
+                      <NumberField
+                        label="Coins"
+                        value={item.effect.amount}
+                        onChange={(e) => setItemEffectField(item.id, { amount: Math.max(0, Number(e.target.value) || 0) })}
+                      />
+                    )}
+                  </div>
+                </div>
+              )}
+            />
+          </Section>
+
+          <Section
+            title="Custom scene flags"
+            description="Branching-memory beats beyond the built-in four (first date, confession, jealousy, promise). Each needs a description — that's the AI classifier's bar for firing it."
+            surface="bare"
+          >
+            <ListEditor
+              items={customSceneFlags}
+              getKey={(f) => f.id}
+              onAdd={addCustomSceneFlag}
+              onRemove={(f) => removeCustomSceneFlag(f.id)}
+              addLabel="Add flag"
+              emptyHint="Only the built-in four flags exist for this world."
+              renderItem={(flag) => (
+                <div className="space-y-1">
                   <TextField
-                    label="Coins"
-                    type="number"
-                    value={item.effect.amount}
-                    onChange={(e) => setItemEffectField(item.id, { amount: Math.max(0, Number(e.target.value) || 0) })}
+                    label="Label"
+                    value={flag.label}
+                    onChange={(e) => updateCustomSceneFlag(flag.id, { label: e.target.value })}
+                    placeholder="e.g. Moved in together"
                   />
-                )}
-              </div>
-            </div>
-          ))}
-          <Button onClick={addItem}>+ Add item</Button>
+                  <TextAreaField
+                    label="When it fires"
+                    rows={2}
+                    value={flag.description}
+                    onChange={(e) => updateCustomSceneFlag(flag.id, { description: e.target.value })}
+                    placeholder="e.g. They explicitly agreed to share a home, not just spending a lot of time at each other's place"
+                  />
+                </div>
+              )}
+            />
+          </Section>
         </div>
-      </details>
+      )}
 
-      <details className="mb-8 rounded-2xl bg-bg-elevated p-6">
-        <summary className="cursor-pointer text-sm font-medium text-text">
-          Custom scene flags ({customSceneFlags.length})
-        </summary>
-        <p className="mt-2 mb-3 text-xs text-text-muted">
-          Beyond the 4 built-in flags (first date, confession, jealousy, promise) that always
-          exist — a world can add its own branching-memory flags for beats specific to its own
-          story. Each needs a description so the AI classifier has an actual bar for when it
-          should fire, the same way the built-in 4 do; a vague one invites false positives.
-        </p>
-        <div className="space-y-3">
-          {customSceneFlags.map((flag) => (
-            <div key={flag.id} className="rounded-xl bg-bg-sunken p-3">
-              <div className="mb-2 flex items-start gap-2">
-                <TextField
-                  label="Label"
-                  value={flag.label}
-                  onChange={(e) => updateCustomSceneFlag(flag.id, { label: e.target.value })}
-                  placeholder="e.g. Moved in together"
-                  className="flex-1"
-                />
-                <Button variant="ghost" onClick={() => removeCustomSceneFlag(flag.id)} className="mt-5">
-                  Remove
+      {tab === 'clock' && world && (
+        <Section
+          title="World clock"
+          description="Shared by every chat in this world. Advancing it moves every character's mood and weather forward — a manual authoring step that doesn't spend an action."
+        >
+          {(() => {
+            const info = getCalendarInfo(currentDay)
+            const weather = getWeather(world.id, currentDay)
+            return (
+              <>
+                <div className="mb-1 text-sm text-text">
+                  Day {info.day} — {info.weekday}, {info.season} ({info.dayOfSeason}/28)
+                  {info.holiday ? <span className="text-romance"> — {info.holiday}</span> : null}
+                </div>
+                <div className="mb-4 text-xs text-text-muted">
+                  {PHASES[currentPhaseIndex]}, {describeWeather(weather)} ·{' '}
+                  {getEnergyRemaining(currentDay, currentPhaseIndex)}/{getMaxEnergyForDay(currentDay)} actions left today
+                </div>
+                <Button variant="secondary" onClick={advanceClock} disabled={advancing}>
+                  {advancing
+                    ? 'Advancing…'
+                    : `Advance to ${PHASES[(currentPhaseIndex + 1) % PHASES.length]}${
+                        currentPhaseIndex === PHASES.length - 1 ? ' (next day)' : ''
+                      }`}
                 </Button>
-              </div>
-              <TextAreaField
-                label="Description (the classifier's bar for firing)"
-                rows={2}
-                value={flag.description}
-                onChange={(e) => updateCustomSceneFlag(flag.id, { description: e.target.value })}
-                placeholder="e.g. They explicitly agreed to share a home, not just spending a lot of time at each other's place"
-              />
-            </div>
-          ))}
-          <Button onClick={addCustomSceneFlag}>+ Add custom flag</Button>
-        </div>
-      </details>
-
-      <details className="mb-8 rounded-2xl bg-bg-elevated p-6" open>
-        <summary className="cursor-pointer text-sm font-medium text-text">
-          World lore ({lorebook.entries.length} entries)
-        </summary>
-        <div className="mt-3">
-          <LorebookEditor
-            book={lorebook}
-            onChange={setLorebook}
-            aiContext={{ name, description, extra: rules ? `World rules: ${rules}` : undefined }}
-          />
-        </div>
-      </details>
-
-      <div className="flex items-center justify-between border-t border-border pt-4">
-        {world ? (
-          <Button variant="danger" onClick={remove}>
-            Delete world
-          </Button>
-        ) : (
-          <span />
-        )}
-        <Button variant="primary" onClick={save} disabled={!name.trim()}>
-          {world ? 'Save changes' : 'Create world'}
-        </Button>
-      </div>
-    </div>
+              </>
+            )
+          })()}
+        </Section>
+      )}
+    </EditorShell>
   )
 }

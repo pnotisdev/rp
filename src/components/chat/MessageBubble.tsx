@@ -60,6 +60,7 @@ export function MessageBubble({
   const showTimestamps = useSettingsStore((s) => s.showTimestamps)
   const showTokenCounts = useSettingsStore((s) => s.showTokenCounts)
   const clickToEdit = useSettingsStore((s) => s.clickToEdit)
+  const regexScripts = useSettingsStore((s) => s.regexScripts)
 
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(message.text)
@@ -115,7 +116,7 @@ export function MessageBubble({
           Generation failed — try regenerating below.
         </span>
       ) : (
-        renderMessageText(displayText)
+        renderMessageText(displayText, regexScripts)
       )}
       {isStreaming && <span className="cursor-blink font-mono">▋</span>}
     </div>
@@ -215,7 +216,7 @@ export function MessageBubble({
                   Generation failed — try regenerating below.
                 </span>
               ) : (
-                renderMessageText(displayText)
+                renderMessageText(displayText, regexScripts)
               )}
               {isStreaming && <span className="cursor-blink font-mono">▋</span>}
             </>

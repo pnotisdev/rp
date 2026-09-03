@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware'
 import type { GenerationParams } from '@/lib/api/types'
 import type { TtsProviderId } from '@/lib/voice/ttsProviders'
 import type { RelationshipDifficulty } from '@/lib/dating/relationshipAssist'
+import type { RegexScript } from '@/lib/types'
 
 export type ChatStyle = 'flat' | 'bubbles' | 'document'
 export type AvatarShape = 'circle' | 'square' | 'rounded' | 'rectangle'
@@ -160,6 +161,10 @@ interface SettingsState {
   autoSuggestChoices: boolean
   setAutoSuggestChoices: (v: boolean) => void
 
+  // find/replace regex scripts over message text
+  regexScripts: RegexScript[]
+  setRegexScripts: (scripts: RegexScript[]) => void
+
   // companion voice
   ttsProvider: TtsProviderId
   ttsApiKey: string
@@ -255,6 +260,9 @@ export const useSettingsStore = create<SettingsState>()(
 
       autoSuggestChoices: true,
       setAutoSuggestChoices: (v) => set({ autoSuggestChoices: v }),
+
+      regexScripts: [],
+      setRegexScripts: (scripts) => set({ regexScripts: scripts }),
 
       ttsProvider: 'koboldcpp',
       ttsApiKey: '',

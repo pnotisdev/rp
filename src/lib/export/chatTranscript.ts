@@ -1,7 +1,8 @@
 import { urlToDataUrl } from '@/lib/characters/pack'
 import type { Character } from '@/lib/characters/cardSpec'
-import type { Chat, Persona, StoredMessage } from '@/lib/types'
+import type { Chat, Persona, RegexScript, StoredMessage } from '@/lib/types'
 import { splitMessageSegments } from '@/lib/text/messageSegments'
+import { applyRegexScripts } from '@/lib/text/regexScripts'
 
 function escapeHtml(text: string): string {
   return text
@@ -12,9 +13,9 @@ function escapeHtml(text: string): string {
     .replace(/'/g, '&#39;')
 }
 
-/** Same action/quote emphasis convention as the live chat UI (`renderMessageText`), built from the same parser. */
-function messageTextHtml(text: string): string {
-  return splitMessageSegments(text)
+/** Same action/quote emphasis convention as the live chat UI (`renderMessageText`), built from the same parser, with the same display-target regex scripts applied. */
+function messageTextHtml(text: string, regexScripts?: RegexScript[]): string {
+  return splitMessageSegments(applyRegexScripts(text, regexScripts, 'display'))
     .map((seg) => {
       if (seg.type === 'action') return `<em>${escapeHtml(seg.content)}</em>`
       if (seg.type === 'quote') return `<span class="quote">${escapeHtml(seg.content)}</span>`
@@ -40,8 +41,9 @@ export async function buildChatTranscriptHtml(opts: {
   character?: Character
   persona?: Persona
   messages: StoredMessage[]
+  regexScripts?: RegexScript[]
 }): Promise<string> {
-  const { chat, character, persona, messages } = opts
+  const { chat, character, persona, messages, regexScripts } = opts
   const characterName = character?.card.name ?? 'Character'
   const personaName = persona?.name ?? 'You'
   const [characterAvatar, personaAvatar] = await Promise.all([
@@ -64,7 +66,7 @@ export async function buildChatTranscriptHtml(opts: {
         <div class="bubble">
           <div class="meta"><span class="name">${escapeHtml(name)}</span><span class="time">${escapeHtml(time)}</span></div>
           ${imagesBlock}
-          <div class="text">${messageTextHtml(m.text)}</div>
+          <div class="text">${messageTextHtml(m.text, regexScripts)}</div>
         </div>
       </div>`
     })

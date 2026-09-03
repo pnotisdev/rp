@@ -89,3 +89,96 @@ describe('buildPrompt — characterProfile (10e life-context fields)', () => {
     expect(result.prompt).not.toContain('Life beyond this scene')
   })
 })
+
+describe("buildPrompt — Author's Note", () => {
+  const history: ChatMessage[] = [
+    { id: '1', role: 'user', name: 'You', text: 'FIRST_LINE' },
+    { id: '2', role: 'char', name: 'Aria', text: 'SECOND_LINE' },
+  ]
+
+  it('places a before_char note ahead of the character identity block', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        character: character({ name: 'Aria', description: 'A cheerful bard.' }),
+        authorNote: { text: 'NOTE_MARKER', position: 'before_char', depth: 0 },
+      }),
+    )
+    expect(result.prompt).toContain('NOTE_MARKER')
+    expect(result.prompt.indexOf('NOTE_MARKER')).toBeLessThan(result.prompt.indexOf('A cheerful bard.'))
+  })
+
+  it('places an after_char note after the card but before the history', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        character: character({ name: 'Aria', description: 'A cheerful bard.' }),
+        history,
+        authorNote: { text: 'NOTE_MARKER', position: 'after_char', depth: 0 },
+      }),
+    )
+    const noteAt = result.prompt.indexOf('NOTE_MARKER')
+    expect(noteAt).toBeGreaterThan(result.prompt.indexOf('A cheerful bard.'))
+    expect(noteAt).toBeLessThan(result.prompt.indexOf('FIRST_LINE'))
+  })
+
+  it('injects an at_depth note (depth 0) after the latest message, before the generation cue', async () => {
+    const result = await buildPrompt(
+      baseInput({ history, authorNote: { text: 'NOTE_MARKER', position: 'at_depth', depth: 0 } }),
+    )
+    expect(result.prompt.indexOf('NOTE_MARKER')).toBeGreaterThan(result.prompt.indexOf('SECOND_LINE'))
+    expect(result.prompt.trim().endsWith('Aria:')).toBe(true)
+  })
+
+  it('injects an at_depth note (depth 1) one message up from the latest', async () => {
+    const result = await buildPrompt(
+      baseInput({ history, authorNote: { text: 'NOTE_MARKER', position: 'at_depth', depth: 1 } }),
+    )
+    const noteAt = result.prompt.indexOf('NOTE_MARKER')
+    expect(noteAt).toBeGreaterThan(result.prompt.indexOf('FIRST_LINE'))
+    expect(noteAt).toBeLessThan(result.prompt.indexOf('SECOND_LINE'))
+  })
+
+  it('ignores a blank or unset note', async () => {
+    const unset = await buildPrompt(baseInput({ history }))
+    expect(unset.prompt).not.toContain('NOTE_MARKER')
+    const blank = await buildPrompt(
+      baseInput({ history, authorNote: { text: '   ', position: 'at_depth', depth: 0 } }),
+    )
+    expect(blank.prompt).not.toContain('NOTE_MARKER')
+  })
+
+  it('counts the at_depth note against the token budget', async () => {
+    const withNote = await buildPrompt(
+      baseInput({ history, authorNote: { text: 'NOTE_MARKER text here', position: 'at_depth', depth: 0 } }),
+    )
+    const without = await buildPrompt(baseInput({ history }))
+    expect(withNote.tokensUsed).toBeGreaterThan(without.tokensUsed)
+  })
+})
+
+describe('buildPrompt — regex scripts (prompt target)', () => {
+  const history: ChatMessage[] = [
+    { id: '1', role: 'user', name: 'You', text: 'the WIDGET is here' },
+    { id: '2', role: 'char', name: 'Aria', text: 'yes the WIDGET' },
+  ]
+
+  it('rewrites history turn text before it reaches the prompt', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        history,
+        regexScripts: [{ id: '1', name: 'x', find: 'WIDGET', replace: 'gadget', target: 'prompt', enabled: true }],
+      }),
+    )
+    expect(result.prompt).toContain('the gadget is here')
+    expect(result.prompt).not.toContain('WIDGET')
+  })
+
+  it('leaves history untouched for a display-only script', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        history,
+        regexScripts: [{ id: '1', name: 'x', find: 'WIDGET', replace: 'gadget', target: 'display', enabled: true }],
+      }),
+    )
+    expect(result.prompt).toContain('the WIDGET is here')
+  })
+})

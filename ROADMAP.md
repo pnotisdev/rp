@@ -718,6 +718,35 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
         and confirmed the server accepted (not silently substituted) the custom id, then restored
         the world to its exact original seed state. 161 tests passing, clean typecheck, clean
         production build.
+- [~] **Per-turn assist-call orchestration + a visible "thinking" state** — the (b) part is done:
+      the post-reply assists (relationship scoring, choice suggestion, objective check, memory
+      summary) are now routed through a `runAssist(key, label, fn)` helper in `useChatSession.ts`
+      that tracks which are in flight, exposed as `assistActivity: string[]` and rendered as a
+      thin pulsing strip above the composer (`AssistActivityBar.tsx`, both chat and VN mode) — so
+      a relationship delta or a new choice card appearing a few seconds after the reply reads as
+      expected work rather than a glitch. They also now fire player-facing-first (relationship +
+      choices before tasks + summary), so the results a user waits on queue ahead on the server.
+      The four Settings → Generation toggle descriptions were rewritten to be honest about the
+      cost (each is a model call; on a local single-GPU server they queue with each other and
+      ahead of the next reply) instead of the old "never blocks or delays it".
+      **Still open**: (a) a real merge (e.g. task-detection folded into the relationship judge call
+      the way item 18 merged two others) — low value since task-detection only runs with an active
+      objective; and (c) the one-switch "minimal assists" profile, which is genuinely blocked on
+      section 10e's world templates / section 13's onboarding (the four individual toggles already
+      exist and now describe their cost).
+- [ ] **`manuallyActivatedIds` is still dead machinery** — `activation.ts` documents and supports a
+      per-turn "activate this lorebook entry for this reply" mechanism, but nothing in the shipped
+      UI ever populates the set (`builder.ts` passes `manuallyActivatedWorldInfoIds` straight
+      through, always empty). Item 51's bug-hunt corrected the *comment* to stop implying it works;
+      the code path itself is still there. Either wire it to a real control (a per-entry "force on
+      for next reply" toggle in the Prompt Inspector or a lorebook quick-panel) or delete the
+      branch — right now it's a maintenance cost with no user.
+- [x] **WAL checkpoint on clean shutdown** — `server/index.ts` now traps `SIGINT`/`SIGTERM` and
+      runs `checkpointDb()` (`PRAGMA wal_checkpoint(TRUNCATE)`, `server/db.ts`) before exiting, so
+      a normal Ctrl+C folds `rp.db-wal` back into `rp.db` and the main database file is complete on
+      its own. Purely a convenience for anyone copying `rp.db` by hand — WAL-mode writes were
+      already durable on disk. Part of the on-disk persistence audit (changelog #58); the full
+      data layout is now documented in the README.
 
 ## 10. Major expansion: a living-world dating sim
 
@@ -1230,6 +1259,176 @@ once it exists.
       real API-design and stability commitment, worth doing once section 10's core data model has
       actually settled rather than before.
 
+## 13. Onboarding, first-run & discoverability
+
+Everything above assumes a user who already knows what a character card, a lorebook, an instruct
+template, and a KoboldCpp URL are. A first-time user gets none of that. Verified state today:
+`App.tsx` mounts straight into the chat view; there is no first-run flow, no connection wizard, no
+"make your first character" path. The empty states that do exist (`CharacterList.tsx`,
+`WorldInfoView.tsx`, `ChatsPanel`) are plain paragraphs, not actionable. Connection is configured
+only by typing a URL into Settings → Connection and reading a passive status dot
+(`ConnectionSettings.tsx`) — nothing routes a new user there or reacts when it's wrong. The one
+thing that keeps a fresh install from being completely empty is the bundled seed content
+(`server/seedContent.ts` — the "Sakura Hill University" world + Sumire + a demo World Info book,
+changelog #49), and nothing points the user at it.
+
+- [ ] **First-run wizard** — a short, skippable sequence on an install with no chats: (1) connect
+      to KoboldCpp — probe the entered URL plus the common defaults (`:5001`, `:5000`), show the
+      detected model name and context length on success (the data is already there via
+      `useConnectionStatus`/`getEffectiveMaxContext`), show the `--host 0.0.0.0` hint on failure;
+      (2) pick or make a persona (see below); (3) start a first chat — offer the seeded Sumire
+      directly, plus "generate one," "start from a template" (`starterTemplates.ts` already
+      exists), and "import a card." The goal is a running conversation without the user ever
+      opening Settings or the character editor.
+- [~] **Actionable empty states** — partly done in the authoring-UI rebuild (changelog #57):
+      Characters / Worlds / Personas / World Info empty states are now a dashed card with a primary
+      "Create your first…" button instead of a bare paragraph. Still open: the empty **chat list**
+      (`ChatsPanel`) and the "Pick a character" chat placeholder, plus a "Use the bundled Sumire"
+      shortcut — those belong with the first-run wizard above.
+- [ ] **Persona nudge** — a chat created with no persona sends the model a hardcoded `'You'` with
+      no description (`NewChatDialog` defaults to "Default (You)"). Item 41's writeup shows how
+      much persona quality actually changes the prompt. Prompt for a one-line persona on first
+      chat, or ship a default "You" persona with an editable blurb instead of a bare fallback
+      string.
+- [~] **Inline help on the dense authoring screens** — largely addressed by the authoring-UI
+      rebuild (changelog #57): `CharacterEditor`'s ~15 stacked `<details>` are now 7 tabbed
+      sections (Identity / Life / Visual novel / Dating sim / World sim / Voice / Advanced), each
+      `Section` carrying a one-line description; `LorebookEditor`'s per-entry knobs collapse behind
+      an "Options" disclosure with the power-user fields (order, position, chance, group, secondary
+      keys) hidden by default; `WorldEditor` got the same tab treatment. Still open: `(?)` popovers
+      for the genuinely opaque ones (regex key syntax, inclusion groups, the sampler params in
+      `SamplingControls`), and a true "Basic" mode that hides whole tabs for a first character.
+- [ ] **VN mode reads as broken before art exists** — enabling `visualNovelMode` with a character
+      that has no sprites and a world with no backgrounds shows a placeholder gradient and initials
+      full-bleed, which looks like a bug, not a "you haven't uploaded art yet" state. Either a
+      clear empty-VN affordance ("Upload sprites for {char} to see them here"), or don't offer the
+      toggle until at least one sprite exists, or a bundled default sprite set.
+- [ ] **Command palette / global search (Ctrl-K)** — jump to any character, chat, world, or view
+      from one input. The nav is an icon-only rail by default (`sidebarExpanded: false`), so even
+      finding the right section is a hover-hunt for a new user; a palette sidesteps that and scales
+      as the number of characters/chats grows. Overlaps with the existing message `SearchPanel`
+      (section 4) — could be one surface.
+- [ ] **Discoverable keyboard shortcuts + a shortcuts sheet** — there's no documented shortcut
+      surface today. Even a handful (send, regenerate, swipe left/right, new chat, toggle VN) plus
+      a `?` overlay listing them.
+- [ ] **A "what these do" explainer for the mode toggles** — VN mode, `autoTrackRelationship`,
+      `autoSuggestChoices`, `autoDetectTasks`, difficulty: a new user has no way to know which of
+      these belong to "I want plain assistant chat" vs "I want a dating sim." Ties directly into
+      section 10e's **world templates**, which is really the structural fix — pull that item's
+      priority up, since it's the thing that lets a plain-RP world not carry the whole section-10
+      mechanic surface.
+
+## 14. Competitive parity — SillyTavern / RisuAI / Agnai
+
+This app already matches or beats SillyTavern on several axes a dating-sim/VN user cares about: VN
+mode is on-by-default and actually wired to mood/scene tags, the dating-sim mechanics and per-world
+economy have no ST equivalent, the world clock/weather/schedule simulation is real, and full
+one-file backup/restore is cleaner than ST's scattered data dirs. The items below are things a
+user arriving from ST, RisuAI, or Agnai will immediately reach for and not find. Sources:
+SillyTavern docs/releases, RisuAI (CCv3, CBS/trigger system, regex scripts), Agnai (multi-user).
+
+- [x] **Author's Note / per-chat injected note** — done. `Chat.authorNote?: { text, position:
+      'before_char' | 'after_char' | 'at_depth', depth }` (`types.ts`), edited from a new
+      `NotebookPen` toolbar button → `AuthorNotePanel.tsx` (radio for the three positions, a 0-8
+      depth slider shown only for `at_depth`, "Clear note" for removal). `builder.ts` gained a
+      matching `authorNote` input: `before_char`/`after_char` fold into the fixed identity region
+      (before the character block / after the examples), `at_depth` is spliced into the trimmed
+      history as its own line `depth` turns up from the latest (depth 0 = immediately before the
+      generation cue). The note is macro-substituted (`{{char}}`/`{{user}}`) like every other text
+      field, counts against the context budget, and reaches the Prompt Inspector automatically
+      since `previewPrompt` runs the same `buildCurrentPrompt` path. Cleared by sending an explicit
+      `authorNote: null` (not `undefined`) — the `JSON.stringify`-drops-`undefined` guard, same as
+      `activeEvent` (changelog #28). 6 new `builder.test.ts` cases (each position's placement, the
+      at-depth insertion point, blank/unset no-op, budget accounting); 167 tests green, typecheck +
+      production build clean; verified live end-to-end against the seeded Sumire chat (set a note,
+      confirmed it in the assembled prompt at the right spot via the Prompt Inspector, confirmed it
+      persisted across a reload and that "Clear note" round-trips to `null`).
+      **Deliberately deferred** (noted, not silently dropped): `everyNTurns` (inject only every N
+      turns — turn-count semantics get fuzzy with swipes/regen, wanted the simple version proven
+      first), and per-character / per-world *default* notes (a small additive follow-up once the
+      chat-level one has been used).
+- [x] **Regex / find-and-replace scripts on model output** — done. `Settings.regexScripts:
+      RegexScript[]` (`{ id, name, find, replace, flags?, target: 'display' | 'prompt' | 'both',
+      enabled }`, `types.ts`), edited from a "Regex scripts" section in Settings → Generation
+      (`RegexScriptsSection.tsx`, a `ListEditor` of rules; a non-compiling pattern is flagged inline
+      and skipped, never thrown). `src/lib/text/regexScripts.ts`'s `applyRegexScripts(text,
+      scripts, target)` is the one pure entry point (12 tests: backrefs, `\n` unescaping, target
+      filtering, invalid-pattern skip, flag handling, chaining). **Display** target runs in
+      `renderMessageText` (`messageText.tsx`) — so the chat list, VN dialogue box, and the HTML
+      transcript export all pick it up — **prompt** target runs in `builder.ts`'s `renderTurn` per
+      history turn, so it reaches the Prompt Inspector for free. The stored message is never
+      touched, so a rule is fully reversible by disabling it (the `'stored'` target the roadmap
+      floated was dropped for that reason). Verified live: a `WIDGET → gizmo` "both" rule showed
+      "gizmo" in the rendered greeting AND in the assembled prompt via the Prompt Inspector.
+      Per-character/per-world scoping stays a later refinement.
+- [ ] **Prompt/context template manager** — in ST the order, on/off state, and content of every
+      prompt section is a drag-to-reorder editable list. Here `builder.ts`'s `fixedSections` array
+      is a hardcoded order, and instruct formatting is 5 fixed builtins (`instructTemplates.ts`)
+      with no editing, no per-character override, and no auto-detection from the template KoboldCpp
+      reports for the loaded model. Rough shape, smallest first: (a) let a user duplicate + edit an
+      instruct template and save it (mirrors the sampler-preset UI that already exists in
+      `SamplingControls`); (b) `Character.instructTemplateId?` override; (c) later, expose the
+      section order/enable flags as data.
+- [ ] **World Info depth ST/RisuAI still have that we don't**:
+      - **sticky / cooldown / delay** — already flagged as deferred in section 3; the blocker is
+        real and worth restating here: no stable per-entry key exists across this app's lorebook
+        sources (character book + world book + global books + synthetic facts book are merged into
+        one array whose order isn't stable turn-to-turn in a group chat). Fixing that key problem
+        is the actual prerequisite, not the sticky logic itself.
+      - **injection at a chat depth** — entries placed N messages deep in the transcript, not just
+        before/after the card block (ST's "@ Depth" position). Pairs naturally with the Author's
+        Note `at_depth` work above — same new injection pass.
+      - ~~**global-book binding UI**~~ — done. `WorldInfoBook` gained `boundCharacterIds` /
+        `boundWorldIds` alongside the pre-existing (UI-less) `boundChatIds`; a book with no
+        bindings at all is still global (every book that predates this stays exactly as it was).
+        `src/lib/worldinfo/scope.ts` (`isGlobalBook` / `bookAppliesToChat`, 7 tests) is the one
+        place the "does this book apply here" question is answered — `useChatSession.ts`'s book
+        filter now calls it with the chat's id, primary character id, and that character's world
+        id. A new `BookScopePicker` ("Available in" — character/world chips, "Make global" reset)
+        sits in a rebuilt `WorldInfoView`, and each book row shows its scope ("Every chat" /
+        "Sumire, +1"). Server-side `normalizeIdArray` dedupes/validates the three arrays on
+        POST/PUT. Chat-level binding stays data-only (a chat is too transient to be worth a
+        picker). Verified live: scoped the seeded "Campus Life" book to Sumire, confirmed the PUT
+        persisted `boundCharacterIds`, confirmed via the Prompt Inspector that its entries still
+        activate in a Sumire chat; negative case (a non-matching character) is covered by the unit
+        tests. 174 tests green, typecheck + build clean.
+      - **weighted inclusion groups** — a group currently always fires its highest-`insertion_order`
+        member (`activation.ts`); ST supports a weighted random pick within the group.
+- [ ] **Read CCv3 character cards** — RisuAI and newer tools emit `chara_card_v3`, which
+      standardizes embedded assets (expression sprites, backgrounds, voice) *in the card*. We're
+      V2-only (`cardSpec.ts`) and carry assets in our own `.rppack.json` instead. At minimum, teach
+      `normalizeCardJson` to read a V3 card's `assets` array into our `sprites` / `gallery` /
+      world `backgrounds` maps, so a modern imported card arrives with its art instead of blank
+      upload slots. (Writing V3 on export is a separate, later question — `.rppack.json` covers
+      our own round-trip already.)
+- [ ] **Quick Replies bar** — a user-configurable row of buttons that send a templated message or
+      run a small action ("advance time," "describe my surroundings," "give a gift," "skip to
+      evening"). The cheap, independently-useful subset of ST's STscript / Quick Replies without
+      committing to a scripting language. Overlaps with section 12's plugin API but doesn't need
+      it.
+- [ ] **Trigger / event system** (RisuAI's CBS + triggers) — an author-facing "when X, then Y"
+      layer: on a keyword, on a stat crossing a threshold, on a scene flag, on day-advance → set a
+      variable, swap the background, fire a lorebook entry, queue a message. We already produce all
+      the events (`relationship_events`, `sceneFlags`, the world clock); there's just no way for an
+      author to hang behavior off them without editing code. Large; pairs with section 12's plugin
+      hooks and 10f's world tick — worth designing them together.
+- [ ] **Mobile / responsive layout** — verified gap: `globals.css` has zero breakpoints, the
+      panels are fixed-width (`w-14` rail, `w-64` chat list), and the root only switches
+      `flex-col → md:flex-row`. The app is unusable on a phone, which is exactly RisuAI's and
+      MiniTavern's whole pitch. Minimum viable: collapsible/overlay panels under `md`, a
+      bottom-nav layout, touch-sized hit targets, and the VN stage getting the full viewport.
+- [ ] **Chat management basics** — no chat rename (the title is frozen to the character's name at
+      creation, `NewChatDialog`), no chat folders/tags/pinning, no one-click "new chat, same
+      character & persona," no "duplicate chat." The fork tree is section 12; this is the
+      un-fancy list-management layer under it.
+- [ ] **Generation HUD** — tokens/sec, time-to-first-token, and a context-fill gauge during and
+      after generation. `showTokenCounts` gives a per-message count; there's no live feedback while
+      the model is working beyond the streaming text itself.
+- [ ] **Multiple chat-completion backends** — already section 8 and explicitly low-priority, noted
+      here only because it's the top reason an ST/Risu user on a hosted model (Claude, OpenRouter,
+      Gemini) can't adopt this app at all today. If hosted-provider support ever happens, the
+      `ChatBackend` abstraction section 8 describes is the right shape.
+
 ## Suggested next steps
 
 Done so far (see checked boxes above for detail):
@@ -1564,6 +1763,59 @@ Done so far (see checked boxes above for detail):
     flags the clearly smaller, lower-risk pick, additive on top of the existing 4 the same way
     custom expressions (item 24) were additive on top of the default 16. See section 9's changelog
     for the full writeup.
+55. ~~Author's Note~~ — the first item off the new section 14 (competitive parity), picked as the
+    smallest steering lever with the biggest payoff for a user arriving from SillyTavern.
+    `Chat.authorNote` + `AuthorNotePanel` + a `builder.ts` injection pass supporting three
+    positions (`before_char` / `after_char` / `at_depth` with a depth slider). Fully verifiable
+    with KoboldCpp off — the Prompt Inspector shows it landing in the assembled prompt. See
+    section 14's checked item for the full writeup; `everyNTurns` and per-character/world default
+    notes deliberately deferred.
+56. ~~Global-lorebook binding UI~~ — second item off section 14, and a half-built feature finished
+    rather than a new one: `WorldInfoBook.boundChatIds` was honored but had no UI, so every
+    standalone book was silently active everywhere. Added `boundCharacterIds`/`boundWorldIds`, a
+    `src/lib/worldinfo/scope.ts` decision function (7 tests), a `BookScopePicker`, and scope
+    summaries in the book list. See section 14's checked sub-item for detail.
+57. ~~Authoring-UI rebuild — Worlds, World Info, Characters, Personas~~ — user asked for these to
+    feel "clean, polished, less AI-slop." The common problems: a flat wall of ~13 identical
+    `<details>` cards per editor, three different ways to style a number input, hand-typed `✕`/`+`
+    glyphs (the same "ASCII feeling" #45 fixed in chat), weak `text-sm` view headers, a
+    non-sticky save row lost at the bottom of a 1200px form. Built shared primitives —
+    `EditorShell` (fixed header with a back button + eyebrow/title, an optional tab strip, a
+    sticky save/delete footer), `NumberField`/`SelectField` (matching `TextField`), `Chip` (the
+    toggle-pill pattern), `ListEditor` (the "list of removable cards + Add button" repeated for
+    gallery/starters/social/schedule/gifts/items/flags), `FileButton` — then rebuilt all four
+    views on them. `CharacterEditor`: 7 tabs (Identity / Life & background / Visual novel / Dating
+    sim / World sim / Voice / Advanced) instead of one endless scroll. `WorldEditor`: 5 tabs
+    (Overview / Lore / Scenes / Dating sim / Clock). `LorebookEditor`: each entry's power-user
+    knobs (order, position, chance, group, case-sensitivity, secondary keys) collapse behind a
+    per-entry "Options" disclosure. List views got `font-display` headers and dashed-card empty
+    states with a primary action. Every save path preserved exactly — verified live end-to-end
+    that a full Sumire save still round-trips schedule/gift-preferences/starters/weather/lorebook
+    with nothing dropped. 174 tests green, typecheck + build clean. Partly closes section 13's
+    "actionable empty states" and "inline help on dense screens" (see those items for what's left).
+58. ~~On-disk persistence audit + WAL checkpoint on shutdown~~ — user asked to confirm data is
+    "saved on the computer, not browser cache." Confirmed: every entity (characters, chats,
+    messages, worlds, lorebooks, personas, objectives, relationship events, facts, saved
+    themes/presets) lives in `data/rp.db` (SQLite/WAL); images in `data/avatars/<kind>/<id>/…`;
+    `data/` is gitignored; `useApiQuery` uses zero browser storage; the only `localStorage` key
+    (`rp-settings`) holds per-device UI preference only (server URL, active ids, theme colours,
+    layout toggles, sampler defaults, voice config). Added a `checkpointDb()` (`PRAGMA
+    wal_checkpoint(TRUNCATE)`) run on `SIGINT`/`SIGTERM` in `server/index.ts` so a clean Ctrl+C
+    folds the write-ahead log back into `rp.db` — WAL writes were always durable, this just spares
+    anyone who copies `rp.db` without its `-wal` sidecar. Documented the full layout in the README.
+59. ~~Regex / find-and-replace scripts~~ — third item off section 14. `Settings.regexScripts` +
+    `RegexScriptsSection` + a pure `applyRegexScripts` (12 tests) wired into `renderMessageText`
+    (display: chat / VN / transcript export) and `builder.ts`'s `renderTurn` (prompt: history
+    turns, visible in the Prompt Inspector). Stored messages untouched, so a rule is reversible by
+    disabling it. See section 14's checked item for detail. Verified live with a `WIDGET → gizmo`
+    rule showing in both the rendered message and the assembled prompt.
+60. ~~Per-turn assist "thinking" indicator~~ — the (b) slice of section 9's assist-orchestration
+    item. Post-reply assist calls now run through a `runAssist` tracker in `useChatSession`,
+    surfaced as a thin pulsing strip above the composer (`AssistActivityBar`, chat + VN) so a
+    relationship delta or choice card that lands a few seconds late reads as expected work. Calls
+    reordered player-facing-first; the four Settings toggle descriptions rewritten to be honest
+    about the per-reply model-call cost. The (a) merge and (c) one-switch "minimal assists"
+    profile stay open — (c) is blocked on world templates (10e).
 
 That closes out the last "reasonable next batch," plus sections 10a, 10c, and 10d in full and a first
 slice each of 10b and 10f taken directly afterward since 10's own suggested phase order names them
@@ -1598,3 +1850,18 @@ sim) and section 11 (image-generation backends) are a separate, much larger trac
 10's own "Suggested phase order" for how to sequence that instead of folding it into this list.
 Section 12 is further out still — deliberately unscheduled ideas to revisit once section 10's core
 exists, not a queue to work through now.
+
+Sections 13 (onboarding/first-run) and 14 (competitive parity) were added after a full
+codebase + competitor review. They're not part of section 10's arc — they're about the app being
+usable and familiar to someone who didn't build it. Progress so far (all verified live with
+KoboldCpp off): ~~Author's Note~~ (#55), ~~global-lorebook binding UI~~ (#56), ~~authoring-UI
+rebuild~~ (#57, which also part-closed section 13's "actionable empty states" and "inline help"),
+~~on-disk persistence audit~~ (#58), ~~regex scripts~~ (#59), ~~per-turn assist "thinking"
+indicator~~ (#60).
+
+Still unblocked and worth doing next, roughly in order: the **first-run connection step + wizard**
+(section 13); **read CCv3 character cards** (section 14 — imported modern cards arrive with their
+art); a **prompt/instruct-template manager** (section 14, smallest slice first: duplicate + edit
+an instruct template). **World templates** (section 10e) is the structural key to section 13's
+"which toggles do I want" problem and is worth pulling forward out of 10's phase order. Mobile/
+responsive (section 14) is larger but is the single biggest limiter on who can use the app at all.

@@ -6,6 +6,7 @@ import {
   GitFork,
   Heart,
   MessageCircle,
+  NotebookPen,
   ScrollText,
   Search,
   Star,
@@ -34,6 +35,8 @@ import { PromptInspector } from './PromptInspector'
 import { ObjectivePanel } from './ObjectivePanel'
 import { DateEventPanel } from './DateEventPanel'
 import { RelationshipPanel } from './RelationshipPanel'
+import { AuthorNotePanel } from './AuthorNotePanel'
+import { AssistActivityBar } from './AssistActivityBar'
 import { SearchPanel } from './SearchPanel'
 import { PinnedMessagesPanel } from './PinnedMessagesPanel'
 import { BagPanel } from './BagPanel'
@@ -53,6 +56,7 @@ export function ChatWindow({ chatId }: { chatId: string | null }) {
     isGenerating,
     streamingText,
     generatingMessageId,
+    assistActivity,
     sendUserMessage,
     regenerate,
     swipe,
@@ -61,6 +65,7 @@ export function ChatWindow({ chatId }: { chatId: string | null }) {
     togglePinMessage,
     abortGeneration,
     previewPrompt,
+    updateAuthorNote,
     updateMemorySummary,
     continueMessage,
     canContinue,
@@ -85,12 +90,14 @@ export function ChatWindow({ chatId }: { chatId: string | null }) {
   } = useChatSession(chatId)
 
   const visualNovelMode = useSettingsStore((s) => s.visualNovelMode)
+  const regexScripts = useSettingsStore((s) => s.regexScripts)
   const setActiveChatId = useSettingsStore((s) => s.setActiveChatId)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [showInspector, setShowInspector] = useState(false)
   const [showObjective, setShowObjective] = useState(false)
   const [showEvent, setShowEvent] = useState(false)
   const [showRelationship, setShowRelationship] = useState(false)
+  const [showAuthorNote, setShowAuthorNote] = useState(false)
   const [showSearch, setShowSearch] = useState(false)
   const [showPinned, setShowPinned] = useState(false)
   const [showBag, setShowBag] = useState(false)
@@ -132,7 +139,7 @@ export function ChatWindow({ chatId }: { chatId: string | null }) {
     if (!chat || exporting) return
     setExporting(true)
     try {
-      const html = await buildChatTranscriptHtml({ chat, character, persona, messages })
+      const html = await buildChatTranscriptHtml({ chat, character, persona, messages, regexScripts })
       downloadChatTranscript(html, chatTranscriptFilename(chat.title))
     } catch (e) {
       toastError(errorMessage(e))
@@ -189,6 +196,13 @@ export function ChatWindow({ chatId }: { chatId: string | null }) {
         title={activeObjective ? `Objective: ${activeObjective.title}` : 'Set an objective for this chat'}
         active={!!activeObjective}
         onClick={() => setShowObjective(true)}
+      />
+      <IconButton
+        tone={toolbarTone}
+        icon={NotebookPen}
+        title={chat.authorNote?.text ? "Author's note (set)" : "Author's note — a steering note for this chat"}
+        active={!!chat.authorNote?.text}
+        onClick={() => setShowAuthorNote(true)}
       />
       <IconButton tone={toolbarTone} icon={ScrollText} title="Inspect the exact prompt and memory sent to the model" onClick={() => setShowInspector(true)} />
       <IconButton
@@ -349,6 +363,13 @@ export function ChatWindow({ chatId }: { chatId: string | null }) {
           onEndRelationship={endRelationship}
         />
       )}
+      {showAuthorNote && (
+        <AuthorNotePanel
+          note={chat.authorNote}
+          onClose={() => setShowAuthorNote(false)}
+          onSave={updateAuthorNote}
+        />
+      )}
       {showSearch && (
         <SearchPanel
           chatId={chat.id}
@@ -408,6 +429,7 @@ export function ChatWindow({ chatId }: { chatId: string | null }) {
           topBarExtra={toolbar}
           parentChatLink={parentChatLink}
           choiceListSlot={choiceListNode('vn')}
+          assistSlot={<AssistActivityBar items={assistActivity} variant="vn" />}
           composerSlot={composerNode('vn')}
         />
       ) : (
@@ -430,6 +452,7 @@ export function ChatWindow({ chatId }: { chatId: string | null }) {
             />
           </div>
           {choiceListNode('default')}
+          <AssistActivityBar items={assistActivity} />
           {composerNode('default')}
         </>
       )}

@@ -73,6 +73,8 @@ interface VNStageProps {
   parentChatLink?: ReactNode
   /** The next-move suggestion chips for the current turn, pre-built with variant="vn" — omitted when there are none. */
   choiceListSlot?: ReactNode
+  /** A thin "background assists running" strip, pre-built — omitted when nothing is running. */
+  assistSlot?: ReactNode
   /** The message composer, pre-built with variant="vn" — docked at the very bottom of the same glass panel as the dialogue text. */
   composerSlot: ReactNode
 }
@@ -103,6 +105,7 @@ export function VNStage({
   topBarExtra,
   parentChatLink,
   choiceListSlot,
+  assistSlot,
   composerSlot,
 }: VNStageProps) {
   const [showLog, setShowLog] = useState(false)
@@ -160,6 +163,7 @@ export function VNStage({
   const { displaySrc: displaySpriteUrl, visible: spriteVisible } = useSpriteCrossfade(spriteUrl)
   const personaName = persona?.name
   const reducedMotion = useSettingsStore((s) => s.reducedMotion)
+  const regexScripts = useSettingsStore((s) => s.regexScripts)
   const showPetals = !reducedMotion && !!sceneBackground && OUTDOOR_BACKGROUNDS.has(sceneBackground)
 
   return (
@@ -340,11 +344,12 @@ export function VNStage({
                 className="vn-dialogue whitespace-pre-wrap text-[15px] leading-relaxed text-white/95"
                 style={{ textShadow: '0 1px 3px rgb(0 0 0 / 0.5)' }}
               >
-                {renderMessageText(displayText)}
+                {renderMessageText(displayText, regexScripts)}
                 {isStreamingThis && <span className="cursor-blink font-mono">▋</span>}
               </p>
             </div>
             {choiceListSlot && <div className="border-t border-white/10 px-3 pt-2.5 sm:px-5">{choiceListSlot}</div>}
+            {assistSlot}
             <div className="border-t border-white/10 p-2.5 sm:px-4">{composerSlot}</div>
           </div>
         </>

@@ -79,3 +79,22 @@ ROADMAP.md      Living to-do list — what's done, what's planned, and why
 ## Privacy & data
 
 Everything this app knows about your characters, chats, and worlds stays in `data/` on your own disk. There is no server-side account system and no analytics. If you use the optional cloud TTS/STT providers in Settings → Voice, audio is sent to whichever provider you configure there — everything else stays local.
+
+### Where your data lives
+
+Nothing that matters is kept in the browser. All content is written to disk by the local API server:
+
+```
+data/
+  rp.db                     SQLite database — every character, chat, message, world,
+                            lorebook, persona, objective, relationship event, and saved
+                            theme/preset. (rp.db-wal / rp.db-shm are SQLite's write-ahead
+                            log; copy all three together, or stop the server first — it
+                            checkpoints on a clean Ctrl+C so rp.db alone is then complete.)
+  avatars/
+    characters/<id>/         avatar + sprites/ + gallery/ for one character
+    worlds/<id>/             avatar + backgrounds/ for one world
+    personas/<id>.<ext>      one image per persona
+```
+
+The **only** thing stored in the browser (`localStorage`, key `rp-settings`) is per-device UI preference: the KoboldCpp URL, which character/chat is active, the current theme colors, layout toggles, sampler defaults, and voice config. Clearing it resets those preferences but never touches your characters, chats, or worlds. To move an install to another machine, use Settings → Data → **Download backup** (one JSON file with everything, images included) or just copy the `data/` folder.
