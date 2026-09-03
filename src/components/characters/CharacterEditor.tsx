@@ -212,9 +212,7 @@ export function CharacterEditor({
   const handleAvatarPick = async (file: File) => {
     if (file.type === 'image/png') {
       try {
-        const imported = await importCharacterFile(file)
-        setForm(imported.card)
-        setAvatarDataUrl(imported.avatarDataUrl)
+        applyImport(await importCharacterFile(file))
         return
       } catch {
         // not an embedded card, just use it as a plain avatar image
@@ -297,12 +295,28 @@ export function CharacterEditor({
     setRelationshipStarters((s) => s.map((item) => (item.id === id ? { ...item, ...patch } : item)))
   const removeRelationshipStarter = (id: string) => setRelationshipStarters((s) => s.filter((item) => item.id !== id))
 
+  /** Applies a parsed card (V1/V2/V3) into the form, including any V3 `emotion`/`icon` assets. */
+  const applyImport = (result: Awaited<ReturnType<typeof importCharacterFile>>) => {
+    setForm(result.card)
+    if (result.avatarDataUrl) setAvatarDataUrl(result.avatarDataUrl)
+    if (result.sprites && Object.keys(result.sprites).length) {
+      setSprites((s) => ({ ...result.sprites, ...s })) // keep anything already uploaded over an import
+    }
+    if (result.customExpressions?.length) {
+      setCustomExpressions((list) => {
+        const known = new Set([...DEFAULT_EXPRESSIONS.map((e) => e.id), ...list.map((e) => e.id)])
+        return [...list, ...result.customExpressions!.filter((e) => !known.has(e.id))]
+      })
+    }
+    if (result.sprites && Object.keys(result.sprites).length) {
+      toastSuccess(`Imported ${Object.keys(result.sprites).length} expression sprite(s) from the card.`)
+    }
+  }
+
   const handleImportFile = async (file: File) => {
     setImportError(null)
     try {
-      const result = await importCharacterFile(file)
-      setForm(result.card)
-      if (result.avatarDataUrl) setAvatarDataUrl(result.avatarDataUrl)
+      applyImport(await importCharacterFile(file))
     } catch (e) {
       setImportError(e instanceof Error ? e.message : String(e))
     }

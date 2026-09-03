@@ -1272,19 +1272,26 @@ thing that keeps a fresh install from being completely empty is the bundled seed
 (`server/seedContent.ts` — the "Sakura Hill University" world + Sumire + a demo World Info book,
 changelog #49), and nothing points the user at it.
 
-- [ ] **First-run wizard** — a short, skippable sequence on an install with no chats: (1) connect
-      to KoboldCpp — probe the entered URL plus the common defaults (`:5001`, `:5000`), show the
-      detected model name and context length on success (the data is already there via
-      `useConnectionStatus`/`getEffectiveMaxContext`), show the `--host 0.0.0.0` hint on failure;
-      (2) pick or make a persona (see below); (3) start a first chat — offer the seeded Sumire
-      directly, plus "generate one," "start from a template" (`starterTemplates.ts` already
-      exists), and "import a card." The goal is a running conversation without the user ever
-      opening Settings or the character editor.
-- [~] **Actionable empty states** — partly done in the authoring-UI rebuild (changelog #57):
-      Characters / Worlds / Personas / World Info empty states are now a dashed card with a primary
-      "Create your first…" button instead of a bare paragraph. Still open: the empty **chat list**
-      (`ChatsPanel`) and the "Pick a character" chat placeholder, plus a "Use the bundled Sumire"
-      shortcut — those belong with the first-run wizard above.
+- [~] **First-run wizard** — a `WelcomeView` (`src/components/chat/WelcomeView.tsx`) now takes
+      over the chat tab whenever there are zero chats (`ChatSurface` wrapper in `App.tsx`). Two
+      cards: **(1) Connect your model** — the live `useConnectionStatus` state, and when offline it
+      quietly probes `:5001` / `127.0.0.1:5001` / `:5000` in the background and offers a one-click
+      "Use it" if one answers, plus an inline URL field (no trip to Settings), the `--host
+      0.0.0.0` hint, and a "you can do this later" note; **(2) Start your first chat** — the
+      seeded Sumire featured with her avatar/description and a "Chat with {name}" button that opens
+      `NewChatDialog` pre-selected (new `initialCharacterId` prop), or, if no character exists, a
+      "Create a character" / "Import a card" pair that routes to the Characters tab. Verified live
+      end-to-end (offline probe path, "Chat with Sumire" → dialog → running chat, and the view
+      correctly reappearing when the last chat is deleted).
+      **Deliberately not done**: a multi-screen stepper and a forced persona-creation step —
+      persona quality still matters (item 41), so the persona nudge below stays open as its own
+      lighter change.
+- [x] **Actionable empty states** — done. The authoring-UI rebuild (#57) gave Characters / Worlds
+      / Personas / World Info a dashed card with a primary "Create your first…" button; the
+      zero-chats case is now the full `WelcomeView` (#62) with the "Chat with Sumire" shortcut the
+      "use the bundled character" ask wanted. (`ChatsPanel`'s own "No chats yet." line is now
+      unreachable — `ChatSurface` renders the Welcome screen instead — but left in as a defensive
+      fallback.)
 - [ ] **Persona nudge** — a chat created with no persona sends the model a hardcoded `'You'` with
       no description (`NewChatDialog` defaults to "Default (You)"). Item 41's writeup shows how
       much persona quality actually changes the prompt. Prompt for a one-line persona on first
@@ -1394,13 +1401,25 @@ SillyTavern docs/releases, RisuAI (CCv3, CBS/trigger system, regex scripts), Agn
         tests. 174 tests green, typecheck + build clean.
       - **weighted inclusion groups** — a group currently always fires its highest-`insertion_order`
         member (`activation.ts`); ST supports a weighted random pick within the group.
-- [ ] **Read CCv3 character cards** — RisuAI and newer tools emit `chara_card_v3`, which
-      standardizes embedded assets (expression sprites, backgrounds, voice) *in the card*. We're
-      V2-only (`cardSpec.ts`) and carry assets in our own `.rppack.json` instead. At minimum, teach
-      `normalizeCardJson` to read a V3 card's `assets` array into our `sprites` / `gallery` /
-      world `backgrounds` maps, so a modern imported card arrives with its art instead of blank
-      upload slots. (Writing V3 on export is a separate, later question — `.rppack.json` covers
-      our own round-trip already.)
+- [x] **Read CCv3 character cards** — done. `normalizeCardJson` already read a V3 card's text
+      fields (it reads `data.*` and never checked `spec_version`); new here is `extractCardAssets`
+      (`cardSpec.ts`, 10 tests) which pulls the usable parts of a V3 `data.assets` array —
+      `{ type, uri, name, ext }` per asset — into our shape: an `icon` asset becomes the portrait,
+      `emotion` assets become expression sprites keyed by our expression id (with ~30 common
+      aliases mapped — `joy → happy`, `fear → scared`, … — and anything unrecognised kept as a
+      custom expression so it still gets an editor slot). `importCharacterFile` returns the extra
+      `sprites`/`customExpressions`; `CharacterEditor.applyImport` merges them (keeping anything
+      already uploaded over the import) and toasts how many landed. `ccdefault:` and `embeded://`
+      URIs are skipped (neither resolves from a bare card — the former is "use the card's own
+      image", already handled for PNG imports; the latter needs the CHARX zip we don't read), and
+      only `data:` / `https:` art is taken (`http:` skipped as a tracking vector). `background` /
+      `user_icon` assets are ignored — a character import has no world to put a background on.
+      Verified live: imported a hand-built V3 JSON with `icon` + `happy` + `joy` + `Mischievous` +
+      a `ccdefault:` `sad` + a `background` asset; the portrait and the Happy slot (deduped from
+      happy+joy) filled, "Mischievous" appeared as a new custom expression, and the `ccdefault:`
+      and `background` assets were correctly ignored. **Still open** (deliberately): reading a
+      `.charx` (zip) container's `embeded://` assets, and writing V3 on export (`.rppack.json`
+      already covers our own round-trip).
 - [ ] **Quick Replies bar** — a user-configurable row of buttons that send a templated message or
       run a small action ("advance time," "describe my surroundings," "give a gift," "skip to
       evening"). The cheap, independently-useful subset of ST's STscript / Quick Replies without
@@ -1816,6 +1835,18 @@ Done so far (see checked boxes above for detail):
     reordered player-facing-first; the four Settings toggle descriptions rewritten to be honest
     about the per-reply model-call cost. The (a) merge and (c) one-switch "minimal assists"
     profile stay open — (c) is blocked on world templates (10e).
+61. ~~Read CCv3 character cards~~ — fourth item off section 14. `extractCardAssets` (`cardSpec.ts`,
+    10 tests) reads a `chara_card_v3` `data.assets` array — `icon` → portrait, `emotion` →
+    expression sprites (with ~30 name aliases; unknowns become custom expressions). Wired through
+    `importCharacterFile` → `CharacterEditor.applyImport`. `ccdefault:`/`embeded://`/`http:` URIs
+    skipped; `background`/`user_icon` ignored (no home on a character import). Verified live with a
+    hand-built V3 JSON. `.charx` zip reading and V3 export stay open.
+62. ~~First-run Welcome screen~~ — section 13's headline item. A `WelcomeView` takes over the chat
+    tab on an install with no chats (`ChatSurface` in `App.tsx`): a connection card that
+    background-probes the common KoboldCpp ports and offers one-click switching + an inline URL
+    field, and a "Chat with Sumire" card that opens `NewChatDialog` pre-selected. Also closes
+    section 13's "actionable empty states" (the zero-chats case was its last unfinished slice).
+    Verified live end-to-end. Multi-screen stepper + forced persona step deliberately skipped.
 
 That closes out the last "reasonable next batch," plus sections 10a, 10c, and 10d in full and a first
 slice each of 10b and 10f taken directly afterward since 10's own suggested phase order names them
@@ -1857,11 +1888,13 @@ usable and familiar to someone who didn't build it. Progress so far (all verifie
 KoboldCpp off): ~~Author's Note~~ (#55), ~~global-lorebook binding UI~~ (#56), ~~authoring-UI
 rebuild~~ (#57, which also part-closed section 13's "actionable empty states" and "inline help"),
 ~~on-disk persistence audit~~ (#58), ~~regex scripts~~ (#59), ~~per-turn assist "thinking"
-indicator~~ (#60).
+indicator~~ (#60), ~~read CCv3 character cards~~ (#61), ~~first-run Welcome screen + actionable
+empty states~~ (#62).
 
-Still unblocked and worth doing next, roughly in order: the **first-run connection step + wizard**
-(section 13); **read CCv3 character cards** (section 14 — imported modern cards arrive with their
-art); a **prompt/instruct-template manager** (section 14, smallest slice first: duplicate + edit
-an instruct template). **World templates** (section 10e) is the structural key to section 13's
+Still unblocked and worth doing next, roughly in order: a **prompt/instruct-template manager**
+(section 14, smallest slice first: duplicate + edit an instruct template); the **persona nudge**
+(section 13 — a default editable "You" persona instead of a bare fallback string); **manga-style
+SFX bursts** (section 5) or **background music per scene** (section 6) for VN polish. **World
+templates** (section 10e) is the structural key to section 13's
 "which toggles do I want" problem and is worth pulling forward out of 10's phase order. Mobile/
 responsive (section 14) is larger but is the single biggest limiter on who can use the app at all.

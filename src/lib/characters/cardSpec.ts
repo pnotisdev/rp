@@ -4,7 +4,7 @@
 
 import type { TtsProviderId } from '@/lib/voice/ttsProviders'
 import type { ScheduleEntry, WeatherPreferences } from '@/lib/world/calendar'
-import type { CustomExpression } from '@/lib/vn/expressions'
+import { DEFAULT_EXPRESSION_IDS, type CustomExpression } from '@/lib/vn/expressions'
 
 export type WorldInfoActivationMode = 'always' | 'keyword' | 'manual'
 
@@ -256,6 +256,107 @@ function normalizeLorebook(raw: unknown): Lorebook | undefined {
 
 function str(v: unknown): string {
   return typeof v === 'string' ? v : ''
+}
+
+/**
+ * Character Card V3 (`chara_card_v3`) standardises embedded art in a `data.assets` array —
+ * `{ type, uri, name, ext }` per asset. This pulls the parts we can actually use out of a card
+ * being imported: the `icon` asset as a portrait, and `emotion` assets as expression sprites
+ * (keyed by our expression id — with a few common aliases mapped, and anything unrecognised kept
+ * as a custom expression so it still gets an editor slot). `ccdefault:` and `embeded://` URIs are
+ * skipped — neither resolves from a plain card file (the former means "use the card's own image",
+ * already handled for PNG imports; the latter needs the CHARX zip container we don't read).
+ * `http:` is skipped too; only `data:` and `https:` art is taken.
+ */
+const CCV3_USABLE_URI = /^(data:|https:\/\/)/i
+
+/** V3 emotion names that don't line up 1:1 with our expression ids (src/lib/vn/expressions.ts). */
+const V3_EMOTION_ALIASES: Record<string, string> = {
+  joy: 'happy',
+  joyful: 'happy',
+  smile: 'happy',
+  smiling: 'happy',
+  anger: 'angry',
+  mad: 'angry',
+  fear: 'scared',
+  afraid: 'scared',
+  fearful: 'scared',
+  disgust: 'annoyed',
+  disgusted: 'annoyed',
+  sadness: 'sad',
+  unhappy: 'sad',
+  surprise: 'surprised',
+  shock: 'surprised',
+  shocked: 'surprised',
+  embarrassment: 'embarrassed',
+  shy: 'blush',
+  bashful: 'blush',
+  adoration: 'love',
+  loving: 'love',
+  normal: 'neutral',
+  default: 'neutral',
+  amusement: 'laughing',
+  laugh: 'laughing',
+  thoughtful: 'thinking',
+  pensive: 'thinking',
+  tired: 'sleepy',
+  sleep: 'sleepy',
+}
+
+function slugEmotion(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40)
+    .replace(/-+$/, '')
+}
+
+export interface CardAssets {
+  /** From an `icon` asset — only set when the card carried a usable inline/https portrait. */
+  avatarDataUrl?: string
+  /** expression id -> image URI, from `emotion` assets. */
+  sprites?: Record<string, string>
+  /** Expression ids not in the built-in set — so the editor grid still shows a slot for them. */
+  customExpressions?: CustomExpression[]
+}
+
+export function extractCardAssets(raw: unknown): CardAssets {
+  if (!raw || typeof raw !== 'object') return {}
+  const obj = raw as Record<string, unknown>
+  const data = (obj.data && typeof obj.data === 'object' ? obj.data : obj) as Record<string, unknown>
+  if (!Array.isArray(data.assets)) return {}
+
+  const result: CardAssets = {}
+  const sprites: Record<string, string> = {}
+  const customExpressions: CustomExpression[] = []
+
+  for (const entry of data.assets) {
+    if (!entry || typeof entry !== 'object') continue
+    const asset = entry as Record<string, unknown>
+    const type = typeof asset.type === 'string' ? asset.type : ''
+    const uri = typeof asset.uri === 'string' ? asset.uri : ''
+    const name = typeof asset.name === 'string' ? asset.name : ''
+    if (!CCV3_USABLE_URI.test(uri)) continue
+
+    if (type === 'icon') {
+      result.avatarDataUrl ??= uri
+    } else if (type === 'emotion' && name) {
+      const slug = slugEmotion(name)
+      if (!slug) continue
+      const id = V3_EMOTION_ALIASES[slug] ?? slug
+      if (sprites[id]) continue
+      sprites[id] = uri
+      if (!DEFAULT_EXPRESSION_IDS.includes(id) && !customExpressions.some((c) => c.id === id)) {
+        customExpressions.push({ id, label: name.trim() || id })
+      }
+    }
+  }
+
+  if (Object.keys(sprites).length) result.sprites = sprites
+  if (customExpressions.length) result.customExpressions = customExpressions
+  return result
 }
 
 /** Same as str(), but tolerates a model returning an array of strings instead of one string (a common mistake for fields like mes_example). */

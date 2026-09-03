@@ -18,14 +18,17 @@ function parseGreetingGate(line: string): { minAffection: number; text: string }
 export function NewChatDialog({
   onCreated,
   onClose,
+  initialCharacterId = '',
 }: {
   onCreated: (chatId: string) => void
   onClose: () => void
+  /** Pre-select this character (from the Welcome screen's "Chat with …" shortcut). */
+  initialCharacterId?: string
 }) {
   const characters = useApiQuery('characters', () => charactersApi.list(), []) ?? []
   const personas = useApiQuery('personas', () => personasApi.list(), []) ?? []
   const worlds = useApiQuery('worlds', () => worldsApi.list(), []) ?? []
-  const [characterId, setCharacterId] = useState<string>('')
+  const [characterId, setCharacterId] = useState<string>(initialCharacterId)
   const [personaId, setPersonaId] = useState<string>('')
   const [greetingIndex, setGreetingIndex] = useState(0)
   const [starterId, setStarterId] = useState<string>('')

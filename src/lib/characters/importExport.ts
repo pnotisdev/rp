@@ -1,4 +1,5 @@
-import { normalizeCardJson, wrapCardV2, type CharacterCardData } from './cardSpec'
+import { extractCardAssets, normalizeCardJson, wrapCardV2, type CharacterCardData } from './cardSpec'
+import type { CustomExpression } from '@/lib/vn/expressions'
 import { readCharacterFromPng, writeCharacterToPng } from './png'
 
 export async function fileToDataUrl(file: File | Blob): Promise<string> {
@@ -13,20 +14,32 @@ export async function fileToDataUrl(file: File | Blob): Promise<string> {
 export interface ImportResult {
   card: CharacterCardData
   avatarDataUrl?: string
+  /** Character Card V3 `emotion` assets, mapped to expression ids — empty for a plain V1/V2 card. */
+  sprites?: Record<string, string>
+  /** Expression ids from V3 assets that aren't in the built-in set. */
+  customExpressions?: CustomExpression[]
 }
 
-/** Imports a SillyTavern-style character card from a .png (embedded metadata) or .json file. */
+/** Imports a SillyTavern / Character-Card-V3 card from a .png (embedded metadata) or .json file. */
 export async function importCharacterFile(file: File): Promise<ImportResult> {
   if (file.type === 'image/png' || file.name.toLowerCase().endsWith('.png')) {
     const raw = await readCharacterFromPng(file)
     const card = normalizeCardJson(raw)
+    const assets = extractCardAssets(raw)
+    // The PNG's own pixels are the portrait (a V3 `icon` asset is usually `ccdefault:` = "this image").
     const avatarDataUrl = await fileToDataUrl(file)
-    return { card, avatarDataUrl }
+    return { card, avatarDataUrl, sprites: assets.sprites, customExpressions: assets.customExpressions }
   }
   const text = await file.text()
   const raw = JSON.parse(text)
   const card = normalizeCardJson(raw)
-  return { card }
+  const assets = extractCardAssets(raw)
+  return {
+    card,
+    avatarDataUrl: assets.avatarDataUrl,
+    sprites: assets.sprites,
+    customExpressions: assets.customExpressions,
+  }
 }
 
 export function downloadJson(card: CharacterCardData) {
