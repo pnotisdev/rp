@@ -167,6 +167,12 @@ interface SettingsState {
   regexScripts: RegexScript[]
   setRegexScripts: (scripts: RegexScript[]) => void
 
+  // writing-style steering — injected into every prompt, right before generation
+  styleGuidance: string
+  avoidEmDashes: boolean
+  setStyleGuidance: (v: string) => void
+  setAvoidEmDashes: (v: boolean) => void
+
   // companion voice
   ttsProvider: TtsProviderId
   ttsApiKey: string
@@ -266,6 +272,11 @@ export const useSettingsStore = create<SettingsState>()(
 
       regexScripts: [],
       setRegexScripts: (scripts) => set({ regexScripts: scripts }),
+
+      styleGuidance: '',
+      avoidEmDashes: false,
+      setStyleGuidance: (v) => set({ styleGuidance: v }),
+      setAvoidEmDashes: (v) => set({ avoidEmDashes: v }),
 
       ttsProvider: 'koboldcpp',
       ttsApiKey: '',

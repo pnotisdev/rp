@@ -43,6 +43,8 @@ export interface PromptBuildInput {
   activeObjective?: { title: string; description?: string; pendingTasks: string[] }
   /** A short, natural-language relationship-stage nudge (never raw numbers) — same late placement as activeObjective. Pre-built by the caller since it's dating-sim-specific, not a core builder concern. */
   relationshipDescription?: string
+  /** Global writing-style steering (e.g. "avoid em dashes") — same late "right before generation" placement as everything else here, since style instructions are most reliably followed close to the generation point. Pre-composed by the caller from settings, not a core builder concern. */
+  styleGuidance?: string
   /**
    * SillyTavern-style Author's Note — a per-chat steering line placed at a chosen point in the
    * prompt (see `AuthorNote` in `types.ts`). Macro-substituted here like any other text field;
@@ -179,6 +181,7 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
     character.post_history_instructions?.trim() ? sub(character.post_history_instructions) : '',
     buildObjectiveBlock(input.activeObjective, sub),
     input.relationshipDescription?.trim() ? sub(input.relationshipDescription) : '',
+    input.styleGuidance?.trim() ? input.styleGuidance.trim() : '',
     // The scene tag describes the character's own turn, so it makes no sense when generating the user's line instead.
     input.impersonateAsUser ? '' : buildSceneInstruction(input.sceneOptions),
   ]

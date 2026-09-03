@@ -90,6 +90,18 @@ describe('buildPrompt — characterProfile (10e life-context fields)', () => {
   })
 })
 
+describe('buildPrompt — styleGuidance', () => {
+  it('folds global writing-style guidance into the late, right-before-generation block', async () => {
+    const result = await buildPrompt(baseInput({ styleGuidance: 'Never use em dashes (the — character) in your writing.' }))
+    expect(result.prompt).toContain('Never use em dashes')
+  })
+
+  it('omits nothing extra when styleGuidance is unset', async () => {
+    const result = await buildPrompt(baseInput())
+    expect(result.prompt).not.toContain('em dash')
+  })
+})
+
 describe("buildPrompt — Author's Note", () => {
   const history: ChatMessage[] = [
     { id: '1', role: 'user', name: 'You', text: 'FIRST_LINE' },

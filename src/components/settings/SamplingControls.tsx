@@ -12,6 +12,7 @@ import { Section } from '@/components/ui/Section'
 import { SettingsPage } from '@/components/ui/SettingsPage'
 import { RegexScriptsSection } from './RegexScriptsSection'
 import { InstructTemplateSection } from './InstructTemplateSection'
+import { WritingStyleSection } from './WritingStyleSection'
 
 // Simple-mode sliders derive several raw params from one intuitive 0-100 value each.
 function creativityToParams(v: number) {
@@ -213,6 +214,8 @@ export function SamplingControls() {
           description="One model call after each reply. Same as relationship tracking, it shares the GPU with your next message — turn it off for pure freeform writing."
         />
       </Section>
+
+      <WritingStyleSection />
 
       <InstructTemplateSection />
 

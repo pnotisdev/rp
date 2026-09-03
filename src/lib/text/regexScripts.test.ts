@@ -64,6 +64,12 @@ describe('applyRegexScripts', () => {
     const s = [script({ find: 'a', replace: 'b' }), script({ find: 'b', replace: 'c' })]
     expect(applyRegexScripts('a', s, 'display')).toBe('c')
   })
+
+  it('the "avoid em dashes" managed rule (WritingStyleSection) strips a dash cleanly, spaced or not', () => {
+    const s = [script({ find: '\\s*—\\s*', replace: ', ' })]
+    expect(applyRegexScripts('The room was quiet — she hesitated.', s, 'display')).toBe('The room was quiet, she hesitated.')
+    expect(applyRegexScripts('one—two', s, 'display')).toBe('one, two')
+  })
 })
 
 describe('isValidRegexScript', () => {

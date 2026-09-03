@@ -58,6 +58,9 @@ import type { ChoiceOption, RelationshipDimension, RelationshipWarning, SceneFla
 /** Minimum number of newly-eligible messages before auto-summarize bothers running (avoids a summarization call on every single turn). */
 const MIN_BATCH_FOR_AUTO_SUMMARY = 6
 
+/** Extra generation rounds `runGeneration` allows itself when a reply looks cut off by hitting max_length, before giving up and leaving it as-is. */
+const MAX_AUTO_CONTINUE_ROUNDS = 2
+
 /** KoboldCpp's `images` field describes the current context, not per-turn — resend whatever the most recent user turn attached. */
 function latestImages(history: StoredMessage[]): string[] {
   for (let i = history.length - 1; i >= 0; i--) {
@@ -293,6 +296,8 @@ export function useChatSession(chatId: string | null) {
   const autoSuggestChoices = useSettingsStore((s) => s.autoSuggestChoices)
   const regexScripts = useSettingsStore((s) => s.regexScripts)
   const reducedAudio = useSettingsStore((s) => s.reducedAudio)
+  const styleGuidanceNote = useSettingsStore((s) => s.styleGuidance)
+  const avoidEmDashes = useSettingsStore((s) => s.avoidEmDashes)
   const setActiveChatId = useSettingsStore((s) => s.setActiveChatId)
   const client = useMemo(() => new KoboldClient(baseUrl), [baseUrl])
   const customInstructTemplates = useApiQuery('instruct-templates', () => instructTemplatesApi.list(), []) ?? []
@@ -501,6 +506,13 @@ export function useChatSession(chatId: string | null) {
         autoTrackRelationship && speaker.id === character.id
           ? buildRelationshipDescription(freshChat, world, character)
           : undefined
+      const styleGuidance =
+        [
+          avoidEmDashes ? 'Never use em dashes (the — character) in your writing. Use a comma, period, or parentheses instead.' : '',
+          styleGuidanceNote.trim(),
+        ]
+          .filter(Boolean)
+          .join(' ') || undefined
 
       const contextBudget = sampler.max_context_length - sampler.max_length - 32
       return buildPrompt({
@@ -520,6 +532,7 @@ export function useChatSession(chatId: string | null) {
         impersonateAsUser: opts?.impersonateAsUser,
         activeObjective: objectiveForPrompt,
         relationshipDescription,
+        styleGuidance,
         authorNote: freshChat.authorNote,
         regexScripts,
         sceneOptions: {
@@ -539,6 +552,7 @@ export function useChatSession(chatId: string | null) {
       activeFacts,
       activeObjective,
       autoTrackRelationship,
+      avoidEmDashes,
       character,
       chat,
       countTokens,
@@ -547,6 +561,7 @@ export function useChatSession(chatId: string | null) {
       regexScripts,
       resolveSpeaker,
       sampler,
+      styleGuidanceNote,
       template,
       world,
       worldInfoBooks,
@@ -1006,102 +1021,136 @@ export function useChatSession(chatId: string | null) {
       // suggestions are all scoped to the primary's relationship — skip them for a turn a
       // non-primary participant spoke, rather than silently attributing their lines to it.
       const isPrimarySpeaker = speaker.id === character.id
-      const continuing = !!opts?.continuing
-      const existingText = continuing ? (historyForPrompt[historyForPrompt.length - 1]?.text ?? '') : ''
+      // `continuing` starts as whatever the caller asked for (a fresh reply, or a manual
+      // "Continue" click) but becomes true partway through the loop below once an auto-continue
+      // round kicks in — from that point on every remaining round behaves exactly like a manual
+      // continue (same prompt shape, same "replace the last swipe" write), it just wasn't the
+      // user who asked for it.
+      let continuing = !!opts?.continuing
+      const wasOriginallyContinuing = continuing
+      let currentHistory = historyForPrompt
+      let accumulated = continuing ? (historyForPrompt[historyForPrompt.length - 1]?.text ?? '') : ''
       setIsGenerating(true)
-      setStreamingText(existingText)
+      setStreamingText(accumulated)
       setGeneratingMessageId(targetMessageId)
       const genkey = makeGenKey()
       genKeyRef.current = genkey
       const abort = new AbortController()
       abortRef.current = abort
 
+      let combined = ''
+      let scene: ReturnType<typeof sanitizeSceneTag>
+      let wroteAnything = false
+
       try {
-        let built = await buildCurrentPrompt(historyForPrompt, { continueLastTurn: continuing, speakerId: opts?.speakerId })
-        if (!built) throw new Error('Could not build prompt: missing character or chat.')
+        // A reply that used its entire token budget without reaching a natural stop almost
+        // always means it was cut off mid-thought, not that the model happened to finish exactly
+        // on the last token — auto-continue transparently rather than leaving a visibly unfinished
+        // message for the user to notice and manually click "Continue" on. Capped so a model that
+        // never emits a stop sequence at all can't turn one reply into an unbounded loop.
+        for (let round = 0; round <= MAX_AUTO_CONTINUE_ROUNDS; round++) {
+          let built = await buildCurrentPrompt(currentHistory, { continueLastTurn: continuing, speakerId: opts?.speakerId })
+          if (!built) throw new Error('Could not build prompt: missing character or chat.')
 
-        // The budget was already tight for THIS turn, not just future ones — fold the
-        // overflow into the summary now and rebuild, instead of waiting until after the
-        // reply lands. Keeps the roleplay going instead of silently truncating history
-        // right when it matters most.
-        if (autoSummarize && built.excludedMessageCount > 0) {
-          await updateMemorySummary({ force: true })
-          const rebuilt = await buildCurrentPrompt(historyForPrompt, { continueLastTurn: continuing, speakerId: opts?.speakerId })
-          if (rebuilt) built = rebuilt
+          // The budget was already tight for THIS turn, not just future ones — fold the
+          // overflow into the summary now and rebuild, instead of waiting until after the
+          // reply lands. Keeps the roleplay going instead of silently truncating history
+          // right when it matters most.
+          if (autoSummarize && built.excludedMessageCount > 0) {
+            await updateMemorySummary({ force: true })
+            const rebuilt = await buildCurrentPrompt(currentHistory, { continueLastTurn: continuing, speakerId: opts?.speakerId })
+            if (rebuilt) built = rebuilt
+          }
+
+          // The template's own turn-boundary tokens (e.g. ChatML's <|im_end|>) must reach
+          // the sampler or the model has no signal to stop at its own turn — merged with
+          // whatever the user additionally set in Settings, not replacing it.
+          const stopSequence = [...new Set([...template.stopSequences, ...(sampler.stop_sequence ?? [])])]
+
+          let newText = ''
+          try {
+            newText = await client.generateStream(
+              {
+                ...sampler,
+                stop_sequence: stopSequence,
+                prompt: built.prompt,
+                genkey,
+                images: images.length ? images : undefined,
+              },
+              (_token, full) => setStreamingText(accumulated + stripSceneTagForDisplay(full)),
+              abort.signal,
+            )
+          } catch (streamErr) {
+            // Fall back to non-streaming generate (some builds/proxies block SSE).
+            console.warn('Streaming generation failed, falling back to non-streaming:', streamErr)
+            newText = await client.generate(
+              { ...sampler, stop_sequence: stopSequence, prompt: built.prompt, genkey, images: images.length ? images : undefined },
+              abort.signal,
+            )
+          }
+
+          const combinedRaw = (accumulated + newText).trimEnd()
+          const unlockedExpressions = getUnlockedExpressionIds(character, chat.affection ?? 0)
+          const unlockedBackgrounds = getUnlockedBackgroundIds(world, chat.affection ?? 0)
+          const { text: extractedText, scene: parsedScene } = extractSceneTag(combinedRaw)
+          combined = extractedText
+          scene = sanitizeSceneTag(parsedScene, unlockedExpressions, unlockedBackgrounds)
+
+          if (continuing) {
+            const freshMsg = await messagesApi.get(targetMessageId)
+            const swipes = freshMsg?.swipes?.length ? [...freshMsg.swipes] : [accumulated]
+            const activeSwipe = freshMsg?.activeSwipe ?? 0
+            swipes[activeSwipe] = combined
+            const swipeScenes = freshMsg?.swipeScenes ? [...freshMsg.swipeScenes] : []
+            swipeScenes[activeSwipe] = scene
+            await messagesApi.update(targetMessageId, {
+              text: combined,
+              swipes,
+              swipeScenes,
+              activeSwipe,
+              scene,
+              tokenCount: await countTokens(combined),
+              failed: false,
+            })
+          } else {
+            const freshMsg = await messagesApi.get(targetMessageId)
+            const existingSwipes = freshMsg?.swipes?.length ? [...freshMsg.swipes] : [combined]
+            const activeSwipe = Math.min(freshMsg?.activeSwipe ?? 0, Math.max(0, existingSwipes.length - 1))
+            existingSwipes[activeSwipe] = combined
+            const swipeScenes = freshMsg?.swipeScenes ? [...freshMsg.swipeScenes] : []
+            swipeScenes[activeSwipe] = scene
+            await messagesApi.update(targetMessageId, {
+              text: combined,
+              swipes: existingSwipes,
+              swipeScenes,
+              activeSwipe,
+              scene,
+              tokenCount: await countTokens(combined),
+              failed: false,
+            })
+          }
+          wroteAnything = true
+          await chatsApi.update(chat.id, {}) // bumps updatedAt so the chat resorts to the top
+
+          // Stopping the generation by hand (or the model genuinely finishing early) both mean
+          // "don't keep going" regardless of how close to the token cap it landed.
+          const generatedTokens = !abort.signal.aborted && newText.trim() ? await countTokens(newText) : 0
+          const looksTruncated = !abort.signal.aborted && generatedTokens >= sampler.max_length - 1
+          if (!looksTruncated || round === MAX_AUTO_CONTINUE_ROUNDS) break
+
+          continuing = true
+          accumulated = combined
+          currentHistory =
+            round === 0
+              ? [...historyForPrompt, { id: targetMessageId, role: 'char' as const, name: speaker.card.name, text: combined }]
+              : [...currentHistory.slice(0, -1), { ...currentHistory[currentHistory.length - 1], text: combined }]
         }
-
-        // The template's own turn-boundary tokens (e.g. ChatML's <|im_end|>) must reach
-        // the sampler or the model has no signal to stop at its own turn — merged with
-        // whatever the user additionally set in Settings, not replacing it.
-        const stopSequence = [...new Set([...template.stopSequences, ...(sampler.stop_sequence ?? [])])]
-
-        let newText = ''
-        try {
-          newText = await client.generateStream(
-            {
-              ...sampler,
-              stop_sequence: stopSequence,
-              prompt: built.prompt,
-              genkey,
-              images: images.length ? images : undefined,
-            },
-            (_token, full) => setStreamingText(existingText + stripSceneTagForDisplay(full)),
-            abort.signal,
-          )
-        } catch (streamErr) {
-          // Fall back to non-streaming generate (some builds/proxies block SSE).
-          console.warn('Streaming generation failed, falling back to non-streaming:', streamErr)
-          newText = await client.generate(
-            { ...sampler, stop_sequence: stopSequence, prompt: built.prompt, genkey, images: images.length ? images : undefined },
-            abort.signal,
-          )
-        }
-
-        const combinedRaw = (existingText + newText).trimEnd()
-        const unlockedExpressions = getUnlockedExpressionIds(character, chat.affection ?? 0)
-        const unlockedBackgrounds = getUnlockedBackgroundIds(world, chat.affection ?? 0)
-        const { text: combined, scene: parsedScene } = extractSceneTag(combinedRaw)
-        const scene = sanitizeSceneTag(parsedScene, unlockedExpressions, unlockedBackgrounds)
-        if (continuing) {
-          const freshMsg = await messagesApi.get(targetMessageId)
-          const swipes = freshMsg?.swipes?.length ? [...freshMsg.swipes] : [existingText]
-          const activeSwipe = freshMsg?.activeSwipe ?? 0
-          swipes[activeSwipe] = combined
-          const swipeScenes = freshMsg?.swipeScenes ? [...freshMsg.swipeScenes] : []
-          swipeScenes[activeSwipe] = scene
-          await messagesApi.update(targetMessageId, {
-            text: combined,
-            swipes,
-            swipeScenes,
-            activeSwipe,
-            scene,
-            tokenCount: await countTokens(combined),
-            failed: false,
-          })
-        } else {
-          const freshMsg = await messagesApi.get(targetMessageId)
-          const existingSwipes = freshMsg?.swipes?.length ? [...freshMsg.swipes] : [combined]
-          const activeSwipe = Math.min(freshMsg?.activeSwipe ?? 0, Math.max(0, existingSwipes.length - 1))
-          existingSwipes[activeSwipe] = combined
-          const swipeScenes = freshMsg?.swipeScenes ? [...freshMsg.swipeScenes] : []
-          swipeScenes[activeSwipe] = scene
-          await messagesApi.update(targetMessageId, {
-            text: combined,
-            swipes: existingSwipes,
-            swipeScenes,
-            activeSwipe,
-            scene,
-            tokenCount: await countTokens(combined),
-            failed: false,
-          })
-        }
-        await chatsApi.update(chat.id, {}) // bumps updatedAt so the chat resorts to the top
 
         // Post-reply assists. Each is fire-and-forget (never blocks the reply that just landed) but
         // routed through `runAssist` so the chat can show which ones are still running — on a local
         // single-GPU server they queue up on the model, and their results otherwise appear with no
         // warning that they were coming.
-        const relationshipHistory = continuing
+        const relationshipHistory = wasOriginallyContinuing
           ? [...historyForPrompt.slice(0, -1), { id: targetMessageId, role: 'char' as const, name: speaker.card.name, text: combined }]
           : [...historyForPrompt, { id: targetMessageId, role: 'char' as const, name: speaker.card.name, text: combined }]
         // A live, scored date (10b) suppresses the normal per-turn drip-feed — its outcome is
@@ -1124,7 +1173,10 @@ export function useChatSession(chatId: string | null) {
         }
       } catch (e) {
         toastError(errorMessage(e))
-        if (!continuing) {
+        // `wroteAnything` covers an auto-continue round failing after an earlier round already
+        // persisted real content — that content stays rather than getting wiped just because a
+        // later extension attempt errored out.
+        if (!wasOriginallyContinuing && !wroteAnything) {
           // Empty text, not an error string baked into the message — that string would otherwise
           // get fed back into every future prompt as something the character genuinely said. The
           // UI shows the failure itself, driven by `failed`, not by message content.

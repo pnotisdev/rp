@@ -117,13 +117,13 @@ export function ObjectivePanel({
               ))}
             </div>
 
-            <div className="mb-4 flex gap-2">
+            <div className="mb-4 flex items-center gap-2">
               <TextField
                 label=""
                 value={newTask}
                 onChange={(e) => setNewTask(e.target.value)}
                 placeholder="Add a task by hand"
-                className="flex-1"
+                className="mb-0 flex-1"
               />
               <Button
                 onClick={() =>
@@ -133,7 +133,6 @@ export function ObjectivePanel({
                   })
                 }
                 disabled={busy !== null || !newTask.trim()}
-                className="mt-5"
               >
                 Add
               </Button>

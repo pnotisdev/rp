@@ -466,6 +466,45 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
       context than the model has loaded), not just a bigger ceiling for larger ones. Also
       genuinely *surfaced*: `useConnectionStatus` exposes `maxContext`, shown in
       `ConnectionSettings` and the `ConnectionBadge` tooltip.
+- [x] **Auto-continue a reply that got cut off by hitting `max_length`** — user-reported: replies
+      sometimes ended mid-sentence instead of finishing the thought. `runGeneration`
+      (`useChatSession.ts`) now loops internally (up to `MAX_AUTO_CONTINUE_ROUNDS = 2` extra
+      rounds): after each generation it counts the tokens the model actually produced this round
+      (`countTokens`, already existed for the token-count badge) and compares against
+      `sampler.max_length` — landing at (or within one token of) the requested cap, with no abort,
+      is a reliable signal the model was cut off rather than genuinely finishing on the last token.
+      If so, the partial text is persisted (so an error on a later round never loses an earlier
+      round's real content) and immediately continued exactly the way the existing manual
+      "Continue" button already does — same `continueLastTurn` prompt shape, same
+      replace-the-active-swipe write — just triggered automatically instead of waiting for the
+      user to notice and click it. Post-reply assists (relationship tracking, choice suggestions,
+      task detection, summarization) now fire once, after the *final* round, not once per round.
+      Stopping generation by hand (the Stop button) always wins and never triggers a continue.
+      Verified live: with `max_length` deliberately dropped to an extreme 40 (to force truncation
+      on the very first round almost every time), a request for a long, detailed story landed a
+      121-token reply — roughly 3x a single round's cap — reading as one continuous passage with
+      no repeated or dropped text at the stitch points, confirming multiple rounds actually ran and
+      merged correctly; at a normal `max_length` (300), this gives up to 900 tokens of headroom
+      before a reply would ever visibly cut off.
+- [x] **Writing-style steering (avoid em dashes, reduce "AI slop" phrasing)** — user-requested,
+      described as needing real enforcement, not just a hopeful prompt hint. Two new global
+      settings (`useSettingsStore.ts`): `avoidEmDashes` (a dedicated toggle) and `styleGuidance`
+      (freeform, with a "Use suggested starter" button offering a canned anti-AI-slop paragraph —
+      "it's not just X, it's Y" constructions, rule-of-three lists, hedging words, purple prose —
+      the user edits or replaces it freely). Both compose into one `PromptBuildInput.styleGuidance`
+      string (`builder.ts`) injected in the same late, right-before-generation slot as an active
+      objective or the relationship nudge, since a style instruction is followed far more reliably
+      placed close to where generation actually starts than buried at the top of a long prompt.
+      Belt and suspenders for the em-dash case specifically, since a model won't always fully obey
+      a style instruction: toggling `avoidEmDashes` on also auto-manages one regex script (`src/lib/text/regexScripts.ts`,
+      already existed for exactly this class of problem) with a stable id
+      (`builtin-avoid-em-dash`, `target: 'both'`) that strips any em dash that slips through —
+      toggling off removes exactly that managed rule, never a user's own. New
+      `WritingStyleSection.tsx` (Settings → Generation). 2 new `builder.test.ts` cases plus one
+      `regexScripts.test.ts` case pinning the managed pattern's exact behavior. Verified live:
+      confirmed the toggle adds/removes the regex rule, confirmed the composed instruction lands in
+      the exact assembled prompt via the Prompt Inspector, and confirmed a real generated reply
+      contained zero em dashes with the toggle on.
 - [ ] Vision-based expression detection using already-piped-through images. The groundwork is
       there — images already flow end-to-end through generation
       ([useChatSession.ts:391,433,442,574](src/lib/hooks/useChatSession.ts#L391), `builder.ts:13-14`,
@@ -1344,6 +1383,16 @@ changelog #49), and nothing points the user at it.
       full-bleed, which looks like a bug, not a "you haven't uploaded art yet" state. Either a
       clear empty-VN affordance ("Upload sprites for {char} to see them here"), or don't offer the
       toggle until at least one sprite exists, or a bundled default sprite set.
+      **A real, silent instance of this found live**: a character with a full custom sprite set but
+      *no world bound at all* — `Character.worldId` unset — has nowhere to source background art
+      from regardless of what the model tags, so VN mode always showed the placeholder gradient
+      even with an otherwise fully-dressed character, with no indication anywhere that "bind a
+      world" was the missing step. Fixed for that one character by binding her to the existing
+      seeded world's background set. Confirms this item's own point rather than closing it — the
+      real fix is still the general empty-state affordance above (here, ideally: a nudge on the
+      character/world editors when VN mode is on but the active character has no world, since
+      background art specifically is a world-level concept a user might not realize they need to
+      set up separately from sprites).
 - [ ] **Command palette / global search (Ctrl-K)** — jump to any character, chat, world, or view
       from one input. The nav is an icon-only rail by default (`sidebarExpanded: false`), so even
       finding the right section is a hover-hunt for a new user; a palette sidesteps that and scales
@@ -1924,6 +1973,23 @@ Done so far (see checked boxes above for detail):
     shipped-as-files) message-send blip and a milestone/unlock reward chime, muted by a new
     `reducedAudio` setting next to `reducedMotion`. See section 6's checked item for the full
     writeup.
+67. ~~Auto-continue truncated replies~~ — user-reported live, once koboldcpp was actually running
+    for a real testing pass: replies sometimes ended mid-sentence. `runGeneration` now detects a
+    reply that used its full `max_length` budget and automatically extends it (up to 2 extra
+    rounds) the same way the existing manual "Continue" button already does. See section 8's
+    checked item for the full writeup, including how it was stress-tested.
+68. ~~Writing-style steering~~ — user-requested: no em dashes, less "AI slop" phrasing generally.
+    A global `styleGuidance` note plus a dedicated `avoidEmDashes` toggle, injected right before
+    generation for reliability, backed by an auto-managed regex rule as a deterministic safety net
+    for the em-dash case specifically. See section 8's checked item for the full writeup.
+69. ~~Background art not showing~~ — user-reported live: VN mode showed only a placeholder
+    gradient behind an otherwise fully-sprited character. Root cause wasn't missing art at all —
+    it was a character with no world bound, so there was nowhere to source background images from
+    regardless of the model's own scene tags. Fixed by binding the affected character to the
+    existing seeded world, whose background set already covered every default location. Confirmed
+    live: the same scene now renders real background art matching the tagged location. See section
+    13's "VN mode reads as broken before art exists" item for the general gap this is one instance
+    of, which stays open.
 
 That closes out the last "reasonable next batch," plus sections 10a, 10c, and 10d in full and a first
 slice each of 10b and 10f taken directly afterward since 10's own suggested phase order names them
