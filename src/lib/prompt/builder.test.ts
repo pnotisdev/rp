@@ -194,3 +194,73 @@ describe('buildPrompt — regex scripts (prompt target)', () => {
     expect(result.prompt).toContain('the WIDGET is here')
   })
 })
+
+describe('buildPrompt — promptSections (section 13 instruct-template-manager part c)', () => {
+  it('includes every section by default when promptSections is unset, same as before this option existed', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        character: character({ name: 'Aria', description: 'A cheerful bard.', mes_example: 'EXAMPLE_LINE' }),
+        personaDescription: 'A curious traveler.',
+        chatSummary: 'SUMMARY_LINE',
+        worldDescription: 'WORLD_LINE',
+        participants: [{ name: 'Kestrel' }],
+      }),
+    )
+    expect(result.prompt).toContain('You are Aria.')
+    expect(result.prompt).toContain('A cheerful bard.')
+    expect(result.prompt).toContain('SUMMARY_LINE')
+    expect(result.prompt).toContain('WORLD_LINE')
+    expect(result.prompt).toContain('About You')
+    expect(result.prompt).toContain('Also present in this scene')
+    expect(result.prompt).toContain('EXAMPLE_LINE')
+  })
+
+  it('omits exactly the disabled sections and leaves the rest untouched', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        character: character({ name: 'Aria', description: 'A cheerful bard.', mes_example: 'EXAMPLE_LINE' }),
+        personaDescription: 'A curious traveler.',
+        chatSummary: 'SUMMARY_LINE',
+        worldDescription: 'WORLD_LINE',
+        promptSections: { summary: false, world: false, examples: false },
+      }),
+    )
+    expect(result.prompt).not.toContain('SUMMARY_LINE')
+    expect(result.prompt).not.toContain('WORLD_LINE')
+    expect(result.prompt).not.toContain('EXAMPLE_LINE')
+    // Untouched sections still present.
+    expect(result.prompt).toContain('A cheerful bard.')
+    expect(result.prompt).toContain('About You')
+  })
+
+  it('turning off the description section still lets the generic system line and history through', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        character: character({ name: 'Aria', description: 'A cheerful bard.' }),
+        promptSections: { description: false },
+      }),
+    )
+    expect(result.prompt).toContain('You are Aria.')
+    expect(result.prompt).not.toContain('A cheerful bard.')
+  })
+
+  it('turning off the system section drops the generic identity line entirely', async () => {
+    const result = await buildPrompt(baseInput({ promptSections: { system: false } }))
+    expect(result.prompt).not.toContain('You are Aria.')
+  })
+
+  it('turning off persona drops the "About {{user}}" line', async () => {
+    const result = await buildPrompt(
+      baseInput({ personaDescription: 'A curious traveler.', promptSections: { persona: false } }),
+    )
+    expect(result.prompt).not.toContain('About You')
+    expect(result.prompt).not.toContain('A curious traveler.')
+  })
+
+  it('turning off participants drops the roster even when other characters are present', async () => {
+    const result = await buildPrompt(
+      baseInput({ participants: [{ name: 'Kestrel' }], promptSections: { participants: false } }),
+    )
+    expect(result.prompt).not.toContain('Also present in this scene')
+  })
+})

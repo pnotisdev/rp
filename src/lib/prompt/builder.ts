@@ -7,6 +7,39 @@ import { applyRegexScripts } from '@/lib/text/regexScripts'
 import type { RegexScript } from '@/lib/types'
 import type { InstructTemplate } from './instructTemplates'
 
+/**
+ * Section 13's instruct-template-manager part (c): `fixedSections` below used to be a hardcoded,
+ * always-on list — the only exception was `includeExamples`, wired to nothing, dead since it was
+ * added. Naming each independently-computed block here lets a caller (Settings → Generation) turn
+ * any of them off entirely, e.g. to drop the persona blurb for a token-tight model, without
+ * touching content. Deliberately NOT included: `worldBefore`/`worldAfter` (governed by lorebook
+ * activation/budget, not an on/off concept) and the Author's Note (already has its own presence +
+ * position control). Reordering these relative to each other isn't exposed either — several are
+ * order-coupled to world-info/author-note placement in ways a flat drag-and-drop would silently
+ * break; only enable/disable is safe to expose without touching that structure.
+ */
+export type PromptSectionId = 'system' | 'summary' | 'world' | 'description' | 'participants' | 'persona' | 'examples'
+
+export const PROMPT_SECTION_LABELS: Record<PromptSectionId, string> = {
+  system: 'System prompt',
+  summary: 'Long-term memory summary',
+  world: 'World / setting description',
+  description: 'Character description',
+  participants: 'Other participants roster (group chats)',
+  persona: 'Persona description',
+  examples: 'Example messages',
+}
+
+export const DEFAULT_PROMPT_SECTIONS: Record<PromptSectionId, boolean> = {
+  system: true,
+  summary: true,
+  world: true,
+  description: true,
+  participants: true,
+  persona: true,
+  examples: true,
+}
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'char'
@@ -33,7 +66,8 @@ export interface PromptBuildInput {
   contextBudget: number
   scanDepth: number
   manuallyActivatedWorldInfoIds?: Set<number>
-  includeExamples?: boolean
+  /** Per-section on/off, e.g. from Settings → Generation — an unset section defaults to on (`DEFAULT_PROMPT_SECTIONS`), so an old caller that never passes this gets today's always-on behavior unchanged. */
+  promptSections?: Partial<Record<PromptSectionId, boolean>>
   countTokens: (text: string) => Promise<number>
   /** The last entry in `history` is an in-progress char turn to keep writing, not a finished one — no closing suffix, no fresh generation cue appended after it. */
   continueLastTurn?: boolean
@@ -91,9 +125,9 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
     contextBudget,
     scanDepth,
     manuallyActivatedWorldInfoIds,
-    includeExamples = true,
     countTokens,
   } = input
+  const sections = { ...DEFAULT_PROMPT_SECTIONS, ...input.promptSections }
 
   const macroCtx = { charName: character.name || 'Character', userName: personaName || 'User' }
   const sub = (text: string | undefined) => substituteMacros(text ?? '', macroCtx)
@@ -146,7 +180,7 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
     : ''
 
   const exampleBlock =
-    includeExamples && character.mes_example?.trim() ? sub(character.mes_example) : ''
+    sections.examples && character.mes_example?.trim() ? sub(character.mes_example) : ''
 
   const worldBefore = before.map((e) => sub(e.content)).join('\n')
   const worldAfter = after.map((e) => sub(e.content)).join('\n')
@@ -158,15 +192,15 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
   const authorNoteDepth = Math.max(0, Math.floor(Number(input.authorNote?.depth) || 0))
 
   const fixedSections = [
-    systemBlock,
-    summaryBlock,
-    worldBlock,
+    sections.system ? systemBlock : '',
+    sections.summary ? summaryBlock : '',
+    sections.world ? worldBlock : '',
     worldBefore,
     authorNoteText && authorNotePosition === 'before_char' ? authorNoteText : '',
-    descriptionBlock,
-    participantsBlock,
+    sections.description ? descriptionBlock : '',
+    sections.participants ? participantsBlock : '',
     worldAfter,
-    personaBlock,
+    sections.persona ? personaBlock : '',
     exampleBlock,
     authorNoteText && authorNotePosition === 'after_char' ? authorNoteText : '',
   ].filter(Boolean)

@@ -12,6 +12,7 @@ import {
   Search,
   Star,
   Target,
+  Wrench,
 } from 'lucide-react'
 import { useChatSession } from '@/lib/hooks/useChatSession'
 import { IconButton } from '@/components/ui/IconButton'
@@ -41,6 +42,7 @@ import { AssistActivityBar } from './AssistActivityBar'
 import { SearchPanel } from './SearchPanel'
 import { PinnedMessagesPanel } from './PinnedMessagesPanel'
 import { BagPanel } from './BagPanel'
+import { DirectorPanel } from './DirectorPanel'
 import { getGiftCatalog } from '@/lib/dating/gifts'
 import { getItemCatalog } from '@/lib/dating/items'
 
@@ -90,7 +92,7 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
     forkChat,
   } = useChatSession(chatId)
 
-  const visualNovelMode = useSettingsStore((s) => s.visualNovelMode)
+  const globalVisualNovelMode = useSettingsStore((s) => s.visualNovelMode)
   const regexScripts = useSettingsStore((s) => s.regexScripts)
   const setActiveChatId = useSettingsStore((s) => s.setActiveChatId)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -102,6 +104,7 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
   const [showSearch, setShowSearch] = useState(false)
   const [showPinned, setShowPinned] = useState(false)
   const [showBag, setShowBag] = useState(false)
+  const [showDirector, setShowDirector] = useState(false)
   const [highlightedId, setHighlightedId] = useState<string | null>(null)
   const highlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [draft, setDraft] = useState('')
@@ -159,6 +162,9 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
     )
   }
 
+  // Chat-level override wins over the global Settings → Appearance default, same precedence style
+  // as the autoTrackRelationship/autoSuggestChoices overrides below it.
+  const visualNovelMode = chat.assistOverrides?.visualNovelMode ?? globalVisualNovelMode
   const pinnedCount = messages.filter((m) => m.pinned).length
   // Presence reads the world's shared clock, so it's only meaningful for a world-bound character
   // that actually has a schedule authored — most characters have neither, and stay unbadged.
@@ -215,6 +221,7 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
       />
       <IconButton tone={toolbarTone} icon={Search} title="Search messages" onClick={() => setShowSearch(true)} />
       <IconButton tone={toolbarTone} icon={Backpack} title="Bag — give a gift you already own" onClick={() => setShowBag(true)} />
+      <IconButton tone={toolbarTone} icon={Wrench} title="Director view — inspect and adjust world/relationship state directly" onClick={() => setShowDirector(true)} />
       <IconButton tone={toolbarTone} icon={Download} title="Export this chat as a readable HTML transcript" onClick={exportTranscript} disabled={exporting} />
     </>
   )
@@ -414,6 +421,10 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
             setShowBag(false)
           }}
         />
+      )}
+
+      {showDirector && (
+        <DirectorPanel chat={chat} character={character} world={world} onClose={() => setShowDirector(false)} />
       )}
 
       {visualNovelMode ? (

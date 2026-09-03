@@ -7,6 +7,7 @@ import {
   Mic,
   PanelLeftClose,
   PanelLeftOpen,
+  Search,
   Settings as SettingsIcon,
   Users,
   type LucideIcon,
@@ -15,7 +16,7 @@ import { useSettingsStore } from '@/lib/store/useSettingsStore'
 
 export type ViewId = 'chat' | 'companion' | 'characters' | 'worlds' | 'personas' | 'worldinfo' | 'gallery' | 'settings'
 
-const NAV: { id: ViewId; label: string; icon: LucideIcon }[] = [
+export const NAV: { id: ViewId; label: string; icon: LucideIcon }[] = [
   { id: 'chat', label: 'Chat', icon: MessageCircle },
   { id: 'companion', label: 'Companion', icon: Mic },
   { id: 'characters', label: 'Characters', icon: Users },
@@ -26,7 +27,17 @@ const NAV: { id: ViewId; label: string; icon: LucideIcon }[] = [
   { id: 'settings', label: 'Settings', icon: SettingsIcon },
 ]
 
-export function Sidebar({ view, onChange }: { view: ViewId; onChange: (v: ViewId) => void }) {
+export function Sidebar({
+  view,
+  onChange,
+  onOpenPalette,
+}: {
+  view: ViewId
+  onChange: (v: ViewId) => void
+  /** Opens the command palette (Ctrl/Cmd-K) — desktop-only trigger; the mobile bottom bar has no
+   *  room to spare and a keyboard shortcut isn't the point on a touch device anyway. */
+  onOpenPalette?: () => void
+}) {
   const expanded = useSettingsStore((s) => s.sidebarExpanded)
   const setExpanded = useSettingsStore((s) => s.setSidebarExpanded)
 
@@ -40,6 +51,19 @@ export function Sidebar({ view, onChange }: { view: ViewId; onChange: (v: ViewId
         expanded ? 'md:w-40 md:px-2' : 'md:w-14 md:items-center md:px-1.5'
       }`}
     >
+      {onOpenPalette && (
+        <button
+          onClick={onOpenPalette}
+          title="Search everywhere (Ctrl/Cmd-K)"
+          aria-label="Search everywhere"
+          className={`mb-1 hidden items-center rounded-xl text-text-muted transition-colors hover:bg-bg-sunken hover:text-text md:flex ${
+            expanded ? 'md:justify-start md:gap-3 md:px-3 md:py-2.5' : 'md:h-10 md:w-10 md:justify-center'
+          }`}
+        >
+          <Search size={18} strokeWidth={1.75} className="shrink-0" />
+          {expanded && <span className="hidden md:inline">Search</span>}
+        </button>
+      )}
       {NAV.map((item) => (
         <button
           key={item.id}

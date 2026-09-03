@@ -1,20 +1,9 @@
 import { useState } from 'react'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
-import { charactersApi, chatsApi, messagesApi, personasApi, worldsApi } from '@/lib/api/client'
-import { substituteMacros } from '@/lib/characters/macros'
-import { computeWarmth, getRelationshipStats, relationshipMilestonesFor, relationshipStageForWarmth } from '@/lib/dating/stage'
-import { defaultGiftInventory } from '@/lib/dating/gifts'
-import { assistOverridesForTemplate } from '@/lib/world/worldTemplates'
-import type { RelationshipDimension } from '@/lib/types'
+import { charactersApi, personasApi, worldsApi } from '@/lib/api/client'
+import { availableGreetings, createChat } from '@/lib/chat/createChat'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
-
-function parseGreetingGate(line: string): { minAffection: number; text: string } {
-  const match = line.match(/^\s*\[affection>=\s*(\d{1,3})\]\s*/i)
-  const minAffection = match ? Math.max(0, Math.min(100, Number(match[1]) || 0)) : 0
-  const text = match ? line.slice(match[0].length) : line
-  return { minAffection, text: text.trim() }
-}
 
 export function NewChatDialog({
   onCreated,
@@ -50,13 +39,7 @@ export function NewChatDialog({
   const world = worlds.find((w) => w.id === character?.worldId)
   const starters = character?.relationshipStarters ?? []
   const starter = starters.find((s) => s.id === starterId)
-  const greetingOptions = character
-    ? [character.card.first_mes, ...(character.card.alternate_greetings ?? [])]
-        .filter((g): g is string => !!g?.trim())
-        .map(parseGreetingGate)
-        .filter((g) => g.minAffection <= 0)
-        .map((g) => g.text)
-    : []
+  const greetingOptions = character ? availableGreetings(character) : []
 
   const create = async () => {
     if (!character || busy) return
@@ -80,42 +63,16 @@ export function NewChatDialog({
       })
       resolvedPersonaId = persona.id
     }
-    const startingAffection = starter?.startingAffection ?? 0
-    // A starter describes existing closeness, not built-up conflict or a curiosity spike, so it
-    // only seeds the four warmth-composing dimensions — curiosity/tension stay at a neutral 0.
-    const startingStats: Partial<Record<RelationshipDimension, number>> | undefined = starter
-      ? { trust: startingAffection, chemistry: startingAffection, comfort: startingAffection, respect: startingAffection }
-      : undefined
-    const warmth = computeWarmth(startingAffection, getRelationshipStats({ relationshipStats: startingStats }))
-    const chat = await chatsApi.create({
-      characterId,
-      participants: participantIds.length ? participantIds : undefined,
+    const chat = await createChat({
+      character,
+      world,
       personaId: resolvedPersonaId || '',
-      title: character.card.name,
-      affection: startingAffection,
-      relationshipStats: startingStats,
-      relationshipStage: relationshipStageForWarmth(warmth, relationshipMilestonesFor(world?.relationshipThresholds)),
-      sceneFlags: [],
-      giftCoins: 24,
-      giftInventory: defaultGiftInventory(world),
-      giftsGiven: {},
-      unlockedGalleryIds: [],
+      personaName: persona?.name,
+      participantIds,
+      startingAffection: starter?.startingAffection ?? 0,
       summary: starter?.blurb || undefined,
-      assistOverrides: assistOverridesForTemplate(world?.template),
+      greetingIndex: greetingOptions.length > 0 ? greetingIndex : -1,
     })
-    if (greetingOptions.length > 0) {
-      const macroCtx = { charName: character.card.name, userName: persona?.name || 'You' }
-      const greetings = greetingOptions.map((g) => substituteMacros(g, macroCtx))
-      const activeSwipe = Math.min(greetingIndex, greetings.length - 1)
-      await messagesApi.create({
-        chatId: chat.id,
-        role: 'char',
-        name: character.card.name,
-        text: greetings[activeSwipe],
-        swipes: greetings,
-        activeSwipe,
-      })
-    }
     onCreated(chat.id)
   }
 

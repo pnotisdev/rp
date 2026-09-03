@@ -290,6 +290,10 @@ export interface Chat {
   assistOverrides?: {
     autoTrackRelationship?: boolean
     autoSuggestChoices?: boolean
+    /** Same precedence — unset falls back to the global Settings → Appearance default. Seeded
+     *  from the bound world's template (Visual Novel forces it on) same as the two flags above,
+     *  editable afterward from `RelationshipPanel`. */
+    visualNovelMode?: boolean
   }
 }
 

@@ -45,9 +45,16 @@ describe('assistOverridesForTemplate', () => {
     expect(assistOverridesForTemplate('slice_of_life')).toEqual({ autoTrackRelationship: false, autoSuggestChoices: false })
   })
 
-  it('leaves no override for dating_sim, visual_novel, or an unset template', () => {
+  it('leaves no relationship override for dating_sim, visual_novel, or an unset template', () => {
     expect(assistOverridesForTemplate('dating_sim')).toEqual({})
-    expect(assistOverridesForTemplate('visual_novel')).toEqual({})
+    expect(assistOverridesForTemplate(undefined)).toEqual({})
+  })
+
+  it('forces visualNovelMode on for visual_novel only, since it is the one template whose whole premise is VN presentation', () => {
+    expect(assistOverridesForTemplate('visual_novel')).toEqual({ visualNovelMode: true })
+    expect(assistOverridesForTemplate('dating_sim')).toEqual({})
+    expect(assistOverridesForTemplate('freeform')).toEqual({ autoTrackRelationship: false, autoSuggestChoices: false })
+    expect(assistOverridesForTemplate('slice_of_life')).toEqual({ autoTrackRelationship: false, autoSuggestChoices: false })
     expect(assistOverridesForTemplate(undefined)).toEqual({})
   })
 })

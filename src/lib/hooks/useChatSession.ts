@@ -49,10 +49,12 @@ import { extractSceneTag, stripSceneTagForDisplay, type SceneTag } from '@/lib/v
 import { DEFAULT_EXPRESSION_IDS } from '@/lib/vn/expressions'
 import { DEFAULT_BACKGROUND_IDS } from '@/lib/vn/backgrounds'
 import { bookAppliesToChat } from '@/lib/worldinfo/scope'
+import { buildFactsLorebook } from '@/lib/worldinfo/facts'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import { errorMessage, toastError, toastInfo, toastSuccess } from '@/lib/store/useToastStore'
 import { playSendBlip } from '@/lib/audio/sfx'
 import type { Character, Lorebook } from '@/lib/characters/cardSpec'
+import { buildCharacterProfileNote } from '@/lib/characters/profile'
 import type { ChoiceOption, RelationshipDimension, RelationshipWarning, SceneFlag } from '@/lib/types'
 
 /** Minimum number of newly-eligible messages before auto-summarize bothers running (avoids a summarization call on every single turn). */
@@ -191,40 +193,6 @@ function buildGiftTasteNote(character: Character): string | undefined {
   return `${character.card.name} ${parts.join('; ')} — react to any gift given accordingly, in character, never reciting this as a checklist.`
 }
 
-/**
- * 10e's "full authoring editors" life-context fields (occupation, home/frequented locations,
- * likes/goals/boundaries, social connections) — unlike the gift-taste note above, this reaches
- * the model unconditionally whenever the speaking character has any of it set, not just when
- * relationship tracking is on: a plain-assistant-chat or lore-reference use of a character should
- * still be able to mention their job or their sister, the same way `description`/`personality`
- * always do. Folded into the identity block in `builder.ts`, not the late post-history slot —
- * this is static background, not a per-turn steering nudge.
- */
-function buildCharacterProfileNote(character: Character): string | undefined {
-  const { occupation, workplace, homeLocation, frequentedLocations, likes, goals, boundaries, socialConnections } =
-    character
-  const parts: string[] = []
-  if (occupation?.trim() || workplace?.trim()) {
-    parts.push(
-      [occupation?.trim() ? `Works as ${occupation.trim()}` : 'Has a life outside this conversation', workplace?.trim() ? `at ${workplace.trim()}` : '']
-        .filter(Boolean)
-        .join(' '),
-    )
-  }
-  if (homeLocation?.trim()) parts.push(`Lives at ${homeLocation.trim()}`)
-  if (frequentedLocations?.length) parts.push(`Often found at ${frequentedLocations.join(', ')}`)
-  if (likes?.length) parts.push(`Enjoys ${likes.join(', ')}`)
-  if (goals?.length) parts.push(`Currently working toward: ${goals.join(', ')}`)
-  if (boundaries?.length) parts.push(`Hard limits, never crossed even in character: ${boundaries.join(', ')}`)
-  if (socialConnections?.length) {
-    const roster = socialConnections
-      .map((c) => `${c.name} (${c.relation}${c.notes ? ` — ${c.notes}` : ''})`)
-      .join('; ')
-    parts.push(`Knows: ${roster}`)
-  }
-  if (parts.length === 0) return undefined
-  return `Life beyond this scene: ${parts.join('. ')}.`
-}
 
 function buildRelationshipDescription(
   chat: Pick<Chat, 'affection' | 'relationshipStats' | 'commitmentStatus' | 'relationshipWarning' | 'breakupCount'>,
@@ -303,6 +271,7 @@ export function useChatSession(chatId: string | null) {
   const reducedAudio = useSettingsStore((s) => s.reducedAudio)
   const styleGuidanceNote = useSettingsStore((s) => s.styleGuidance)
   const avoidEmDashes = useSettingsStore((s) => s.avoidEmDashes)
+  const promptSections = useSettingsStore((s) => s.promptSections)
   const setActiveChatId = useSettingsStore((s) => s.setActiveChatId)
   const client = useMemo(() => new KoboldClient(baseUrl), [baseUrl])
   const customInstructTemplates = useApiQuery('instruct-templates', () => instructTemplatesApi.list(), []) ?? []
@@ -444,25 +413,7 @@ export function useChatSession(chatId: string | null) {
         )
         .map((b) => b.book)
       const worldLorebook = world?.lorebook ? [world.lorebook] : []
-      // Remembered facts ride through the exact same activation/budget/placement machinery as
-      // any other lorebook — a synthetic constant book, not a new prompt section.
-      const factsLorebook: Lorebook[] = activeFacts.length
-        ? [
-            {
-              name: 'Remembered facts',
-              entries: activeFacts.map((f, i) => ({
-                id: i,
-                keys: [],
-                content: f.text,
-                constant: true,
-                selective: false,
-                insertion_order: 100,
-                enabled: true,
-                activationMode: 'always' as const,
-              })),
-            },
-          ]
-        : []
+      const factsLorebook = buildFactsLorebook(activeFacts)
       const affection = freshChat.affection ?? 0
       const worldDescription = world
         ? [
@@ -532,6 +483,7 @@ export function useChatSession(chatId: string | null) {
         template,
         contextBudget: Math.max(contextBudget, 256),
         scanDepth: 8,
+        promptSections,
         countTokens,
         continueLastTurn: opts?.continueLastTurn,
         impersonateAsUser: opts?.impersonateAsUser,
@@ -563,6 +515,7 @@ export function useChatSession(chatId: string | null) {
       countTokens,
       messages,
       persona,
+      promptSections,
       regexScripts,
       resolveSpeaker,
       sampler,

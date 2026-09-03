@@ -1152,7 +1152,7 @@ below:**
       save, same as today's `GenerateCharacterDialog`/`RegenerateFieldButton` pattern. This is
       image → text only; see section 11 for actual image *generation* (portraits, sprites, CGs),
       which is a separate, larger integration.
-- [~] **World templates**: a starting point picked when creating a world (Freeform RP / Visual
+- [x] **World templates**: a starting point picked when creating a world (Freeform RP / Visual
       Novel / Dating Sim / Slice of Life), pulled forward out of section 10's phase order per
       section 13's own note that it's the structural fix for "which toggles do I want." Shipped: a
       `WorldTemplateGallery.tsx` modal (mirrors the character `TemplateGallery.tsx` pattern) shown
@@ -1182,13 +1182,31 @@ below:**
       world's chat sent a real message with neither assist firing (affection stayed 0, no choice
       pills), flipping "Track relationship" to On in the panel persisted immediately and the very
       next real reply *did* update affection while choices correctly stayed off.
-      **Still open**: `visualNovelMode` per-chat/per-world gating — a bigger change than the other
-      two, since it's a display-mode/rendering concern (which component even renders) rather than
-      just a background model call to skip, not something this pass touched.
-      6 new tests (`worldTemplates.test.ts`). Verified live end-to-end: created a Freeform world
-      (confirmed Dating sim/Clock tabs absent), switched its template chip to Dating Sim mid-edit
-      (confirmed the Dating sim tab reappeared immediately), saved a Visual Novel world and
-      confirmed `template: "visual_novel"` round-tripped through a fresh `GET /api/worlds`.
+      **`visualNovelMode` per-chat/per-world gating, done in a second follow-up pass**: unlike the
+      two assist flags above, this is a display-mode/rendering concern (which component even
+      renders), not a background model call to skip — but the same precedence pattern still fit
+      exactly. `Chat.assistOverrides` gained a third field, `visualNovelMode?: boolean`
+      (`types.ts`), same "unset falls back to the global Settings → Appearance default" contract as
+      the other two. `assistOverridesForTemplate()` now also seeds it — `visual_novel` forces it
+      on, since that template's whole premise is scene-background presentation, unlike the other
+      three where VN mode is a legitimate but unrelated choice the user's own global default should
+      keep deciding (forcing it off for Freeform/Slice of Life, say, would fight a user who
+      genuinely wants VN presentation for a non-romance story). `ChatWindow.tsx` resolves
+      `chat.assistOverrides?.visualNovelMode ?? globalVisualNovelMode` once, right after the
+      chat-loaded guard, and every existing use of the old plain global read (toolbar tone, the
+      header-vs-VNStage branch) picks it up unchanged. Editable per chat from a third select in
+      `RelationshipPanel`'s override row, identical UI to the existing two. 3 new/updated
+      `worldTemplates.test.ts` cases. **Verified live**: with the global default ON, set a chat's
+      override to Off and watched it switch from `VNStage` to the ordinary message-log view
+      immediately (header/BOND bar replaced by the normal toolbar and message bubbles); confirmed a
+      second, un-overridden chat stayed in VN mode throughout, proving the override is genuinely
+      per-chat and the global default still governs everything else; reverted the override back to
+      "Use global default" and confirmed the chat returned to VN mode exactly as it started.
+      6 new tests (`worldTemplates.test.ts`) from the first pass, 3 more from this one. Verified
+      live end-to-end for the template/tab-gating half: created a Freeform world (confirmed Dating
+      sim/Clock tabs absent), switched its template chip to Dating Sim mid-edit (confirmed the
+      Dating sim tab reappeared immediately), saved a Visual Novel world and confirmed
+      `template: "visual_novel"` round-tripped through a fresh `GET /api/worlds`.
 
 ### 10f. Proactive, scheduled characters (the core ask)
 - [x] **Schedules** — the explicit prerequisite for proactive outreach below, shipped on its own
@@ -1236,21 +1254,61 @@ below:**
       that distinction turns out to matter in practice; the flat version was cheap to ship and
       already covers the given example ("Promised to visit again next weekend" reads fine as plain
       text).
-- [ ] **A runtime state snapshot assembled fresh per generation**: once schedule/mood/memory/
+- [~] **A runtime state snapshot assembled fresh per generation**: once schedule/mood/memory/
       relationship state exist, they need a compact, consistent block fed into the prompt each
       turn (location, time, current activity, mood, relevant relationship numbers, a handful of
       the most relevant typed memories, current goal) rather than an ever-growing character card.
-      This is a structured extension of what `builder.ts` already assembles (persona, world,
-      lorebook, summary, recent history) — the new pieces are just more numerous and more
-      volatile, which is exactly why they need their own assembly step instead of being hand-woven
-      into the system prompt.
-- [ ] **Context as an explicit budget, not "fits or gets cut"**: `builder.ts` already trims by
+      Checked against what `useChatSession.ts` actually assembles today: location/time/activity/
+      mood (`describeWorldMoment`/`describePresence`, folded into `worldDescription`), relationship
+      numbers (`buildRelationshipDescription`), and current goal (`activeObjective`) were already
+      each covered — the "compact, consistent block" ask was more nearly true than this item's own
+      wording assumed. The one genuinely missing, and genuinely "ever-growing," piece was memories:
+      **fixed live.** `buildFactsLorebook()` (new, `src/lib/worldinfo/facts.ts`) — chat facts now
+      go through the exact same per-book `token_budget` cap every other lorebook already had
+      (`FACTS_TOKEN_BUDGET = 200`, roughly a "handful" of short one-liners), which they'd silently
+      never had before this (an unset `token_budget` defaults to unbounded in
+      `activateWorldInfo` — facts were the one book with no cap at all, so a long enough chat's
+      memory would grow forever, eventually crowding out either the lore budget or, worse, recent
+      conversation history once the outer context budget got tight). Prioritized by recency —
+      `insertion_order` derived from `createdAt` rather than a flat constant — since recency is the
+      only deterministic relevance proxy available without either a real retrieval system or
+      another model call, both bigger asks than this slice. Also found and fixed the same
+      unbounded-growth shape in `buildCharacterProfileNote()` (extracted to
+      `src/lib/characters/profile.ts`): an author's `likes`/`goals`/`frequentedLocations`/
+      `socialConnections` were dumped into the prompt in full every turn with no cap. Now capped
+      (8/5/5/6 respectively) — **deliberately excluding `boundaries`**, a character's stated hard
+      limits, from any cap: silently dropping one because there were "too many" is a real
+      content-safety risk, not just a token-budget nicety, and in practice an author writes a
+      handful, never dozens, so leaving it uncapped costs nothing. 13 new tests
+      (`facts.test.ts` — including a full pipeline test through the real `activateWorldInfo`, not
+      just the lorebook construction; `profile.test.ts`). Verified live end-to-end with koboldcpp
+      off (falls back to `estimateTokens` in a few ms, not a hang): a real test chat with 20 facts
+      showed exactly the 15 most recent activated and the 5 oldest dropped for budget in the Prompt
+      Inspector; a real test character with 20 authored "likes" showed exactly the first 8 in the
+      assembled prompt. **Still open**: a true single-field consolidation of these already-separate
+      pieces into one literal block wasn't attempted — each already reaches the prompt correctly
+      and consolidating working, separately-tested code into one field is a real risk (to a
+      heavily-used, well-tested core system) for a mostly-cosmetic gain, not something to do
+      without the ability to live-verify generation quality hasn't regressed.
+- [~] **Context as an explicit budget, not "fits or gets cut"**: `builder.ts` already trims by
       excluding older messages into the summary when a prompt overflows
       (`excludedMessageCount`/`autoSummarize` in `useChatSession.ts`), but that's the only lever
       today. Once the runtime snapshot above adds several more competing inputs (memories, world
       state, schedule), worth formalizing into priority tiers (character identity and current
       scene are never cut; relationship state and recent dialogue are cut late; retrieved memories
       and background lore are cut first) rather than one undifferentiated pool.
+      **The one piece of this taken as a real, safe first slice**: memories (chat facts) are now
+      the first category of "retrieved" content with an actual enforced cap at all — see the
+      runtime-snapshot item just above. **Deliberately not attempted**: a true cross-cutting tier
+      system spanning the *whole* prompt (today's `fixedTokens` — system prompt, world lore,
+      character identity, and every activated lorebook entry including facts — is computed first
+      and subtracted unconditionally, with only *history* actually competing for what's left; lore
+      already has its own independent per-book budget, which is a real form of tiering, just not a
+      single unified one). Unifying that properly is a bigger architectural change to a
+      heavily-used, well-tested core system, and per this item's own reasoning it's meant to follow
+      the runtime-snapshot work rather than be tackled in isolation — verifying it doesn't quietly
+      degrade generation quality needs actual live generation to check against, not just token
+      counts, so it stays open rather than being rushed through blind.
 - [ ] **Proactive outreach**: characters that can initiate contact — a text, unprompted — driven
       by their schedule, mood-of-day, and relationship state, instead of the app only ever
       replying to a message the player sent first. This is the single biggest architectural
@@ -1306,12 +1364,50 @@ proactive outreach, live dates, relationship lifecycle) is real and in use — s
 much easier to reason about with that foundation already built, and some may turn out unnecessary
 once it exists.
 
-- [ ] **A director/debug view**: read-only inspector panels for a character's current mood,
+- [x] **A director/debug view**: read-only inspector panels for a character's current mood,
       location, relationship numbers, and recent memories, plus manual world-state controls for
-      testing (advance time, trigger an event, set a relationship value, change the weather, hand
-      over an item) — makes iterating on a world dramatically faster than playing through it
-      manually every time, but is really a creator/power-user tool layered on top of section 10
-      rather than part of it.
+      testing (advance time, trigger an event, set a relationship value, hand over an item) —
+      makes iterating on a world dramatically faster than playing through it manually every time,
+      but is really a creator/power-user tool layered on top of section 10 rather than part of it.
+      `src/components/chat/DirectorPanel.tsx` (new), opened from a new `Wrench` icon in
+      `ChatWindow.tsx`'s shared toolbar (both normal and VN mode get it for free, same as every
+      other panel there). Deliberately built as a layer *on top of* existing mechanics rather than
+      a new system — every control goes through the same `chatsApi`/`worldsApi` PUTs and the same
+      deterministic `calendar.ts` reads the ordinary chat UI already uses, nothing new is stored:
+      - **World & time**: season/day/weekday/phase/holiday (`getCalendarInfo`), weather
+        (`getWeather`, deterministic per world+day), the character's mood-of-day (`getMoodOfDay`)
+        and current schedule presence/location (`getCurrentActivity`) — all read live, since none
+        of them are actually stored fields (see below). "Advance time" steps the world's shared
+        clock forward one phase (`advancePhase` + `worldsApi.update`), the same call the World
+        editor's own "Advance clock" button already makes.
+      - **Relationship**: live warmth/stage/commitment display plus a number field per dimension
+        (affection + the six `RELATIONSHIP_DIMENSIONS`) that PUTs the new values via
+        `chatsApi.update` and logs a `relationship-events` audit entry for any dimension that
+        actually changed (a no-op Apply logs nothing — verified live).
+      - **Scene flags**: a toggleable pill per flag (built-in + world-authored), direct
+        `chatsApi.update({ sceneFlags })` — the lightweight stand-in for "trigger an event"; a full
+        `DateEventCard` still belongs to the existing Event panel, not duplicated here.
+      - **Recent memories**: the chat's active `ChatFact`s, newest 8, read-only.
+      - **Hand over an item**: a direct gift/item inventory grant (`chatsApi.update` on
+        `giftInventory`/`itemInventory`) — distinct from `BagPanel`'s "Give," which sends an
+        in-scene chat message; this is a pure debug stock addition with no narrative side effect.
+      **One real, deliberate scope cut**: "change the weather" from the original wording isn't a
+      control, because weather was never stored — `getWeather(worldId, day)` is a pure
+      deterministic hash of world id and day, recomputed on demand precisely so it never needs
+      persisting (see `calendar.ts`'s own header comment). Making it independently settable would
+      mean adding a stored override field that fights the existing "nothing here needs its own
+      storage" design, for a testing convenience "advance time" mostly already covers (a few
+      advances cycles through different deterministic weather for free). Left undone rather than
+      forced in.
+      **Live-verified in browser, on the actual in-progress Sumire save** (warmth 96, `sweethearts`/
+      `living_together`, real chat-fact history) rather than a throwaway fixture, so every mutating
+      control was snapshotted first and reverted after: toggled a scene flag on/off (round-tripped
+      through the UI itself); advanced the world clock a phase (Morning → Afternoon, confirmed in
+      the panel's own display, then restored via a direct API call since there's no "undo" control
+      in the UI); clicked Apply with unchanged values (confirmed the PUT succeeds and, correctly,
+      logs no relationship-event — checked the event list directly); granted a gift (confirmed
+      `giftInventory` gained the new entry, then restored the original inventory exactly). Final
+      state diffed field-by-field against the pre-test snapshot and confirmed identical.
 - [ ] **Save slots** distinct from chat history: a named, full-state snapshot (world state,
       character states, relationships, inventory, calendar, flags) a player can return to, rather
       than a chat transcript being the only unit of "where I am in the story." Chat forking
@@ -1406,11 +1502,36 @@ changelog #49), and nothing points the user at it.
       character/world editors when VN mode is on but the active character has no world, since
       background art specifically is a world-level concept a user might not realize they need to
       set up separately from sprites).
-- [ ] **Command palette / global search (Ctrl-K)** — jump to any character, chat, world, or view
-      from one input. The nav is an icon-only rail by default (`sidebarExpanded: false`), so even
-      finding the right section is a hover-hunt for a new user; a palette sidesteps that and scales
-      as the number of characters/chats grows. Overlaps with the existing message `SearchPanel`
-      (section 4) — could be one surface.
+- [x] **Command palette / global search (Ctrl/Cmd-K)** — jump to any character, chat, world, or
+      view from one input. `src/components/layout/CommandPalette.tsx` (new), wired into
+      `src/App.tsx` via a global `keydown` listener and a search-trigger button in
+      `src/components/layout/Sidebar.tsx` (desktop-only — the mobile bottom bar has no room and a
+      keyboard shortcut isn't the point on a touch device). An empty query shows the view list
+      (`NAV` from `Sidebar.tsx`, exported for this); a non-empty query searches chats (title +
+      character name), characters (name), and worlds (name) in parallel, capped at 6 results per
+      group. Arrow keys move the highlight, Enter activates, Escape or a backdrop click closes.
+      Selecting a character or world result deep-links straight into that item's editor —
+      `CharactersView`/`WorldsView` gained optional `initialCharacterId`/`initialWorldId` +
+      `onConsumedInitial` props, consumed once via a `useEffect` keyed on the id (not on every
+      `characters`/`worlds` refetch, which would otherwise snap the view back open after a save).
+      Selecting a chat result sets `activeChatId` and switches to the chat view; selecting a view
+      result just switches views.
+      **Live-verified in browser, and it caught a real bug in the process**: the `results` array
+      that keyboard navigation indexes into was built in group order `View, Chat, Character,
+      World`, but the grouped render walked `View, Character, Chat, World` — a different order.
+      Whenever both chat and character results were present, the row shown as "active" (highlighted
+      via the render-order index) and the row `Enter` actually activated (`results[clampedIndex]`,
+      the array-order index) were two *different* items — confirmed by searching "Sumire" (which
+      matched both a character and a chat) and watching Enter open a **chat** while a **character**
+      row was shown highlighted. Fixed by reordering the `results` array construction to match the
+      render's group order, and — to make this class of bug structurally impossible going forward —
+      replaced the separately-hardcoded `['View', 'Character', 'Chat', 'World']` render-group list
+      with one derived from `results` itself (`[...new Set(results.map(r => r.group))]`), so the
+      keyboard index and the visual grouping can never drift apart again. Re-verified after the fix:
+      query filtering across all three entity types, Arrow Up/Down moving the highlight in true
+      visual order, Enter activating exactly the highlighted row, mouse click/hover doing the same,
+      and Escape closing cleanly with no state left behind. Overlaps with the existing message
+      `SearchPanel` (section 4) — could be unified into one surface later, not done here.
 - [ ] **Discoverable keyboard shortcuts + a shortcuts sheet** — there's no documented shortcut
       surface today. Even a handful (send, regenerate, swipe left/right, new chat, toggle VN) plus
       a `?` overlay listing them.
@@ -1464,10 +1585,9 @@ SillyTavern docs/releases, RisuAI (CCv3, CBS/trigger system, regex scripts), Agn
       floated was dropped for that reason). Verified live: a `WIDGET → gizmo` "both" rule showed
       "gizmo" in the rendered greeting AND in the assembled prompt via the Prompt Inspector.
       Per-character/per-world scoping stays a later refinement.
-- [~] **Prompt/context template manager** — in ST the order, on/off state, and content of every
-      prompt section is a drag-to-reorder editable list. Here `builder.ts`'s `fixedSections` array
-      is still a hardcoded order (part (c) below stays open), but instruct-template editing itself
-      is done: (a) and (b) of the rough shape this bullet originally sketched.
+- [x] **Prompt/context template manager** — in ST the order, on/off state, and content of every
+      prompt section is a drag-to-reorder editable list. Here, all three parts of the rough shape
+      this bullet originally sketched are done, with one deliberate, documented scope cut (below).
       - **(a) Duplicate + edit + save, mirroring the sampler-preset UI** — done.
         `instructTemplatesApi`/`instruct_templates` table (server/client, same shape as
         presets/themes: list/create/update/delete) plus `resolveInstructTemplate(id, custom[])`
@@ -1491,7 +1611,33 @@ SillyTavern docs/releases, RisuAI (CCv3, CBS/trigger system, regex scripts), Agn
         Deliberately **not** added to `.rppack.json` — a custom template id is only meaningful on
         the install that created it, and bundling a dangling reference into a shared pack would be
         worse than just leaving the field unset for the importer to set themselves.
-      - **(c) Section order/enable flags as data** — still open; `fixedSections` stays hardcoded.
+      - **(c) Section enable-flags as data** — done. `builder.ts` names each independently-computed
+        fixed section (`PromptSectionId`: system/summary/world/description/participants/persona/
+        examples) and a new `PromptBuildInput.promptSections?: Partial<Record<PromptSectionId,
+        boolean>>` gates each one's inclusion — an unset entry defaults to on
+        (`DEFAULT_PROMPT_SECTIONS`), so every existing caller keeps today's always-on behavior
+        unchanged. Replaces `includeExamples`, a same-shaped flag that existed on the builder
+        already but was dead — nothing ever set it. `useSettingsStore.promptSections` (global,
+        persisted) is the one real caller, threaded through `useChatSession.ts`'s
+        `buildCurrentPrompt`; a new `PromptSectionsSection.tsx` (Settings → Generation, next to the
+        instruct template editor) exposes all 7 as `Toggle`s. **Deliberately not done: reordering.**
+        Full drag-to-reorder, ST-style, isn't exposed — several of these sections are
+        order-coupled to world-info before/after placement and the Author's Note's own
+        before_char/at_depth/after_char position in ways a flat list would silently break (moving
+        "description" past "world" would, for instance, desync from where `worldBefore`/
+        `worldAfter` actually land relative to it). Enable/disable is safe to expose without
+        touching that structure; reordering would need those interactions redesigned first, a
+        genuinely separate, larger effort. World-info entry position and the Author's Note's own
+        position control stay exactly as they are — both already have finer-grained placement
+        control than a single section-level flag would give them anyway.
+        6 new tests (`builder.test.ts`) — default-on behavior, each section's disable in isolation,
+        and disabling one leaves the others untouched. **Verified live**: toggled off "World /
+        setting description" in Settings → Generation, opened the seeded Sumire chat's Prompt
+        Inspector, and confirmed the world block's two distinctive phrases (`"cherry-blossom-lined
+        quads"` from the world's description, `"grounded and present-day"` from its rules) were
+        both absent from the exact assembled prompt while unrelated content — the character's own
+        profile mentioning the same campus by name, prior chat history — correctly still appeared;
+        re-enabled it and confirmed the setting round-tripped through `localStorage`.
       5 new tests (`instructTemplates.test.ts`) covering builtin/custom resolution and the unknown-id
       fallback. Verified live end-to-end: duplicated ChatML, edited its system prefix, saved it as
       "My ChatML Variant" (appeared as the active template immediately), set it as a per-character
@@ -1590,12 +1736,51 @@ SillyTavern docs/releases, RisuAI (CCv3, CBS/trigger system, regex scripts), Agn
       (`document.documentElement.scrollWidth === innerWidth`) after each fix, and a full-desktop
       regression check afterward confirming the rail/collapsed-panel/toolbar all render exactly as
       before at desktop width.
-- [ ] **Chat management basics** — no chat rename (the title is frozen to the character's name at
-      creation, `NewChatDialog`), no chat folders/tags/pinning, no one-click "new chat, same
-      character & persona," no "duplicate chat." The fork tree is section 12; this is the
-      un-fancy list-management layer under it. AI Dungeon's Adventure model (section 15) is a
-      concrete reference for the shape this should take — title, tags, and settings as real
-      per-chat fields, not just the frozen character-name title this app has today.
+- [~] **Chat management basics** — rename, duplicate, and one-click "new chat, same character &
+      persona" are done; folders/tags/pinned-chats stay open (below). `ChatsPanel.tsx` gained a
+      per-row `MoreHorizontal` menu (a lightweight inline popover, click-outside-to-close via the
+      same backdrop technique `Modal`/`CommandPalette` already use — no new shared component,
+      since nothing else needs a generic dropdown yet) with four actions:
+      - **Rename** — the row's title becomes an inline `<input>` in place (no separate dialog),
+        committed on Enter/blur, cancelled on Escape. `chatsApi.update(id, { title })`; the title
+        was frozen to the character's name at creation until now.
+      - **Duplicate (full copy)** — reuses `chatsApi.fork(id)` **with no `messageId`**, which the
+        existing fork endpoint (section 4) already treats as "clone the whole chat" when the
+        cutoff is omitted (`server/app.ts`'s fork route: `cutoff = allMessages.length` when
+        `req.body.messageId` is absent) — history, relationship stats, events, and facts all
+        clone, exactly what "duplicate" means. No new server code at all; this is UI over an
+        already-shipped, already-tested mechanism. The copy lands with `parentChatId` set, same as
+        any fork, which doubles as a free "jump back to the original" link.
+      - **New chat, same character & persona** — genuinely new: creates a *fresh* chat (0
+        affection, no history) reusing the row's `characterId`/`personaId`. Extracted the chat-
+        creation logic `NewChatDialog.tsx` already had into a shared `src/lib/chat/createChat.ts`
+        (`createChat()` + a pure `availableGreetings()` helper, 6 new unit tests) rather than
+        duplicating it a second time — `NewChatDialog` itself was refactored to call the same
+        function, so the starting-state fields (gift coins, starting inventory, assist overrides,
+        warmth-derived stage) can't drift between the picker-flow path and this one-click path.
+      - **Delete** — found live while scoping this item: `DELETE /api/chats/:id` (section 4) has
+        existed since chat deletion was first wired up, but there was **no UI anywhere in the app
+        that could call it** — not mentioned in this bullet's original wording, but about as basic
+        as "chat management" gets, so added here rather than filed as a separate gap. Behind a
+        `confirm()`; if the deleted chat was the active one, clears `activeChatId` too (via
+        widening `ChatsPanel`'s `onSelect` to accept `null`, matching `ChatSurface`'s own prop
+        shape in `App.tsx`) — otherwise the app would keep pointing at a chat that no longer
+        exists (`ChatWindow` degrades gracefully to its empty state, but the sidebar would show
+        nothing selected forever).
+      **Verified live end-to-end**, deliberately against disposable test data rather than the
+      real seeded Sumire chats (created a throwaway "TestBot" character + chat via the actual
+      `NewChatDialog` UI, not a shortcut): renamed it and confirmed the new title via a fresh
+      `GET /api/chats`; duplicated it and confirmed the copy's messages, `parentChatId`, and title
+      suffix; ran "new chat, same character" and confirmed the result had 0 affection, no
+      `parentChatId`, the same `personaId`, the cloned greeting message, and that `activeChatId`
+      genuinely navigated to it; deleted all three test chats plus the test character through the
+      same UI (confirmed `activeChatId` cleared on the active one) and confirmed via a final
+      `GET /api/chats`/`GET /api/characters` that the two real Sumire chats/characters — including
+      exact `affection`/`relationshipStats`/`sceneFlags` values — were untouched throughout.
+      **Deliberately not done**: chat folders/tags/pinned-chats-list — a real, separate authoring
+      surface (its own UI for creating/assigning tags, not a quick addition to this row menu), and
+      AI Dungeon's Adventure-model framing (title/tags/settings as one coherent per-chat settings
+      object) is a bigger reference shape worth its own pass once tags exist to hang it on.
 - [ ] **Generation HUD** — tokens/sec, time-to-first-token, and a context-fill gauge during and
       after generation. `showTokenCounts` gives a per-message count; there's no live feedback while
       the model is working beyond the streaming text itself.
@@ -1679,12 +1864,22 @@ the subset that's actually a good fit for a local-first, single-user, character-
       model's raw *response* before regex scripts, scene-tag stripping, and macro handling touch
       it — useful for the same debugging reason AI Dungeon exposes raw output. A small addition to
       the same panel, not a new one.
-- [ ] **High-contrast / larger-text presets**: this app already has `fontScale`, `reducedMotion`,
-      and now `reducedAudio` (section 6), plus full theme customization, but nothing bundles a
-      one-click "high contrast" look the way AI Dungeon's accessibility settings do. A theme preset
-      (`themePresets.ts`, same mechanism as Sakura/Neon Night) tuned for contrast rather than mood,
-      alongside the existing font-scale slider, would close this cheaply — pairs with section 9's
-      existing accessibility pass (aria-labels) rather than needing new machinery.
+- [x] **High-contrast theme preset**: this app already has `fontScale`, `reducedMotion`, and
+      `reducedAudio` (section 6), plus full theme customization, but nothing bundled a one-click
+      "high contrast" look the way AI Dungeon's accessibility settings do. Added a third entry to
+      `THEME_PRESETS` in `src/lib/store/themePresets.ts` (same mechanism as Sakura/Neon Night, so
+      `ThemeEditor.tsx` needed no changes to pick it up) tuned for contrast rather than mood:
+      near-black-on-white / near-white-on-black text (~19:1, past WCAG's 7:1 "AAA" bar), an
+      actually-visible black/white border instead of the default's subtle divider (WCAG 1.4.11
+      non-text contrast), and a bright accent picked per-mode for legibility over brand consistency
+      — blue on white in light mode, gold on black in dark, since one hue rarely reads well against
+      both. Larger-text is still just the existing `fontScale` slider, not part of this preset.
+      **Live-verified in browser**: applied from Settings → Appearance → Presets in both dark mode
+      (confirmed via computed `getComputedStyle` on `:root` — `--c-bg: 0 0 0`, `--c-text: 255 255
+      255`, `--c-accent: 255 210 0`, `--c-border: 255 255 255`) and light mode (toggled the
+      editor's Light/Dark switch, confirmed via the persisted `rp-settings` store —
+      `themeTokensLight` held the expected white/black/blue values, `colorMode` flipped to
+      `"light"`), matching `themePresets.ts` exactly in both cases.
 - [ ] **Rewind: delete a message and everything after it, in one action**: the "AI is editable, not
       authoritative" philosophy (undo/retry/edit/erase) is already this app's philosophy too —
       regenerate/swipe, edit, fork, and one-at-a-time delete all exist — but backing out of a scene
@@ -2150,8 +2345,9 @@ Done so far (see checked boxes above for detail):
     world templates (#65), picked specifically because it needed koboldcpp actually running to
     verify correctly. `Chat.assistOverrides`, seeded from the bound world's template at chat
     creation, editable after via two new selects in `RelationshipPanel.tsx`. See section 10e's
-    world-templates item for the full writeup. `visualNovelMode` per-chat/per-world gating stays
-    open — a bigger, rendering-level change, not a natural extension of this pass.
+    world-templates item for the full writeup. `visualNovelMode` per-chat/per-world gating stayed
+    open at the time — a bigger, rendering-level change, not a natural extension of this pass — and
+    shipped later, in #76.
 71. ~~Mobile/responsive layout, first slice~~ — the item flagged as "the single biggest limiter on
     who can use the app at all," picked next since it didn't need koboldcpp specifically. Bottom
     nav below `md`, the chat list and chat window each full-width and toggled instead of
@@ -2160,6 +2356,74 @@ Done so far (see checked boxes above for detail):
     Settings tabs) found by measuring actual element geometry live rather than trusting a
     screenshot, all fixed. See section 14's checked item for the full writeup, including what a
     full mobile pass still needs beyond this first slice.
+72. ~~10f's runtime-state-snapshot + context-budget-tiers groundwork, the koboldcpp-independent
+    slice~~ — asked for explicitly: "finish section 10," specifically the parts that don't need
+    koboldcpp turned on. Checked what's genuinely blocked (10b's live date mode and 10e's
+    AI-assisted authoring are meaningless without a model to actually generate with; 10f's
+    proactive outreach needs a design decision, not more coding time, before any code) versus
+    what's pure deterministic prompt-assembly work, verifiable via the Prompt Inspector and unit
+    tests alone. Found and fixed a real, previously-uncapped-forever gap: chat facts (memories)
+    had no token budget at all, unlike every other lorebook, so a long enough chat's memory would
+    grow without bound; now capped and recency-prioritized (`buildFactsLorebook`,
+    `src/lib/worldinfo/facts.ts`). Found the identical shape of bug in authored `likes`/`goals`/
+    `frequentedLocations`/`socialConnections` (`buildCharacterProfileNote`,
+    `src/lib/characters/profile.ts`) and capped those too — deliberately leaving `boundaries`
+    uncapped, since silently dropping a stated hard limit for space is a safety risk, not a
+    token-budget nicety. See section 10f's two checked-partial items for the full writeup,
+    including what's honestly still open (a true single-block consolidation, and the harder
+    cross-cutting budget-tier unification) and why neither was attempted blind.
+
+73. ~~High-contrast theme preset~~ — asked "anything else we can build, other than 10" with
+    koboldcpp off; picked as one of three quick, purely-deterministic UI items alongside the
+    command palette and (next) the director/debug view. Section 15's open accessibility item.
+    Third `THEME_PRESETS` entry (section 14) tuned for WCAG contrast rather than mood. See section
+    15's checked item for the full writeup and live-verification notes.
+74. ~~Command palette / global search (Ctrl/Cmd-K)~~ — second of that same three-item batch, and
+    section 13's headline discoverability gap: the nav is an icon-only rail by default, so finding
+    a section (let alone a specific character/chat/world) was a hover-hunt. One input, four
+    entity types, deep-links straight into the character/world editor or the right chat. Live
+    verification surfaced and fixed a real keyboard-nav desync bug — the row shown as "active" and
+    the row `Enter` actually activated could be two different items whenever both chat and
+    character results were present. See section 13's checked item for the full writeup.
+
+75. ~~Director/debug view~~ — third and last of that three-item batch, and section 12's headline
+    item pulled forward as a quick, purely-deterministic power-user tool. Live-verified directly
+    against the real in-progress Sumire save rather than a throwaway fixture — every mutating
+    control was snapshotted first and reverted after, confirmed identical field-by-field. See
+    section 12's checked item for the full writeup, including the one scope cut (no "set weather"
+    control, since weather is a deterministic function of day, never stored, so there was nothing
+    to set).
+
+76. ~~`visualNovelMode` per-chat/per-world gating~~ — asked again to "work through all section 10
+    parts that can be done with koboldcpp turned off." Re-surveyed every remaining unchecked
+    section 10 item against that filter: 10b's live date mode, intent chips, live feedback, and
+    real stakes all need either a live model to verify or a design call this file already flags as
+    the user's to make; 10e's AI-assisted authoring needs a live model outright; 10f's proactive
+    outreach is explicitly blocked on an open design question, not on koboldcpp being on or off, so
+    picking it up without that answer would mean guessing at the one thing the roadmap itself says
+    only the user can decide. The one item that was genuinely just deterministic, unfinished code —
+    world templates' own "still open" gap, `visualNovelMode` gating — is closed out here. See
+    section 10e's world templates entry for the full writeup.
+
+77. ~~Instruct-template manager part (c): prompt-section enable flags~~ — asked to "continue
+    working through the roadmap." Re-audited mobile/responsive at 375px across Characters, Worlds,
+    World Info, Gallery, Personas, and every Settings tab first (the roadmap's own top pick) —
+    found no new bugs; the shared `EditorShell` (Characters/Worlds/Personas) and the already-fixed
+    tab-strip pattern hold up as-is. The VN toolbar now needs scrolling to reach its 12th icon
+    (added since the last pass), confirmed genuinely reachable, not a regression — the roadmap's
+    own "scrolls instead of picks" tradeoff, not a new bug. With mobile clean, moved to the next
+    concretely-scoped item: closes out section 14's "Prompt/context template manager" in full. See
+    that item's part (c) for the full writeup.
+
+78. ~~Chat management basics: rename, duplicate, quick-new, and delete~~ — asked to "work on
+    section 14." Picked this over the section's other open items since it's concretely scoped and
+    fully deterministic — no live model needed to build or verify, unlike the Generation HUD
+    (needs real streaming to show tokens/sec), and unlike World Info depth's sticky/cooldown gap
+    or the trigger/event system, both of which have real, stated prerequisites (a stable
+    cross-source lorebook key; a joint design pass with section 12's plugin hooks) rather than
+    just being unbuilt. Also found, in passing, that chat deletion had a working server route with
+    no UI anywhere to reach it — added alongside the three items the bullet actually named. See
+    that item for the full writeup.
 
 That closes out the last "reasonable next batch," plus sections 10a, 10c, and 10d in full and a first
 slice each of 10b and 10f taken directly afterward since 10's own suggested phase order names them
@@ -2176,13 +2440,15 @@ smaller than the rest of section 10:
 3. Multi-character relationship tracking — today only the primary's affection/stats/gifts/gallery
    exist; a non-primary participant is a scene NPC with no tracked relationship of their own. Real
    scope (parallel relationship state per participant, not just one), not a quick follow-up.
-4. The rest of proactive outreach (section 10f) — the runtime-state-snapshot and context-budget-
-   tiers groundwork, then the actual "world tick" + unprompted-message queue + authored restraint.
-   Schedules above is deliberately just the prerequisite; the roadmap's own words for this one still
-   apply — "the single biggest architectural departure from today's request/response chat loop" —
-   and it deserves a real design conversation (how an unprompted message even reaches the player —
-   a notification? an inbox view? — is still completely open) before any code, not a continuation
-   of this incremental batch.
+4. The rest of proactive outreach (section 10f) — the koboldcpp-independent groundwork
+   (runtime-state-snapshot's memory-capping piece, a first slice of context-budget-tiers) is now
+   done (#72); what's left is the actual "world tick" + unprompted-message queue + authored
+   restraint, plus the harder, cross-cutting half of context budget tiers. Schedules was already
+   the deterministic prerequisite; the roadmap's own words for outreach itself still apply — "the
+   single biggest architectural departure from today's request/response chat loop" — and it
+   deserves a real design conversation (how an unprompted message even reaches the player — a
+   notification? an inbox view? — is still completely open) before any code, not a continuation of
+   this incremental batch.
 5. The rest of 10b — a genuinely live, turn-by-turn date/hangout conversation mode (today's "date"
    is still an ordinary chat with per-turn scoring switched off and one judge pass at the end, not a
    separate streamed scene), intent chips, a live rapport indicator/reactive portrait, and hidden
@@ -2203,24 +2469,32 @@ rebuild~~ (#57, which also part-closed section 13's "actionable empty states" an
 ~~on-disk persistence audit~~ (#58), ~~regex scripts~~ (#59), ~~per-turn assist "thinking"
 indicator~~ (#60), ~~read CCv3 character cards~~ (#61), ~~first-run Welcome screen + actionable
 empty states~~ (#62), ~~persona nudge~~ (#63), ~~instruct-template manager~~ (#64, parts (a)/(b)
-only — (c) stays open), ~~world templates~~ (#65, pulled forward from 10e), ~~UI SFX +
+only — (c) shipped later, in #77), ~~world templates~~ (#65, pulled forward from 10e), ~~UI SFX +
 `reducedAudio`~~ (#66), ~~gate relationship-tracking/choice-suggestion assists per-chat~~ (#70,
-world templates' real remaining half — `visualNovelMode` gating stays open), ~~mobile/responsive
-layout, first slice~~ (#71 — every other view/editor screen individually, and a real "what's
-essential" mobile toolbar redesign, stay open).
+world templates' real remaining half), ~~mobile/responsive layout, first slice~~ (#71 — every
+other view/editor screen individually, and a real "what's essential" mobile toolbar redesign, stay
+open), ~~10f's koboldcpp-independent groundwork~~ (#72 — memory capping and a first slice of
+context-budget tiers; the actual world-tick/outreach mechanism and the harder budget-tier
+unification stay open), ~~high-contrast theme preset~~ (#73), ~~command palette~~ (#74),
+~~director/debug view~~ (#75), ~~`visualNovelMode` per-chat/per-world gating~~ (#76, closing out
+world templates in full), ~~mobile/responsive re-audit (no new bugs) + instruct-template manager
+part (c)~~ (#77, closing out the prompt/context template manager in full).
 
 Still unblocked and worth doing next, roughly in order: **the rest of mobile/responsive** — every
-editor/settings screen beyond the core chat surface, and the toolbar icon-set redesign #71
-explicitly deferred (today's fix scrolls instead of picks); a **prompt/instruct-template manager,
-part (c)** — expose `builder.ts`'s `fixedSections` order/enable-flags as editable data, now that
-(a)/(b) have shipped; **`visualNovelMode` per-chat/per-world gating** — the one piece #70 didn't
-close, and a bigger change since it's a rendering-mode concern, not just a background call to
-skip; **manga-style SFX bursts** (section 5) or **background music per scene** (section 6) for VN
-polish, now that the UI-SFX groundwork (#66) exists to build on.
+editor/settings screen beyond the core chat surface (re-audited at 375px in #77, still clean), and
+the toolbar icon-set redesign #71 explicitly deferred (today's fix scrolls instead of picks, and
+now has more icons to scroll past than it did at #71); **manga-style SFX bursts** (section 5) or
+**background music per scene** (section 6) for VN polish, now that the UI-SFX groundwork (#66)
+exists to build on. **Proactive outreach itself**
+(10f, the actual headline of section 10) is next in line for a design conversation, not more
+unattended coding — specifically, how an unprompted message even reaches the player (a
+notification? a separate inbox view? injected straight into the chat as if they just texted?) is
+still an open question only the user can answer, and koboldcpp being on or off doesn't change that.
 
 Section 15 (added from a user-supplied AI Dungeon competitive analysis) is a separate set of ideas,
-not yet folded into this priority order. Of those, the smallest, most self-contained pieces —
-raw-vs-processed output in the Prompt Inspector, a high-contrast theme preset — could slot into a
-future "reasonable next batch" without much thought; the user-authored scripting idea is the
-standout but is deliberately scoped in stages precisely so it doesn't get picked up as a single
-large unplanned effort — see that item's own "smallest first" breakdown before starting on it.
+not yet folded into this priority order. The high-contrast theme preset, its smallest
+self-contained piece, has shipped (#73); of what's left, raw-vs-processed output in the Prompt
+Inspector is the next smallest, self-contained enough to slot into a future "reasonable next
+batch" without much thought. The user-authored scripting idea is the standout but is deliberately
+scoped in stages precisely so it doesn't get picked up as a single large unplanned effort — see
+that item's own "smallest first" breakdown before starting on it.

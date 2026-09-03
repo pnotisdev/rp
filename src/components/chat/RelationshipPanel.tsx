@@ -110,11 +110,11 @@ export function RelationshipPanel({ chat, character, world, onClose, onBuyGift, 
     }
   }
 
-  const overrideValue = (key: 'autoTrackRelationship' | 'autoSuggestChoices'): 'default' | 'on' | 'off' => {
+  const overrideValue = (key: 'autoTrackRelationship' | 'autoSuggestChoices' | 'visualNovelMode'): 'default' | 'on' | 'off' => {
     const v = chat.assistOverrides?.[key]
     return v === undefined ? 'default' : v ? 'on' : 'off'
   }
-  const setOverride = async (key: 'autoTrackRelationship' | 'autoSuggestChoices', value: 'default' | 'on' | 'off') => {
+  const setOverride = async (key: 'autoTrackRelationship' | 'autoSuggestChoices' | 'visualNovelMode', value: 'default' | 'on' | 'off') => {
     const next = { ...(chat.assistOverrides ?? {}) }
     if (value === 'default') delete next[key]
     else next[key] = value === 'on'
@@ -181,6 +181,16 @@ export function RelationshipPanel({ chat, character, world, onClose, onBuyGift, 
             hint="Overrides the global Settings → Generation default, just for this chat."
             value={overrideValue('autoSuggestChoices')}
             onChange={(e) => setOverride('autoSuggestChoices', e.target.value as 'default' | 'on' | 'off')}
+          >
+            <option value="default">Use global default</option>
+            <option value="on">On</option>
+            <option value="off">Off</option>
+          </SelectField>
+          <SelectField
+            label="Visual Novel mode for this chat"
+            hint="Overrides the global Settings → Appearance default, just for this chat."
+            value={overrideValue('visualNovelMode')}
+            onChange={(e) => setOverride('visualNovelMode', e.target.value as 'default' | 'on' | 'off')}
           >
             <option value="default">Use global default</option>
             <option value="on">On</option>

@@ -47,11 +47,28 @@ function blankWorld(template?: WorldTemplateId): Omit<WorldCard, 'id' | 'created
   }
 }
 
-export function WorldsView() {
+export function WorldsView({
+  initialWorldId,
+  onConsumedInitial,
+}: {
+  /** Deep-link into this world's editor on mount (the command palette's "jump to a world"). */
+  initialWorldId?: string | null
+  onConsumedInitial?: () => void
+} = {}) {
   const worlds = useApiQuery('worlds', () => worldsApi.list(), []) ?? []
   const [selected, setSelected] = useState<WorldCard | 'new' | null>(null)
   const [pendingTemplate, setPendingTemplate] = useState<WorldTemplateId | undefined>(undefined)
   const [showTemplateGallery, setShowTemplateGallery] = useState(false)
+
+  useEffect(() => {
+    if (!initialWorldId) return
+    const match = worlds.find((w) => w.id === initialWorldId)
+    if (!match) return
+    setSelected(match)
+    onConsumedInitial?.()
+    // Only re-run when the target id itself changes (or the list finishes loading) — not on every
+    // `worlds` refetch, which would otherwise snap back open every time this world's own editor saves.
+  }, [initialWorldId, worlds.length])
 
   if (selected) {
     return (

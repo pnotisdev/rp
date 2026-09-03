@@ -73,4 +73,39 @@ export const THEME_PRESETS: ThemePreset[] = [
       '--c-danger': '255 61 87',
     },
   },
+  {
+    // Tuned for contrast, not mood — near-black-on-white / near-white-on-black text (~19:1,
+    // well past WCAG's 7:1 "AAA" bar), an actually-visible border instead of the default's subtle
+    // near-invisible divider (WCAG 1.4.11 non-text contrast), and a bright, punchy accent picked
+    // for legibility over brand consistency between the two modes — blue-on-white in light mode,
+    // gold-on-black in dark, since a single hue that reads well against both isn't the same color.
+    id: 'high-contrast',
+    name: 'High Contrast',
+    light: {
+      '--c-bg': '255 255 255',
+      '--c-bg-elevated': '255 255 255',
+      '--c-bg-sunken': '225 225 225',
+      '--c-border': '0 0 0',
+      '--c-text': '0 0 0',
+      '--c-text-muted': '60 60 60',
+      '--c-accent': '0 60 200',
+      '--c-accent-text': '255 255 255',
+      '--c-msg-user': '0 60 200',
+      '--c-msg-char': '225 225 225',
+      '--c-danger': '180 0 0',
+    },
+    dark: {
+      '--c-bg': '0 0 0',
+      '--c-bg-elevated': '26 26 26',
+      '--c-bg-sunken': '0 0 0',
+      '--c-border': '255 255 255',
+      '--c-text': '255 255 255',
+      '--c-text-muted': '200 200 200',
+      '--c-accent': '255 210 0',
+      '--c-accent-text': '0 0 0',
+      '--c-msg-user': '255 210 0',
+      '--c-msg-char': '26 26 26',
+      '--c-danger': '255 100 100',
+    },
+  },
 ]

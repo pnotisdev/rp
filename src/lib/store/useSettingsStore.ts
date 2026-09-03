@@ -4,6 +4,8 @@ import type { GenerationParams } from '@/lib/api/types'
 import type { TtsProviderId } from '@/lib/voice/ttsProviders'
 import type { RelationshipDifficulty } from '@/lib/dating/relationshipAssist'
 import type { RegexScript } from '@/lib/types'
+import type { PromptSectionId } from '@/lib/prompt/builder'
+import { DEFAULT_PROMPT_SECTIONS } from '@/lib/prompt/builder'
 
 export type ChatStyle = 'flat' | 'bubbles' | 'document'
 export type AvatarShape = 'circle' | 'square' | 'rounded' | 'rectangle'
@@ -127,9 +129,12 @@ interface SettingsState {
   advancedSamplerMode: boolean
   sampler: GenerationParams
   instructTemplateId: string
+  /** Which of `builder.ts`'s fixed prompt sections are included — a missing key defaults to on (`DEFAULT_PROMPT_SECTIONS`). */
+  promptSections: Record<PromptSectionId, boolean>
   setAdvancedSamplerMode: (v: boolean) => void
   setSampler: (patch: Partial<GenerationParams>) => void
   setInstructTemplateId: (id: string) => void
+  setPromptSectionEnabled: (id: PromptSectionId, enabled: boolean) => void
 
   customCss: string
   setCustomCss: (css: string) => void
@@ -239,9 +244,11 @@ export const useSettingsStore = create<SettingsState>()(
       advancedSamplerMode: false,
       sampler: { ...DEFAULT_SAMPLER },
       instructTemplateId: 'plain-chat',
+      promptSections: DEFAULT_PROMPT_SECTIONS,
       setAdvancedSamplerMode: (v) => set({ advancedSamplerMode: v }),
       setSampler: (patch) => set((s) => ({ sampler: { ...s.sampler, ...patch } })),
       setInstructTemplateId: (id) => set({ instructTemplateId: id }),
+      setPromptSectionEnabled: (id, enabled) => set((s) => ({ promptSections: { ...s.promptSections, [id]: enabled } })),
 
       customCss: '',
       setCustomCss: (css) => set({ customCss: css }),

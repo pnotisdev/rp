@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Sidebar, type ViewId } from '@/components/layout/Sidebar'
+import { CommandPalette } from '@/components/layout/CommandPalette'
 import { ChatsPanel } from '@/components/chat/ChatsPanel'
 import { ChatWindow } from '@/components/chat/ChatWindow'
 import { WelcomeView } from '@/components/chat/WelcomeView'
@@ -60,10 +61,26 @@ export default function App() {
   const [view, setView] = useState<ViewId>('chat')
   const activeChatId = useSettingsStore((s) => s.activeChatId)
   const setActiveChatId = useSettingsStore((s) => s.setActiveChatId)
+  const [showPalette, setShowPalette] = useState(false)
+  // Deep-link targets for the command palette's "jump to a character/world" — consumed (cleared)
+  // by the view itself once it's actually opened that item's editor, not re-armed on every render.
+  const [pendingCharacterId, setPendingCharacterId] = useState<string | null>(null)
+  const [pendingWorldId, setPendingWorldId] = useState<string | null>(null)
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        setShowPalette((v) => !v)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
 
   return (
     <div className="flex h-full w-full flex-col md:flex-row">
-      <Sidebar view={view} onChange={setView} />
+      <Sidebar view={view} onChange={setView} onOpenPalette={() => setShowPalette(true)} />
       {/* The mobile bottom nav is `fixed`, out of normal flow — this padding keeps it from
           covering the last bit of content. No-op at `md` and up, where the rail is a sibling
           taking its own column width instead. */}
@@ -72,14 +89,36 @@ export default function App() {
           <ChatSurface activeChatId={activeChatId} onSelect={setActiveChatId} onNavigate={setView} />
         )}
         {view === 'companion' && <CompanionView />}
-        {view === 'characters' && <CharactersView />}
-        {view === 'worlds' && <WorldsView />}
+        {view === 'characters' && (
+          <CharactersView initialCharacterId={pendingCharacterId} onConsumedInitial={() => setPendingCharacterId(null)} />
+        )}
+        {view === 'worlds' && (
+          <WorldsView initialWorldId={pendingWorldId} onConsumedInitial={() => setPendingWorldId(null)} />
+        )}
         {view === 'personas' && <PersonasView />}
         {view === 'worldinfo' && <WorldInfoView />}
         {view === 'gallery' && <GalleryView />}
         {view === 'settings' && <SettingsView />}
       </div>
       <ToastViewport />
+      {showPalette && (
+        <CommandPalette
+          onClose={() => setShowPalette(false)}
+          onNavigateView={setView}
+          onSelectChat={(id) => {
+            setActiveChatId(id)
+            setView('chat')
+          }}
+          onSelectCharacter={(id) => {
+            setPendingCharacterId(id)
+            setView('characters')
+          }}
+          onSelectWorld={(id) => {
+            setPendingWorldId(id)
+            setView('worlds')
+          }}
+        />
+      )}
     </div>
   )
 }

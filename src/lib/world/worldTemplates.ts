@@ -68,8 +68,15 @@ export function getWorldTemplate(id: WorldTemplateId): WorldTemplateDef {
 
 /** `Chat.assistOverrides` to seed a brand-new chat with, derived from the bound world's template —
  *  `{}` (no override, inherit the global default) for a template that doesn't disable them. */
-export function assistOverridesForTemplate(template: WorldTemplateId | undefined): { autoTrackRelationship?: boolean; autoSuggestChoices?: boolean } {
-  return getWorldTemplate(template ?? 'dating_sim').disablesRelationshipAssists
+export function assistOverridesForTemplate(
+  template: WorldTemplateId | undefined,
+): { autoTrackRelationship?: boolean; autoSuggestChoices?: boolean; visualNovelMode?: boolean } {
+  const relationshipOverride = getWorldTemplate(template ?? 'dating_sim').disablesRelationshipAssists
     ? { autoTrackRelationship: false, autoSuggestChoices: false }
     : {}
+  // Only Visual Novel forces a *display mode* opinion — its whole premise is scene-background
+  // presentation, unlike the other three templates, where VN mode is a legitimate but unrelated
+  // choice the user's own global default should keep deciding.
+  const vnOverride = (template ?? 'dating_sim') === 'visual_novel' ? { visualNovelMode: true } : {}
+  return { ...relationshipOverride, ...vnOverride }
 }

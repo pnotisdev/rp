@@ -12,6 +12,7 @@ import { Section } from '@/components/ui/Section'
 import { SettingsPage } from '@/components/ui/SettingsPage'
 import { RegexScriptsSection } from './RegexScriptsSection'
 import { InstructTemplateSection } from './InstructTemplateSection'
+import { PromptSectionsSection } from './PromptSectionsSection'
 import { WritingStyleSection } from './WritingStyleSection'
 
 // Simple-mode sliders derive several raw params from one intuitive 0-100 value each.
@@ -216,6 +217,8 @@ export function SamplingControls() {
       </Section>
 
       <WritingStyleSection />
+
+      <PromptSectionsSection />
 
       <InstructTemplateSection />
 
