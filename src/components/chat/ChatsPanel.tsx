@@ -33,9 +33,24 @@ export function ChatsPanel({
     return getCurrentActivity(character.schedule, world.currentDay ?? 0, world.currentPhaseIndex ?? 0)
   }
 
+  // The collapsed mini-rail exists to save desktop width while keeping some panel visible
+  // alongside a wide ChatWindow — a trade that doesn't make sense on a phone, where there's no
+  // width to spare in the first place. So below `md` it's always the full list, `collapsed` or
+  // not; the two variants below just get responsive visibility instead of an early return.
+  const newChatDialog = showNew && (
+    <NewChatDialog
+      onClose={() => setShowNew(false)}
+      onCreated={(id) => {
+        setShowNew(false)
+        onSelect(id)
+      }}
+    />
+  )
+
   if (collapsed) {
     return (
-      <div className="flex w-14 shrink-0 flex-col items-center gap-1 border-r border-border bg-bg-elevated py-4">
+      <>
+      <div className="hidden w-14 shrink-0 flex-col items-center gap-1 border-r border-border bg-bg-elevated py-4 md:flex">
         <button
           onClick={() => setCollapsed(false)}
           title="Expand chats"
@@ -75,21 +90,18 @@ export function ChatsPanel({
             )
           })}
         </div>
-        {showNew && (
-          <NewChatDialog
-            onClose={() => setShowNew(false)}
-            onCreated={(id) => {
-              setShowNew(false)
-              onSelect(id)
-            }}
-          />
-        )}
+        {newChatDialog}
       </div>
+      {fullChatList(true)}
+      </>
     )
   }
 
-  return (
-    <div className="flex w-64 shrink-0 flex-col border-r border-border bg-bg-elevated">
+  return fullChatList(false)
+
+  function fullChatList(mobileOnly: boolean) {
+    return (
+    <div className={`${mobileOnly ? 'flex md:hidden' : 'flex'} w-full shrink-0 flex-col border-r border-border bg-bg-elevated md:w-64`}>
       <div className="flex items-center justify-between gap-2 p-4">
         <button
           onClick={() => setCollapsed(true)}
@@ -150,15 +162,9 @@ export function ChatsPanel({
           <p className="px-2 py-4 text-center text-xs text-text-muted">No chats yet.</p>
         )}
       </div>
-      {showNew && (
-        <NewChatDialog
-          onClose={() => setShowNew(false)}
-          onCreated={(id) => {
-            setShowNew(false)
-            onSelect(id)
-          }}
-        />
-      )}
+      {/* In collapsed mode the rail block above already renders this once — avoid mounting it twice. */}
+      {!mobileOnly && newChatDialog}
     </div>
-  )
+    )
+  }
 }

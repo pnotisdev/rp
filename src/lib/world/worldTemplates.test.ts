@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { WORLD_TEMPLATES, getWorldTemplate, hiddenWorldTabs } from './worldTemplates'
+import { WORLD_TEMPLATES, assistOverridesForTemplate, getWorldTemplate, hiddenWorldTabs } from './worldTemplates'
 
 describe('hiddenWorldTabs', () => {
   it('hides nothing for the dating_sim template — the full feature set', () => {
@@ -36,5 +36,18 @@ describe('getWorldTemplate', () => {
     for (const t of WORLD_TEMPLATES) {
       expect(getWorldTemplate(t.id).id).toBe(t.id)
     }
+  })
+})
+
+describe('assistOverridesForTemplate', () => {
+  it('turns relationship tracking and choices off for freeform and slice_of_life', () => {
+    expect(assistOverridesForTemplate('freeform')).toEqual({ autoTrackRelationship: false, autoSuggestChoices: false })
+    expect(assistOverridesForTemplate('slice_of_life')).toEqual({ autoTrackRelationship: false, autoSuggestChoices: false })
+  })
+
+  it('leaves no override for dating_sim, visual_novel, or an unset template', () => {
+    expect(assistOverridesForTemplate('dating_sim')).toEqual({})
+    expect(assistOverridesForTemplate('visual_novel')).toEqual({})
+    expect(assistOverridesForTemplate(undefined)).toEqual({})
   })
 })

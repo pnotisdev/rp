@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { ChevronLeft, ChevronRight, GitFork, Heart, History, RotateCcw, Star, X } from 'lucide-react'
+import { ArrowLeft, ChevronLeft, ChevronRight, GitFork, Heart, History, RotateCcw, Star, X } from 'lucide-react'
 import type { Character } from '@/lib/characters/cardSpec'
 import type { Chat, Persona, StoredMessage, WorldCard } from '@/lib/types'
 import { placeholderGradient } from '@/lib/vn/placeholder'
@@ -69,6 +69,8 @@ interface VNStageProps {
    * (relationship/event/objective/etc + the connection dot), placed left of the log toggle.
    */
   topBarExtra?: ReactNode
+  /** Mobile-only "back to chat list" — the chats panel is a full-screen overlay under `md`, so VN mode needs its own way back besides the desktop-only side panel. Hidden at `md` and above. */
+  onBack?: () => void
   /** Small "original chat" jump-back link — only meaningful when this chat was forked. */
   parentChatLink?: ReactNode
   /** The next-move suggestion chips for the current turn, pre-built with variant="vn" — omitted when there are none. */
@@ -103,6 +105,7 @@ export function VNStage({
   onFork,
   onTogglePin,
   topBarExtra,
+  onBack,
   parentChatLink,
   choiceListSlot,
   assistSlot,
@@ -177,7 +180,25 @@ export function VNStage({
       />
       {showPetals && <SakuraPetals />}
 
-      <div className="absolute right-4 top-4 z-20 flex h-9 items-center gap-1 rounded-full bg-black/40 pl-1 pr-1 backdrop-blur-sm">
+      {/* The full desktop toolbar (9 icons + Log) is too wide for any phone screen to show as one
+          static row — max-w + overflow-x-auto keeps it from spilling off-screen (this pill is
+          `absolute right-4`, so an unbounded width pushes its *left* edge past the viewport)
+          rather than a real "what's essential on mobile" redesign, which is a bigger, more
+          opinionated change than this pass's scope. */}
+      <div className="absolute right-4 top-4 z-20 flex h-9 max-w-[calc(100vw-2rem)] items-center gap-1 overflow-x-auto rounded-full bg-black/40 pl-1 pr-1 backdrop-blur-sm">
+        {onBack && (
+          <>
+            <button
+              onClick={onBack}
+              title="Back to chats"
+              aria-label="Back to chats"
+              className="flex h-7 w-7 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/15 hover:text-white md:hidden"
+            >
+              <ArrowLeft size={15} strokeWidth={2} />
+            </button>
+            <span className="h-4 w-px bg-white/15 md:hidden" />
+          </>
+        )}
         {topBarExtra}
         <span className="h-4 w-px bg-white/15" />
         <button

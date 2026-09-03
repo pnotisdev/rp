@@ -3,7 +3,7 @@ import { X } from 'lucide-react'
 import type { Character, GalleryEntry } from '@/lib/characters/cardSpec'
 import type { Chat, WorldCard } from '@/lib/types'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
-import { chatFactsApi, relationshipEventsApi } from '@/lib/api/client'
+import { chatFactsApi, chatsApi, relationshipEventsApi } from '@/lib/api/client'
 import { getGiftCatalog } from '@/lib/dating/gifts'
 import { getItemCatalog } from '@/lib/dating/items'
 import {
@@ -22,6 +22,7 @@ import type { CommitmentStatus } from '@/lib/types'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { Section } from '@/components/ui/Section'
+import { SelectField } from '@/components/ui/Field'
 
 const ALL_STAT_KEYS = ['affection', 'trust', 'chemistry', 'comfort', 'respect', 'curiosity', 'tension'] as const
 
@@ -109,6 +110,17 @@ export function RelationshipPanel({ chat, character, world, onClose, onBuyGift, 
     }
   }
 
+  const overrideValue = (key: 'autoTrackRelationship' | 'autoSuggestChoices'): 'default' | 'on' | 'off' => {
+    const v = chat.assistOverrides?.[key]
+    return v === undefined ? 'default' : v ? 'on' : 'off'
+  }
+  const setOverride = async (key: 'autoTrackRelationship' | 'autoSuggestChoices', value: 'default' | 'on' | 'off') => {
+    const next = { ...(chat.assistOverrides ?? {}) }
+    if (value === 'default') delete next[key]
+    else next[key] = value === 'on'
+    await chatsApi.update(chat.id, { assistOverrides: next })
+  }
+
   const events = useApiQuery('relationship-events', () => relationshipEventsApi.listByChat(chat.id), [chat.id]) ?? []
   const facts = useApiQuery('chat-facts', () => chatFactsApi.listByChat(chat.id), [chat.id]) ?? []
   const activeFacts = facts.filter((f) => f.active)
@@ -151,6 +163,29 @@ export function RelationshipPanel({ chat, character, world, onClose, onBuyGift, 
           ) : (
             <p className="mt-2 text-xs text-text-muted">Max stage reached.</p>
           )}
+        </div>
+
+        <div className="mb-4 grid grid-cols-1 gap-3 rounded-xl bg-bg-sunken p-4 sm:grid-cols-2">
+          <SelectField
+            label="Track relationship for this chat"
+            hint="Overrides the global Settings → Generation default, just for this chat."
+            value={overrideValue('autoTrackRelationship')}
+            onChange={(e) => setOverride('autoTrackRelationship', e.target.value as 'default' | 'on' | 'off')}
+          >
+            <option value="default">Use global default</option>
+            <option value="on">On</option>
+            <option value="off">Off</option>
+          </SelectField>
+          <SelectField
+            label="Suggest choices for this chat"
+            hint="Overrides the global Settings → Generation default, just for this chat."
+            value={overrideValue('autoSuggestChoices')}
+            onChange={(e) => setOverride('autoSuggestChoices', e.target.value as 'default' | 'on' | 'off')}
+          >
+            <option value="default">Use global default</option>
+            <option value="on">On</option>
+            <option value="off">Off</option>
+          </SelectField>
         </div>
 
         <div className="mb-4 flex items-center justify-between rounded-xl bg-bg-sunken p-4">

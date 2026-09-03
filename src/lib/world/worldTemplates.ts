@@ -20,6 +20,11 @@ export interface WorldTemplateDef {
   /** Pre-filled into the new world's description field — a starting point, not locked in. */
   description: string
   rules: string
+  /** Whether a new chat for a character bound to this world should default `Chat.assistOverrides`
+   *  to turn off relationship tracking/choice suggestions — the templates whose own blurb says
+   *  "no romance mechanics," not merely "no gift economy" (Visual Novel keeps relationship
+   *  tracking on by default; plenty of VN stories are romance-driven even without a gift shop). */
+  disablesRelationshipAssists: boolean
 }
 
 export const WORLD_TEMPLATES: WorldTemplateDef[] = [
@@ -29,6 +34,7 @@ export const WORLD_TEMPLATES: WorldTemplateDef[] = [
     blurb: 'An open-ended setting for plain roleplay or lore reference. No gift economy, no world clock.',
     description: '',
     rules: '',
+    disablesRelationshipAssists: true,
   },
   {
     id: 'visual_novel',
@@ -36,6 +42,7 @@ export const WORLD_TEMPLATES: WorldTemplateDef[] = [
     blurb: 'A story-driven setting with scene backgrounds and time-of-day flavor, without the dating-sim economy.',
     description: '',
     rules: 'Describe the setting cinematically — establish where a scene is and what it looks like before dialogue.',
+    disablesRelationshipAssists: false,
   },
   {
     id: 'dating_sim',
@@ -43,6 +50,7 @@ export const WORLD_TEMPLATES: WorldTemplateDef[] = [
     blurb: 'The full mechanic set: gifts, items, relationship thresholds, scene flags, and the world clock.',
     description: '',
     rules: '',
+    disablesRelationshipAssists: false,
   },
   {
     id: 'slice_of_life',
@@ -50,9 +58,18 @@ export const WORLD_TEMPLATES: WorldTemplateDef[] = [
     blurb: 'A living, day-to-day setting driven by the calendar and weather, without romance mechanics.',
     description: '',
     rules: 'Let the passage of time, weather, and daily routine shape the scene as much as dialogue does.',
+    disablesRelationshipAssists: true,
   },
 ]
 
 export function getWorldTemplate(id: WorldTemplateId): WorldTemplateDef {
   return WORLD_TEMPLATES.find((t) => t.id === id) ?? WORLD_TEMPLATES[2]
+}
+
+/** `Chat.assistOverrides` to seed a brand-new chat with, derived from the bound world's template —
+ *  `{}` (no override, inherit the global default) for a template that doesn't disable them. */
+export function assistOverridesForTemplate(template: WorldTemplateId | undefined): { autoTrackRelationship?: boolean; autoSuggestChoices?: boolean } {
+  return getWorldTemplate(template ?? 'dating_sim').disablesRelationshipAssists
+    ? { autoTrackRelationship: false, autoSuggestChoices: false }
+    : {}
 }

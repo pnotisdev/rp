@@ -27,6 +27,10 @@ function ChatSurface({
   onNavigate: (view: ViewId) => void
 }) {
   const chats = useApiQuery('chats', () => chatsApi.list(), [])
+  // Below `md` there's only room for one of the chat list / the active chat at a time — this is
+  // purely which one a phone-width viewport is currently showing, never touched at `md` and up,
+  // where both render side by side regardless of it (see the responsive classes below).
+  const [mobileListOpen, setMobileListOpen] = useState(!activeChatId)
 
   if (chats === undefined) return <div className="flex-1" />
   if (chats.length === 0) {
@@ -35,8 +39,18 @@ function ChatSurface({
 
   return (
     <>
-      <ChatsPanel activeChatId={activeChatId} onSelect={onSelect} />
-      <ChatWindow chatId={activeChatId} />
+      <div className={`${mobileListOpen ? 'flex' : 'hidden'} w-full md:flex md:w-auto`}>
+        <ChatsPanel
+          activeChatId={activeChatId}
+          onSelect={(id) => {
+            onSelect(id)
+            setMobileListOpen(false)
+          }}
+        />
+      </div>
+      <div className={`${mobileListOpen ? 'hidden' : 'flex'} w-full min-w-0 flex-1 md:flex`}>
+        <ChatWindow chatId={activeChatId} onBack={() => setMobileListOpen(true)} />
+      </div>
     </>
   )
 }
@@ -50,7 +64,10 @@ export default function App() {
   return (
     <div className="flex h-full w-full flex-col md:flex-row">
       <Sidebar view={view} onChange={setView} />
-      <div className="flex flex-1 min-w-0">
+      {/* The mobile bottom nav is `fixed`, out of normal flow — this padding keeps it from
+          covering the last bit of content. No-op at `md` and up, where the rail is a sibling
+          taking its own column width instead. */}
+      <div className="flex flex-1 min-w-0 pb-14 md:pb-0">
         {view === 'chat' && (
           <ChatSurface activeChatId={activeChatId} onSelect={setActiveChatId} onNavigate={setView} />
         )}

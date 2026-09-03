@@ -32,8 +32,12 @@ export function Sidebar({ view, onChange }: { view: ViewId; onChange: (v: ViewId
 
   return (
     <nav
-      className={`flex shrink-0 flex-col gap-1 bg-gradient-to-b from-bg-elevated to-bg py-4 transition-[width] duration-200 ${
-        expanded ? 'w-40 px-2' : 'w-14 items-center px-1.5'
+      // Below `md` there's no room for a vertical rail (expanded or not) alongside any of this
+      // app's views, so it becomes a fixed bottom bar instead — icon-only, "expanded" is a
+      // desktop-only concept there. At `md` and up this is the original vertical rail, unchanged.
+      className={`fixed inset-x-0 bottom-0 z-30 flex items-center justify-around gap-0.5 border-t border-border bg-bg-elevated px-1 py-1.5
+        md:static md:inset-auto md:z-auto md:flex-col md:justify-start md:gap-1 md:border-t-0 md:bg-gradient-to-b md:from-bg-elevated md:to-bg md:py-4 md:transition-[width] md:duration-200 ${
+        expanded ? 'md:w-40 md:px-2' : 'md:w-14 md:items-center md:px-1.5'
       }`}
     >
       {NAV.map((item) => (
@@ -42,16 +46,16 @@ export function Sidebar({ view, onChange }: { view: ViewId; onChange: (v: ViewId
           onClick={() => onChange(item.id)}
           title={item.label}
           aria-label={item.label}
-          className={`flex items-center rounded-xl text-xs transition-colors ${
-            expanded ? 'gap-3 px-3 py-2.5' : 'h-10 w-10 justify-center'
-          } ${
+          className={`flex flex-1 items-center justify-center rounded-xl text-xs transition-colors md:flex-initial ${
+            expanded ? 'md:justify-start md:gap-3 md:px-3 md:py-2.5' : 'md:h-10 md:w-10'
+          } h-11 w-11 md:w-auto ${
             view === item.id
               ? 'bg-accent/10 text-accent font-medium'
               : 'text-text-muted hover:bg-bg-sunken hover:text-text'
           }`}
         >
           <item.icon size={18} strokeWidth={1.75} className="shrink-0" />
-          {expanded && <span>{item.label}</span>}
+          {expanded && <span className="hidden md:inline">{item.label}</span>}
         </button>
       ))}
 
@@ -59,8 +63,8 @@ export function Sidebar({ view, onChange }: { view: ViewId; onChange: (v: ViewId
         onClick={() => setExpanded(!expanded)}
         title={expanded ? 'Collapse sidebar' : 'Expand sidebar'}
         aria-label={expanded ? 'Collapse sidebar' : 'Expand sidebar'}
-        className={`mt-auto flex items-center rounded-xl text-text-muted transition-colors hover:bg-bg-sunken hover:text-text ${
-          expanded ? 'justify-start gap-3 px-3 py-2.5' : 'h-10 w-10 justify-center'
+        className={`hidden items-center rounded-xl text-text-muted transition-colors hover:bg-bg-sunken hover:text-text md:mt-auto md:flex ${
+          expanded ? 'md:justify-start md:gap-3 md:px-3 md:py-2.5' : 'md:h-10 md:w-10 md:justify-center'
         }`}
       >
         {expanded ? <PanelLeftClose size={18} strokeWidth={1.75} /> : <PanelLeftOpen size={18} strokeWidth={1.75} />}

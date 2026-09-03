@@ -278,6 +278,19 @@ export interface Chat {
   parentChatId?: string
   /** The message (in the parent chat) this fork branched off from. */
   forkedFromMessageId?: string
+  /**
+   * Per-chat overrides for the global relationship-tracking/choice-suggestion assist toggles
+   * (Settings → Generation) — an unset field falls back to that global default, same precedence
+   * style as `Character.instructTemplateId`. Seeded once from the bound world's template at chat
+   * creation (`NewChatDialog`) so a Freeform/Slice of Life world's chats genuinely don't carry a
+   * relationship-tracking prompt line even if the user's global default has it on — not
+   * live-recomputed if the world's template changes later, the same "picks a default, doesn't
+   * retroactively enforce it" contract world templates (10e) already has for hiding editor tabs.
+   */
+  assistOverrides?: {
+    autoTrackRelationship?: boolean
+    autoSuggestChoices?: boolean
+  }
 }
 
 export interface WorldInfoBook {

@@ -4,6 +4,7 @@ import { charactersApi, chatsApi, messagesApi, personasApi, worldsApi } from '@/
 import { substituteMacros } from '@/lib/characters/macros'
 import { computeWarmth, getRelationshipStats, relationshipMilestonesFor, relationshipStageForWarmth } from '@/lib/dating/stage'
 import { defaultGiftInventory } from '@/lib/dating/gifts'
+import { assistOverridesForTemplate } from '@/lib/world/worldTemplates'
 import type { RelationshipDimension } from '@/lib/types'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
@@ -100,6 +101,7 @@ export function NewChatDialog({
       giftsGiven: {},
       unlockedGalleryIds: [],
       summary: starter?.blurb || undefined,
+      assistOverrides: assistOverridesForTemplate(world?.template),
     })
     if (greetingOptions.length > 0) {
       const macroCtx = { charName: character.card.name, userName: persona?.name || 'You' }

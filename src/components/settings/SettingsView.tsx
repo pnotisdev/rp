@@ -12,7 +12,9 @@ export function SettingsView() {
 
   return (
     <div className="flex-1 overflow-y-auto p-8">
-      <div className="mb-10 flex gap-1 border-b border-border">
+      {/* overflow-x-auto: on a narrow viewport all five tabs don't fit — without this, Voice and
+          Data are simply unreachable rather than just visually tight. */}
+      <div className="mb-10 flex gap-1 overflow-x-auto border-b border-border">
         {(
           [
             ['connection', 'Connection'],

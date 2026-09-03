@@ -61,6 +61,11 @@ const MIN_BATCH_FOR_AUTO_SUMMARY = 6
 /** Extra generation rounds `runGeneration` allows itself when a reply looks cut off by hitting max_length, before giving up and leaving it as-is. */
 const MAX_AUTO_CONTINUE_ROUNDS = 2
 
+/** A chat-level override (`Chat.assistOverrides`) wins over the global Settings → Generation default — unset falls back to it, same precedence style as `Character.instructTemplateId`. */
+function effectiveAssistFlag(chatOverride: boolean | undefined, globalDefault: boolean): boolean {
+  return chatOverride ?? globalDefault
+}
+
 /** KoboldCpp's `images` field describes the current context, not per-turn — resend whatever the most recent user turn attached. */
 function latestImages(history: StoredMessage[]): string[] {
   for (let i = history.length - 1; i >= 0; i--) {
@@ -503,7 +508,7 @@ export function useChatSession(chatId: string | null) {
       // {{user}}'s relationship with the primary specifically, not something a non-primary
       // participant's own dialogue should be steered by.
       const relationshipDescription =
-        autoTrackRelationship && speaker.id === character.id
+        effectiveAssistFlag(freshChat.assistOverrides?.autoTrackRelationship, autoTrackRelationship) && speaker.id === character.id
           ? buildRelationshipDescription(freshChat, world, character)
           : undefined
       const styleGuidance =
@@ -1157,12 +1162,12 @@ export function useChatSession(chatId: string | null) {
         // resolved once, at the end, by endDateEvent's own assessDateOutcome pass instead.
         const inLiveDate = chat.activeEvent?.kind === 'date' && !!chat.activeEvent.startedAt
 
-        if (autoTrackRelationship && isPrimarySpeaker && !inLiveDate) {
+        if (effectiveAssistFlag(chat.assistOverrides?.autoTrackRelationship, autoTrackRelationship) && isPrimarySpeaker && !inLiveDate) {
           runAssist('relationship', 'Updating relationship', () =>
             updateAffectionFromReply(chat.id, relationshipHistory, combined),
           )
         }
-        if (autoSuggestChoices && isPrimarySpeaker) {
+        if (effectiveAssistFlag(chat.assistOverrides?.autoSuggestChoices, autoSuggestChoices) && isPrimarySpeaker) {
           runAssist('choices', 'Suggesting replies', () => suggestChoicesForMessage(targetMessageId, relationshipHistory))
         }
         if (autoDetectTasks) {

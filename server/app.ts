@@ -380,6 +380,7 @@ app.post('/api/chats', (req, res) => {
     unlockedGalleryIds: Array.isArray(req.body.unlockedGalleryIds) ? req.body.unlockedGalleryIds : [],
     activeEvent: req.body.activeEvent,
     summary: req.body.summary || undefined,
+    assistOverrides: req.body.assistOverrides ?? undefined,
     createdAt: now,
     updatedAt: now,
   })

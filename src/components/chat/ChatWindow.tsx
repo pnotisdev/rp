@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import {
+  ArrowLeft,
   Backpack,
   CalendarHeart,
   Download,
@@ -43,7 +44,7 @@ import { BagPanel } from './BagPanel'
 import { getGiftCatalog } from '@/lib/dating/gifts'
 import { getItemCatalog } from '@/lib/dating/items'
 
-export function ChatWindow({ chatId }: { chatId: string | null }) {
+export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?: () => void }) {
   const {
     chat,
     character,
@@ -274,6 +275,9 @@ export function ChatWindow({ chatId }: { chatId: string | null }) {
       {!visualNovelMode && (
         <header className="flex items-center justify-between gap-4 border-b border-border bg-bg-elevated px-5 py-3">
           <div className="flex min-w-0 items-center gap-3">
+            {onBack && (
+              <IconButton tone="chrome" icon={ArrowLeft} title="Back to chats" onClick={onBack} className="md:hidden" />
+            )}
             {character?.avatarDataUrl && (
               <img src={character.avatarDataUrl} className="h-10 w-10 shrink-0 rounded-xl object-cover" />
             )}
@@ -312,7 +316,10 @@ export function ChatWindow({ chatId }: { chatId: string | null }) {
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            {toolbar}
+            {/* The full icon toolbar doesn't fit next to a title block on a phone-width screen —
+                scrolls horizontally there rather than overflowing the header or crushing the
+                title down to nothing. A real "what's essential on mobile" pass is a follow-up. */}
+            <div className="flex max-w-[45vw] items-center gap-1 overflow-x-auto sm:max-w-none">{toolbar}</div>
             <div className="mx-1.5 h-5 w-px bg-border" />
             <ConnectionBadge />
           </div>
@@ -427,6 +434,7 @@ export function ChatWindow({ chatId }: { chatId: string | null }) {
           onFork={forkChat}
           onTogglePin={togglePinMessage}
           topBarExtra={toolbar}
+          onBack={onBack}
           parentChatLink={parentChatLink}
           choiceListSlot={choiceListNode('vn')}
           assistSlot={<AssistActivityBar items={assistActivity} variant="vn" />}

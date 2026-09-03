@@ -1164,14 +1164,27 @@ below:**
       makes the template editable after creation too — switching narrower never touches data
       already entered on a hidden tab, only what's shown. Threaded through `pack.ts` (world
       bundling) and the backup/restore path (already generic, no change needed there).
-      **Deliberately not done, and worth being honest about**: this does not yet gate "which stats
-      exist" or "whether the calendar/energy economy is on" in the way the original wording
-      promised — `autoTrackRelationship`/`autoSuggestChoices`/`visualNovelMode` are still global
-      `useSettingsStore` toggles shared by every chat, not per-world or per-chat, so a Freeform
-      world's characters still get a relationship-tracking prompt line if the user's global setting
-      has it on. Properly closing that gap needs those settings to become per-chat/per-world first —
-      a genuinely separate, larger change, not a natural extension of the tab-hiding done here.
-      Tracked as its own follow-up rather than silently implied by this item being checked off.
+      **The "gate the actual mechanics, not just the editor tabs" half, done in a follow-up pass**:
+      `Chat.assistOverrides?: { autoTrackRelationship?, autoSuggestChoices? }` (`types.ts`) — unset
+      falls back to the global Settings → Generation default, same precedence style as
+      `Character.instructTemplateId`. `assistOverridesForTemplate()` (`worldTemplates.ts`) seeds a
+      brand-new chat's overrides from the bound world's template at creation time
+      (`NewChatDialog`): Freeform and Slice of Life (whose own blurbs say "no romance mechanics")
+      turn both off; Visual Novel deliberately does not, since plenty of VN stories are
+      romance-driven even without the gift-shop economy — only the templates that actually claim
+      "no romance" in their own description disable it, not everything that hides the Dating sim
+      tab. `effectiveAssistFlag()` (`useChatSession.ts`) resolves the override at all three real
+      gate sites (the relationship-description prompt line, the post-reply relationship-tracking
+      call, the post-reply choice-suggestion call). Editable after creation too, from two new
+      selects ("Use global default" / "On" / "Off") in `RelationshipPanel.tsx` — the natural home,
+      since "why isn't this chat tracking relationship" is exactly what that panel answers. 2 new
+      `worldTemplates.test.ts` cases. Verified live end-to-end with koboldcpp running: a Freeform
+      world's chat sent a real message with neither assist firing (affection stayed 0, no choice
+      pills), flipping "Track relationship" to On in the panel persisted immediately and the very
+      next real reply *did* update affection while choices correctly stayed off.
+      **Still open**: `visualNovelMode` per-chat/per-world gating — a bigger change than the other
+      two, since it's a display-mode/rendering concern (which component even renders) rather than
+      just a background model call to skip, not something this pass touched.
       6 new tests (`worldTemplates.test.ts`). Verified live end-to-end: created a Freeform world
       (confirmed Dating sim/Clock tabs absent), switched its template chip to Dating Sim mid-edit
       (confirmed the Dating sim tab reappeared immediately), saved a Visual Novel world and
@@ -1540,15 +1553,49 @@ SillyTavern docs/releases, RisuAI (CCv3, CBS/trigger system, regex scripts), Agn
       the events (`relationship_events`, `sceneFlags`, the world clock); there's just no way for an
       author to hang behavior off them without editing code. Large; pairs with section 12's plugin
       hooks and 10f's world tick — worth designing them together.
-- [ ] **Mobile / responsive layout** — verified gap: `globals.css` has zero breakpoints, the
-      panels are fixed-width (`w-14` rail, `w-64` chat list), and the root only switches
-      `flex-col → md:flex-row`. The app is unusable on a phone, which is exactly RisuAI's and
-      MiniTavern's whole pitch. Minimum viable: collapsible/overlay panels under `md`, a
-      bottom-nav layout, touch-sized hit targets, and the VN stage getting the full viewport.
+- [~] **Mobile / responsive layout** — first slice: the core chat experience, not every editor
+      screen (a full pass is bigger than one session). `Sidebar.tsx` is a bottom-fixed icon bar
+      under `md`, the original vertical rail at `md` and up — `expanded`/collapse stays a
+      desktop-only concept, mobile is always icon-only. `ChatsPanel`/`ChatWindow` no longer sit
+      permanently side by side below `md`: `ChatSurface` (`App.tsx`) tracks a local
+      `mobileListOpen` toggle that shows one full-width at a time, with a new `ChatWindow`/`VNStage`
+      `onBack` prop rendering a back arrow (chrome header, and the VN glass toolbar pill) to return
+      to the list — untouched at `md` and up, where both always render side by side regardless.
+      `ChatsPanel`'s own collapsed mini-rail (a desktop preference for saving width next to a wide
+      `ChatWindow`) doesn't make sense on a phone with no width to spare in the first place, so it's
+      now `hidden md:flex`, with the full list forced instead via a `mobileOnly` render path —
+      caught live: without this, a desktop `collapsed` preference left mobile showing a useless
+      w-14 icon strip and a mostly-blank screen.
+      **Two real overflow bugs found and fixed via live measurement, not just visual inspection**
+      (`getBoundingClientRect`, not trusting a screenshot that can silently clip): the VN mode
+      top-right glass toolbar pill (9 action icons + Log, all in one row) measured 453px wide
+      against a 375px viewport — `right-4` positioning meant it overflowed *left*, off-screen,
+      invisibly; the ordinary chat header's icon toolbar had the exact same problem, just next to a
+      shrinking title instead of visibly breaking. Both fixed with a capped `max-w` +
+      `overflow-x-auto` rather than a real "what's essential on mobile" icon-set redesign, which is
+      a bigger, more opinionated follow-up. Applying the same live-measurement check to
+      `SettingsView.tsx`'s 5-tab strip (`Connection/Appearance/Generation/Voice/Data`) found a
+      worse version of the same bug: `overflow-x: visible` with no scroll affordance at all meant
+      Voice and Data were completely unreachable on mobile, not just tight — fixed with the same
+      `overflow-x-auto` pattern; `EditorShell.tsx`'s own tab strip (Character/World editors) already
+      had it, confirmed by checking rather than assuming.
+      **Deliberately not done in this slice**: every other view (Characters/Worlds/Personas/World
+      Info/Gallery/settings sub-panels) gets responsive layout "for free" from the App-level
+      Sidebar/ChatsPanel fix, verified not to overflow, but wasn't individually redesigned for
+      touch/small-screen ergonomics; a real "what's essential in the mobile toolbar" icon audit,
+      mentioned above twice, stays open; touch-target sizing was verified adequate for the bottom
+      nav (44px) but not audited app-wide. Verified live end-to-end at a 375×812 viewport: chat
+      list ↔ chat window navigation via the back button in both VN and ordinary modes, bottom nav
+      switching between every top-level view, zero horizontal page overflow measured directly
+      (`document.documentElement.scrollWidth === innerWidth`) after each fix, and a full-desktop
+      regression check afterward confirming the rail/collapsed-panel/toolbar all render exactly as
+      before at desktop width.
 - [ ] **Chat management basics** — no chat rename (the title is frozen to the character's name at
       creation, `NewChatDialog`), no chat folders/tags/pinning, no one-click "new chat, same
       character & persona," no "duplicate chat." The fork tree is section 12; this is the
-      un-fancy list-management layer under it.
+      un-fancy list-management layer under it. AI Dungeon's Adventure model (section 15) is a
+      concrete reference for the shape this should take — title, tags, and settings as real
+      per-chat fields, not just the frozen character-name title this app has today.
 - [ ] **Generation HUD** — tokens/sec, time-to-first-token, and a context-fill gauge during and
       after generation. `showTokenCounts` gives a per-message count; there's no live feedback while
       the model is working beyond the streaming text itself.
@@ -1556,6 +1603,115 @@ SillyTavern docs/releases, RisuAI (CCv3, CBS/trigger system, regex scripts), Agn
       here only because it's the top reason an ST/Risu user on a hosted model (Claude, OpenRouter,
       Gemini) can't adopt this app at all today. If hosted-provider support ever happens, the
       `ChatBackend` abstraction section 8 describes is the right shape.
+
+## 15. Competitive ideas — AI Dungeon
+
+Added from a user-supplied feature analysis of [aidungeon.com](https://aidungeon.com), read in full
+and cross-checked against what's already here rather than transcribed. AI Dungeon is a genuinely
+different kind of product from this app: a sandbox open-world AI-RPG platform built around
+publishing, discovery, and a shared community library, with an account/cloud-save layer this app
+deliberately doesn't have (see the Privacy section of the README — no accounts, no cloud, nothing
+leaves the machine except calls to KoboldCpp and an optional TTS/STT provider). Most of its
+platform-facing surface (Discover/Trending, Scenario/Adventure publishing with
+Draft/Unlisted/Published visibility, content ratings for public browsing, a Credits/Scales
+currency balancing paid inference against free usage, an "Improve the AI" telemetry/dataset-
+opt-in) doesn't transfer at all and isn't being pursued — it exists to solve problems (a paid
+hosted-inference business, a public content marketplace) this app doesn't have. True networked
+multiplayer (join codes, inviting/kicking/blocking other *people* in one shared adventure) is the
+same story: it would need an accounts-and-sync layer that contradicts "everything stays on this
+machine" at the architecture level, not just a missing feature — a local same-device pass-and-play
+mode is a different, much smaller ask if it's ever wanted, but isn't scoped here. What's below is
+the subset that's actually a good fit for a local-first, single-user, character-centric app.
+
+- [ ] **User-authored scripting, scoped to one character or world**: AI Dungeon's strongest and
+      most novel idea for this app to learn from. A Scenario can carry JavaScript across four
+      hook points (Library — shared helpers/state; Input — rewrite what the player typed before
+      it's interpreted; Context — rewrite what's about to be sent to the model; Output — rewrite
+      what the model produced) with persistent state and a Script Test sandbox (feed sample input,
+      inspect returned text/logs/updated state before it ever runs for real). Community scripts
+      reportedly cover dice rolls, custom stat systems, relationship tracking, random events, and
+      auto-populated Story Cards — i.e. creators building their *own* game mechanics on top of the
+      narrative engine instead of waiting for the app to ship them. This is a natural, larger
+      extension of this app's own founding principle (see section 10's intro: "the model plays the
+      character, deterministic code runs the world") — right now only the *app's* code gets to be
+      that deterministic layer; this would let a *creator* be it too, for their own character or
+      world, without forking the app. The smallest real version of this already exists and ships
+      today: regex scripts (`src/lib/text/regexScripts.ts`) are exactly an Output-only hook with no
+      state and a fixed transform shape (find/replace). A real scripting layer is the general case
+      of that. **Distinct from section 12's "plugin/extension API"** — that one is an app-level
+      surface for extending the whole app (new UI panels, app-wide hooks) aimed at someone
+      comfortable shipping a mod; this would be scenario-level, shipped *inside* one character or
+      world's own data, closer to "a formula in a spreadsheet" than "a browser extension."
+      Rough shape, smallest first, and each step needs a real sandboxing answer before it ships (a
+      Web Worker with no `fetch`/DOM access, or a restricted interpreter — arbitrary JS touching a
+      local Express server and SQLite database is a real risk, not a formality, even single-user):
+      (a) an Output-only hook — pure `(text, state) => { text, state }`, run after generation,
+      before the message is stored, no network/DOM access, with a test sandbox mirroring AI
+      Dungeon's; (b) persistent per-character/world script state, surfaced somewhere read-only
+      (the eventual director/debug view in section 12 is the natural home); (c) Input and Context
+      hooks once (a) and (b) have actually been used and the risk profile is better understood.
+- [ ] **Scenario-style starting templates with fill-in-the-blank placeholders**: a step beyond the
+      world templates just shipped (10e) and `Character.relationshipStarters[]` — a reusable
+      starting package (a world, its bound character(s), an opening premise, optionally a persona
+      nudge) that asks the player a few short questions when starting a chat from it ("Your
+      character's name?", "How do you know each other?") and substitutes the answers into the
+      opening, the same idea as AI Dungeon's Scenario placeholders. Mad-libs-simple, but it turns
+      "recreate the same opening for a new save" from manual re-entry into picking a template and
+      filling a couple of blanks — worth doing once world templates (10e) have seen enough real use
+      to know what actually varies between starts of the same world.
+- [ ] **Explicit Do / Say / Narrate input modes**: AI Dungeon disambiguates a turn's *kind* (action,
+      dialogue, direct narration) instead of leaving it to the model to infer from punctuation
+      alone. This app already leans on a convention for the same distinction post-hoc
+      (`*action*`/"dialogue" segment parsing, `src/lib/text/messageSegments.ts`) but nothing marks
+      *input* this way before it's sent. A small composer affordance — a mode chip (Do/Say/Narrate)
+      next to the existing impersonate toggle, folded into the turn as a light prefix hint rather
+      than a new field — could reduce ambiguity for a less-experienced user typing plain text,
+      worth prototyping small before committing to it as a permanent control.
+- [ ] **On-demand in-chat scene snapshot generation**: distinct from section 11's "generate into an
+      editor slot" tools (portrait/sprite/CG/background authoring) — AI Dungeon's **See** action
+      generates an image of *what's happening right now* directly in the transcript, not something
+      saved into a persistent character/world slot. Once section 11's image-generation backend
+      abstraction exists, a chat-level "snapshot this moment" action reusing the same provider is a
+      small addition on top, not a separate integration.
+- [ ] **Raw vs. processed model output toggle**: the Prompt Inspector already shows the exact text
+      *sent* to the model (arguably more transparent than AI Dungeon's categorized context viewer,
+      since it's the literal assembled string, not a reconstruction). What it doesn't show is the
+      model's raw *response* before regex scripts, scene-tag stripping, and macro handling touch
+      it — useful for the same debugging reason AI Dungeon exposes raw output. A small addition to
+      the same panel, not a new one.
+- [ ] **High-contrast / larger-text presets**: this app already has `fontScale`, `reducedMotion`,
+      and now `reducedAudio` (section 6), plus full theme customization, but nothing bundles a
+      one-click "high contrast" look the way AI Dungeon's accessibility settings do. A theme preset
+      (`themePresets.ts`, same mechanism as Sakura/Neon Night) tuned for contrast rather than mood,
+      alongside the existing font-scale slider, would close this cheaply — pairs with section 9's
+      existing accessibility pass (aria-labels) rather than needing new machinery.
+- [ ] **Rewind: delete a message and everything after it, in one action**: the "AI is editable, not
+      authoritative" philosophy (undo/retry/edit/erase) is already this app's philosophy too —
+      regenerate/swipe, edit, fork, and one-at-a-time delete all exist — but backing out of a scene
+      that went several turns in a direction you don't want today means deleting messages one at a
+      time from the bottom. A "Rewind to here" action on any message (delete it and every later
+      message in the chat, in one confirm) is the missing bulk case — smaller and much less
+      structural than chat forking (section 4), which is for *keeping* both branches; this is for
+      when you don't want the discarded branch at all.
+- [ ] **Combinatorial character creation**: a lighter alternative to the two creation paths that
+      already exist (`TemplateGallery`'s fixed starter cards, and `GenerateCharacterDialog`'s
+      free-text-brief-to-full-card generation) — pick from small independent trait lists (an
+      archetype, an occupation, a defining quirk, a relationship-to-player starter) and have the
+      model assemble an opening description/personality from the combination, the same idea as AI
+      Dungeon's Character Creator Scenarios. Sits between "start from a fixed template" and "type a
+      paragraph and hope the brief was specific enough" — worth prototyping as a third tab
+      alongside the two `CharacterEditor` "New character" entry points rather than replacing either.
+- [ ] **A named progression for onboarding, not just a feature list**: AI Dungeon's own framing —
+      Beginner writes a prompt, Intermediate adds Plot Essentials/Story Cards, Advanced builds a
+      Scenario, Expert builds branching/Character Creator content, Developer writes scripts — is a
+      genuinely useful *organizing principle* to borrow even though none of its individual rungs
+      map onto this app one-to-one. Section 13's own open items (a real "Basic" mode that hides
+      whole `CharacterEditor` tabs, world templates as "which mechanics apply") are already reaching
+      for the same idea without naming it. Worth stating explicitly once world templates (10e) and
+      the per-chat/per-world assist-toggle gating above have landed: a first chat only ever needs
+      "type and talk"; the dating-sim/world-sim/instruct-template/regex-script/(eventual scripting)
+      layers should read as *rungs to climb into*, not a wall of settings a new user meets on day
+      one. Not a feature to build so much as a lens for sequencing section 13's remaining work.
 
 ## Suggested next steps
 
@@ -1990,6 +2146,20 @@ Done so far (see checked boxes above for detail):
     live: the same scene now renders real background art matching the tagged location. See section
     13's "VN mode reads as broken before art exists" item for the general gap this is one instance
     of, which stays open.
+70. ~~Gate relationship-tracking/choice-suggestion assists per-chat~~ — the real remaining half of
+    world templates (#65), picked specifically because it needed koboldcpp actually running to
+    verify correctly. `Chat.assistOverrides`, seeded from the bound world's template at chat
+    creation, editable after via two new selects in `RelationshipPanel.tsx`. See section 10e's
+    world-templates item for the full writeup. `visualNovelMode` per-chat/per-world gating stays
+    open — a bigger, rendering-level change, not a natural extension of this pass.
+71. ~~Mobile/responsive layout, first slice~~ — the item flagged as "the single biggest limiter on
+    who can use the app at all," picked next since it didn't need koboldcpp specifically. Bottom
+    nav below `md`, the chat list and chat window each full-width and toggled instead of
+    permanently side by side, a back button in both chat header styles. Two real off-screen
+    overflow bugs (VN toolbar pill, ordinary header toolbar) and one real dead-end (unreachable
+    Settings tabs) found by measuring actual element geometry live rather than trusting a
+    screenshot, all fixed. See section 14's checked item for the full writeup, including what a
+    full mobile pass still needs beyond this first slice.
 
 That closes out the last "reasonable next batch," plus sections 10a, 10c, and 10d in full and a first
 slice each of 10b and 10f taken directly afterward since 10's own suggested phase order names them
@@ -2033,17 +2203,24 @@ rebuild~~ (#57, which also part-closed section 13's "actionable empty states" an
 ~~on-disk persistence audit~~ (#58), ~~regex scripts~~ (#59), ~~per-turn assist "thinking"
 indicator~~ (#60), ~~read CCv3 character cards~~ (#61), ~~first-run Welcome screen + actionable
 empty states~~ (#62), ~~persona nudge~~ (#63), ~~instruct-template manager~~ (#64, parts (a)/(b)
-only — (c) stays open), ~~world templates~~ (#65, pulled forward from 10e — doesn't yet gate the
-global assist toggles, see that item's own honest accounting of what's cut), ~~UI SFX +
-`reducedAudio`~~ (#66).
+only — (c) stays open), ~~world templates~~ (#65, pulled forward from 10e), ~~UI SFX +
+`reducedAudio`~~ (#66), ~~gate relationship-tracking/choice-suggestion assists per-chat~~ (#70,
+world templates' real remaining half — `visualNovelMode` gating stays open), ~~mobile/responsive
+layout, first slice~~ (#71 — every other view/editor screen individually, and a real "what's
+essential" mobile toolbar redesign, stay open).
 
-Still unblocked and worth doing next, roughly in order: a **prompt/instruct-template manager,
+Still unblocked and worth doing next, roughly in order: **the rest of mobile/responsive** — every
+editor/settings screen beyond the core chat surface, and the toolbar icon-set redesign #71
+explicitly deferred (today's fix scrolls instead of picks); a **prompt/instruct-template manager,
 part (c)** — expose `builder.ts`'s `fixedSections` order/enable-flags as editable data, now that
-(a)/(b) have shipped; **gate the global assist toggles per-chat or per-world** — the real remaining
-half of world templates (#65): today `autoTrackRelationship`/`autoSuggestChoices`/`visualNovelMode`
-are still one setting shared by every chat, so a Freeform world's characters still carry a
-relationship-tracking prompt line if that global toggle is on — needs those settings to become
-per-chat/per-world before a template can honestly claim to turn mechanics off, not just hide editor
-tabs; **manga-style SFX bursts** (section 5) or **background music per scene** (section 6) for VN
-polish, now that the UI-SFX groundwork (#66) exists to build on. Mobile/responsive (section 14) is
-larger but is the single biggest limiter on who can use the app at all.
+(a)/(b) have shipped; **`visualNovelMode` per-chat/per-world gating** — the one piece #70 didn't
+close, and a bigger change since it's a rendering-mode concern, not just a background call to
+skip; **manga-style SFX bursts** (section 5) or **background music per scene** (section 6) for VN
+polish, now that the UI-SFX groundwork (#66) exists to build on.
+
+Section 15 (added from a user-supplied AI Dungeon competitive analysis) is a separate set of ideas,
+not yet folded into this priority order. Of those, the smallest, most self-contained pieces —
+raw-vs-processed output in the Prompt Inspector, a high-contrast theme preset — could slot into a
+future "reasonable next batch" without much thought; the user-authored scripting idea is the
+standout but is deliberately scoped in stages precisely so it doesn't get picked up as a single
+large unplanned effort — see that item's own "smallest first" breakdown before starting on it.
