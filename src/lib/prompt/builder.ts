@@ -16,6 +16,8 @@ export interface ChatMessage {
 
 export interface PromptBuildInput {
   character: CharacterCardData
+  /** 10e's life-context fields (occupation, home/frequented locations, likes/goals/boundaries, social connections) — a pre-built, plain-text note, since those fields live on `Character`, not the portable `CharacterCardData` this builder otherwise works from. Folded into the identity block alongside description/personality/scenario. */
+  characterProfile?: string
   personaName: string
   personaDescription: string
   history: ChatMessage[]
@@ -83,7 +85,11 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
   const macroCtx = { charName: character.name || 'Character', userName: personaName || 'User' }
   const sub = (text: string | undefined) => substituteMacros(text ?? '', macroCtx)
 
-  const scanText = recentMessagesText(history, scanDepth)
+  // A book's own `scan_depth` (from an imported SillyTavern card) can ask to look further back
+  // than our default — honor the deepest request so that book's entries are actually reachable;
+  // never *narrower* than the default, since there's one shared scan window across all books.
+  const effectiveScanDepth = lorebooks.reduce((max, b) => Math.max(max, b.scan_depth ?? 0), scanDepth)
+  const scanText = recentMessagesText(history, effectiveScanDepth)
   const { activated: activatedEntries, droppedForBudget, droppedForGroup } = activateWorldInfo(
     lorebooks,
     scanText,
@@ -102,6 +108,7 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
     character.description?.trim() ? sub(character.description) : '',
     character.personality?.trim() ? `Personality: ${sub(character.personality)}` : '',
     character.scenario?.trim() ? `Scenario: ${sub(character.scenario)}` : '',
+    input.characterProfile?.trim() ? sub(input.characterProfile) : '',
   ].filter(Boolean)
   const descriptionBlock = descriptionParts.join('\n')
 

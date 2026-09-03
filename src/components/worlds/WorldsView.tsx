@@ -108,10 +108,17 @@ function WorldEditor({ world, onDone }: { world: WorldCard | null; onDone: () =>
   const [thresholds, setThresholds] = useState(base.relationshipThresholds ?? {})
   const [currentDay, setCurrentDay] = useState(base.currentDay ?? 0)
   const [currentPhaseIndex, setCurrentPhaseIndex] = useState(base.currentPhaseIndex ?? 0)
+  const [advancing, setAdvancing] = useState(false)
 
   const save = async () => {
     try {
       if (world) {
+        // Deliberately does NOT send currentDay/currentPhaseIndex: this editor only ever reads
+        // them into local state once, at mount, for display — a live chat's own actions (dates,
+        // energy spend) advance the world's real clock independently via `advanceClock` below and
+        // its own narrowly-scoped PUT. Including the stale mount-time snapshot here would silently
+        // roll the clock back to whatever it was when this editor happened to be opened, discarding
+        // any progress made elsewhere in the meantime.
         await worldsApi.update(world.id, {
           name,
           description,
@@ -123,8 +130,6 @@ function WorldEditor({ world, onDone }: { world: WorldCard | null; onDone: () =>
           gifts,
           items,
           relationshipThresholds: thresholds,
-          currentDay,
-          currentPhaseIndex,
         })
       } else {
         await worldsApi.create({
@@ -224,13 +229,20 @@ function WorldEditor({ world, onDone }: { world: WorldCard | null; onDone: () =>
   }
 
   const advanceClock = async () => {
-    if (!world) return
+    // Guards against a fast double-click firing two requests off the same stale closed-over
+    // currentDay/currentPhaseIndex (state only updates after the await below) — without this the
+    // second click silently computed and requested the identical "next phase" as the first
+    // instead of actually advancing an extra step.
+    if (!world || advancing) return
+    setAdvancing(true)
     const next = advancePhase(currentDay, currentPhaseIndex)
     try {
       await worldsApi.update(world.id, { currentDay: next.day, currentPhaseIndex: next.phaseIndex })
     } catch (e) {
       toastError(errorMessage(e))
       return
+    } finally {
+      setAdvancing(false)
     }
     setCurrentDay(next.day)
     setCurrentPhaseIndex(next.phaseIndex)
@@ -304,7 +316,7 @@ function WorldEditor({ world, onDone }: { world: WorldCard | null; onDone: () =>
               </p>
             )
           })()}
-          <Button variant="ghost" onClick={advanceClock}>
+          <Button variant="ghost" onClick={advanceClock} disabled={advancing}>
             → Advance to {PHASES[(currentPhaseIndex + 1) % PHASES.length]}
             {currentPhaseIndex === PHASES.length - 1 ? ' (next day)' : ''}
           </Button>
@@ -510,8 +522,13 @@ function WorldEditor({ world, onDone }: { world: WorldCard | null; onDone: () =>
                     <TextField
                       label="Amount"
                       type="number"
+                      step={1}
                       value={item.effect.amount}
-                      onChange={(e) => setItemEffectField(item.id, { amount: Math.max(-10, Math.min(10, Number(e.target.value) || 0)) })}
+                      onChange={(e) =>
+                        setItemEffectField(item.id, {
+                          amount: Math.max(-10, Math.min(10, Math.round(Number(e.target.value) || 0))),
+                        })
+                      }
                     />
                   </>
                 )}

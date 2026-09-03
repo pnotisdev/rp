@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { charactersApi, worldsApi } from '@/lib/api/client'
-import type { Character, GalleryEntry, RelationshipStarter } from '@/lib/characters/cardSpec'
+import type { Character, GalleryEntry, RelationshipStarter, SocialConnection } from '@/lib/characters/cardSpec'
 import { blankCharacterData } from '@/lib/characters/cardSpec'
 import { downloadJson, downloadPng, fileToDataUrl, importCharacterFile } from '@/lib/characters/importExport'
 import { buildCharacterPack, downloadCharacterPack, importCharacterPack, parseCharacterPackFile } from '@/lib/characters/pack'
@@ -58,6 +58,15 @@ export function CharacterEditor({
   const [voiceProvider, setVoiceProvider] = useState<TtsProviderId | ''>(character?.voice?.provider ?? '')
   const [voiceId, setVoiceId] = useState(character?.voice?.voiceId ?? '')
   const [worldId, setWorldId] = useState(character?.worldId ?? '')
+  const [occupation, setOccupation] = useState(character?.occupation ?? '')
+  const [workplace, setWorkplace] = useState(character?.workplace ?? '')
+  const [homeLocation, setHomeLocation] = useState(character?.homeLocation ?? '')
+  const [frequentedLocations, setFrequentedLocations] = useState<string[]>(character?.frequentedLocations ?? [])
+  const [likes, setLikes] = useState<string[]>(character?.likes ?? [])
+  const [goals, setGoals] = useState<string[]>(character?.goals ?? [])
+  const [boundaries, setBoundaries] = useState<string[]>(character?.boundaries ?? [])
+  const [socialConnections, setSocialConnections] = useState<SocialConnection[]>(character?.socialConnections ?? [])
+  const [dateModeOptOut, setDateModeOptOut] = useState(character?.dateModeOptOut ?? false)
   const [showGenerate, setShowGenerate] = useState(false)
   const [showTemplates, setShowTemplates] = useState(false)
   const [importError, setImportError] = useState<string | null>(null)
@@ -83,14 +92,26 @@ export function CharacterEditor({
     setWeatherHates(character?.weatherPreferences?.hates ?? [])
     setSchedule(character?.schedule ?? [])
     setWorldId(character?.worldId ?? '')
+    setOccupation(character?.occupation ?? '')
+    setWorkplace(character?.workplace ?? '')
+    setHomeLocation(character?.homeLocation ?? '')
+    setFrequentedLocations(character?.frequentedLocations ?? [])
+    setLikes(character?.likes ?? [])
+    setGoals(character?.goals ?? [])
+    setBoundaries(character?.boundaries ?? [])
+    setSocialConnections(character?.socialConnections ?? [])
+    setDateModeOptOut(character?.dateModeOptOut ?? false)
   }, [character?.id])
 
   const set = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) =>
     setForm((f) => ({ ...f, [key]: value }))
 
-  const voice = voiceProvider || voiceId.trim() ? { provider: voiceProvider || undefined, voiceId: voiceId.trim() || undefined } : undefined
+  // Sent as `null`, not `undefined`, when empty: JSON.stringify drops `undefined`-valued keys
+  // entirely, so an `undefined` here would make the update request omit the field altogether and
+  // silently leave the character's previous value in place instead of actually clearing it.
+  const voice = voiceProvider || voiceId.trim() ? { provider: voiceProvider || undefined, voiceId: voiceId.trim() || undefined } : null
   const weatherPreferences =
-    weatherLoves.length || weatherHates.length ? { loves: weatherLoves, hates: weatherHates } : undefined
+    weatherLoves.length || weatherHates.length ? { loves: weatherLoves, hates: weatherHates } : null
 
   /** A weather kind can't be loved and hated at once — picking one side clears the other. */
   const toggleWeather = (kind: WeatherKind, side: 'loves' | 'hates') => {
@@ -119,6 +140,16 @@ export function CharacterEditor({
     )
   }
 
+  const addSocialConnection = () => {
+    setSocialConnections((list) => [...list, { id: newId(), name: '', relation: '' }])
+  }
+  const updateSocialConnection = (id: string, patch: Partial<SocialConnection>) => {
+    setSocialConnections((list) => list.map((c) => (c.id === id ? { ...c, ...patch } : c)))
+  }
+  const removeSocialConnection = (id: string) => {
+    setSocialConnections((list) => list.filter((c) => c.id !== id))
+  }
+
   const save = async () => {
     try {
       if (character) {
@@ -127,17 +158,26 @@ export function CharacterEditor({
           avatarDataUrl,
           sprites,
           spriteUnlocks,
-          customExpressions: customExpressions.length ? customExpressions : undefined,
+          customExpressions: customExpressions.length ? customExpressions : null,
           giftPreferences,
-          giftLikes: giftLikes.length ? giftLikes : undefined,
-          giftDislikes: giftDislikes.length ? giftDislikes : undefined,
-          loveLanguage: loveLanguage.trim() || undefined,
+          giftLikes: giftLikes.length ? giftLikes : null,
+          giftDislikes: giftDislikes.length ? giftDislikes : null,
+          loveLanguage: loveLanguage.trim() || null,
           gallery,
           relationshipStarters,
           voice,
           weatherPreferences,
-          schedule: schedule.length ? schedule : undefined,
-          worldId: worldId || undefined,
+          schedule: schedule.length ? schedule : null,
+          worldId: worldId || null,
+          occupation: occupation.trim() || null,
+          workplace: workplace.trim() || null,
+          homeLocation: homeLocation.trim() || null,
+          frequentedLocations: frequentedLocations.length ? frequentedLocations : null,
+          likes: likes.length ? likes : null,
+          goals: goals.length ? goals : null,
+          boundaries: boundaries.length ? boundaries : null,
+          socialConnections: socialConnections.length ? socialConnections : null,
+          dateModeOptOut,
         })
         onSaved(character.id)
       } else {
@@ -146,17 +186,26 @@ export function CharacterEditor({
           avatarDataUrl,
           sprites,
           spriteUnlocks,
-          customExpressions: customExpressions.length ? customExpressions : undefined,
+          customExpressions: customExpressions.length ? customExpressions : null,
           giftPreferences,
-          giftLikes: giftLikes.length ? giftLikes : undefined,
-          giftDislikes: giftDislikes.length ? giftDislikes : undefined,
-          loveLanguage: loveLanguage.trim() || undefined,
+          giftLikes: giftLikes.length ? giftLikes : null,
+          giftDislikes: giftDislikes.length ? giftDislikes : null,
+          loveLanguage: loveLanguage.trim() || null,
           gallery,
           relationshipStarters,
           voice,
           weatherPreferences,
-          schedule: schedule.length ? schedule : undefined,
-          worldId: worldId || undefined,
+          schedule: schedule.length ? schedule : null,
+          worldId: worldId || null,
+          occupation: occupation.trim() || null,
+          workplace: workplace.trim() || null,
+          homeLocation: homeLocation.trim() || null,
+          frequentedLocations: frequentedLocations.length ? frequentedLocations : null,
+          likes: likes.length ? likes : null,
+          goals: goals.length ? goals : null,
+          boundaries: boundaries.length ? boundaries : null,
+          socialConnections: socialConnections.length ? socialConnections : null,
+          dateModeOptOut,
         })
         onSaved(created.id)
       }
@@ -527,6 +576,7 @@ export function CharacterEditor({
                   onChange={(e) => setSpriteUnlock(exp.id, Number(e.target.value) || 0)}
                   className="w-16 rounded bg-bg-elevated px-2 py-0.5 text-center text-[11px] text-text outline-none"
                   title="Unlock affection"
+                  aria-label={`Unlock affection for ${exp.label} expression`}
                 />
                 {isCustom ? (
                   <button
@@ -782,6 +832,117 @@ export function CharacterEditor({
             placeholder="Leave blank to use the global voice"
           />
         </div>
+      </details>
+
+      <details className="mb-8 rounded-2xl bg-bg-elevated p-6">
+        <summary className="cursor-pointer text-sm font-medium text-text">Life & background</summary>
+        <p className="mt-2 mb-3 text-xs text-text-muted">
+          Reaches the model as part of this character's own identity block, alongside description/
+          personality/scenario — so it applies to any use of the character, not just dating-sim
+          chats. Boundaries are informational for the model, not an enforcement mechanism; see
+          "Content & features" below for the one boundary this app actually gates mechanically.
+        </p>
+        <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <TextField
+            label="Occupation"
+            value={occupation}
+            onChange={(e) => setOccupation(e.target.value)}
+            placeholder="e.g. second-year architecture student"
+          />
+          <TextField
+            label="Workplace / school"
+            value={workplace}
+            onChange={(e) => setWorkplace(e.target.value)}
+            placeholder="e.g. Sakura Hill University"
+          />
+          <TextField
+            label="Home"
+            value={homeLocation}
+            onChange={(e) => setHomeLocation(e.target.value)}
+            placeholder="e.g. a small apartment near the station"
+          />
+          <TextField
+            label="Frequented locations"
+            value={frequentedLocations.join(', ')}
+            onChange={(e) => setFrequentedLocations(e.target.value.split(',').map((v) => v.trim()).filter(Boolean))}
+            placeholder="the campus café, the riverside park"
+          />
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <TextField
+            label="Likes / interests"
+            value={likes.join(', ')}
+            onChange={(e) => setLikes(e.target.value.split(',').map((v) => v.trim()).filter(Boolean))}
+            placeholder="Gothic architecture, secondhand books"
+          />
+          <TextField
+            label="Goals"
+            value={goals.join(', ')}
+            onChange={(e) => setGoals(e.target.value.split(',').map((v) => v.trim()).filter(Boolean))}
+            placeholder="Finish her thesis, open her own bookshop"
+          />
+          <TextField
+            label="Boundaries"
+            value={boundaries.join(', ')}
+            onChange={(e) => setBoundaries(e.target.value.split(',').map((v) => v.trim()).filter(Boolean))}
+            placeholder="Won't tolerate being lied to"
+          />
+        </div>
+      </details>
+
+      <details className="mb-8 rounded-2xl bg-bg-elevated p-6">
+        <summary className="cursor-pointer text-sm font-medium text-text">
+          Social connections ({socialConnections.length})
+        </summary>
+        <p className="mt-2 mb-3 text-xs text-text-muted">
+          Who this character knows and how — reaches the model as part of the same identity block
+          as "Life & background" above, so it can naturally reference them in conversation.
+        </p>
+        <div className="space-y-3">
+          {socialConnections.map((conn) => (
+            <div key={conn.id} className="rounded-xl bg-bg-sunken p-3">
+              <div className="mb-2 flex items-start gap-2">
+                <TextField
+                  label="Name"
+                  value={conn.name}
+                  onChange={(e) => updateSocialConnection(conn.id, { name: e.target.value })}
+                  className="flex-1"
+                />
+                <TextField
+                  label="Relation"
+                  value={conn.relation}
+                  onChange={(e) => updateSocialConnection(conn.id, { relation: e.target.value })}
+                  placeholder="childhood friend, older sister"
+                  className="flex-1"
+                />
+                <Button variant="ghost" onClick={() => removeSocialConnection(conn.id)} className="mt-5">
+                  Remove
+                </Button>
+              </div>
+              <TextField
+                label="Notes (optional)"
+                value={conn.notes ?? ''}
+                onChange={(e) => updateSocialConnection(conn.id, { notes: e.target.value || undefined })}
+                placeholder="e.g. hasn't spoken to her in years"
+              />
+            </div>
+          ))}
+          <Button onClick={addSocialConnection}>+ Add connection</Button>
+        </div>
+      </details>
+
+      <details className="mb-8 rounded-2xl bg-bg-elevated p-6">
+        <summary className="cursor-pointer text-sm font-medium text-text">Content & features</summary>
+        <p className="mt-2 mb-3 text-xs text-text-muted">
+          Per-character opt-outs — unlike every affection/warmth gate elsewhere in this app, these
+          are an authorial choice, not something that unlocks with more warmth.
+        </p>
+        <Toggle
+          checked={dateModeOptOut}
+          onChange={setDateModeOptOut}
+          label="Opt out of date/event mode"
+          description="Hides the date/event button for this character entirely — for a character better suited to lore/reference or plain-assistant use than a romanceable one."
+        />
       </details>
 
       <details className="mb-8 rounded-2xl bg-bg-elevated p-6">

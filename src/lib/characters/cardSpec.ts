@@ -118,8 +118,34 @@ export interface Character {
   weatherPreferences?: WeatherPreferences
   /** Daily/weekly routine (src/lib/world/calendar.ts) — where they are and what they're doing at a given world day/phase. Only meaningful for a world-bound character, since it reads the world's shared clock. */
   schedule?: ScheduleEntry[]
+  /** General interests/hobbies — distinct from `giftLikes` (gift-shopping taste specifically). Free text so it reads naturally in a fed-in prompt line. */
+  likes?: string[]
+  /** What this character wants or is working toward — motivations, not just personality color. */
+  goals?: string[]
+  /** Hard limits — things this character won't do or won't tolerate, in character. Informational for the model, not itself an enforcement mechanism (see `dateModeOptOut` for the one boundary this app actually gates mechanically). */
+  boundaries?: string[]
+  /** Who this character knows and how (10e's "social connections") — reaches the prompt as a compact roster line, the same idea as the group-chat participant roster but for people who aren't actually in the scene. */
+  socialConnections?: SocialConnection[]
+  /** Job title/role, e.g. "barista" or "second-year architecture student". */
+  occupation?: string
+  /** Where they work/study, distinct from `occupation` (the role) — e.g. "Sakura Hill University". */
+  workplace?: string
+  /** Where they live, e.g. "a small apartment near the station". */
+  homeLocation?: string
+  /** Places they're often found beyond home/work — cafes, parks, a favorite bench. */
+  frequentedLocations?: string[]
+  /** Content/feature flag (10e): excludes this character from the date/event system entirely — the "reaching for a boundary" case a numeric affection gate can't express, since it's an authorial opt-out rather than something that unlocks with more warmth. */
+  dateModeOptOut?: boolean
   createdAt: number
   updatedAt: number
+}
+
+export interface SocialConnection {
+  id: string
+  name: string
+  /** How they know each other, e.g. "childhood friend", "older sister", "rival from the debate club". */
+  relation: string
+  notes?: string
 }
 
 export function blankCharacterData(name = 'New Character'): CharacterCardData {
@@ -201,6 +227,11 @@ function normalizeLorebook(raw: unknown): Lorebook | undefined {
       position: e.position === 'after_char' ? 'after_char' : 'before_char',
       case_sensitive: !!e.case_sensitive,
       activationMode,
+      // ST only honors `probability` when `useProbability` is explicitly true; absent entirely,
+      // treat it the same as "no probability set" (always passes) rather than silently dropping it.
+      probability:
+        typeof e.probability === 'number' && e.useProbability !== false ? e.probability : undefined,
+      group: typeof e.group === 'string' && e.group.trim() ? e.group : undefined,
       extensions: (e.extensions as Record<string, unknown>) ?? {},
     })
   }

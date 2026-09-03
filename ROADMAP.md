@@ -535,6 +535,144 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
       subsequent successful generation for that message. Verified live: after the fix, the
       Composer correctly fell back to a disabled "Send" instead of a misleading "Continue," and
       "⟲ Regenerate" produced a genuine, correctly in-character reply.
+- [x] **Bug-hunt pass across database, character, world, and lorebook systems** — four parallel,
+      read-only audits (not user-reported this time; deliberately gone looking) turned up a batch
+      of real, independently-verified bugs, all fixed and live-tested against the running dev
+      server + a real seeded character/world:
+      - **The `JSON.stringify`-drops-`undefined` bug (first found and fixed once for
+        `Chat.activeEvent`, item 28) had recurred systemically in `CharacterEditor`'s save path** —
+        `voice`, `worldId`, `loveLanguage`, `customExpressions`, `giftLikes`, `giftDislikes`,
+        `schedule`, and `weatherPreferences` all used the `value.length ? value : undefined`
+        pattern, so *clearing* any of them (e.g. unbinding a character from a world, or wiping a
+        love-language note back to empty) silently sent a request with that key missing entirely —
+        the server's `'key' in req.body` patch logic correctly no-ops on an absent key, so the old
+        value just stayed forever with no error. Fixed by sending `null` instead of `undefined` for
+        all eight fields (`server/app.ts`'s existing per-field normalizers already treat `null` the
+        same as "clear it" — confirmed, not assumed). Verified live end-to-end: cleared a real
+        character's world binding via the actual editor UI, confirmed the PUT response and a fresh
+        refetch both came back with `worldId` entirely absent (not just falsy) rather than the old
+        bound-world id.
+      - **`.rppack.json` export/import silently dropped `giftLikes`/`giftDislikes`/`loveLanguage`/
+        `weatherPreferences`/`schedule`** despite the pack UI's own copy claiming full portability —
+        `CharacterPackV1` and `buildCharacterPack`/`importCharacterPack` (`pack.ts`) only ever
+        carried the original, smaller field set. Added all five.
+      - **The World editor's "Save changes" silently reverted the live world clock** —
+        `WorldEditor` seeds `currentDay`/`currentPhaseIndex` into local state once at mount and
+        never refreshes it, but the general `save()` (used for *any* edit — name, lore, gifts, …)
+        included that stale snapshot in every PUT. A chat spending energy/advancing a date
+        elsewhere while the World editor happened to be open, followed by an unrelated "Save
+        changes" click, would silently roll the clock back to whatever it was when the editor was
+        opened. The dedicated "Advance to next phase" control already avoided this (sends only the
+        two changed fields) — the fix was just to drop `currentDay`/`currentPhaseIndex` from the
+        general save payload entirely, since nothing in that form actually edits them. Verified
+        live: advanced the clock via a direct API call (simulating a live chat action) while an
+        already-open editor still held the old day/phase in state, clicked "Save changes," and
+        confirmed the server-side clock kept the live-advanced value instead of reverting.
+      - **Deleting a persona left `Chat.personaId` dangling** — mirrors the character-delete
+        cleanup that already existed for `participants`, but personas never got the equivalent scan.
+        A chat whose persona was deleted 404'd on every persona fetch and silently fell back to the
+        hardcoded `'You'` (same failure shape as item 41's missing persona-get route). Added the
+        same full-table-scan cleanup on persona delete, clearing to `''` (personaId is a required
+        `string`, not optional, so `''` rather than `null`/`undefined` stays a valid value of that
+        type). Also guarded `useChatSession`'s persona query to skip the fetch entirely when
+        `personaId` is falsy, instead of round-tripping a request for `/personas/` with an empty id.
+      - **Deleting a chat left fork children's `parentChatId` dangling** — the header's "⑂ original
+        chat" link would navigate to a chat that no longer existed. Added the same scan-and-clear
+        cleanup pattern on chat delete.
+      - **`POST /api/restore` wasn't atomic** — each table was wiped with `.clear()` then
+        repopulated row-by-row with no surrounding transaction, so one bad row partway through
+        (e.g. a backup from a slightly older schema) left some tables holding the new backup's data
+        and others still holding the old, pre-restore data, with no way back since the old data was
+        already gone. Now wrapped in a real `BEGIN`/`COMMIT`/`ROLLBACK` transaction (`node:sqlite`'s
+        `DatabaseSync` executes raw transaction SQL directly). The avatar-file restore had the same
+        shape of bug (wiped `avatarsDir` before rewriting it) — now writes into a temp directory
+        first and only swaps it into place once every file has written successfully. Verified live:
+        crafted a restore payload with a `chats` row missing its required `characterId`, confirmed
+        the request came back 400 *and* every table's row count was completely unchanged afterward
+        (previously, tables processed before the bad one would have stayed clobbered even though
+        the overall restore failed).
+      - **Re-uploading an avatar/sprite/gallery CG/background in a different image format left the
+        old file behind** (`avatars.ts`) — the filename includes the extension, so a png-then-jpg
+        re-upload wrote a second file rather than replacing the first, and removing an entry from a
+        sprite/gallery/background map never touched disk at all. Both now prune anything no longer
+        referenced right after (re)writing — a small, permanent disk-space leak on a long-lived
+        local install, not data corruption.
+      - **Importing a SillyTavern card silently dropped `probability`/`group`** on every lorebook
+        entry (`cardSpec.ts`'s `normalizeLorebook`) — every other new activation field
+        (`secondary_keys`, `selective`, `case_sensitive`, `insertion_order`) was already copied,
+        these two were not, silently breaking the exact inclusion-group/probability features
+        added in item 19 for any imported card that used them. Fixed, respecting ST's own
+        `useProbability: false` convention for explicitly disabling a set probability.
+      - **Regex lorebook keys ignored the `case_sensitive` toggle** — `/dragon/` with
+        `case_sensitive: false` wouldn't match "Dragon" unless the author manually added an `i`
+        flag, since the regex path never consulted the toggle at all (only the literal-match path
+        did). Fixed to add an implicit `i` flag when case-insensitive and the author didn't already
+        specify one explicitly.
+      - **A lorebook's own `scan_depth` was completely ignored** — hardcoded to 8 messages in
+        `useChatSession.ts` regardless of what an imported card's book requested (import already
+        normalized a real `scan_depth`, but nothing downstream ever read it), so a card scan-tuned
+        for a longer memory window in SillyTavern silently lost that behavior here. Fixed in
+        `builder.ts`: the scan window now expands to the deepest `scan_depth` any active book
+        requests, never narrower than the existing default.
+      - **The "Manual" lorebook activation mode's docstring didn't match its actual behavior** — the
+        `manuallyActivatedIds` mechanism the comment described (SillyTavern-style ad hoc per-turn
+        activation) has no populating caller anywhere in the shipped app; in practice a manual entry
+        is just the author's own `enabled` toggle. Not a functional bug (nothing regresses), but
+        corrected the misleading comment rather than leave it implying dead machinery works.
+      - Item catalog "Amount" accepted a fractional relationship-boost value in the World editor
+        that the server then silently discarded back to a hardcoded `1` instead of rejecting or
+        rounding it — `normalizeItemEffect` now rounds instead of defaulting.
+      - Double-clicking "Advance to next phase" fired two requests off the same stale pre-`await`
+        closure state (harmless — the second request just silently computed the identical "next
+        phase" again — but wasteful); added a loading guard.
+      - Minor: an `aria-label` on the per-expression unlock-affection number input, which previously
+        had only a `title` tooltip.
+      156 tests passing (2 new: regex case-sensitivity, lorebook-import probability/group
+      preservation), clean typecheck, clean production build.
+- [x] **Lorebook editor: UI for `selective`/`secondary_keys`, `case_sensitive`,
+      `insertion_order`, and `position`** — see item 52 in "Suggested next steps" for the full
+      writeup; `LorebookEditor.tsx` gained "Order"/"Position" for every entry and "Case
+      sensitive"/"Also require a secondary key" for keyword-mode entries.
+- [x] **10e's "Full authoring editors" — life-context fields** (partial; see section 10e's own
+      note for what's still open). Eight new `Character` fields (`cardSpec.ts`): `likes`, `goals`,
+      `boundaries` (free-text arrays), `socialConnections` (`SocialConnection[]` — name/relation/
+      notes), `occupation`, `workplace`, `homeLocation`, `frequentedLocations`, plus one content
+      flag, `dateModeOptOut`. Three new `CharacterEditor` sections follow the file's existing
+      `<details>` pattern (matching Weather preferences/Schedule): "Life & background",
+      "Social connections", "Content & features".
+      - **Reaches the model, not just the editor** — the whole point of the earlier relationship-
+        description work (item 17) was that authored data should actually change what the model
+        knows, not just gate unlocks. `buildCharacterProfileNote()` (`useChatSession.ts`) composes
+        a compact "Life beyond this scene: ..." line from whichever of these fields are set, folded
+        into `builder.ts`'s identity block (`descriptionParts`, alongside description/personality/
+        scenario) via a new `PromptBuildInput.characterProfile` field — unlike the gift-taste note
+        (item 35) this is **not** gated behind `autoTrackRelationship`, since a plain-assistant or
+        lore-reference use of a character should still be able to mention their job or their
+        sister the same way `description` always does. Reaches the Prompt Inspector automatically
+        since `previewPrompt` already goes through the same `buildCurrentPrompt` path.
+      - **`dateModeOptOut` actually gates something, not just informational text** — the date/event
+        toolbar button (`ChatWindow.tsx`) is hidden entirely (not just disabled) when the primary
+        character has the flag set, the same "no badge at all" treatment as a character with no
+        active event. Deliberately didn't force-end an already-in-progress date if the flag gets
+        set mid-chat — an authorial forward-looking choice, not a retroactive purge.
+      - Same clearing-bug pattern as item 51 avoided from the start this time: all eight fields use
+        the `null`-not-`undefined` convention in `CharacterEditor.save()` and the matching
+        `'field' in req.body` server patch logic (`server/app.ts`), plus a new
+        `normalizeSocialConnections()` alongside the existing `normalizeStringArray()`.
+      - `.rppack.json` export/import (`pack.ts`) carries all eight fields, same as the item-51 fix
+        for the fields that predated this pass.
+      - 2 new tests (`builder.test.ts`: characterProfile folds into the prompt when set, adds
+        nothing when unset). Verified live end-to-end against the real seeded Sumire character:
+        filled every new field through the actual editor UI (including a real social connection),
+        saved, confirmed persistence via a fresh refetch, confirmed the exact "Life beyond this
+        scene: ..." line in the real built prompt via the Prompt Inspector, and confirmed the
+        date-event toolbar button disappeared with the flag set. **Caught a real bug in my own
+        test harness along the way, not the app**: a naive `label text === "Name"` DOM query
+        matched the character's own top-level Name field before the intended Social Connection's
+        Name field (both share that exact label text) and briefly renamed the demo character —
+        caught immediately since I was watching the response, fixed by scoping the query to the
+        specific `<details>` block, demo data restored. 158 tests passing, clean typecheck, clean
+        production build.
 
 ## 10. Major expansion: a living-world dating sim
 
@@ -869,10 +1007,17 @@ below:**
       (`Character.sprites`, `DEFAULT_EXPRESSIONS`) so a real face variant (happy, shy, hurt, etc.)
       is available for the live-date reactive portrait in 10b, not just a hard swap between
       whatever's been uploaded — ties directly into section 1's open "sprite layering" gap.
-- [ ] **Full authoring editors**: beyond today's card fields, editors for identity, personality,
-      likes/goals/boundaries, dating stats, social connections (who a character knows and how),
-      employment, weather preferences, home/frequented locations, lore, and per-character
-      content/feature flags (e.g. opting a character out of date mode, or out of certain content).
+- [x] **Full authoring editors** (partial — see below): identity/personality/lore/weather
+      preferences already had editors before this pass; added likes/goals/boundaries, social
+      connections (who a character knows and how), employment (occupation/workplace),
+      home/frequented locations, and one content/feature flag (opting a character out of date
+      mode) — three new `CharacterEditor` sections ("Life & background", "Social connections",
+      "Content & features"). **Still open**: "dating stats" (a named but never-specified concept —
+      revisit once it's clearer what it should mean beyond the `relationshipStats` that already
+      exist per-chat) and opting a character out of *specific content* beyond the one date-mode
+      flag (needs a real taxonomy of "certain content" first). See section 9's changelog for the
+      full writeup, including how the new fields actually reach the model (not just sit in the
+      editor) and how the date-mode flag is mechanically enforced, not just informational.
 - [ ] **AI-assisted authoring, reviewed before saving**: let the model roll a set of dating stats,
       draft the narrative profile, or — with a vision-capable model — draft an entire character
       from an uploaded portrait, fitted to the world's tone. Every field stays editable before
@@ -1326,6 +1471,46 @@ Done so far (see checked boxes above for detail):
     the OS-level `prefers-reduced-motion` media query as a second, independent guard (same
     convention as `.cursor-blink`/`.vn-sprite-bob`). Verified live: 7 running animations confirmed
     via computed style on an outdoor background, 0 petals confirmed on an indoor one.
+51. ~~Bug-hunt pass: database, character, world, and lorebook systems~~ — user asked to keep
+    polishing these four areas and fixing bugs rather than pick up a new roadmap item, so this
+    batch went looking rather than waiting for another live playthrough to surface something. Four
+    parallel audits found and this pass fixed: the `undefined`-drops-from-`JSON.stringify` bug
+    (previously fixed once for `Chat.activeEvent`, item 28) recurring across eight `CharacterEditor`
+    fields, so clearing a character's world binding/voice/love-language/schedule/etc. silently
+    no-op'd; the same fields missing from `.rppack.json` export/import; the World editor's general
+    "Save changes" silently reverting the live world clock to a stale mount-time snapshot; two
+    dangling-reference bugs (deleting a persona or a forked-from chat left other records pointing
+    at a dead id); a non-atomic `/api/restore` that could leave the DB in a mixed old/new state on
+    a partial failure; an orphaned-avatar-file disk leak on format-changing re-uploads; lorebook
+    import silently dropping `probability`/`group`; regex lorebook keys ignoring `case_sensitive`;
+    a lorebook's `scan_depth` being completely ignored; a fractional item-effect amount silently
+    replaced with `1` instead of rounded; plus two minor polish items (a double-click guard, an
+    aria-label). See section 9's own writeup for the full per-bug detail and how each was verified
+    live against the running dev server. Section 9 for section-level context on the code paths.
+52. ~~Lorebook editor: UI for `selective`/`secondary_keys`, `case_sensitive`, `insertion_order`,
+    and `position`~~ — a direct follow-on from item 51's audit: `activateWorldInfo` already fully
+    supported all five (and import already preserved them), but a creator writing an entry from
+    scratch in-app had no way to set any of them — only imported cards could ever use half of the
+    activation engine's own feature surface. Added to `LorebookEditor.tsx`: "Order"
+    (`insertion_order`) and "Position" (before/after the character) now show for every entry;
+    "Case sensitive" and "Also require a secondary key" (with a secondary-keys field when toggled
+    on) show for keyword-mode entries specifically, since case sensitivity and AND-logic secondary
+    matching are meaningless for always/manual entries. Verified live against the seeded "Sakura
+    Hill — Campus Life" book, which was built specifically to demonstrate these: confirmed its
+    existing selective (café/coffee/cafe + exam/exams/finals secondary keys) and `after_char`
+    entries render with the right toggle/field state on load, then round-tripped a real edit
+    (toggled Case sensitive on the "library" entry, confirmed via a fresh server refetch, reverted).
+53. ~~10e: authoring depth — life-context fields~~ — user picked this explicitly (offered a choice
+    between this, proactive-outreach design work, and multi-character relationship tracking) as
+    the next roadmap item after 51/52's bug-hunt closed out. Eight new `Character` fields
+    (likes/goals/boundaries, social connections, occupation/workplace, home/frequented locations,
+    a date-mode opt-out flag), three new `CharacterEditor` sections, and — the part that makes
+    this more than inert data entry — a new `characterProfile` prompt block so the authored life
+    details actually reach the model, plus real mechanical enforcement of the one content flag
+    (hides the date-event button entirely, not just cosmetically). See section 9's changelog for
+    the full writeup. Deliberately left the other three 10e bullets untouched: "guaranteed
+    expression coverage" is entangled with 10b's live-date mode, which doesn't exist yet;
+    "AI-assisted authoring" and "world templates" are separate, sizable pieces of their own.
 
 That closes out the last "reasonable next batch," plus sections 10a, 10c, and 10d in full and a first
 slice each of 10b and 10f taken directly afterward since 10's own suggested phase order names them

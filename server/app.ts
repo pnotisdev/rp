@@ -5,6 +5,7 @@ import {
   characterStore,
   chatFactStore,
   chatStore,
+  db,
   messageStore,
   newId,
   objectiveStore,
@@ -96,7 +97,14 @@ function normalizeItemEffect(raw: unknown): { kind: string; dimension?: string; 
   }
   const dimension = RELATIONSHIP_DELTA_KEYS.has(obj.dimension as string) ? (obj.dimension as string) : 'affection'
   const amount = Number(obj.amount)
-  return { kind: 'relationship', dimension, amount: Number.isInteger(amount) ? Math.max(-10, Math.min(10, amount)) : 1 }
+  // Round rather than reject a fractional amount (e.g. a client that didn't clamp to a whole
+  // number before saving) — silently substituting a fixed 1 for any non-integer input, including
+  // a deliberate "+2.5" someone just typed, discarded the author's actual value with no feedback.
+  return {
+    kind: 'relationship',
+    dimension,
+    amount: Number.isFinite(amount) ? Math.max(-10, Math.min(10, Math.round(amount))) : 1,
+  }
 }
 
 function normalizeItemDefs(raw: unknown) {
@@ -119,6 +127,21 @@ function normalizeStringArray(raw: unknown): string[] | undefined {
   if (!Array.isArray(raw)) return undefined
   const cleaned = raw.filter((v): v is string => typeof v === 'string' && !!v.trim()).map((v) => v.trim())
   return cleaned.length > 0 ? cleaned : undefined
+}
+
+/** 10e's "who a character knows" — drops any entry missing a name (the one field a connection is meaningless without). */
+function normalizeSocialConnections(raw: unknown): { id: string; name: string; relation: string; notes?: string }[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const entries = raw
+    .filter((c): c is Record<string, unknown> => !!c && typeof c === 'object')
+    .map((c, i) => ({
+      id: typeof c.id === 'string' && c.id.trim() ? c.id.trim() : `conn-${i}`,
+      name: typeof c.name === 'string' ? c.name.trim() : '',
+      relation: typeof c.relation === 'string' ? c.relation.trim() : '',
+      notes: typeof c.notes === 'string' && c.notes.trim() ? c.notes.trim() : undefined,
+    }))
+    .filter((c) => !!c.name)
+  return entries.length > 0 ? entries : undefined
 }
 
 function normalizeRelationshipThresholds(raw: unknown) {
@@ -166,6 +189,15 @@ app.post('/api/characters', (req, res) => {
     weatherPreferences: req.body.weatherPreferences ?? undefined,
     schedule: Array.isArray(req.body.schedule) ? req.body.schedule : undefined,
     worldId: req.body.worldId || undefined,
+    likes: normalizeStringArray(req.body.likes),
+    goals: normalizeStringArray(req.body.goals),
+    boundaries: normalizeStringArray(req.body.boundaries),
+    socialConnections: normalizeSocialConnections(req.body.socialConnections),
+    occupation: typeof req.body.occupation === 'string' ? req.body.occupation : undefined,
+    workplace: typeof req.body.workplace === 'string' ? req.body.workplace : undefined,
+    homeLocation: typeof req.body.homeLocation === 'string' ? req.body.homeLocation : undefined,
+    frequentedLocations: normalizeStringArray(req.body.frequentedLocations),
+    dateModeOptOut: req.body.dateModeOptOut === true,
     createdAt: now,
     updatedAt: now,
   })
@@ -191,6 +223,15 @@ app.put('/api/characters/:id', (req, res) => {
   if ('voice' in req.body) patch.voice = req.body.voice ?? undefined
   if ('weatherPreferences' in req.body) patch.weatherPreferences = req.body.weatherPreferences ?? undefined
   if ('schedule' in req.body) patch.schedule = Array.isArray(req.body.schedule) ? req.body.schedule : undefined
+  if ('likes' in req.body) patch.likes = normalizeStringArray(req.body.likes)
+  if ('goals' in req.body) patch.goals = normalizeStringArray(req.body.goals)
+  if ('boundaries' in req.body) patch.boundaries = normalizeStringArray(req.body.boundaries)
+  if ('socialConnections' in req.body) patch.socialConnections = normalizeSocialConnections(req.body.socialConnections)
+  if ('occupation' in req.body) patch.occupation = typeof req.body.occupation === 'string' ? req.body.occupation : undefined
+  if ('workplace' in req.body) patch.workplace = typeof req.body.workplace === 'string' ? req.body.workplace : undefined
+  if ('homeLocation' in req.body) patch.homeLocation = typeof req.body.homeLocation === 'string' ? req.body.homeLocation : undefined
+  if ('frequentedLocations' in req.body) patch.frequentedLocations = normalizeStringArray(req.body.frequentedLocations)
+  if ('dateModeOptOut' in req.body) patch.dateModeOptOut = req.body.dateModeOptOut === true
   const updated = characterStore.update(id, patch)
   res.json(updated)
 })
@@ -257,8 +298,19 @@ app.put('/api/personas/:id', (req, res) => {
 })
 
 app.delete('/api/personas/:id', (req, res) => {
-  removeAvatar('personas', req.params.id)
-  personaStore.remove(req.params.id)
+  const personaId = req.params.id
+  // Mirrors the character-delete cleanup below: `Chat.personaId` is a dangling reference once the
+  // persona is gone, not indexed, so a full scan is needed. Left unresolved, the client's persona
+  // fetch 404s silently on every load of that chat and it permanently loses its persona binding
+  // (name/description never reach the prompt) with no visible error.
+  for (const chat of chatStore.list()) {
+    // `Chat.personaId` is typed as a required string (no "no persona" case existed until this
+    // cleanup), so clear it to '' rather than null/undefined to stay a valid value of that type —
+    // `persona?.name || 'You'` and friends already treat any falsy id/lookup miss as "no persona".
+    if (chat.personaId === personaId) chatStore.update(chat.id as string, { personaId: '' })
+  }
+  removeAvatar('personas', personaId)
+  personaStore.remove(personaId)
   res.status(204).end()
 })
 
@@ -378,6 +430,14 @@ app.delete('/api/chats/:id', (req, res) => {
   for (const o of objectiveStore.list({ where: 'chatId = ?', params: [chatId] })) objectiveStore.remove(o.id as string)
   for (const e of relationshipEventStore.list({ where: 'chatId = ?', params: [chatId] })) relationshipEventStore.remove(e.id as string)
   for (const f of chatFactStore.list({ where: 'chatId = ?', params: [chatId] })) chatFactStore.remove(f.id as string)
+  // Any chat forked FROM this one points back via parentChatId — not an indexed column (it lives
+  // in the JSON blob, like `participants` above), so a full scan. Left dangling, the header's
+  // "⑂ original chat" link would navigate to a chat that no longer exists (a 404 fetch) with no
+  // indication why.
+  for (const chat of chatStore.list()) {
+    if (chat.parentChatId !== chatId) continue
+    chatStore.update(chat.id as string, { parentChatId: undefined, forkedFromMessageId: undefined })
+  }
   chatStore.remove(chatId)
   res.status(204).end()
 })
@@ -658,14 +718,31 @@ app.post('/api/restore', express.json({ limit: '1gb' }), (req, res) => {
     return res.status(400).json({ error: 'Not a recognized backup file.' })
   }
   const data = body.data as Record<string, unknown>
-  for (const [key, store] of Object.entries(BACKUP_STORES)) {
-    store.clear()
-    const rows = Array.isArray(data[key]) ? (data[key] as Record<string, unknown>[]) : []
-    for (const row of rows) store.insert(row)
+  // Everything below the DB tables must land as one all-or-nothing unit — restore used to wipe
+  // and reload each table in sequence with no surrounding transaction, so a single bad row deep
+  // in the backup (e.g. one saved under an older schema) left the DB in a mixed old/new state:
+  // tables processed before the failure held new data, tables after it still held the old data,
+  // with no way to recover the pre-restore state since it had already been partially overwritten.
+  db.exec('BEGIN')
+  try {
+    for (const [key, store] of Object.entries(BACKUP_STORES)) {
+      store.clear()
+      const rows = Array.isArray(data[key]) ? (data[key] as Record<string, unknown>[]) : []
+      for (const row of rows) store.insert(row)
+    }
+    db.exec('COMMIT')
+  } catch (e) {
+    db.exec('ROLLBACK')
+    throw e
   }
   if (Array.isArray(body.avatarFiles)) {
-    fs.rmSync(avatarsDir, { recursive: true, force: true })
-    fs.mkdirSync(avatarsDir, { recursive: true })
+    // Write into a fresh temp directory first and only swap it in once every file has been
+    // written successfully — writing directly into `avatarsDir` after wiping it (the old
+    // approach) permanently lost every avatar/sprite/background if a write failed partway
+    // through, since the original files were already gone by then.
+    const tmpDir = `${avatarsDir}.restore-tmp`
+    fs.rmSync(tmpDir, { recursive: true, force: true })
+    fs.mkdirSync(tmpDir, { recursive: true })
     for (const f of body.avatarFiles as Record<string, unknown>[]) {
       if (typeof f.relPath !== 'string' || typeof f.base64 !== 'string') continue
       // Backups are trusted local exports, but a maliciously-crafted one could still carry
@@ -676,10 +753,12 @@ app.post('/api/restore', express.json({ limit: '1gb' }), (req, res) => {
         .filter((seg) => seg && seg !== '.' && seg !== '..')
         .join('/')
       if (!safeRel) continue
-      const dest = path.join(avatarsDir, safeRel)
+      const dest = path.join(tmpDir, safeRel)
       fs.mkdirSync(path.dirname(dest), { recursive: true })
       fs.writeFileSync(dest, Buffer.from(f.base64, 'base64'))
     }
+    fs.rmSync(avatarsDir, { recursive: true, force: true })
+    fs.renameSync(tmpDir, avatarsDir)
   }
   res.status(204).end()
 })

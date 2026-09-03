@@ -198,7 +198,56 @@ export function LorebookEditor({
                   className="w-24 rounded bg-bg-elevated px-2 py-0.5 text-xs text-text outline-none"
                 />
               </label>
+              <label
+                className="flex items-center gap-1 text-text-muted"
+                title="Higher fires first when the token budget is tight, and wins group tie-breaks"
+              >
+                <span>Order</span>
+                <input
+                  type="number"
+                  value={entry.insertion_order}
+                  onChange={(e) => updateEntry(entry.id!, { insertion_order: Number(e.target.value) || 0 })}
+                  className="w-16 rounded bg-bg-elevated px-2 py-0.5 text-xs text-text outline-none"
+                />
+              </label>
+              <label className="flex items-center gap-1 text-text-muted" title="Where this entry is inserted relative to the character's own description">
+                <span>Position</span>
+                <select
+                  value={entry.position ?? 'before_char'}
+                  onChange={(e) => updateEntry(entry.id!, { position: e.target.value as 'before_char' | 'after_char' })}
+                  className="rounded bg-bg-elevated px-1 py-0.5 text-xs text-text outline-none"
+                >
+                  <option value="before_char">Before character</option>
+                  <option value="after_char">After character</option>
+                </select>
+              </label>
             </div>
+            {(entry.activationMode ?? 'keyword') === 'keyword' && (
+              <div className="mt-2 flex flex-wrap items-center gap-4 text-xs">
+                <Toggle
+                  checked={!!entry.case_sensitive}
+                  onChange={(v) => updateEntry(entry.id!, { case_sensitive: v })}
+                  label="Case sensitive"
+                />
+                <Toggle
+                  checked={!!entry.selective}
+                  onChange={(v) => updateEntry(entry.id!, { selective: v })}
+                  label="Also require a secondary key"
+                />
+                {entry.selective && (
+                  <TextField
+                    label="Secondary keys (comma separated — any one is enough)"
+                    value={(entry.secondary_keys ?? []).join(', ')}
+                    onChange={(e) =>
+                      updateEntry(entry.id!, {
+                        secondary_keys: e.target.value.split(',').map((k) => k.trim()).filter(Boolean),
+                      })
+                    }
+                    className="min-w-[16rem] flex-1"
+                  />
+                )}
+              </div>
+            )}
           </div>
         ))}
       </div>

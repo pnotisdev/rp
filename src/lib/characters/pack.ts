@@ -1,8 +1,9 @@
 import { charactersApi, worldsApi } from '@/lib/api/client'
 import { fileToDataUrl } from './importExport'
-import type { Character, CharacterCardData, GalleryEntry, Lorebook, RelationshipStarter } from './cardSpec'
+import type { Character, CharacterCardData, GalleryEntry, Lorebook, RelationshipStarter, SocialConnection } from './cardSpec'
 import type { GiftItem, WorldCard } from '@/lib/types'
 import type { CustomExpression } from '@/lib/vn/expressions'
+import type { ScheduleEntry, WeatherPreferences } from '@/lib/world/calendar'
 
 const PACK_KIND = 'rp-character-pack'
 const PACK_VERSION = 1
@@ -17,9 +18,23 @@ export interface CharacterPackV1 {
     spriteUnlocks?: Record<string, number>
     customExpressions?: CustomExpression[]
     giftPreferences?: Record<string, number>
+    giftLikes?: string[]
+    giftDislikes?: string[]
+    loveLanguage?: string
+    weatherPreferences?: WeatherPreferences
+    schedule?: ScheduleEntry[]
     gallery?: GalleryEntry[]
     relationshipStarters?: RelationshipStarter[]
     voice?: Character['voice']
+    occupation?: string
+    workplace?: string
+    homeLocation?: string
+    frequentedLocations?: string[]
+    likes?: string[]
+    goals?: string[]
+    boundaries?: string[]
+    socialConnections?: SocialConnection[]
+    dateModeOptOut?: boolean
   }
   world?: {
     name: string
@@ -75,9 +90,23 @@ export async function buildCharacterPack(character: Character, world?: WorldCard
       spriteUnlocks: character.spriteUnlocks,
       customExpressions: character.customExpressions,
       giftPreferences: character.giftPreferences,
+      giftLikes: character.giftLikes,
+      giftDislikes: character.giftDislikes,
+      loveLanguage: character.loveLanguage,
+      weatherPreferences: character.weatherPreferences,
+      schedule: character.schedule,
       gallery: gallery.length ? gallery : undefined,
       relationshipStarters: character.relationshipStarters,
       voice: character.voice,
+      occupation: character.occupation,
+      workplace: character.workplace,
+      homeLocation: character.homeLocation,
+      frequentedLocations: character.frequentedLocations,
+      likes: character.likes,
+      goals: character.goals,
+      boundaries: character.boundaries,
+      socialConnections: character.socialConnections,
+      dateModeOptOut: character.dateModeOptOut,
     },
   }
 
@@ -154,9 +183,23 @@ export async function importCharacterPack(pack: CharacterPackV1): Promise<{ char
     spriteUnlocks: pack.character.spriteUnlocks,
     customExpressions: pack.character.customExpressions,
     giftPreferences: pack.character.giftPreferences,
+    giftLikes: pack.character.giftLikes,
+    giftDislikes: pack.character.giftDislikes,
+    loveLanguage: pack.character.loveLanguage,
+    weatherPreferences: pack.character.weatherPreferences,
+    schedule: pack.character.schedule,
     gallery: pack.character.gallery,
     relationshipStarters: pack.character.relationshipStarters,
     voice: pack.character.voice,
+    occupation: pack.character.occupation,
+    workplace: pack.character.workplace,
+    homeLocation: pack.character.homeLocation,
+    frequentedLocations: pack.character.frequentedLocations,
+    likes: pack.character.likes,
+    goals: pack.character.goals,
+    boundaries: pack.character.boundaries,
+    socialConnections: pack.character.socialConnections,
+    dateModeOptOut: pack.character.dateModeOptOut,
     worldId: world?.id,
   })
   return { character, world }

@@ -171,13 +171,18 @@ export function ChatWindow({ chatId }: { chatId: string | null }) {
   const toolbar = (
     <>
       <IconButton tone={toolbarTone} icon={Heart} title="Open relationship panel" onClick={() => setShowRelationship(true)} />
-      <IconButton
-        tone={toolbarTone}
-        icon={CalendarHeart}
-        title={chat.activeEvent?.title ? `Event: ${chat.activeEvent.title}` : 'Create a date/event scenario'}
-        active={!!chat.activeEvent}
-        onClick={() => setShowEvent(true)}
-      />
+      {/* 10e's content/feature flag: an author-level opt-out, not something that unlocks with more
+          warmth like every other gate in this app — so the trigger is hidden entirely rather than
+          just disabled, the same way a character with no active date shows no badge at all. */}
+      {!character?.dateModeOptOut && (
+        <IconButton
+          tone={toolbarTone}
+          icon={CalendarHeart}
+          title={chat.activeEvent?.title ? `Event: ${chat.activeEvent.title}` : 'Create a date/event scenario'}
+          active={!!chat.activeEvent}
+          onClick={() => setShowEvent(true)}
+        />
+      )}
       <IconButton
         tone={toolbarTone}
         icon={Target}

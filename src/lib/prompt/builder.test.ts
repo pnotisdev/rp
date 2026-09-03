@@ -75,3 +75,17 @@ describe('buildPrompt — group chat (multiple speaking characters)', () => {
     expect(result.prompt.trim().endsWith('Aria:')).toBe(true)
   })
 })
+
+describe('buildPrompt — characterProfile (10e life-context fields)', () => {
+  it('folds the pre-built profile note into the identity block when set', async () => {
+    const result = await buildPrompt(
+      baseInput({ characterProfile: 'Life beyond this scene: Works as a librarian at Sakura Hill University.' }),
+    )
+    expect(result.prompt).toContain('Life beyond this scene: Works as a librarian at Sakura Hill University.')
+  })
+
+  it('omits nothing extra when characterProfile is unset', async () => {
+    const result = await buildPrompt(baseInput())
+    expect(result.prompt).not.toContain('Life beyond this scene')
+  })
+})

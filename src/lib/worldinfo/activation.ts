@@ -7,9 +7,14 @@ export interface ActivationOptions {
 }
 
 /**
- * Scans recent chat text for lorebook entry keyword matches. `always`-mode
- * entries (constant: true) are always included. `manual` entries are only
- * included if their id is present in manuallyActivatedIds.
+ * Scans recent chat text for lorebook entry keyword matches. `always`-mode entries (constant:
+ * true) are always included. `manual` entries fire purely off their own `enabled` toggle — this
+ * app has no in-chat "activate for this turn" control, so unlike upstream SillyTavern's
+ * manual mode (activated ad hoc via slash command), here it's simply an entry the author flips
+ * on/off by hand in the editor rather than one keyword-triggered automatically.
+ * `manuallyActivatedIds` exists for a future per-chat runtime toggle and is additive on top of
+ * `enabled`, not a replacement for it — passing an id there activates that entry even if its
+ * `enabled` toggle is off, but nothing in the shipped UI populates it yet.
  * Mirrors ST's "always / when relevant (keyword) / manual" activation modes.
  */
 export interface WorldInfoActivationResult {
@@ -150,12 +155,18 @@ function passesProbability(entry: LorebookEntry): boolean {
   return Math.random() * 100 < p
 }
 
-/** SillyTavern's own convention: a key wrapped in slashes (`/pattern/flags`) is a regex, not a literal substring. */
-function parseRegexKey(key: string): RegExp | null {
+/**
+ * SillyTavern's own convention: a key wrapped in slashes (`/pattern/flags`) is a regex, not a
+ * literal substring. `caseSensitive` only adds an implicit `i` flag when the author didn't
+ * already specify one explicitly — an explicit `i` (or the entry being case-sensitive) is
+ * always respected as written.
+ */
+function parseRegexKey(key: string, caseSensitive: boolean): RegExp | null {
   const match = key.match(/^\/(.+)\/([a-z]*)$/i)
   if (!match) return null
+  const flags = !caseSensitive && !match[2].includes('i') ? match[2] + 'i' : match[2]
   try {
-    return new RegExp(match[1], match[2])
+    return new RegExp(match[1], flags)
   } catch {
     return null
   }
@@ -164,7 +175,7 @@ function parseRegexKey(key: string): RegExp | null {
 function matchesKeywords(entry: LorebookEntry, haystackOriginal: string, haystackLower: string): boolean {
   if (entry.keys.length === 0) return false
   const test = (k: string) => {
-    const regex = parseRegexKey(k)
+    const regex = parseRegexKey(k, !!entry.case_sensitive)
     if (regex) return regex.test(haystackOriginal)
     const needle = entry.case_sensitive ? k : k.toLowerCase()
     const hay = entry.case_sensitive ? haystackOriginal : haystackLower

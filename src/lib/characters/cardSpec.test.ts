@@ -125,6 +125,30 @@ describe('normalizeCardJson', () => {
       expect(card.character_book?.entries[0].enabled).toBe(false)
     })
 
+    it('preserves probability (when useProbability is not false) and group on import', () => {
+      const card = normalizeCardJson({
+        name: 'X',
+        character_book: {
+          entries: [
+            { keys: ['a'], content: 'A', probability: 40, useProbability: true, group: 'reaction' },
+            { keys: ['b'], content: 'B', probability: 90 },
+          ],
+        },
+      })
+      const [a, b] = card.character_book!.entries
+      expect(a.probability).toBe(40)
+      expect(a.group).toBe('reaction')
+      expect(b.probability).toBe(90)
+    })
+
+    it('drops probability when useProbability is explicitly false', () => {
+      const card = normalizeCardJson({
+        name: 'X',
+        character_book: { entries: [{ keys: ['a'], content: 'A', probability: 40, useProbability: false }] },
+      })
+      expect(card.character_book?.entries[0].probability).toBeUndefined()
+    })
+
     it('is undefined when character_book is absent or not an object', () => {
       expect(normalizeCardJson({ name: 'X' }).character_book).toBeUndefined()
       expect(normalizeCardJson({ name: 'X', character_book: 'nope' }).character_book).toBeUndefined()

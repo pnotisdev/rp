@@ -75,16 +75,42 @@ export function resolveAvatar(kind: AvatarEntityKind, id: string, avatarDataUrl:
     throw new Error('Invalid id')
   }
   const { ext, buffer } = decodeImageDataUrl(avatarDataUrl)
+  // Re-uploading in a different image format (e.g. png -> jpg) writes a new file rather than
+  // overwriting the old one, since the extension is part of the filename — without this, the
+  // previous format's file just lingers on disk forever, unreferenced by anything.
+  const staleExts = Object.values(EXT_BY_MIME).filter((e) => e !== ext)
   if (kind === 'personas') {
     const dir = path.join(avatarsDir, 'personas')
     fs.mkdirSync(dir, { recursive: true })
     fs.writeFileSync(path.join(dir, `${id}.${ext}`), buffer)
+    for (const staleExt of staleExts) {
+      const stale = path.join(dir, `${id}.${staleExt}`)
+      if (fs.existsSync(stale)) fs.unlinkSync(stale)
+    }
     return `/avatars/personas/${id}.${ext}?t=${Date.now()}`
   }
   const dir = entityDir(kind, id)
   fs.mkdirSync(dir, { recursive: true })
   fs.writeFileSync(path.join(dir, `avatar.${ext}`), buffer)
+  for (const staleExt of staleExts) {
+    const stale = path.join(dir, `avatar.${staleExt}`)
+    if (fs.existsSync(stale)) fs.unlinkSync(stale)
+  }
   return `/avatars/${kind}/${id}/avatar.${ext}?t=${Date.now()}`
+}
+
+/**
+ * Deletes every file in `dir` whose name isn't in `keep` — used right after (re)writing a set of
+ * image files, so a stale one left behind by a format change (re-uploading the same slot as a
+ * different mime type, e.g. png -> jpg) or a dropped map key (an unlocked-then-removed gallery
+ * CG/sprite) doesn't linger on disk forever; nothing here ever deletes a file that's still
+ * referenced by the map/avatar just resolved.
+ */
+function pruneUnreferencedFiles(dir: string, keep: Set<string>): void {
+  if (!fs.existsSync(dir)) return
+  for (const file of fs.readdirSync(dir)) {
+    if (!keep.has(file)) fs.unlinkSync(path.join(dir, file))
+  }
 }
 
 /** Removes every image belonging to this entity — for characters/worlds that's the whole per-entity folder (avatar + sprites/gallery or backgrounds together), for a persona just its one flat file. */
@@ -122,6 +148,7 @@ export function resolveAvatarMap(
   if (!UUID_RE.test(id)) throw new Error('Invalid id')
   if (!map || typeof map !== 'object') return undefined
   const result: Record<string, string> = {}
+  const dir = path.join(entityDir(kind, id), subKind)
   for (const [key, value] of Object.entries(map as Record<string, unknown>)) {
     if (!SAFE_KEY_RE.test(key) || typeof value !== 'string' || !value) continue
     if (!value.startsWith('data:')) {
@@ -135,10 +162,18 @@ export function resolveAvatarMap(
     } catch (e) {
       throw new Error(`"${key}": ${e instanceof Error ? e.message : String(e)}`)
     }
-    const dir = path.join(entityDir(kind, id), subKind)
     fs.mkdirSync(dir, { recursive: true })
     fs.writeFileSync(path.join(dir, `${key}.${ext}`), buffer)
     result[key] = `/avatars/${kind}/${id}/${subKind}/${key}.${ext}?t=${Date.now()}`
   }
+  // This map fully replaces whatever was here before (a dropped key means the caller no longer
+  // wants that entry at all — e.g. a removed gallery CG or custom expression), and a changed
+  // extension leaves the old-format file behind under `dir` isn't referenced by `result` at all,
+  // so anything not in the freshly-resolved set is safe to delete — this whole directory belongs
+  // to just this one entity/subKind.
+  pruneUnreferencedFiles(
+    dir,
+    new Set(Object.values(result).map((url) => url.split('/').pop()!.split('?')[0])),
+  )
   return result
 }

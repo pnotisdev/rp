@@ -182,6 +182,14 @@ describe('activateWorldInfo', () => {
       const b = book([entry({ content: 'X', keys: ['/unterminated'] })])
       expect(activateWorldInfo([b], 'text with /unterminated inside').activated).toHaveLength(1)
     })
+
+    it('respects the entry-level case_sensitive toggle even without an explicit "i" flag', () => {
+      const insensitive = book([entry({ content: 'X', keys: ['/tavern/'], case_sensitive: false })])
+      expect(activateWorldInfo([insensitive], 'the TAVERN was loud').activated).toHaveLength(1)
+      const sensitive = book([entry({ content: 'X', keys: ['/tavern/'], case_sensitive: true })])
+      expect(activateWorldInfo([sensitive], 'the TAVERN was loud').activated).toHaveLength(0)
+      expect(activateWorldInfo([sensitive], 'the tavern was loud').activated).toHaveLength(1)
+    })
   })
 
   describe('inclusion groups', () => {
