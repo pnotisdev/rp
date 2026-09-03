@@ -51,6 +51,7 @@ export function ThemeEditor() {
   const reducedAudio = useSettingsStore((s) => s.reducedAudio)
   const showTimestamps = useSettingsStore((s) => s.showTimestamps)
   const showTokenCounts = useSettingsStore((s) => s.showTokenCounts)
+  const showGenerationHud = useSettingsStore((s) => s.showGenerationHud)
   const tagsAsFolders = useSettingsStore((s) => s.tagsAsFolders)
   const clickToEdit = useSettingsStore((s) => s.clickToEdit)
   const visualNovelMode = useSettingsStore((s) => s.visualNovelMode)
@@ -262,6 +263,12 @@ export function ThemeEditor() {
         />
         <Toggle checked={showTimestamps} onChange={() => toggleFlag('showTimestamps')} label="Show timestamps" />
         <Toggle checked={showTokenCounts} onChange={() => toggleFlag('showTokenCounts')} label="Show token counts" />
+        <Toggle
+          checked={showGenerationHud}
+          onChange={() => toggleFlag('showGenerationHud')}
+          label="Generation HUD"
+          description="Tokens/sec, time to first token, and context fill, shown live while a reply streams in and left up until the next one starts"
+        />
         <Toggle checked={tagsAsFolders} onChange={() => toggleFlag('tagsAsFolders')} label="Tags as folders" />
         <Toggle checked={clickToEdit} onChange={() => toggleFlag('clickToEdit')} label="Click message to edit" />
         <Toggle

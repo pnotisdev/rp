@@ -788,13 +788,23 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
       objective; and (c) the one-switch "minimal assists" profile, which is genuinely blocked on
       section 10e's world templates / section 13's onboarding (the four individual toggles already
       exist and now describe their cost).
-- [ ] **`manuallyActivatedIds` is still dead machinery** — `activation.ts` documents and supports a
-      per-turn "activate this lorebook entry for this reply" mechanism, but nothing in the shipped
-      UI ever populates the set (`builder.ts` passes `manuallyActivatedWorldInfoIds` straight
-      through, always empty). Item 51's bug-hunt corrected the *comment* to stop implying it works;
-      the code path itself is still there. Either wire it to a real control (a per-entry "force on
-      for next reply" toggle in the Prompt Inspector or a lorebook quick-panel) or delete the
-      branch — right now it's a maintenance cost with no user.
+- [x] **`manuallyActivatedIds` is still dead machinery** — deleted rather than wired up. Sized both
+      options first, per this item's own framing: a real per-entry "force on for next reply"
+      control needs a stable key to force *one specific* entry on, but `LorebookEntry.id` is only
+      unique within its own book and `activateWorldInfo()` scans every active book (character +
+      world + bound standalone books) in one call — so the shipped shape of this branch was worse
+      than just unused, it was latently unsafe: activating id `3` for one intended entry could just
+      as easily light up an unrelated same-numbered entry in a completely different book. This is
+      the identical cross-source id-collision problem item 54's scene-flag-authoring writeup
+      already flagged for a near-identical sticky/cooldown idea, which is why that one also went
+      unbuilt rather than risk it. Removed the parameter from `activateWorldInfo()`
+      (`activation.ts`) and `PromptBuildInput.manuallyActivatedWorldInfoIds` (`builder.ts`) entirely
+      rather than leave a footgun sitting there for whoever eventually builds the real (composite-
+      key) version of this control. Manual-mode entries' actual, live behavior — fires purely off
+      their own `enabled` toggle — is untouched; only the always-empty additive branch is gone.
+      Updated `activation.test.ts` (one dead test replaced with a real "excludes when disabled"
+      case, two affection-gating tests' now-shifted positional argument fixed); all 240 tests still
+      green, typecheck and build clean.
 - [x] **WAL checkpoint on clean shutdown** — `server/index.ts` now traps `SIGINT`/`SIGTERM` and
       runs `checkpointDb()` (`PRAGMA wal_checkpoint(TRUNCATE)`, `server/db.ts`) before exiting, so
       a normal Ctrl+C folds `rp.db-wal` back into `rp.db` and the main database file is complete on
@@ -1532,9 +1542,26 @@ changelog #49), and nothing points the user at it.
       visual order, Enter activating exactly the highlighted row, mouse click/hover doing the same,
       and Escape closing cleanly with no state left behind. Overlaps with the existing message
       `SearchPanel` (section 4) — could be unified into one surface later, not done here.
-- [ ] **Discoverable keyboard shortcuts + a shortcuts sheet** — there's no documented shortcut
-      surface today. Even a handful (send, regenerate, swipe left/right, new chat, toggle VN) plus
-      a `?` overlay listing them.
+- [x] **Discoverable keyboard shortcuts + a shortcuts sheet** — shipped the smallest genuinely-safe
+      slice rather than the item's full original wish list. `?` opens a new `KeyboardShortcutsSheet`
+      (built on the shared `Modal`) listing every shortcut that actually exists: the pre-existing
+      Ctrl/Cmd+K (never documented anywhere before this), a new ←/→ swipe-navigation shortcut, `Esc`
+      to close the open panel, and `?` itself. Both new global handlers (`?` in `App.tsx`, ←/→ in
+      `ChatWindow.tsx`) guard against firing while focus is in an `INPUT`/`TEXTAREA`/
+      `contentEditable` element, since both keys are ordinary typing characters/navigation keys, not
+      exotic combos. `Esc`-to-close is one `useEffect` added to `Modal.tsx` itself, so every one of
+      the dozen-plus panels built on that shared shell gets it for free, not just new ones.
+      **Deliberately cut real functionality, not just scope, out of the original wish list**:
+      "send" needs no shortcut (Enter already sends); "new chat" and "toggle VN" were left out
+      rather than bound to something arbitrary, since every available key was already either a
+      reserved OS/browser combo or an ordinary typing character; "regenerate" was left out for a
+      sharper reason — arrow-key swipe deliberately never triggers `swipe()`'s own "generate a
+      brand-new swipe" branch at the last index (see `useChatSession.ts`), since silently kicking
+      off a real generation from what reads as a passive browsing gesture would be a surprising,
+      easy-to-trigger-by-accident side effect, not a shortcut anyone actually asked for — the same
+      reasoning would apply to a bare "regenerate" key. Verified live: `?` opens the sheet with the
+      correct four rows, `Esc` closes it, and dispatching an arrow key at a focused `<textarea>`
+      correctly produces no swipe/network activity, confirming the typing guard holds.
 - [ ] **A "what these do" explainer for the mode toggles** — VN mode, `autoTrackRelationship`,
       `autoSuggestChoices`, `autoDetectTasks`, difficulty: a new user has no way to know which of
       these belong to "I want plain assistant chat" vs "I want a dating sim." Ties directly into
@@ -1650,9 +1677,22 @@ SillyTavern docs/releases, RisuAI (CCv3, CBS/trigger system, regex scripts), Agn
         sources (character book + world book + global books + synthetic facts book are merged into
         one array whose order isn't stable turn-to-turn in a group chat). Fixing that key problem
         is the actual prerequisite, not the sticky logic itself.
-      - **injection at a chat depth** — entries placed N messages deep in the transcript, not just
-        before/after the card block (ST's "@ Depth" position). Pairs naturally with the Author's
-        Note `at_depth` work above — same new injection pass.
+      - ~~**injection at a chat depth**~~ — done. `LorebookEntry.position` gained `'at_depth'`
+        alongside `before_char`/`after_char`, with its own `depth` field (same convention as
+        `AuthorNote.depth`) — a new "At depth" option in `LorebookEditor`'s Position select, with a
+        Depth number field that only shows once it's picked. `builder.ts`'s injection pass, previously
+        hand-built for the one fixed Author's Note, is now generalized to any number of depth-anchored
+        items: each is spliced in at its own `includedTurns.length - depth` position, processed
+        farthest-back first so a shallower item's "distance from the end" is computed against the
+        array as the deeper ones have already grown it — the same way a person layering several
+        depth-anchored notes by hand would reason about their relative positions. 4 new
+        `builder.test.ts` cases (depth 0, depth 1, a lorebook entry layered against the Author's Note
+        at a different depth, token-budget accounting). Verified live: added a temporary "always" +
+        "at depth" (depth 2) entry to a book already scoped to the seeded Sumire chat, confirmed via
+        the Prompt Inspector it activated (showed in "World info activated") and landed exactly once,
+        two messages up from the latest, ahead of the relationship-description block — not in the
+        fixed identity region above the transcript — then removed the test entry. 244 tests green,
+        typecheck + build clean.
       - ~~**global-book binding UI**~~ — done. `WorldInfoBook` gained `boundCharacterIds` /
         `boundWorldIds` alongside the pre-existing (UI-less) `boundChatIds`; a book with no
         bindings at all is still global (every book that predates this stays exactly as it was).
@@ -1667,8 +1707,21 @@ SillyTavern docs/releases, RisuAI (CCv3, CBS/trigger system, regex scripts), Agn
         persisted `boundCharacterIds`, confirmed via the Prompt Inspector that its entries still
         activate in a Sumire chat; negative case (a non-matching character) is covered by the unit
         tests. 174 tests green, typecheck + build clean.
-      - **weighted inclusion groups** — a group currently always fires its highest-`insertion_order`
-        member (`activation.ts`); ST supports a weighted random pick within the group.
+      - ~~**weighted inclusion groups**~~ — done. New `LorebookEntry.groupWeight` — if any member of
+        a group sets it, the winner is a weighted random draw across the whole group (an unset
+        weight on another member defaults to 1) instead of the old deterministic "highest
+        `insertion_order` wins" rule, which stays the default behavior for every group that never
+        sets a weight (existing books are completely unaffected). A new "Weight" `NumberField` in
+        `LorebookEditor` appears next to "Inclusion group" only once a group name is set, with an
+        "order wins" placeholder making the fallback behavior visible rather than a silent default.
+        7 new `activation.test.ts` cases, mirroring the existing `probability` tests' own
+        deterministic-boundary style (weight 0 vs. a positive peer, run N times) rather than
+        asserting on a single random draw. Verified live against the seeded "Campus Life" book's
+        existing `weather-mood` group (`clear, sunny` vs. `rain, storm`): set a weight, confirmed
+        via a direct API fetch it persisted, then cleared it again and confirmed the key was
+        removed entirely rather than left as a stray `0`/`undefined` — restoring the seeded demo
+        content to exactly its original deterministic behavior. 248 tests green, typecheck + build
+        clean.
 - [x] **Read CCv3 character cards** — done. `normalizeCardJson` already read a V3 card's text
       fields (it reads `data.*` and never checked `spec_version`); new here is `extractCardAssets`
       (`cardSpec.ts`, 10 tests) which pulls the usable parts of a V3 `data.assets` array —
@@ -1688,11 +1741,26 @@ SillyTavern docs/releases, RisuAI (CCv3, CBS/trigger system, regex scripts), Agn
       and `background` assets were correctly ignored. **Still open** (deliberately): reading a
       `.charx` (zip) container's `embeded://` assets, and writing V3 on export (`.rppack.json`
       already covers our own round-trip).
-- [ ] **Quick Replies bar** — a user-configurable row of buttons that send a templated message or
-      run a small action ("advance time," "describe my surroundings," "give a gift," "skip to
-      evening"). The cheap, independently-useful subset of ST's STscript / Quick Replies without
-      committing to a scripting language. Overlaps with section 12's plugin API but doesn't need
-      it.
+- [x] **Quick Replies bar** — a user-configurable row of buttons that send a templated message
+      verbatim, exactly as if typed and sent by hand. New `QuickReply` type (`types.ts`), a
+      `quickReplies` array in `useSettingsStore` (global, not per-chat/per-character — a fixed
+      utility toolbar makes sense everywhere, unlike authored content tied to one world), a
+      `QuickRepliesSection` settings panel (Settings → Generation, `ListEditor` over label+message
+      pairs) seeded with three starters ("Look around," "Let time pass," "Change the subject") that
+      a returning user's own edits/deletions are never overwritten by. `QuickReplyBar.tsx` renders
+      the row in both `ChatWindow` layouts and inside `VNStage`'s glass panel, reusing `ChoiceList`'s
+      exact chip shape/variant convention for visual consistency. Deliberately shown only when the
+      AI-suggested `ChoiceList` isn't (`choiceListNode(variant) || quickReplyNode(variant)` in
+      `ChatWindow.tsx`) so at most one chip row ever competes for the same strip above the composer,
+      rather than stacking two rows of pills. Clicking one calls the same `sendUserMessage` path as
+      typing and hitting Send — no new send mechanism. Verified live: turned off "Suggest choices"
+      to isolate it, confirmed the three default buttons render with correct label/message, clicked
+      "Look around" and confirmed `*takes a moment to look around and take in the surroundings*`
+      was sent as the user's own message and got a real in-character scene-description reply back;
+      confirmed the Settings panel's add/edit/remove round-trips. Not done: the roadmap's own
+      "give a gift" example action — that's already its own dedicated Bag/gift-shop flow (section
+      2), a quick-reply button sending plain text isn't the right shape for it. Overlaps with
+      section 12's plugin API but doesn't need it, per this item's original scoping.
 - [ ] **Trigger / event system** (RisuAI's CBS + triggers) — an author-facing "when X, then Y"
       layer: on a keyword, on a stat crossing a threshold, on a scene flag, on day-advance → set a
       variable, swap the background, fire a lorebook entry, queue a message. We already produce all
@@ -1736,6 +1804,31 @@ SillyTavern docs/releases, RisuAI (CCv3, CBS/trigger system, regex scripts), Agn
       (`document.documentElement.scrollWidth === innerWidth`) after each fix, and a full-desktop
       regression check afterward confirming the rail/collapsed-panel/toolbar all render exactly as
       before at desktop width.
+      **Two more real bugs found and fixed in a later pass**, this time triggered by VN-mode
+      content tall enough that the earlier slice's test scenarios never happened to hit it:
+      (1) A live playthrough at 375×812 in VN mode measured the message composer's own `<textarea>`
+      sitting at `top: 833px` on an 812px-tall viewport — completely below the fold, unreachable,
+      not just cramped. Root cause was the exact flexbox `min-height: auto` bug class already fixed
+      once for the VN sprite itself (section 1), one level higher up the tree this time:
+      `App.tsx`'s `<div className="flex flex-1 min-w-0 pb-14 md:pb-0">` (the view-content wrapper)
+      measured 951px tall inside its own 812px-tall flex parent, refusing to shrink because nothing
+      in the chain had `min-h-0`. Fixed with `min-h-0` on that wrapper — confirmed live afterward
+      that the composer's full `getBoundingClientRect()` now sits inside the viewport. Also capped
+      `VNStage`'s choice-list row at `max-h-[15vh] overflow-y-auto` (the same "capped rather than
+      left to grow" treatment its own dialogue box already had) as a second, independent guard, so
+      a long inclusion group or several quick-replies wrapping to multiple lines can't reopen the
+      same failure mode even if some future change loses the `min-h-0` fix.
+      (2) The ordinary (non-VN) chat header's title block measured only 119px wide at 375px — the
+      icon toolbar's own `shrink-0` wrapper directly determines how much is left for the title, and
+      its existing 45vw mobile cap (added for a different reason — keeping the toolbar itself from
+      overflowing) still left too little: the character's name truncated to a single letter, and
+      "near strangers • 6" wrapped across two lines, visibly inflating the header. Tightened the
+      toolbar's mobile cap to 30vw (still scrolls to reach every icon, just shows fewer before
+      scrolling) and made the warmth-stage label `truncate` on one line instead of wrap — measured
+      the title block's width go from 119px to 175.5px live, name and stage label both render
+      correctly, header height dropped from 114px to 104px. Both fixes verified with zero
+      horizontal overflow at 375px and a full desktop-width regression check confirming the header
+      and VN panel are unchanged there.
 - [~] **Chat management basics** — rename, duplicate, and one-click "new chat, same character &
       persona" are done; folders/tags/pinned-chats stay open (below). `ChatsPanel.tsx` gained a
       per-row `MoreHorizontal` menu (a lightweight inline popover, click-outside-to-close via the
@@ -1781,9 +1874,32 @@ SillyTavern docs/releases, RisuAI (CCv3, CBS/trigger system, regex scripts), Agn
       surface (its own UI for creating/assigning tags, not a quick addition to this row menu), and
       AI Dungeon's Adventure-model framing (title/tags/settings as one coherent per-chat settings
       object) is a bigger reference shape worth its own pass once tags exist to hang it on.
-- [ ] **Generation HUD** — tokens/sec, time-to-first-token, and a context-fill gauge during and
-      after generation. `showTokenCounts` gives a per-message count; there's no live feedback while
-      the model is working beyond the streaming text itself.
+- [x] **Generation HUD** — tokens/sec, time-to-first-token, and a context-fill gauge during and
+      after generation, distinct from `showTokenCounts`' per-message-after-the-fact count. New
+      `GenerationStats` (`useChatSession.ts`) and `GenerationHud.tsx`, gated behind a
+      `showGenerationHud` setting (Settings → Appearance, next to `showTokenCounts`, default on).
+      **Tried KoboldCpp's own `/api/extra/perf` first and abandoned it after a real live-caught
+      bug**: that endpoint reports the server's single most recent generation of *any* kind, so with
+      post-reply assists (relationship scoring, choice suggestions) sharing the same server, its
+      numbers can describe an unrelated background call instead of the reply the HUD is showing —
+      one live run surfaced a nonsensical "300.21s to first token" this way, immediately visible as
+      wrong (the same server's own `/api/extra/perf` polled directly showed ~7s at the time).
+      Rebuilt entirely client-side instead, timed from each round's own SSE stream (`runGeneration`
+      in `useChatSession.ts`) — correct by construction since it can only ever measure tokens that
+      arrived on this exact request. Also fixed `PerfInfo`'s type (`api/types.ts`) along the way:
+      its original fields (`last_process`/`last_eval`/`last_seconds`) never matched a real
+      KoboldCpp response at all — dead code that had simply never been called until this pass
+      exercised it, now corrected to the real shape (`last_process_time`/`last_eval_speed`/etc.,
+      confirmed via a direct `curl` against the live server) even though the HUD itself no longer
+      uses it. Numbers update live on every token while streaming (labeled "streaming…"), then do
+      one final recompute over the round's full duration when it lands. Verified live end-to-end
+      across a reply that ran three auto-continue rounds: watched tok/s and context-fill climb
+      sensibly through all three, confirmed the "streaming…" label clears and the number stops
+      moving once generation actually finishes, and spot-checked the final reading (14.9 tok/s)
+      against a direct `curl` of `/api/extra/perf` moments later (16.4 eval speed) — same ballpark,
+      not a bit-for-bit match, since that endpoint's own "last" figure had almost certainly already
+      moved on to the post-reply assist calls that fire right after a reply lands — exactly the
+      attribution problem that ruled it out as this HUD's source of truth in the first place.
 - [ ] **Multiple chat-completion backends** — already section 8 and explicitly low-priority, noted
       here only because it's the top reason an ST/Risu user on a hosted model (Claude, OpenRouter,
       Gemini) can't adopt this app at all today. If hosted-provider support ever happens, the
@@ -1858,12 +1974,19 @@ the subset that's actually a good fit for a local-first, single-user, character-
       saved into a persistent character/world slot. Once section 11's image-generation backend
       abstraction exists, a chat-level "snapshot this moment" action reusing the same provider is a
       small addition on top, not a separate integration.
-- [ ] **Raw vs. processed model output toggle**: the Prompt Inspector already shows the exact text
-      *sent* to the model (arguably more transparent than AI Dungeon's categorized context viewer,
-      since it's the literal assembled string, not a reconstruction). What it doesn't show is the
-      model's raw *response* before regex scripts, scene-tag stripping, and macro handling touch
-      it — useful for the same debugging reason AI Dungeon exposes raw output. A small addition to
-      the same panel, not a new one.
+- [x] **Raw vs. processed model output toggle**: the Prompt Inspector already showed the exact text
+      *sent* to the model; it now also shows a "Latest reply" block with a Processed/Raw toggle for
+      the chat's most recent character message — Raw is the model's exact output before scene-tag
+      extraction ever touches it (`combinedRaw` in `useChatSession.ts`'s `runGeneration`), Processed
+      is what's actually stored/rendered. New `StoredMessage.rawText`/`swipeRawTexts` (parallel to
+      `swipes`/`swipeScenes`), written alongside them at every generation completion and kept in
+      sync when swiping between alternates. Deliberately narrow: only the latest reply, not every
+      message in the transcript — matches this item's own "a small addition to the same panel, not
+      a new one." A message from before this field existed just has no raw text; the toggle
+      disables itself and says so rather than showing stale/empty data. Verified live: generated a
+      fresh reply, confirmed `rawText` round-trips via a direct `/api/chats/:id/messages` fetch and
+      the UI toggle switches between the two views; an older message in the same chat correctly
+      showed the "generated before this toggle existed" fallback instead of a blank Raw tab.
 - [x] **High-contrast theme preset**: this app already has `fontScale`, `reducedMotion`, and
       `reducedAudio` (section 6), plus full theme customization, but nothing bundled a one-click
       "high contrast" look the way AI Dungeon's accessibility settings do. Added a third entry to
@@ -1880,14 +2003,20 @@ the subset that's actually a good fit for a local-first, single-user, character-
       editor's Light/Dark switch, confirmed via the persisted `rp-settings` store —
       `themeTokensLight` held the expected white/black/blue values, `colorMode` flipped to
       `"light"`), matching `themePresets.ts` exactly in both cases.
-- [ ] **Rewind: delete a message and everything after it, in one action**: the "AI is editable, not
-      authoritative" philosophy (undo/retry/edit/erase) is already this app's philosophy too —
-      regenerate/swipe, edit, fork, and one-at-a-time delete all exist — but backing out of a scene
-      that went several turns in a direction you don't want today means deleting messages one at a
-      time from the bottom. A "Rewind to here" action on any message (delete it and every later
-      message in the chat, in one confirm) is the missing bulk case — smaller and much less
-      structural than chat forking (section 4), which is for *keeping* both branches; this is for
-      when you don't want the discarded branch at all.
+- [x] **Rewind: delete a message and everything after it, in one action** — done. New
+      `rewindToMessage()` (`useChatSession.ts`): finds the target message's index in the already-
+      loaded, already-ordered `messages` array and removes it plus everything after, reusing the
+      existing single-message `messagesApi.remove()` primitive rather than adding a new bulk-delete
+      server route — a local single-user chat's message count never justifies one. A new "Rewind to
+      here" icon (`History`, lucide) sits in `MessageBubble`'s per-message hover row, next to Fork
+      and Delete, behind the same `confirm()` pattern already used for chat deletion and ending a
+      relationship — one shared implementation reaches both the ordinary chat view and VN mode's
+      backlog drawer, since both render through the same `MessageLog`/`MessageBubble`. Verified live
+      against disposable test data (a throwaway character + chat + 5 messages created directly via
+      the API, matching item 78's own verification convention): rewinding from the 3rd message
+      correctly left exactly the first two, confirmed via a fresh `GET`; the browser automation's
+      own auto-dismissed `confirm()` was itself useful negative-case coverage — clicking without
+      confirming correctly left the chat untouched. Cleaned up the test character/chat afterward.
 - [ ] **Combinatorial character creation**: a lighter alternative to the two creation paths that
       already exist (`TemplateGallery`'s fixed starter cards, and `GenerateCharacterDialog`'s
       free-text-brief-to-full-card generation) — pick from small independent trait lists (an
@@ -2425,6 +2554,108 @@ Done so far (see checked boxes above for detail):
     no UI anywhere to reach it — added alongside the three items the bullet actually named. See
     that item for the full writeup.
 
+79. ~~Slow-burn pacing~~ — user asked, while doing a full live Sumire playthrough specifically to
+    check this: make sure the roleplay isn't too fast-paced and the character isn't too willing.
+    Reproduced live before fixing anything: on a fresh "Near Strangers" chat, an unprompted "Can I
+    kiss you?" got a token "you can't just demand that" immediately followed by "Fine... then stop
+    talking and do it already" in the *same* reply — the relationship-difficulty slider (section 2)
+    only scales numeric deltas and says so in its own copy ("never what a character says or how a
+    scene plays out"); nothing in the prompt actually asked the model to hold a line on scene
+    content itself. Added `slowBurnPacing` (Settings → Generation → Relationship tracking, on by
+    default) alongside `avoidEmDashes`/`styleGuidance` in the same "right before generation"
+    steering slot: an instruction that intimacy is earned gradually and a character should react in
+    character — hesitation, deflection, or an outright no — rather than caving just to be agreeable.
+    Verified live: regenerated the exact same "Can I kiss you?" turn with the setting on and got a
+    flat, in-character refusal instead (kept studying, wouldn't be moved), with bond/warmth
+    correctly unaffected by the request either way. Deliberately a global toggle, not per-character —
+    Sumire's own card already asks for "warms up slowly," but the gap this closes is the model not
+    holding that line under a direct, escalating request, which isn't specific to one character card.
+80. ~~AI character generation, verified~~ — same live pass: confirmed `GenerateCharacterDialog` (the
+    "Generate with AI" button in `New Character`, item 0's toast-system entry) actually works
+    end-to-end against a real running KoboldCpp — gave it a one-line brief, got back a complete,
+    well-formed card (description, personality, scenario, first message, tags) in the character's
+    intended voice. No code change; this was purely a "make sure the LLM can create characters"
+    verification, and it already does, discarded afterward rather than left in the character list.
+
+81. ~~Quick Replies bar~~ — user asked to keep working through the roadmap; picked as the next
+    concretely-scoped, koboldcpp-verifiable item off section 14's open list (Generation HUD needs
+    live token/sec streaming to be worth building well; World Info sticky/cooldown and the
+    trigger/event system both have real, stated design prerequisites). See section 14's checked
+    item for the full writeup.
+
+82. ~~Raw vs. processed model output toggle~~ — same live-playthrough pass as #79/#80, picked up
+    alongside the pacing fix since both came out of using the Prompt Inspector to verify #79 live.
+    See section 15's checked item for the full writeup.
+
+83. ~~Generation HUD~~ — user asked to keep working through the roadmap; next concretely-scoped
+    item off section 15 (World Info sticky/cooldown and the trigger/event system both have real,
+    stated design prerequisites; the two remaining section 14 items, chat folders/tags and
+    Multiple chat-completion backends, are both bigger authoring-surface or architecture pieces).
+    Live-verified, and caught a real attribution bug in `/api/extra/perf` along the way — see
+    section 15's checked item for the full writeup.
+
+84. ~~`manuallyActivatedIds` dead machinery, removed~~ — user asked to keep working through the
+    roadmap; picked as a small, deterministic, fully test-covered cleanup with zero koboldcpp
+    dependency. Sizing it first (this item's own two offered options) surfaced that "wire it up"
+    was actually the riskier path — the id-collision problem below. See section 9's checked item
+    for the full writeup.
+
+85. ~~World Info "at depth" injection~~ — user asked to keep working through the roadmap; picked
+    as the concretely-scoped, koboldcpp-independent sub-item of section 14's World Info depth
+    bullet (sticky/cooldown and weighted inclusion groups both stay open — the former genuinely
+    blocked on the cross-source id problem, the latter smaller but lower-value). See section 14's
+    checked sub-item for the full writeup.
+
+86. ~~Seeded Sumire never actually populated her own 10e life-context fields~~ — found live during
+    a UI/UX pass through `CharacterEditor`'s tabs: occupation, workplace, home, frequented
+    locations, likes, goals, boundaries, and social connections all showed as empty (placeholder
+    text only) on the bundled demo character, even though item 53 built the whole feature —
+    `characterProfile`, the prompt block that surfaces exactly these fields — well after Sumire was
+    originally seeded (item 49) and the seed was never revisited. Meant every fresh install's own
+    bundled character failed to demonstrate a real, shipped feature. Filled in `seedContent.ts` with
+    values consistent with her existing card (architecture-loving tsundere at Sakura Hill
+    University) — deliberately including a boundary ("hates being rushed or pressured into
+    anything before she's actually ready") that reinforces this session's own slow-burn-pacing work
+    (#79) in her own authored data, not just the global setting. Also applied the same values to
+    the already-seeded live character through `CharacterEditor`'s own UI (the seed runner is
+    idempotent and won't retroactively update an install that's already past first run) so this
+    install's Sumire matches the corrected seed too. Verified live via the Prompt Inspector:
+    confirmed every new field (occupation, home, frequented locations, likes, goals, the boundary,
+    and the social connection) reaches the actual assembled prompt through the existing
+    `characterProfile` block, no new wiring needed since that plumbing already worked — this was
+    purely a content gap, not a code bug.
+
+87. ~~Weighted inclusion groups~~ — user asked to keep working through the roadmap; picked as the
+    remaining self-contained sub-item of section 14's World Info depth bullet, once koboldcpp went
+    unreachable mid-session (confirmed via the Connection tab's own "Not reachable" state, correctly
+    surfaced) and ruled out any more live-roleplay-dependent work for the time being — this one
+    needed nothing but the existing test suite and a direct API check to verify. Sticky/cooldown is
+    now the only sub-item left in that bullet, still genuinely blocked on the cross-source id
+    problem. See section 14's checked sub-item for the full writeup.
+
+88. ~~Mobile pass: composer unreachable in VN mode, chat header title crushed~~ — acting as a senior
+    UI/UX-focused developer per this session's own framing, with koboldcpp still unreachable ruling
+    out more roleplay-dependent work. Reproduced both live at 375×812 rather than guessing from a
+    screenshot: the VN-mode composer measured entirely below the viewport (a real, interaction-
+    blocking bug — the user could not send a message at all in that state, not just a cramped
+    layout), and the ordinary chat header's title block measured 119px wide, crushing the
+    character's name to one letter. Both traced to real root causes (a missing `min-h-0` on a flex
+    wrapper one level above the already-fixed VN sprite bug; a `shrink-0` icon toolbar whose mobile
+    width cap left too little room for the title) rather than papered over, and both verified fixed
+    with the same live-measurement rigor as every earlier mobile fix in this file. See section 14's
+    "Mobile / responsive layout" item for the full writeup.
+
+89. ~~Rewind~~ — user asked what else could be checked off before koboldcpp comes back; picked as
+    a concretely-scoped, fully deterministic section 15 item (no live model needed to build or
+    verify) that closes a real, clearly-described gap. See section 15's checked item for the full
+    writeup.
+
+90. ~~Discoverable keyboard shortcuts + a shortcuts sheet~~ — same "what else can be checked off"
+    session as Rewind (#89); picked as the other concretely-scoped, fully deterministic item on the
+    list. Also fixed a genuine, separate gap found while building it: `Modal.tsx` had no `Esc`-to-
+    close at all, so this one change reaches every panel built on it. See section 13's checked item
+    for the full writeup, including what was deliberately left out of the original wish list and why.
+
 That closes out the last "reasonable next batch," plus sections 10a, 10c, and 10d in full and a first
 slice each of 10b and 10f taken directly afterward since 10's own suggested phase order names them
 as the foundation everything else in that section reads from. What's left, still deliberately
@@ -2492,9 +2723,7 @@ notification? a separate inbox view? injected straight into the chat as if they 
 still an open question only the user can answer, and koboldcpp being on or off doesn't change that.
 
 Section 15 (added from a user-supplied AI Dungeon competitive analysis) is a separate set of ideas,
-not yet folded into this priority order. The high-contrast theme preset, its smallest
-self-contained piece, has shipped (#73); of what's left, raw-vs-processed output in the Prompt
-Inspector is the next smallest, self-contained enough to slot into a future "reasonable next
-batch" without much thought. The user-authored scripting idea is the standout but is deliberately
-scoped in stages precisely so it doesn't get picked up as a single large unplanned effort — see
-that item's own "smallest first" breakdown before starting on it.
+not yet folded into this priority order. The high-contrast theme preset (#73) and raw-vs-processed
+output in the Prompt Inspector (#82) have both shipped. The user-authored scripting idea is
+the standout but is deliberately scoped in stages precisely so it doesn't get picked up as a single
+large unplanned effort — see that item's own "smallest first" breakdown before starting on it.

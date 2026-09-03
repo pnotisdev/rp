@@ -167,6 +167,61 @@ describe("buildPrompt — Author's Note", () => {
   })
 })
 
+describe('buildPrompt — World Info "at_depth" position', () => {
+  const history: ChatMessage[] = [
+    { id: '1', role: 'user', name: 'You', text: 'FIRST_LINE' },
+    { id: '2', role: 'char', name: 'Aria', text: 'SECOND_LINE' },
+  ]
+  const lorebookWithEntry = (depth: number) => ({
+    entries: [
+      {
+        keys: [],
+        content: 'LORE_MARKER',
+        constant: true,
+        selective: false,
+        insertion_order: 100,
+        enabled: true,
+        activationMode: 'always' as const,
+        position: 'at_depth' as const,
+        depth,
+      },
+    ],
+  })
+
+  it('injects an at_depth entry (depth 0) after the latest message, before the generation cue', async () => {
+    const result = await buildPrompt(baseInput({ history, lorebooks: [lorebookWithEntry(0)] }))
+    expect(result.prompt.indexOf('LORE_MARKER')).toBeGreaterThan(result.prompt.indexOf('SECOND_LINE'))
+    expect(result.prompt.trim().endsWith('Aria:')).toBe(true)
+  })
+
+  it('injects an at_depth entry (depth 1) one message up from the latest', async () => {
+    const result = await buildPrompt(baseInput({ history, lorebooks: [lorebookWithEntry(1)] }))
+    const markerAt = result.prompt.indexOf('LORE_MARKER')
+    expect(markerAt).toBeGreaterThan(result.prompt.indexOf('FIRST_LINE'))
+    expect(markerAt).toBeLessThan(result.prompt.indexOf('SECOND_LINE'))
+  })
+
+  it('layers multiple at_depth items (a lorebook entry and the Author\'s Note) at their own distinct depths', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        history,
+        lorebooks: [lorebookWithEntry(1)],
+        authorNote: { text: 'NOTE_MARKER', position: 'at_depth', depth: 0 },
+      }),
+    )
+    // Depth 1 (further back) should land before depth 0 (right before the generation cue).
+    expect(result.prompt.indexOf('LORE_MARKER')).toBeLessThan(result.prompt.indexOf('NOTE_MARKER'))
+    expect(result.prompt.indexOf('FIRST_LINE')).toBeLessThan(result.prompt.indexOf('LORE_MARKER'))
+    expect(result.prompt.indexOf('NOTE_MARKER')).toBeGreaterThan(result.prompt.indexOf('SECOND_LINE'))
+  })
+
+  it('counts an at_depth entry against the token budget', async () => {
+    const withEntry = await buildPrompt(baseInput({ history, lorebooks: [lorebookWithEntry(0)] }))
+    const without = await buildPrompt(baseInput({ history }))
+    expect(withEntry.tokensUsed).toBeGreaterThan(without.tokensUsed)
+  })
+})
+
 describe('buildPrompt — regex scripts (prompt target)', () => {
   const history: ChatMessage[] = [
     { id: '1', role: 'user', name: 'You', text: 'the WIDGET is here' },

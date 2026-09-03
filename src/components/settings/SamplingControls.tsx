@@ -14,6 +14,7 @@ import { RegexScriptsSection } from './RegexScriptsSection'
 import { InstructTemplateSection } from './InstructTemplateSection'
 import { PromptSectionsSection } from './PromptSectionsSection'
 import { WritingStyleSection } from './WritingStyleSection'
+import { QuickRepliesSection } from './QuickRepliesSection'
 
 // Simple-mode sliders derive several raw params from one intuitive 0-100 value each.
 function creativityToParams(v: number) {
@@ -71,6 +72,8 @@ export function SamplingControls() {
   const setAutoTrackRelationship = useSettingsStore((s) => s.setAutoTrackRelationship)
   const relationshipDifficulty = useSettingsStore((s) => s.relationshipDifficulty)
   const setRelationshipDifficulty = useSettingsStore((s) => s.setRelationshipDifficulty)
+  const slowBurnPacing = useSettingsStore((s) => s.slowBurnPacing)
+  const setSlowBurnPacing = useSettingsStore((s) => s.setSlowBurnPacing)
   const autoSuggestChoices = useSettingsStore((s) => s.autoSuggestChoices)
   const setAutoSuggestChoices = useSettingsStore((s) => s.setAutoSuggestChoices)
 
@@ -202,6 +205,14 @@ export function SamplingControls() {
             a character says or how a scene plays out. Gentle softens the swings, harsh sharpens them.
           </p>
         </div>
+        <div className="pt-3">
+          <Toggle
+            checked={slowBurnPacing}
+            onChange={setSlowBurnPacing}
+            label="Slow-burn pacing"
+            description="This is the one that actually touches scene content, unlike the difficulty scale above: steers a character away from giving in to affection, a kiss, or closeness just because it was asked for, especially early in a relationship. On by default."
+          />
+        </div>
       </Section>
 
       <Section
@@ -215,6 +226,8 @@ export function SamplingControls() {
           description="One model call after each reply. Same as relationship tracking, it shares the GPU with your next message — turn it off for pure freeform writing."
         />
       </Section>
+
+      <QuickRepliesSection />
 
       <WritingStyleSection />
 

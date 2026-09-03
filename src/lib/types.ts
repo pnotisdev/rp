@@ -53,6 +53,20 @@ export interface CustomSceneFlag {
 }
 
 /**
+ * Section 14's "Quick Replies bar" — the cheap, independently-useful subset of SillyTavern's
+ * STscript/Quick Replies without committing to an actual scripting language: a user-configurable
+ * button that sends `message` verbatim, exactly as if the player had typed and sent it themselves.
+ * Global (Settings → Generation), not per-chat/per-character — the whole point is a small fixed
+ * toolbar of narrative utility actions ("describe my surroundings," "let some time pass") that
+ * makes sense in any chat, not authored content tied to one world or card.
+ */
+export interface QuickReply {
+  id: string
+  label: string
+  message: string
+}
+
+/**
  * 10c's "Define-the-Relationship ladder" — a player-driven progression, separate from the
  * warmth-derived `RelationshipStage` above (which only ever tracks how close things *feel*, never
  * an explicit status). Warmth gates which tier can be *asked for* (see `stage.ts`'s
@@ -219,6 +233,15 @@ export interface StoredMessage extends ChatMessage {
   scene?: SceneTag
   /** Parallel to `swipes` — each alternate reply can carry its own scene. */
   swipeScenes?: (SceneTag | undefined)[]
+  /**
+   * The model's exact output for the active swipe, before scene-tag extraction ever touches it —
+   * `text`/`swipes` already have that (and any display regex scripts) applied. Undefined for
+   * messages generated before this field existed, and for user messages. Debug-only: shown in the
+   * Prompt Inspector's raw/processed toggle, never read by prompt-building or anything gameplay-facing.
+   */
+  rawText?: string
+  /** Parallel to `swipes` — each alternate reply's own pre-extraction raw output. */
+  swipeRawTexts?: (string | undefined)[]
   /** Suggested next lines/actions for the user, generated after this (char) message lands. */
   choices?: string[]
   /** Structured branch options that can include direct lines, actions, or gifts. */

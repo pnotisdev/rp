@@ -256,6 +256,25 @@ function hasRequiredFlags(required: string[] | undefined, flags: Set<SceneFlag>)
   return required.every((f) => flags.has(f as SceneFlag))
 }
 
+/**
+ * Section 15's "Generation HUD" — live feedback while the model is working, distinct from
+ * `showTokenCounts`' per-message-after-the-fact count. Entirely client-side, timed from this
+ * round's own SSE stream (see `runGeneration`'s own comment for why `/api/extra/perf` was tried
+ * and dropped — it reports the server's single most recent generation of any kind, which a
+ * concurrent post-reply assist call can and did misattribute live). `tokensPerSec`/`firstTokenMs`
+ * update on every token while streaming, then get one final recompute over the round's full
+ * duration when it finishes. `contextUsed`/`contextBudget` come straight from the same
+ * `buildPrompt` result every generation already computes, no extra call.
+ */
+export interface GenerationStats {
+  tokensPerSec: number
+  firstTokenMs: number
+  contextUsed: number
+  contextBudget: number
+  /** True once this round has finished (the numbers are final) — still climbing mid-stream until then. */
+  measured: boolean
+}
+
 export function useChatSession(chatId: string | null) {
   const baseUrl = useSettingsStore((s) => s.baseUrl)
   const sampler = useSettingsStore((s) => s.sampler)
@@ -271,6 +290,7 @@ export function useChatSession(chatId: string | null) {
   const reducedAudio = useSettingsStore((s) => s.reducedAudio)
   const styleGuidanceNote = useSettingsStore((s) => s.styleGuidance)
   const avoidEmDashes = useSettingsStore((s) => s.avoidEmDashes)
+  const slowBurnPacing = useSettingsStore((s) => s.slowBurnPacing)
   const promptSections = useSettingsStore((s) => s.promptSections)
   const setActiveChatId = useSettingsStore((s) => s.setActiveChatId)
   const client = useMemo(() => new KoboldClient(baseUrl), [baseUrl])
@@ -324,6 +344,7 @@ export function useChatSession(chatId: string | null) {
   const [isGenerating, setIsGenerating] = useState(false)
   const [streamingText, setStreamingText] = useState('')
   const [generatingMessageId, setGeneratingMessageId] = useState<string | null>(null)
+  const [genStats, setGenStats] = useState<GenerationStats | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const genKeyRef = useRef<string>('')
   const summarizingRef = useRef(false)
@@ -465,6 +486,9 @@ export function useChatSession(chatId: string | null) {
       const styleGuidance =
         [
           avoidEmDashes ? 'Never use em dashes (the — character) in your writing. Use a comma, period, or parentheses instead.' : '',
+          slowBurnPacing
+            ? "Pace intimacy like a slow burn: earn it gradually through many small moments, don't grant it just because it was asked for. If pushed toward more affection, a kiss, or closeness faster than the relationship has actually earned, react as your character genuinely would — hesitation, deflection, or an outright no are often the right call, especially early on. Don't cave just to be agreeable."
+            : '',
           styleGuidanceNote.trim(),
         ]
           .filter(Boolean)
@@ -519,6 +543,7 @@ export function useChatSession(chatId: string | null) {
       regexScripts,
       resolveSpeaker,
       sampler,
+      slowBurnPacing,
       styleGuidanceNote,
       template,
       world,
@@ -991,6 +1016,7 @@ export function useChatSession(chatId: string | null) {
       setIsGenerating(true)
       setStreamingText(accumulated)
       setGeneratingMessageId(targetMessageId)
+      setGenStats(null)
       const genkey = makeGenKey()
       genKeyRef.current = genkey
       const abort = new AbortController()
@@ -1025,6 +1051,10 @@ export function useChatSession(chatId: string | null) {
           // whatever the user additionally set in Settings, not replacing it.
           const stopSequence = [...new Set([...template.stopSequences, ...(sampler.stop_sequence ?? [])])]
 
+          const genStartedAt = performance.now()
+          let firstTokenAt: number | null = null
+          let streamedTokenCount = 0
+          const builtForStats = built
           let newText = ''
           try {
             newText = await client.generateStream(
@@ -1035,7 +1065,20 @@ export function useChatSession(chatId: string | null) {
                 genkey,
                 images: images.length ? images : undefined,
               },
-              (_token, full) => setStreamingText(accumulated + stripSceneTagForDisplay(full)),
+              (_token, full) => {
+                const now = performance.now()
+                if (firstTokenAt === null) firstTokenAt = now
+                streamedTokenCount++
+                setStreamingText(accumulated + stripSceneTagForDisplay(full))
+                const elapsedSec = (now - firstTokenAt) / 1000
+                setGenStats({
+                  tokensPerSec: elapsedSec > 0 ? streamedTokenCount / elapsedSec : 0,
+                  firstTokenMs: firstTokenAt - genStartedAt,
+                  contextUsed: builtForStats.tokensUsed,
+                  contextBudget: builtForStats.contextBudget,
+                  measured: false,
+                })
+              },
               abort.signal,
             )
           } catch (streamErr) {
@@ -1045,6 +1088,25 @@ export function useChatSession(chatId: string | null) {
               { ...sampler, stop_sequence: stopSequence, prompt: built.prompt, genkey, images: images.length ? images : undefined },
               abort.signal,
             )
+          }
+
+          // Finalize this round's stats client-side rather than reconciling against KoboldCpp's
+          // own `/api/extra/perf` — tried that first, and live-caught a real attribution bug: with
+          // post-reply assists (relationship scoring, choice suggestions) sharing the same server,
+          // `/api/extra/perf` reports the single most recent generation of ANY kind, so by the time
+          // this round's `getPerf()` call resolves it can just as easily describe an unrelated
+          // background assist call as this reply — one live run showed a nonsensical 300s
+          // "time to first token" this way. Every token in `streamedTokenCount` is scoped to
+          // exactly this round's own SSE stream, so it can't be misattributed the same way.
+          if (streamedTokenCount > 0 && firstTokenAt !== null) {
+            const finalElapsedSec = (performance.now() - firstTokenAt) / 1000
+            setGenStats({
+              tokensPerSec: finalElapsedSec > 0 ? streamedTokenCount / finalElapsedSec : 0,
+              firstTokenMs: firstTokenAt - genStartedAt,
+              contextUsed: builtForStats.tokensUsed,
+              contextBudget: builtForStats.contextBudget,
+              measured: true,
+            })
           }
 
           const combinedRaw = (accumulated + newText).trimEnd()
@@ -1061,10 +1123,14 @@ export function useChatSession(chatId: string | null) {
             swipes[activeSwipe] = combined
             const swipeScenes = freshMsg?.swipeScenes ? [...freshMsg.swipeScenes] : []
             swipeScenes[activeSwipe] = scene
+            const swipeRawTexts = freshMsg?.swipeRawTexts ? [...freshMsg.swipeRawTexts] : []
+            swipeRawTexts[activeSwipe] = combinedRaw
             await messagesApi.update(targetMessageId, {
               text: combined,
               swipes,
               swipeScenes,
+              swipeRawTexts,
+              rawText: combinedRaw,
               activeSwipe,
               scene,
               tokenCount: await countTokens(combined),
@@ -1077,10 +1143,14 @@ export function useChatSession(chatId: string | null) {
             existingSwipes[activeSwipe] = combined
             const swipeScenes = freshMsg?.swipeScenes ? [...freshMsg.swipeScenes] : []
             swipeScenes[activeSwipe] = scene
+            const swipeRawTexts = freshMsg?.swipeRawTexts ? [...freshMsg.swipeRawTexts] : []
+            swipeRawTexts[activeSwipe] = combinedRaw
             await messagesApi.update(targetMessageId, {
               text: combined,
               swipes: existingSwipes,
               swipeScenes,
+              swipeRawTexts,
+              rawText: combinedRaw,
               activeSwipe,
               scene,
               tokenCount: await countTokens(combined),
@@ -1300,6 +1370,7 @@ export function useChatSession(chatId: string | null) {
         activeSwipe: nextIndex,
         text: swipes[nextIndex],
         scene: msg.swipeScenes?.[nextIndex],
+        rawText: msg.swipeRawTexts?.[nextIndex],
       })
     },
     [isGenerating, messages, runGeneration],
@@ -1618,6 +1689,23 @@ export function useChatSession(chatId: string | null) {
     await messagesApi.remove(messageId)
   }, [])
 
+  /**
+   * Section 15's "Rewind" — the bulk case one-at-a-time delete doesn't cover: back out of a scene
+   * that went several turns in an unwanted direction by deleting a message and everything after
+   * it, in one action. Deliberately not a new server endpoint — `messages` (already loaded,
+   * already in order) tells us exactly which ids that is; no bulk-delete route exists or is needed
+   * for a local single-user app's message counts. Unlike forking (section 4), which is for
+   * *keeping* both branches, this discards the tail outright.
+   */
+  const rewindToMessage = useCallback(
+    async (messageId: string) => {
+      const idx = messages.findIndex((m) => m.id === messageId)
+      if (idx === -1) return
+      await Promise.all(messages.slice(idx).map((m) => messagesApi.remove(m.id)))
+    },
+    [messages],
+  )
+
   const togglePinMessage = useCallback(async (messageId: string) => {
     const msg = await messagesApi.get(messageId)
     await messagesApi.update(messageId, { pinned: !msg?.pinned })
@@ -1642,12 +1730,14 @@ export function useChatSession(chatId: string | null) {
     isGenerating,
     streamingText,
     generatingMessageId,
+    genStats,
     assistActivity,
     sendUserMessage,
     regenerate,
     swipe,
     editMessage,
     deleteMessage,
+    rewindToMessage,
     togglePinMessage,
     abortGeneration,
     previewPrompt,

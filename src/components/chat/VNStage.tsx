@@ -60,6 +60,7 @@ interface VNStageProps {
   onSwipe: (id: string, dir: 'left' | 'right') => void
   onRegenerate: (id: string) => void
   onDelete: (id: string) => void
+  onRewind: (id: string) => void
   onEdit: (id: string, text: string) => void
   onFork: (id: string) => void
   onTogglePin: (id: string) => void
@@ -101,6 +102,7 @@ export function VNStage({
   onSwipe,
   onRegenerate,
   onDelete,
+  onRewind,
   onEdit,
   onFork,
   onTogglePin,
@@ -252,6 +254,7 @@ export function VNStage({
             highlightedMessageId={highlightedMessageId}
             onEdit={onEdit}
             onDelete={onDelete}
+            onRewind={onRewind}
             onRegenerate={onRegenerate}
             onSwipe={onSwipe}
             onFork={onFork}
@@ -369,7 +372,13 @@ export function VNStage({
                 {isStreamingThis && <span className="cursor-blink font-mono">▋</span>}
               </p>
             </div>
-            {choiceListSlot && <div className="border-t border-white/10 px-3 pt-2.5 sm:px-5">{choiceListSlot}</div>}
+            {/* Capped the same way the dialogue box above is — three chips wrapping to two lines
+                on a narrow phone screen was measured pushing the composer entirely below the
+                viewport (its own `top` past `window.innerHeight`), making the app unable to send a
+                message at all. A tall choice row now scrolls in place instead of growing the panel. */}
+            {choiceListSlot && (
+              <div className="max-h-[15vh] overflow-y-auto border-t border-white/10 px-3 pt-2.5 sm:px-5">{choiceListSlot}</div>
+            )}
             {assistSlot}
             <div className="border-t border-white/10 p-2.5 sm:px-4">{composerSlot}</div>
           </div>

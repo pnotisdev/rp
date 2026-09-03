@@ -31,6 +31,8 @@ import {
 import { MessageLog } from './MessageLog'
 import { VNStage } from './VNStage'
 import { ChoiceList } from './ChoiceList'
+import { QuickReplyBar } from './QuickReplyBar'
+import { GenerationHud } from './GenerationHud'
 import { Composer } from './Composer'
 import { ConnectionBadge } from './ConnectionBadge'
 import { PromptInspector } from './PromptInspector'
@@ -59,12 +61,14 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
     isGenerating,
     streamingText,
     generatingMessageId,
+    genStats,
     assistActivity,
     sendUserMessage,
     regenerate,
     swipe,
     editMessage,
     deleteMessage,
+    rewindToMessage,
     togglePinMessage,
     abortGeneration,
     previewPrompt,
@@ -93,6 +97,8 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
   } = useChatSession(chatId)
 
   const globalVisualNovelMode = useSettingsStore((s) => s.visualNovelMode)
+  const quickReplies = useSettingsStore((s) => s.quickReplies)
+  const showGenerationHud = useSettingsStore((s) => s.showGenerationHud)
   const regexScripts = useSettingsStore((s) => s.regexScripts)
   const setActiveChatId = useSettingsStore((s) => s.setActiveChatId)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -122,6 +128,30 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
   useEffect(() => {
     if (highlightedId) scrollToMessage(scrollRef.current, highlightedId)
   }, [highlightedId])
+
+  // Section 15's "discoverable keyboard shortcuts" — arrow-key swipe navigation on the latest
+  // reply. Deliberately never fires the "generate a brand-new swipe" branch `swipe('right', ...)`
+  // takes at the last index (see `useChatSession.ts`) — an arrow key is a passive browsing
+  // gesture, and silently kicking off a real generation from it would be a surprising, easy-to-
+  // trigger-by-accident side effect, not a shortcut anyone asked for.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+      const target = e.target as HTMLElement | null
+      if (target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable) return
+      const last = [...messages].reverse().find((m) => m.role === 'char')
+      if (!last) return
+      const swipes = last.swipes ?? [last.text]
+      const current = last.activeSwipe ?? 0
+      const dir = e.key === 'ArrowLeft' ? 'left' : 'right'
+      if (dir === 'left' && current === 0) return
+      if (dir === 'right' && current >= swipes.length - 1) return
+      e.preventDefault()
+      swipe(last.id, dir)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [messages, swipe])
 
   // A jump from search or the pinned panel — scroll-to for the VN log lives in VNStage itself
   // (it needs to open its collapsed backlog drawer first), driven by the same highlightedId.
@@ -243,6 +273,10 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
     return last
   })()
 
+  // The Prompt Inspector's raw/processed toggle only ever looks at the latest reply — a message
+  // generated before `rawText` existed just has nothing to show, handled there, not here.
+  const lastCharMessage = [...messages].reverse().find((m) => m.role === 'char')
+
   const choiceListNode = (variant: 'default' | 'vn') =>
     activeChoices && (
       <ChoiceList
@@ -255,6 +289,12 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
           regenerateChoices(activeChoices.id).finally(() => setRefreshingChoices(false))
         }}
       />
+    )
+
+  const quickReplyNode = (variant: 'default' | 'vn') =>
+    !activeChoices &&
+    !isGenerating && (
+      <QuickReplyBar variant={variant} replies={quickReplies} onPick={(reply) => sendUserMessage(reply.message, [])} />
     )
 
   const composerNode = (variant: 'default' | 'vn') => (
@@ -309,14 +349,14 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
                   </span>
                 )}
               </div>
-              <div className="mt-1 flex items-center gap-2">
-                <div className="h-1.5 w-24 overflow-hidden rounded-full bg-bg-sunken">
+              <div className="mt-1 flex min-w-0 items-center gap-2">
+                <div className="h-1.5 w-24 shrink-0 overflow-hidden rounded-full bg-bg-sunken">
                   <div
                     className="h-full rounded-full bg-romance transition-[width] duration-500"
                     style={{ width: `${warmth}%` }}
                   />
                 </div>
-                <span className="text-[11px] uppercase tracking-wide text-text-muted">
+                <span className="truncate text-[11px] uppercase tracking-wide text-text-muted">
                   {formatRelationshipStage(relationshipStage)} • {warmth}
                 </span>
               </div>
@@ -325,8 +365,14 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
           <div className="flex shrink-0 items-center gap-1">
             {/* The full icon toolbar doesn't fit next to a title block on a phone-width screen —
                 scrolls horizontally there rather than overflowing the header or crushing the
-                title down to nothing. A real "what's essential on mobile" pass is a follow-up. */}
-            <div className="flex max-w-[45vw] items-center gap-1 overflow-x-auto sm:max-w-none">{toolbar}</div>
+                title down to nothing. Measured live at 375px: `shrink-0` on this row's own parent
+                means the toolbar's cap directly sets how much space the title block has left, not
+                just how much of the toolbar itself is visible — 45vw (169px) left the title area
+                only ~119px wide, still enough to wrap "near strangers • 6" onto two lines and
+                truncate the character's name to a single letter. Tightened the cap; the toolbar
+                still scrolls to reach every icon, just shows fewer before scrolling. A real
+                "what's essential on mobile" icon-set pass stays the bigger follow-up. */}
+            <div className="flex max-w-[30vw] items-center gap-1 overflow-x-auto sm:max-w-none">{toolbar}</div>
             <div className="mx-1.5 h-5 w-px bg-border" />
             <ConnectionBadge />
           </div>
@@ -338,6 +384,7 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
           summary={chat.summary}
           onUpdateSummary={() => updateMemorySummary({ force: true })}
           onClose={() => setShowInspector(false)}
+          lastReply={lastCharMessage ? { processed: lastCharMessage.text, raw: lastCharMessage.rawText } : undefined}
         />
       )}
       {showObjective && (
@@ -441,14 +488,20 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
           onSwipe={swipe}
           onRegenerate={regenerate}
           onDelete={deleteMessage}
+          onRewind={rewindToMessage}
           onEdit={editMessage}
           onFork={forkChat}
           onTogglePin={togglePinMessage}
           topBarExtra={toolbar}
           onBack={onBack}
           parentChatLink={parentChatLink}
-          choiceListSlot={choiceListNode('vn')}
-          assistSlot={<AssistActivityBar items={assistActivity} variant="vn" />}
+          choiceListSlot={choiceListNode('vn') || quickReplyNode('vn')}
+          assistSlot={
+            <>
+              {showGenerationHud && <GenerationHud stats={genStats} variant="vn" />}
+              <AssistActivityBar items={assistActivity} variant="vn" />
+            </>
+          }
           composerSlot={composerNode('vn')}
         />
       ) : (
@@ -464,13 +517,15 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
               highlightedMessageId={highlightedId}
               onEdit={editMessage}
               onDelete={deleteMessage}
+              onRewind={rewindToMessage}
               onRegenerate={regenerate}
               onSwipe={swipe}
               onFork={forkChat}
               onTogglePin={togglePinMessage}
             />
           </div>
-          {choiceListNode('default')}
+          {choiceListNode('default') || quickReplyNode('default')}
+          {showGenerationHud && <GenerationHud stats={genStats} />}
           <AssistActivityBar items={assistActivity} />
           {composerNode('default')}
         </>

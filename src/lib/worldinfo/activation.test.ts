@@ -68,11 +68,9 @@ describe('activateWorldInfo', () => {
       expect(activateWorldInfo([b], 'irrelevant text').activated).toHaveLength(1)
     })
 
-    it('includes a manual entry via manuallyActivatedIds even when a real id is required', () => {
-      const e = entry({ content: 'X', activationMode: 'manual', enabled: false, id: 77 })
-      const b = book([e])
+    it('excludes a manual entry when its enabled flag is off', () => {
+      const b = book([entry({ content: 'X', activationMode: 'manual', enabled: false })])
       expect(activateWorldInfo([b], 'text').activated).toHaveLength(0)
-      expect(activateWorldInfo([b], 'text', new Set([77])).activated).toHaveLength(1)
     })
   })
 
@@ -81,14 +79,14 @@ describe('activateWorldInfo', () => {
       const b = book([
         entry({ content: 'X', constant: true, activationMode: 'always', extensions: { affectionMin: 50 } }),
       ])
-      expect(activateWorldInfo([b], 'text', new Set(), 20).activated).toHaveLength(0)
-      expect(activateWorldInfo([b], 'text', new Set(), 50).activated).toHaveLength(1)
-      expect(activateWorldInfo([b], 'text', new Set(), 80).activated).toHaveLength(1)
+      expect(activateWorldInfo([b], 'text', 20).activated).toHaveLength(0)
+      expect(activateWorldInfo([b], 'text', 50).activated).toHaveLength(1)
+      expect(activateWorldInfo([b], 'text', 80).activated).toHaveLength(1)
     })
 
     it('defaults affectionMin to 0 (always eligible) when unset', () => {
       const b = book([entry({ content: 'X', constant: true, activationMode: 'always' })])
-      expect(activateWorldInfo([b], 'text', new Set(), 0).activated).toHaveLength(1)
+      expect(activateWorldInfo([b], 'text', 0).activated).toHaveLength(1)
     })
   })
 
@@ -218,6 +216,54 @@ describe('activateWorldInfo', () => {
       const result = activateWorldInfo([b], 'text')
       expect(result.activated).toHaveLength(1)
       expect(result.droppedForGroup).toHaveLength(0)
+    })
+
+    describe('weighted groups (groupWeight)', () => {
+      it('never picks a zero-weight entry over a positive-weight peer', () => {
+        const b = book([
+          entry({ content: 'never', constant: true, activationMode: 'always', group: 'g', groupWeight: 0, insertion_order: 999 }),
+          entry({ content: 'always', constant: true, activationMode: 'always', group: 'g', groupWeight: 1 }),
+        ])
+        for (let i = 0; i < 30; i++) {
+          expect(activateWorldInfo([b], 'text').activated.map((e) => e.content)).toEqual(['always'])
+        }
+      })
+
+      it('a heavily-weighted entry wins against several zero-weight peers regardless of insertion_order', () => {
+        const b = book([
+          entry({ content: 'winner', constant: true, activationMode: 'always', group: 'g', groupWeight: 1, insertion_order: 1 }),
+          entry({ content: 'loser-a', constant: true, activationMode: 'always', group: 'g', groupWeight: 0, insertion_order: 999 }),
+          entry({ content: 'loser-b', constant: true, activationMode: 'always', group: 'g', groupWeight: 0, insertion_order: 500 }),
+        ])
+        for (let i = 0; i < 30; i++) {
+          expect(activateWorldInfo([b], 'text').activated.map((e) => e.content)).toEqual(['winner'])
+        }
+      })
+
+      it('ignores groupWeight entirely (falls back to insertion_order) when no member of the group sets it', () => {
+        const b = book([
+          entry({ content: 'low', constant: true, activationMode: 'always', group: 'g', insertion_order: 10 }),
+          entry({ content: 'high', constant: true, activationMode: 'always', group: 'g', insertion_order: 90 }),
+        ])
+        for (let i = 0; i < 10; i++) {
+          expect(activateWorldInfo([b], 'text').activated.map((e) => e.content)).toEqual(['high'])
+        }
+      })
+
+      it('an unset weight in a weighted group defaults to 1, not 0', () => {
+        // Only one member ever sets groupWeight; the other two default to weight 1 and must be
+        // reachable — asserting the winner varies across the 3 members over enough draws.
+        const b = book([
+          entry({ content: 'a', constant: true, activationMode: 'always', group: 'g' }),
+          entry({ content: 'b', constant: true, activationMode: 'always', group: 'g' }),
+          entry({ content: 'c', constant: true, activationMode: 'always', group: 'g', groupWeight: 1 }),
+        ])
+        const winners = new Set<string>()
+        for (let i = 0; i < 200; i++) {
+          winners.add(activateWorldInfo([b], 'text').activated[0].content)
+        }
+        expect(winners.size).toBeGreaterThan(1)
+      })
     })
   })
 

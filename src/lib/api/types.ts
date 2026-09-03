@@ -56,11 +56,21 @@ export interface KoboldVersionInfo {
   version: string
 }
 
+/**
+ * `/api/extra/perf` — reports the MOST RECENT completed generation, not a running/live figure.
+ * The original shape here (`last_process`/`last_eval`/`last_seconds`) never actually matched a
+ * real KoboldCpp response — caught only now, while wiring up the Generation HUD (section 15),
+ * since nothing had called `getPerf()` before. Fields below are what a live 1.118.1 server
+ * actually returns; the index signature covers the rest (image/TTS/transcribe counters, uptime,
+ * horde fields) that this app has no use for yet.
+ */
 export interface PerfInfo {
-  last_process: number
-  last_eval: number
+  last_process_time: number
+  last_eval_time: number
+  last_process_speed: number
+  last_eval_speed: number
   last_token_count: number
-  last_seconds: number
+  last_input_count: number
   total_gens: number
   stop_reason: number
   queue: number

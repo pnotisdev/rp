@@ -15,6 +15,7 @@ interface MessageLogProps {
   highlightedMessageId?: string | null
   onEdit: (id: string, text: string) => void
   onDelete: (id: string) => void
+  onRewind: (id: string) => void
   onRegenerate: (id: string) => void
   onSwipe: (id: string, dir: 'left' | 'right') => void
   onFork: (id: string) => void
@@ -32,6 +33,7 @@ export function MessageLog({
   highlightedMessageId,
   onEdit,
   onDelete,
+  onRewind,
   onRegenerate,
   onSwipe,
   onFork,
@@ -55,6 +57,7 @@ export function MessageLog({
           isHighlighted={highlightedMessageId === m.id}
           onEdit={(text) => onEdit(m.id, text)}
           onDelete={() => onDelete(m.id)}
+          onRewind={() => onRewind(m.id)}
           onRegenerate={() => onRegenerate(m.id)}
           onSwipe={(dir) => onSwipe(m.id, dir)}
           onFork={() => onFork(m.id)}

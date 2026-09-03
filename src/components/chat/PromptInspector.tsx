@@ -9,15 +9,21 @@ export function PromptInspector({
   summary,
   onUpdateSummary,
   onClose,
+  lastReply,
 }: {
   loadPrompt: () => Promise<PromptBuildResult | null>
   summary?: string
   onUpdateSummary: () => Promise<string | null>
   onClose: () => void
+  /** The chat's latest character reply, processed (what's stored/rendered) vs. raw (the model's
+   *  exact output, before scene-tag extraction) — `raw` is undefined for a reply generated before
+   *  this field existed. Undefined entirely when the chat has no character message yet. */
+  lastReply?: { processed: string; raw?: string }
 }) {
   const [result, setResult] = useState<PromptBuildResult | null | 'error'>(null)
   const [summarizing, setSummarizing] = useState(false)
   const [summaryError, setSummaryError] = useState<string | null>(null)
+  const [showRawReply, setShowRawReply] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -118,6 +124,46 @@ export function PromptInspector({
 
             <h3 className="mb-1 text-xs font-semibold text-text-muted">Exact text sent to the model</h3>
             <pre className="whitespace-pre-wrap rounded-xl bg-bg-sunken p-4 text-xs text-text">{result.prompt}</pre>
+
+            {lastReply && (
+              <div className="mt-5">
+                <div className="mb-2 flex items-center justify-between">
+                  <h3 className="text-xs font-semibold text-text-muted">Latest reply</h3>
+                  <div className="flex gap-1 rounded-lg bg-bg-sunken p-0.5 text-xs">
+                    <button
+                      onClick={() => setShowRawReply(false)}
+                      className={`rounded-md px-2 py-1 transition-colors ${!showRawReply ? 'bg-accent/10 text-accent' : 'text-text-muted'}`}
+                    >
+                      Processed
+                    </button>
+                    <button
+                      onClick={() => setShowRawReply(true)}
+                      disabled={!lastReply.raw}
+                      className={`rounded-md px-2 py-1 transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${showRawReply ? 'bg-accent/10 text-accent' : 'text-text-muted'}`}
+                    >
+                      Raw
+                    </button>
+                  </div>
+                </div>
+                {showRawReply && lastReply.raw ? (
+                  <>
+                    <p className="mb-2 text-xs text-text-muted">
+                      Exactly what the model returned, before scene-tag extraction or any display regex script touches it.
+                    </p>
+                    <pre className="whitespace-pre-wrap rounded-xl bg-bg-sunken p-4 text-xs text-text">{lastReply.raw}</pre>
+                  </>
+                ) : (
+                  <pre className="whitespace-pre-wrap rounded-xl bg-bg-sunken p-4 text-xs text-text">
+                    {lastReply.processed || '(empty)'}
+                  </pre>
+                )}
+                {!lastReply.raw && (
+                  <p className="mt-2 text-xs text-text-muted">
+                    Raw output isn't available for this reply — it was generated before this toggle existed.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         )}
     </Modal>

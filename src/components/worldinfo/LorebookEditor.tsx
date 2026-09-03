@@ -176,11 +176,23 @@ export function LorebookEditor({
                     <SelectField
                       label="Position"
                       value={entry.position ?? 'before_char'}
-                      onChange={(e) => updateEntry(entry.id!, { position: e.target.value as 'before_char' | 'after_char' })}
+                      onChange={(e) =>
+                        updateEntry(entry.id!, { position: e.target.value as 'before_char' | 'after_char' | 'at_depth' })
+                      }
                     >
                       <option value="before_char">Before card</option>
                       <option value="after_char">After card</option>
+                      <option value="at_depth">At depth</option>
                     </SelectField>
+                    {entry.position === 'at_depth' && (
+                      <NumberField
+                        label="Depth"
+                        min={0}
+                        hint="Messages up from the latest"
+                        value={entry.depth ?? 2}
+                        onChange={(e) => updateEntry(entry.id!, { depth: Math.max(0, Number(e.target.value) || 0) })}
+                      />
+                    )}
                     <NumberField
                       label="Unlock warmth"
                       min={0}
@@ -210,13 +222,29 @@ export function LorebookEditor({
 
                   {mode === 'keyword' && (
                     <>
-                      <TextField
-                        label="Inclusion group"
-                        hint="Entries sharing a group are mutually exclusive — only the highest-order one fires."
-                        value={entry.group ?? ''}
-                        onChange={(e) => updateEntry(entry.id!, { group: e.target.value || undefined })}
-                        placeholder="none"
-                      />
+                      <div className="grid grid-cols-1 gap-x-3 sm:grid-cols-[1fr_120px]">
+                        <TextField
+                          label="Inclusion group"
+                          hint="Entries sharing a group are mutually exclusive — only one fires."
+                          value={entry.group ?? ''}
+                          onChange={(e) => updateEntry(entry.id!, { group: e.target.value || undefined })}
+                          placeholder="none"
+                        />
+                        {entry.group && (
+                          <NumberField
+                            label="Weight"
+                            min={0}
+                            hint="Set on any member for a weighted random pick"
+                            value={entry.groupWeight ?? ''}
+                            onChange={(e) =>
+                              updateEntry(entry.id!, {
+                                groupWeight: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value) || 0),
+                              })
+                            }
+                            placeholder="order wins"
+                          />
+                        )}
+                      </div>
                       <div className="flex flex-wrap items-center gap-x-4">
                         <label className="flex cursor-pointer items-center gap-1.5 text-xs text-text-muted">
                           <input

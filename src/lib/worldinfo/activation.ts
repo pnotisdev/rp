@@ -12,10 +12,17 @@ export interface ActivationOptions {
  * app has no in-chat "activate for this turn" control, so unlike upstream SillyTavern's
  * manual mode (activated ad hoc via slash command), here it's simply an entry the author flips
  * on/off by hand in the editor rather than one keyword-triggered automatically.
- * `manuallyActivatedIds` exists for a future per-chat runtime toggle and is additive on top of
- * `enabled`, not a replacement for it — passing an id there activates that entry even if its
- * `enabled` toggle is off, but nothing in the shipped UI populates it yet.
  * Mirrors ST's "always / when relevant (keyword) / manual" activation modes.
+ *
+ * (Previously took a `manuallyActivatedIds: Set<number>` for a future per-turn "force this entry
+ * on" control, additive on top of `enabled` — removed as dead machinery nothing ever populated,
+ * per section 9's own note. It also would have been unsafe to wire up as originally shaped:
+ * `LorebookEntry.id` is only unique within one book, and this function scans several books at
+ * once, so a single flat id set could force on a same-numbered entry in an unrelated book too —
+ * the same cross-source id-collision problem section 9's scene-flag-authoring writeup already
+ * flagged for a very similar sticky/cooldown idea. A real version of this control needs a stable
+ * composite key across sources first, which is its own, separate piece of work, not a quick
+ * revival of this branch.)
  */
 export interface WorldInfoActivationResult {
   activated: LorebookEntry[]
@@ -38,7 +45,6 @@ const MAX_RECURSION_DEPTH = 3
 export function activateWorldInfo(
   books: Lorebook[],
   recentText: string,
-  manuallyActivatedIds: Set<number> = new Set(),
   affection = 0,
 ): WorldInfoActivationResult {
   const haystackLower = recentText.toLowerCase()
@@ -53,9 +59,8 @@ export function activateWorldInfo(
 
     for (const entry of book.entries) {
       const mode = entry.activationMode ?? (entry.constant ? 'always' : 'keyword')
-      // Manual-mode entries have their own enabled-or-manually-activated check below — gating
-      // on `enabled` here too would make the manuallyActivatedIds branch of that check
-      // unreachable for an entry the creator left toggled off.
+      // Manual-mode entries have their own enabled check below, not the generic one — kept
+      // separate so this stays a no-op fallthrough point if a real per-turn override ever lands.
       if (mode !== 'manual' && !entry.enabled) continue
       const requiredAffection = Number((entry.extensions as Record<string, unknown> | undefined)?.affectionMin ?? 0)
       if (Number.isFinite(requiredAffection) && affection < requiredAffection) continue
@@ -64,11 +69,8 @@ export function activateWorldInfo(
         continue
       }
       if (mode === 'manual') {
-        // Manual entries are considered "on" purely via their enabled toggle,
-        // or explicitly via manuallyActivatedIds for one-off inclusion.
-        if (entry.enabled || (entry.id !== undefined && manuallyActivatedIds.has(entry.id))) {
-          matched.push(entry)
-        }
+        // Manual entries are considered "on" purely via their own enabled toggle.
+        if (entry.enabled) matched.push(entry)
         continue
       }
       // Keyword-mode entries also chain via recursive scanning below, so keep the candidate
@@ -123,9 +125,16 @@ export function activateWorldInfo(
     }
     matched = ungrouped
     for (const group of byGroup.values()) {
-      const [winner, ...losers] = [...group].sort((a, b) => b.insertion_order - a.insertion_order)
+      // ST's weighted inclusion groups: if any member sets `groupWeight`, the winner is a
+      // weighted random draw across the whole group (an unset weight defaults to 1) instead of
+      // the plain deterministic "highest insertion_order wins" rule every group used before this
+      // existed — that rule stays the default so a book with no weights set behaves exactly as
+      // it always has.
+      const winner = group.some((e) => e.groupWeight !== undefined)
+        ? pickWeighted(group)
+        : [...group].sort((a, b) => b.insertion_order - a.insertion_order)[0]
       matched.push(winner)
-      droppedForGroup.push(...losers)
+      droppedForGroup.push(...group.filter((e) => e !== winner))
     }
 
     // Higher insertion_order = higher priority = filled into the budget first.
@@ -153,6 +162,19 @@ function passesProbability(entry: LorebookEntry): boolean {
   if (entry.probability === undefined) return true
   const p = Math.max(0, Math.min(100, entry.probability))
   return Math.random() * 100 < p
+}
+
+/** A weight of 0 can never win as long as some other member has positive weight — only picked at all when every weight in the group is 0 (all equally, arbitrarily excluded). */
+function pickWeighted(group: LorebookEntry[]): LorebookEntry {
+  const weights = group.map((e) => Math.max(0, e.groupWeight ?? 1))
+  const total = weights.reduce((sum, w) => sum + w, 0)
+  if (total <= 0) return group[0]
+  let roll = Math.random() * total
+  for (let i = 0; i < group.length; i++) {
+    roll -= weights[i]
+    if (roll < 0) return group[i]
+  }
+  return group[group.length - 1]
 }
 
 /**

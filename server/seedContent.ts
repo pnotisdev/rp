@@ -399,6 +399,39 @@ export const seedCharacter: Character = {
     { id: 'weekend-evening', days: ['saturday', 'sunday'], phase: 'evening', status: 'available', activity: 'Reading by the window', location: 'Her apartment' },
     { id: 'every-night', phase: 'night', status: 'sleeping', activity: 'Asleep', location: 'Her apartment' },
   ],
+  occupation: 'Second-year architectural history student',
+  workplace: 'Sakura Hill University',
+  homeLocation: 'A small one-bedroom apartment a few blocks from campus, packed with more books than furniture',
+  frequentedLocations: [
+    "The university library's under-heated second floor",
+    "her family's secondhand bookshop downtown",
+    'the quiet bench under the sakura trees',
+  ],
+  likes: [
+    'Gothic Revival architecture',
+    'old buildings with real history behind them',
+    'secondhand books nobody else wants',
+    'quiet mornings before the campus wakes up',
+  ],
+  goals: [
+    'finish her thesis on Gothic Revival influences in local architecture',
+    'see a real Gothic cathedral in person someday, not just in photographs',
+  ],
+  // Deliberately includes a pacing-relevant boundary — a bundled demo character worth roleplaying
+  // slowly should say so in her own authored data, not rely solely on the global slow-burn-pacing
+  // setting (`useSettingsStore.ts`) to carry the whole weight of it.
+  boundaries: [
+    'will not tolerate being mocked for the things she cares about',
+    "hates being rushed or pressured into anything before she's actually ready for it",
+  ],
+  socialConnections: [
+    {
+      id: 'parents',
+      name: 'Her parents',
+      relation: 'run the family secondhand bookshop together',
+      notes: 'Raised her surrounded by towers of uncatalogued books — where her love of old buildings and older stories actually started.',
+    },
+  ],
   createdAt: now,
   updatedAt: now,
 }

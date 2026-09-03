@@ -65,7 +65,6 @@ export interface PromptBuildInput {
   /** Tokens available for the ENTIRE prompt (max_context_length - max_length, minus caller's safety margin). */
   contextBudget: number
   scanDepth: number
-  manuallyActivatedWorldInfoIds?: Set<number>
   /** Per-section on/off, e.g. from Settings → Generation — an unset section defaults to on (`DEFAULT_PROMPT_SECTIONS`), so an old caller that never passes this gets today's always-on behavior unchanged. */
   promptSections?: Partial<Record<PromptSectionId, boolean>>
   countTokens: (text: string) => Promise<number>
@@ -124,7 +123,6 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
     template,
     contextBudget,
     scanDepth,
-    manuallyActivatedWorldInfoIds,
     countTokens,
   } = input
   const sections = { ...DEFAULT_PROMPT_SECTIONS, ...input.promptSections }
@@ -140,11 +138,11 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
   const { activated: activatedEntries, droppedForBudget, droppedForGroup } = activateWorldInfo(
     lorebooks,
     scanText,
-    manuallyActivatedWorldInfoIds,
     input.affection ?? 0,
   )
-  const before = activatedEntries.filter((e) => e.position !== 'after_char')
+  const before = activatedEntries.filter((e) => e.position !== 'after_char' && e.position !== 'at_depth')
   const after = activatedEntries.filter((e) => e.position === 'after_char')
+  const worldAtDepth = activatedEntries.filter((e) => e.position === 'at_depth')
 
   const systemBlock = sub(
     character.system_prompt?.trim() ||
@@ -209,6 +207,17 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
   const authorNoteAtDepthTokens =
     authorNoteText && authorNotePosition === 'at_depth' ? await countTokens(authorNoteText) : 0
 
+  // ST's World Info "@ Depth" position — same injection mechanism as the Author's Note's own
+  // `at_depth` above, generalized to (potentially several) lorebook entries each with their own
+  // depth, rather than the one fixed note.
+  const worldAtDepthItems = await Promise.all(
+    worldAtDepth.map(async (e) => {
+      const text = sub(e.content)
+      return { text, tokens: await countTokens(text), depth: Math.max(0, Math.floor(Number(e.depth) || 0)) }
+    }),
+  )
+  const worldAtDepthTokens = worldAtDepthItems.reduce((sum, i) => sum + i.tokens, 0)
+
   // Injected right before generation — same "late" placement as ST's post-history-instructions,
   // which is exactly where steering toward an in-progress objective is most effective.
   const postHistoryBlock = [
@@ -234,7 +243,8 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
       : turnPrefix('char', input.nextSpeakerName?.trim() || macroCtx.charName, template)
   const genCueTokens = await countTokens(genCue)
 
-  let remaining = contextBudget - fixedTokens - postHistoryTokens - genCueTokens - authorNoteAtDepthTokens
+  let remaining =
+    contextBudget - fixedTokens - postHistoryTokens - genCueTokens - authorNoteAtDepthTokens - worldAtDepthTokens
   const includedTurns: { text: string; tokens: number }[] = []
   let excludedCount = 0
 
@@ -252,11 +262,19 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
   }
   includedTurns.reverse()
 
-  // Author's Note "at depth": drop it in as its own line `depth` turns up from the latest — depth
-  // 0 is right before the generation cue, higher values blend it further back into the transcript.
+  // "At depth" injection: each item (the Author's Note, plus any lorebook entries positioned
+  // this way) drops in as its own line `depth` turns up from the latest — depth 0 is right before
+  // the generation cue, higher values blend it further back into the transcript. Sorted
+  // farthest-back first so each shallower item's "distance from the end" is computed against the
+  // array as it's grown by the deeper insertions already spliced in, the same way a person
+  // layering several depth-anchored notes by hand would reason about their relative positions.
+  const depthInjections = worldAtDepthItems.map((i) => ({ text: `${i.text}\n\n`, tokens: i.tokens, depth: i.depth }))
   if (authorNoteAtDepthTokens > 0) {
-    const insertAt = Math.max(0, includedTurns.length - authorNoteDepth)
-    includedTurns.splice(insertAt, 0, { text: `${authorNoteText}\n\n`, tokens: authorNoteAtDepthTokens })
+    depthInjections.push({ text: `${authorNoteText}\n\n`, tokens: authorNoteAtDepthTokens, depth: authorNoteDepth })
+  }
+  for (const item of depthInjections.sort((a, b) => b.depth - a.depth)) {
+    const insertAt = Math.max(0, includedTurns.length - item.depth)
+    includedTurns.splice(insertAt, 0, { text: item.text, tokens: item.tokens })
   }
 
   const historyText = includedTurns.map((t) => t.text).join('')

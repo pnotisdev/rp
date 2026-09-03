@@ -3,9 +3,16 @@ import { persist } from 'zustand/middleware'
 import type { GenerationParams } from '@/lib/api/types'
 import type { TtsProviderId } from '@/lib/voice/ttsProviders'
 import type { RelationshipDifficulty } from '@/lib/dating/relationshipAssist'
-import type { RegexScript } from '@/lib/types'
+import type { QuickReply, RegexScript } from '@/lib/types'
 import type { PromptSectionId } from '@/lib/prompt/builder'
 import { DEFAULT_PROMPT_SECTIONS } from '@/lib/prompt/builder'
+
+/** Seeded on first run only — a returning user's own edits/deletions are never overwritten (see the `merge` config below, which does a plain shallow spread for this key like every other scalar/array setting). */
+const DEFAULT_QUICK_REPLIES: QuickReply[] = [
+  { id: 'qr-surroundings', label: 'Look around', message: '*takes a moment to look around and take in the surroundings*' },
+  { id: 'qr-time-skip', label: 'Let time pass', message: '*lets some time pass*' },
+  { id: 'qr-change-subject', label: 'Change the subject', message: 'Anyway — so, what else is new with you?' },
+]
 
 export type ChatStyle = 'flat' | 'bubbles' | 'document'
 export type AvatarShape = 'circle' | 'square' | 'rounded' | 'rectangle'
@@ -103,6 +110,7 @@ interface SettingsState {
   reducedAudio: boolean
   showTimestamps: boolean
   showTokenCounts: boolean
+  showGenerationHud: boolean
   tagsAsFolders: boolean
   clickToEdit: boolean
   visualNovelMode: boolean
@@ -120,6 +128,7 @@ interface SettingsState {
       | 'reducedAudio'
       | 'showTimestamps'
       | 'showTokenCounts'
+      | 'showGenerationHud'
       | 'tagsAsFolders'
       | 'clickToEdit'
       | 'visualNovelMode',
@@ -172,11 +181,24 @@ interface SettingsState {
   regexScripts: RegexScript[]
   setRegexScripts: (scripts: RegexScript[]) => void
 
+  // section 14's Quick Replies bar — a fixed row of user-configurable buttons above the composer
+  quickReplies: QuickReply[]
+  setQuickReplies: (replies: QuickReply[]) => void
+
   // writing-style steering — injected into every prompt, right before generation
   styleGuidance: string
   avoidEmDashes: boolean
   setStyleGuidance: (v: string) => void
   setAvoidEmDashes: (v: boolean) => void
+  /** Steers scene *content*, not just prose — the relationship-difficulty slider above only scales
+   *  numeric deltas and says so in its own copy ("never what a character says or how a scene
+   *  opens"); this is what actually asks the model not to have a character give in to a request
+   *  just to be agreeable. Defaults on: reproduced live against the seeded Sumire on a near-strangers
+   *  chat, an unprompted kiss request got a token "you can't just demand that" followed by
+   *  immediate compliance in the same reply — the character's own card already asks for someone who
+   *  "warms up slowly," the model just wasn't holding that line under a direct, escalating request. */
+  slowBurnPacing: boolean
+  setSlowBurnPacing: (v: boolean) => void
 
   // companion voice
   ttsProvider: TtsProviderId
@@ -233,6 +255,7 @@ export const useSettingsStore = create<SettingsState>()(
       reducedAudio: false,
       showTimestamps: true,
       showTokenCounts: false,
+      showGenerationHud: true,
       tagsAsFolders: true,
       clickToEdit: true,
       visualNovelMode: false,
@@ -280,10 +303,15 @@ export const useSettingsStore = create<SettingsState>()(
       regexScripts: [],
       setRegexScripts: (scripts) => set({ regexScripts: scripts }),
 
+      quickReplies: DEFAULT_QUICK_REPLIES,
+      setQuickReplies: (replies) => set({ quickReplies: replies }),
+
       styleGuidance: '',
       avoidEmDashes: false,
       setStyleGuidance: (v) => set({ styleGuidance: v }),
       setAvoidEmDashes: (v) => set({ avoidEmDashes: v }),
+      slowBurnPacing: true,
+      setSlowBurnPacing: (v) => set({ slowBurnPacing: v }),
 
       ttsProvider: 'koboldcpp',
       ttsApiKey: '',

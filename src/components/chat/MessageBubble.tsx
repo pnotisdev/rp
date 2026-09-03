@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronLeft, ChevronRight, GitFork, RotateCcw, Star, TriangleAlert, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, GitFork, History, RotateCcw, Star, TriangleAlert, X } from 'lucide-react'
 import type { StoredMessage } from '@/lib/types'
 import { useSettingsStore, type AvatarShape } from '@/lib/store/useSettingsStore'
 import { messageAnchorId } from '@/lib/scrollToMessage'
@@ -36,6 +36,7 @@ interface MessageBubbleProps {
   isHighlighted?: boolean
   onEdit: (text: string) => void
   onDelete: () => void
+  onRewind: () => void
   onRegenerate: () => void
   onSwipe: (dir: 'left' | 'right') => void
   onFork: () => void
@@ -50,6 +51,7 @@ export function MessageBubble({
   isHighlighted,
   onEdit,
   onDelete,
+  onRewind,
   onRegenerate,
   onSwipe,
   onFork,
@@ -173,6 +175,18 @@ export function MessageBubble({
             aria-label="Fork chat from here"
           >
             <GitFork size={13} strokeWidth={2} />
+          </button>
+          <button
+            onClick={() => {
+              if (confirm('Rewind to here? This deletes this message and everything after it in this chat — the discarded messages are not kept anywhere, unlike forking.')) {
+                onRewind()
+              }
+            }}
+            className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-bg-sunken hover:text-danger"
+            title="Rewind to here (delete this and everything after)"
+            aria-label="Rewind to here — delete this message and everything after it"
+          >
+            <History size={13} strokeWidth={2} />
           </button>
           <button
             onClick={onDelete}

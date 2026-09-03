@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Sidebar, type ViewId } from '@/components/layout/Sidebar'
 import { CommandPalette } from '@/components/layout/CommandPalette'
+import { KeyboardShortcutsSheet } from '@/components/layout/KeyboardShortcutsSheet'
 import { ChatsPanel } from '@/components/chat/ChatsPanel'
 import { ChatWindow } from '@/components/chat/ChatWindow'
 import { WelcomeView } from '@/components/chat/WelcomeView'
@@ -62,6 +63,7 @@ export default function App() {
   const activeChatId = useSettingsStore((s) => s.activeChatId)
   const setActiveChatId = useSettingsStore((s) => s.setActiveChatId)
   const [showPalette, setShowPalette] = useState(false)
+  const [showShortcuts, setShowShortcuts] = useState(false)
   // Deep-link targets for the command palette's "jump to a character/world" — consumed (cleared)
   // by the view itself once it's actually opened that item's editor, not re-armed on every render.
   const [pendingCharacterId, setPendingCharacterId] = useState<string | null>(null)
@@ -72,6 +74,16 @@ export default function App() {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
         setShowPalette((v) => !v)
+        return
+      }
+      // `?` is a real character people type constantly — only treat it as the shortcuts-sheet
+      // shortcut when focus isn't in a text field, the same guard section 15's other new
+      // shortcut (arrow-key swipe, in ChatWindow) uses.
+      const target = e.target as HTMLElement | null
+      const typing = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable
+      if (e.key === '?' && !typing) {
+        e.preventDefault()
+        setShowShortcuts((v) => !v)
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -83,8 +95,15 @@ export default function App() {
       <Sidebar view={view} onChange={setView} onOpenPalette={() => setShowPalette(true)} />
       {/* The mobile bottom nav is `fixed`, out of normal flow — this padding keeps it from
           covering the last bit of content. No-op at `md` and up, where the rail is a sibling
-          taking its own column width instead. */}
-      <div className="flex flex-1 min-w-0 pb-14 md:pb-0">
+          taking its own column width instead.
+          `min-h-0` matters here: a flex item's default `min-height: auto` refuses to shrink
+          below its content's natural height, so on a short mobile viewport a tall VN scene (a
+          long reply plus a wrapped choice row) was measured growing this wrapper to 951px inside
+          an 812px-tall parent — pushing the composer below the actual screen, unreachable, not
+          just visually cramped. The same flexbox bug class already fixed once for the VN sprite
+          itself; this is the wrapper one level up that the earlier mobile pass didn't happen to
+          stress with tall-enough content to catch. */}
+      <div className="flex min-h-0 flex-1 min-w-0 pb-14 md:pb-0">
         {view === 'chat' && (
           <ChatSurface activeChatId={activeChatId} onSelect={setActiveChatId} onNavigate={setView} />
         )}
@@ -119,6 +138,7 @@ export default function App() {
           }}
         />
       )}
+      {showShortcuts && <KeyboardShortcutsSheet onClose={() => setShowShortcuts(false)} />}
     </div>
   )
 }

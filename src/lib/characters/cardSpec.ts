@@ -38,14 +38,18 @@ export interface LorebookEntry {
   selective: boolean
   insertion_order: number
   enabled: boolean
-  position?: 'before_char' | 'after_char'
+  position?: 'before_char' | 'after_char' | 'at_depth'
+  /** Only meaningful when `position` is `'at_depth'` — how many messages up from the latest to sit, same convention as `AuthorNote.depth`. 0 = immediately before the model replies. */
+  depth?: number
   case_sensitive?: boolean
   /** Not part of the upstream spec — mirrors ST's always/when-relevant/manual radio. Kept in sync with `constant`. */
   activationMode?: WorldInfoActivationMode
   /** 0-100 — a keyword match only fires this often even when otherwise matched. Doesn't apply to always/manual entries (see activation.ts). */
   probability?: number
-  /** Entries sharing a non-empty group name are mutually exclusive — only the highest-priority match in the group fires. */
+  /** Entries sharing a non-empty group name are mutually exclusive — only one match in the group fires. */
   group?: string
+  /** Optional weighted-random pick within a `group`, mirroring ST — if ANY entry in the group sets this, the winner is a weighted random draw across the whole group (unset weight defaults to 1) instead of the deterministic highest-`insertion_order`-wins rule that applies when no entry in the group sets it. */
+  groupWeight?: number
   extensions?: Record<string, unknown>
 }
 
@@ -226,7 +230,8 @@ function normalizeLorebook(raw: unknown): Lorebook | undefined {
       selective: !!e.selective,
       insertion_order: typeof e.insertion_order === 'number' ? e.insertion_order : 100,
       enabled: e.enabled === undefined ? !(e.disable === true) : !!e.enabled,
-      position: e.position === 'after_char' ? 'after_char' : 'before_char',
+      position: e.position === 'after_char' || e.position === 'at_depth' ? e.position : 'before_char',
+      depth: typeof e.depth === 'number' && e.depth >= 0 ? e.depth : undefined,
       case_sensitive: !!e.case_sensitive,
       activationMode,
       // ST only honors `probability` when `useProbability` is explicitly true; absent entirely,
@@ -234,6 +239,7 @@ function normalizeLorebook(raw: unknown): Lorebook | undefined {
       probability:
         typeof e.probability === 'number' && e.useProbability !== false ? e.probability : undefined,
       group: typeof e.group === 'string' && e.group.trim() ? e.group : undefined,
+      groupWeight: typeof e.groupWeight === 'number' && e.groupWeight >= 0 ? e.groupWeight : undefined,
       extensions: (e.extensions as Record<string, unknown>) ?? {},
     })
   }

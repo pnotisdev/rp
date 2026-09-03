@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { Button } from '@/components/ui/Button'
 
 type ModalSize = 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl'
@@ -32,6 +32,16 @@ interface ModalProps {
  * them — mb-3 vs mb-4 on the header, 80/85/88vh caps, p-6 vs p-4 inner cards).
  */
 export function Modal({ onClose, title, size = 'lg', scrollable, hideHeaderClose, headerExtra, children }: ModalProps) {
+  // Section 15's "discoverable keyboard shortcuts" — Escape-to-close, added once here rather than
+  // per-panel, so every modal built on this shell (there are over a dozen) gets it for free.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [onClose])
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div
