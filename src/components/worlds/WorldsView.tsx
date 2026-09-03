@@ -1,11 +1,12 @@
 import { useState } from 'react'
+import { Globe } from 'lucide-react'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { worldsApi } from '@/lib/api/client'
-import type { GiftItem, GiftRarity, WorldCard } from '@/lib/types'
+import type { GiftItem, GiftRarity, ItemDef, ItemEffect, RelationshipDimension, WorldCard } from '@/lib/types'
 import { fileToDataUrl } from '@/lib/characters/importExport'
 import { DEFAULT_BACKGROUNDS } from '@/lib/vn/backgrounds'
 import { formatRelationshipStage, RELATIONSHIP_MILESTONES } from '@/lib/dating/stage'
-import { advancePhase, getCalendarInfo, getWeather, describeWeather, PHASES } from '@/lib/world/calendar'
+import { advancePhase, getCalendarInfo, getEnergyRemaining, getMaxEnergyForDay, getWeather, describeWeather, PHASES } from '@/lib/world/calendar'
 import { newId } from '@/lib/id'
 import { TextAreaField, TextField } from '@/components/ui/Field'
 import { Button } from '@/components/ui/Button'
@@ -13,6 +14,16 @@ import { errorMessage, toastError } from '@/lib/store/useToastStore'
 import { LorebookEditor } from '@/components/worldinfo/LorebookEditor'
 
 const GIFT_RARITIES: GiftRarity[] = ['common', 'uncommon', 'rare', 'epic']
+const RELATIONSHIP_DELTA_DIMENSIONS: ('affection' | RelationshipDimension)[] = [
+  'affection',
+  'trust',
+  'chemistry',
+  'comfort',
+  'respect',
+  'curiosity',
+  'tension',
+]
+const SCENE_FLAG_OPTIONS = ['first_date', 'confession', 'jealousy', 'promise'] as const
 const EDITABLE_STAGES = ['acquaintances', 'warming_up', 'getting_close', 'close', 'sweethearts'] as const
 const DEFAULT_THRESHOLDS = Object.fromEntries(RELATIONSHIP_MILESTONES.map((m) => [m.stage, m.at])) as Record<
   (typeof EDITABLE_STAGES)[number] | 'near_strangers',
@@ -59,13 +70,15 @@ export function WorldsView() {
             onClick={() => setSelected(w)}
             className="themed-shadow group rounded-2xl bg-bg-elevated p-4 text-left transition-transform hover:-translate-y-0.5"
           >
-            {w.avatarDataUrl ? (
-              <img src={w.avatarDataUrl} className="mb-3 aspect-[3/4] w-full rounded-xl object-cover" />
-            ) : (
-              <div className="mb-3 flex aspect-[3/4] w-full items-center justify-center rounded-xl bg-bg-sunken text-2xl text-text-muted">
-                <span className="font-mono">~</span>
-              </div>
-            )}
+            <div className="portrait-frame mb-3 aspect-[3/4] w-full rounded-xl">
+              {w.avatarDataUrl ? (
+                <img src={w.avatarDataUrl} className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center bg-bg-sunken text-text-muted">
+                  <Globe size={28} strokeWidth={1.5} />
+                </div>
+              )}
+            </div>
             <div className="truncate text-sm font-medium text-text">{w.name}</div>
             <div className="truncate text-xs text-text-muted">{w.lorebook.entries.length} lore entries</div>
           </button>
@@ -91,6 +104,7 @@ function WorldEditor({ world, onDone }: { world: WorldCard | null; onDone: () =>
   const [backgrounds, setBackgrounds] = useState<Record<string, string>>(base.backgrounds ?? {})
   const [backgroundUnlocks, setBackgroundUnlocks] = useState<Record<string, number>>(base.backgroundUnlocks ?? {})
   const [gifts, setGifts] = useState<GiftItem[]>(base.gifts ?? [])
+  const [items, setItems] = useState<ItemDef[]>(base.items ?? [])
   const [thresholds, setThresholds] = useState(base.relationshipThresholds ?? {})
   const [currentDay, setCurrentDay] = useState(base.currentDay ?? 0)
   const [currentPhaseIndex, setCurrentPhaseIndex] = useState(base.currentPhaseIndex ?? 0)
@@ -107,6 +121,7 @@ function WorldEditor({ world, onDone }: { world: WorldCard | null; onDone: () =>
           backgrounds,
           backgroundUnlocks,
           gifts,
+          items,
           relationshipThresholds: thresholds,
           currentDay,
           currentPhaseIndex,
@@ -121,6 +136,7 @@ function WorldEditor({ world, onDone }: { world: WorldCard | null; onDone: () =>
           backgrounds,
           backgroundUnlocks,
           gifts,
+          items,
           relationshipThresholds: thresholds,
         })
       }
@@ -141,6 +157,36 @@ function WorldEditor({ world, onDone }: { world: WorldCard | null; onDone: () =>
 
   const removeGift = (id: string) => {
     setGifts((g) => g.filter((item) => item.id !== id))
+  }
+
+  const addItem = () => {
+    setItems((list) => [
+      ...list,
+      { id: newId(), name: `Item ${list.length + 1}`, rarity: 'common', price: 5, tags: [], effect: { kind: 'relationship', dimension: 'affection', amount: 1 } },
+    ])
+  }
+
+  const updateItem = (id: string, patch: Partial<ItemDef>) => {
+    setItems((list) => list.map((i) => (i.id === id ? { ...i, ...patch } : i)))
+  }
+
+  /** Switching effect kind replaces the effect with clean defaults, rather than merging, so a leftover `dimension`/`flag`/`amount` from the previous kind never lingers unseen in what gets saved. */
+  const setItemEffectKind = (id: string, kind: ItemEffect['kind']) => {
+    const next: ItemEffect =
+      kind === 'flag'
+        ? { kind: 'flag', flag: 'first_date' }
+        : kind === 'currency'
+          ? { kind: 'currency', amount: 5 }
+          : { kind: 'relationship', dimension: 'affection', amount: 1 }
+    updateItem(id, { effect: next })
+  }
+
+  const setItemEffectField = (id: string, patch: Partial<ItemEffect>) => {
+    setItems((list) => list.map((i) => (i.id === id ? { ...i, effect: { ...i.effect, ...patch } as ItemEffect } : i)))
+  }
+
+  const removeItem = (id: string) => {
+    setItems((list) => list.filter((i) => i.id !== id))
   }
 
   const setThreshold = (stage: (typeof EDITABLE_STAGES)[number], value: string) => {
@@ -252,6 +298,9 @@ function WorldEditor({ world, onDone }: { world: WorldCard | null; onDone: () =>
                 {' · '}
                 {PHASES[currentPhaseIndex]}, {describeWeather(weather)}. Shared by every chat in this world;
                 advancing it moves every character's mood/weather forward with it.
+                <br />
+                {getEnergyRemaining(currentDay, currentPhaseIndex)}/{getMaxEnergyForDay(currentDay)} actions left
+                today — starting a date spends one; running out ends the day.
               </p>
             )
           })()}
@@ -259,6 +308,9 @@ function WorldEditor({ world, onDone }: { world: WorldCard | null; onDone: () =>
             → Advance to {PHASES[(currentPhaseIndex + 1) % PHASES.length]}
             {currentPhaseIndex === PHASES.length - 1 ? ' (next day)' : ''}
           </Button>
+          <p className="mt-1.5 text-[11px] text-text-muted">
+            This button is a manual authoring/testing step — it doesn't spend an action.
+          </p>
         </div>
       )}
 
@@ -385,6 +437,112 @@ function WorldEditor({ world, onDone }: { world: WorldCard | null; onDone: () =>
             </div>
           ))}
           <Button onClick={addGift}>+ Add gift</Button>
+        </div>
+      </details>
+
+      <details className="mb-8 rounded-2xl bg-bg-elevated p-6">
+        <summary className="cursor-pointer text-sm font-medium text-text">
+          Item catalog ({items.length})
+        </summary>
+        <p className="mt-2 mb-3 text-xs text-text-muted">
+          Consumables and trinkets, separate from gifts — used from the Bag for an immediate,
+          authored effect (a relationship nudge, a scene flag, or coins) rather than given to a
+          character in a scene. No built-in default catalog; leave empty for no items at all.
+        </p>
+        <div className="space-y-2">
+          {items.map((item) => (
+            <div key={item.id} className="space-y-2 rounded-xl bg-bg-sunken p-3">
+              <div className="grid grid-cols-1 items-end gap-2 sm:grid-cols-[1fr_120px_90px_auto]">
+                <TextField label="Name" value={item.name} onChange={(e) => updateItem(item.id, { name: e.target.value })} />
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-text-muted">Rarity</span>
+                  <select
+                    value={item.rarity}
+                    onChange={(e) => updateItem(item.id, { rarity: e.target.value as GiftRarity })}
+                    className="w-full rounded-xl bg-bg-elevated px-3 py-2 text-sm text-text outline-none"
+                  >
+                    {GIFT_RARITIES.map((r) => (
+                      <option key={r} value={r}>
+                        {r}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <TextField
+                  label="Price"
+                  type="number"
+                  value={item.price}
+                  onChange={(e) => updateItem(item.id, { price: Math.max(0, Number(e.target.value) || 0) })}
+                />
+                <Button variant="ghost" onClick={() => removeItem(item.id)}>
+                  Remove
+                </Button>
+              </div>
+              <div className="grid grid-cols-1 items-end gap-2 sm:grid-cols-3">
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-text-muted">Effect</span>
+                  <select
+                    value={item.effect.kind}
+                    onChange={(e) => setItemEffectKind(item.id, e.target.value as ItemEffect['kind'])}
+                    className="w-full rounded-xl bg-bg-elevated px-3 py-2 text-sm text-text outline-none"
+                  >
+                    <option value="relationship">Relationship boost</option>
+                    <option value="flag">Set scene flag</option>
+                    <option value="currency">Grant coins</option>
+                  </select>
+                </label>
+                {item.effect.kind === 'relationship' && (
+                  <>
+                    <label className="block">
+                      <span className="mb-1 block text-xs font-medium text-text-muted">Dimension</span>
+                      <select
+                        value={item.effect.dimension}
+                        onChange={(e) => setItemEffectField(item.id, { dimension: e.target.value as (typeof RELATIONSHIP_DELTA_DIMENSIONS)[number] })}
+                        className="w-full rounded-xl bg-bg-elevated px-3 py-2 text-sm text-text outline-none"
+                      >
+                        {RELATIONSHIP_DELTA_DIMENSIONS.map((d) => (
+                          <option key={d} value={d}>
+                            {d}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <TextField
+                      label="Amount"
+                      type="number"
+                      value={item.effect.amount}
+                      onChange={(e) => setItemEffectField(item.id, { amount: Math.max(-10, Math.min(10, Number(e.target.value) || 0)) })}
+                    />
+                  </>
+                )}
+                {item.effect.kind === 'flag' && (
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-medium text-text-muted">Flag</span>
+                    <select
+                      value={item.effect.flag}
+                      onChange={(e) => setItemEffectField(item.id, { flag: e.target.value as (typeof SCENE_FLAG_OPTIONS)[number] })}
+                      className="w-full rounded-xl bg-bg-elevated px-3 py-2 text-sm text-text outline-none"
+                    >
+                      {SCENE_FLAG_OPTIONS.map((f) => (
+                        <option key={f} value={f}>
+                          {f.replace('_', ' ')}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                {item.effect.kind === 'currency' && (
+                  <TextField
+                    label="Coins"
+                    type="number"
+                    value={item.effect.amount}
+                    onChange={(e) => setItemEffectField(item.id, { amount: Math.max(0, Number(e.target.value) || 0) })}
+                  />
+                )}
+              </div>
+            </div>
+          ))}
+          <Button onClick={addItem}>+ Add item</Button>
         </div>
       </details>
 

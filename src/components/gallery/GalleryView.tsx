@@ -62,6 +62,8 @@ export function GalleryView() {
         {characters.map((character) => {
           const gallery = character.gallery ?? []
           if (gallery.length === 0) return null
+          const cgs = gallery.filter((g) => !g.isEnding)
+          const endings = gallery.filter((g) => g.isEnding)
           const unlocked = unlockedByCharacter.get(character.id) ?? new Set<string>()
           const affection = affectionByCharacter.get(character.id) ?? 0
           return (
@@ -72,36 +74,72 @@ export function GalleryView() {
                   {unlocked.size}/{gallery.length} unlocked • affection {affection}
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-                {gallery.map((entry) => {
-                  const unlockedByStory = unlocked.has(entry.id)
-                  const unlockedByAffection = affection >= entry.unlockAffection
-                  const isUnlocked = unlockedByStory || unlockedByAffection
-                  return (
-                    <div key={entry.id} className="group relative overflow-hidden rounded-2xl border border-border bg-bg-elevated">
-                      {entry.imageUrl ? (
-                        <img
-                          src={entry.imageUrl}
-                          className={`aspect-[4/3] w-full object-cover transition-transform duration-300 ${isUnlocked ? 'group-hover:scale-[1.03]' : 'blur-sm grayscale'}`}
-                        />
-                      ) : (
-                        <div className="flex aspect-[4/3] w-full items-center justify-center text-xs text-text-muted">No art</div>
-                      )}
-                      {!isUnlocked && (
-                        <div className="absolute inset-0 flex items-center justify-center bg-black/40">
-                          <div className="rounded-xl bg-black/60 px-2.5 py-1 text-xs text-white">
-                            Unlock at {entry.unlockAffection}
+              {cgs.length > 0 && (
+                <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+                  {cgs.map((entry) => {
+                    const isUnlocked = unlocked.has(entry.id) || affection >= entry.unlockAffection
+                    return (
+                      <div key={entry.id} className="group relative overflow-hidden rounded-2xl border border-border bg-bg-elevated">
+                        {entry.imageUrl ? (
+                          <img
+                            src={entry.imageUrl}
+                            className={`aspect-[4/3] w-full object-cover transition-transform duration-300 ${isUnlocked ? 'group-hover:scale-[1.03]' : 'blur-sm grayscale'}`}
+                          />
+                        ) : (
+                          <div className="flex aspect-[4/3] w-full items-center justify-center text-xs text-text-muted">No art</div>
+                        )}
+                        {!isUnlocked && (
+                          <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+                            <div className="rounded-xl bg-black/60 px-2.5 py-1 text-xs text-white">
+                              Unlock at {entry.unlockAffection}
+                            </div>
+                          </div>
+                        )}
+                        <div className="p-3">
+                          <div className="text-xs font-medium text-text">{entry.title}</div>
+                          {entry.unlockHint && <div className="mt-1 text-[11px] text-text-muted">{entry.unlockHint}</div>}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+              {endings.length > 0 && (
+                <div className="mt-5">
+                  <div className="mb-2.5 text-xs font-semibold uppercase tracking-wide text-romance">Endings</div>
+                  <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+                    {endings.map((entry) => {
+                      // Endings unlock only via reaching Sweethearts (see `unlockedEndingIds`) — never
+                      // through `unlockAffection`, which is unused/ignored for `isEnding` entries.
+                      const isUnlocked = unlocked.has(entry.id)
+                      return (
+                        <div
+                          key={entry.id}
+                          className={`group relative overflow-hidden rounded-2xl border bg-bg-elevated ${isUnlocked ? 'border-romance themed-shadow' : 'border-border'}`}
+                        >
+                          {entry.imageUrl ? (
+                            <img
+                              src={entry.imageUrl}
+                              className={`aspect-[4/3] w-full object-cover transition-transform duration-300 ${isUnlocked ? 'group-hover:scale-[1.03]' : 'blur-sm grayscale'}`}
+                            />
+                          ) : (
+                            <div className="flex aspect-[4/3] w-full items-center justify-center text-xs text-text-muted">No art</div>
+                          )}
+                          {!isUnlocked && (
+                            <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+                              <div className="rounded-xl bg-black/60 px-2.5 py-1 text-xs text-white">Reach Sweethearts</div>
+                            </div>
+                          )}
+                          <div className="p-3">
+                            <div className="text-xs font-medium text-text">{entry.title}</div>
+                            {entry.unlockHint && <div className="mt-1 text-[11px] text-text-muted">{entry.unlockHint}</div>}
                           </div>
                         </div>
-                      )}
-                      <div className="p-3">
-                        <div className="text-xs font-medium text-text">{entry.title}</div>
-                        {entry.unlockHint && <div className="mt-1 text-[11px] text-text-muted">{entry.unlockHint}</div>}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
             </section>
           )
         })}

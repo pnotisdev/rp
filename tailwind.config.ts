@@ -30,6 +30,10 @@ export default {
         'msg-user': 'rgb(var(--c-msg-user) / <alpha-value>)',
         'msg-char': 'rgb(var(--c-msg-char) / <alpha-value>)',
         danger: 'rgb(var(--c-danger) / <alpha-value>)',
+        success: 'rgb(var(--c-success) / <alpha-value>)',
+        warning: 'rgb(var(--c-warning) / <alpha-value>)',
+        romance: 'rgb(var(--c-romance) / <alpha-value>)',
+        'romance-text': 'rgb(var(--c-romance-text) / <alpha-value>)',
       },
       borderRadius: {
         DEFAULT: 'var(--radius)',

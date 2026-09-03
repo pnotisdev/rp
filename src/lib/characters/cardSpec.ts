@@ -24,6 +24,8 @@ export interface GalleryEntry {
   unlockAffection: number
   unlockHint?: string
   requiredFlags?: string[]
+  /** A once-per-relationship epilogue (10c's "Endings gallery") — unlocks the moment warmth reaches the top "sweethearts" stage, not through `unlockAffection`/story-beat detection like an ordinary CG. */
+  isEnding?: boolean
 }
 
 export interface LorebookEntry {
@@ -96,6 +98,16 @@ export interface Character {
   customExpressions?: CustomExpression[]
   /** Gift preference score per gift id (-2..3) used by the gift economy to affect relationship gain. */
   giftPreferences?: Record<string, number>
+  /**
+   * Authored gift taste (10d's "Authored reactions") — richer than the numeric `giftPreferences`
+   * score above, which only ever drives the affection delta, never the model's own reaction text.
+   * Free text rather than a fixed catalog, so it reads naturally in a fed-in prompt line and isn't
+   * limited to gifts already in the catalog (a character can love "anything handmade" in general).
+   */
+  giftLikes?: string[]
+  giftDislikes?: string[]
+  /** Free text — how this character feels most loved/appreciated, e.g. "quality time" or "acts of service". */
+  loveLanguage?: string
   /** Unlockable CG-like gallery entries for this character. */
   gallery?: GalleryEntry[]
   /** Optional narrative starting points offered when creating a new chat with this character. */

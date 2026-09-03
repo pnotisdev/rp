@@ -20,6 +20,10 @@ export const DEFAULT_THEME_TOKENS: Record<string, string> = {
   '--c-msg-user': '13 121 105',
   '--c-msg-char': '255 255 255',
   '--c-danger': '197 48 48',
+  '--c-success': '22 130 74',
+  '--c-warning': '180 108 8',
+  '--c-romance': '201 63 122',
+  '--c-romance-text': '255 255 255',
 }
 
 export const DEFAULT_THEME_TOKENS_DARK: Record<string, string> = {
@@ -34,6 +38,10 @@ export const DEFAULT_THEME_TOKENS_DARK: Record<string, string> = {
   '--c-msg-user': '94 224 197',
   '--c-msg-char': '26 27 27',
   '--c-danger': '240 120 120',
+  '--c-success': '94 220 150',
+  '--c-warning': '240 190 90',
+  '--c-romance': '236 108 184',
+  '--c-romance-text': '12 13 13',
 }
 
 export const DEFAULT_SAMPLER: GenerationParams = {
@@ -125,6 +133,9 @@ interface SettingsState {
 
   sidebarExpanded: boolean
   setSidebarExpanded: (v: boolean) => void
+
+  chatsPanelCollapsed: boolean
+  setChatsPanelCollapsed: (v: boolean) => void
 
   // long-term memory
   autoSummarize: boolean
@@ -224,6 +235,9 @@ export const useSettingsStore = create<SettingsState>()(
       sidebarExpanded: false,
       setSidebarExpanded: (v) => set({ sidebarExpanded: v }),
 
+      chatsPanelCollapsed: false,
+      setChatsPanelCollapsed: (v) => set({ chatsPanelCollapsed: v }),
+
       autoSummarize: true,
       keepRecentMessages: 12,
       summaryDetail: 'concise',
@@ -249,6 +263,23 @@ export const useSettingsStore = create<SettingsState>()(
       ttsVoice: '',
       setVoiceConfig: (patch) => set(patch),
     }),
-    { name: 'rp-settings' },
+    {
+      name: 'rp-settings',
+      // zustand's default merge is shallow — a token object already in localStorage (from before
+      // this key existed) would otherwise fully replace the default object instead of layering
+      // over it, permanently hiding any new token/param this app ships later behind `undefined`
+      // for every returning user. Deep-merging just these three keeps a user's customized values
+      // while still backfilling new ones with their default.
+      merge: (persisted, current) => {
+        const p = (persisted ?? {}) as Partial<SettingsState>
+        return {
+          ...current,
+          ...p,
+          themeTokensLight: { ...current.themeTokensLight, ...p.themeTokensLight },
+          themeTokensDark: { ...current.themeTokensDark, ...p.themeTokensDark },
+          sampler: { ...current.sampler, ...p.sampler },
+        }
+      },
+    },
   ),
 )

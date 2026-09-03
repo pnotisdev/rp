@@ -9,6 +9,8 @@ import { Slider } from '@/components/ui/Slider'
 import { Toggle } from '@/components/ui/Toggle'
 import { Button } from '@/components/ui/Button'
 import { TextField } from '@/components/ui/Field'
+import { Section } from '@/components/ui/Section'
+import { SettingsPage } from '@/components/ui/SettingsPage'
 
 // Simple-mode sliders derive several raw params from one intuitive 0-100 value each.
 function creativityToParams(v: number) {
@@ -93,150 +95,131 @@ export function SamplingControls() {
   }
 
   return (
-    <div className="max-w-2xl space-y-14">
-      <section>
-        <h3 className="mb-3 text-sm font-semibold text-text">Context & length</h3>
-        <div className="rounded-2xl bg-bg-elevated p-6">
-          <Slider
-            label="Max context length"
-            min={512}
-            max={131072}
-            step={512}
-            value={sampler.max_context_length}
-            onChange={(v) => setSampler({ max_context_length: v })}
-            formatValue={(v) => `${v.toLocaleString()} tok`}
-          />
-          <Slider
-            label="Max response length"
-            min={16}
-            max={4096}
-            step={16}
-            value={sampler.max_length}
-            onChange={(v) => setSampler({ max_length: v })}
-            formatValue={(v) => `${v} tok`}
-          />
-        </div>
-      </section>
+    <SettingsPage>
+      <Section title="Context & length">
+        <Slider
+          label="Max context length"
+          min={512}
+          max={131072}
+          step={512}
+          value={sampler.max_context_length}
+          onChange={(v) => setSampler({ max_context_length: v })}
+          formatValue={(v) => `${v.toLocaleString()} tok`}
+        />
+        <Slider
+          label="Max response length"
+          min={16}
+          max={4096}
+          step={16}
+          value={sampler.max_length}
+          onChange={(v) => setSampler({ max_length: v })}
+          formatValue={(v) => `${v} tok`}
+        />
+      </Section>
 
-      <section>
-        <h3 className="mb-1 text-sm font-semibold text-text">Long-term memory</h3>
-        <p className="mb-3 text-xs text-text-muted">
-          Once a chat outgrows the context window, older turns are folded into a running summary by
-          the connected model instead of being silently dropped.
-        </p>
-        <div className="rounded-2xl bg-bg-elevated p-6">
-          <Toggle
-            checked={autoSummarize}
-            onChange={setAutoSummarize}
-            label="Auto-summarize older history"
-            description="Runs after each reply, and proactively if a turn is about to hit the context limit"
-          />
-          <Slider
-            label="Keep verbatim"
-            min={4}
-            max={40}
-            step={2}
-            value={keepRecentMessages}
-            onChange={setKeepRecentMessages}
-            formatValue={(v) => `${v} messages`}
-            description="Recent messages kept word-for-word; anything older gets summarized"
-          />
-          <div className="pt-3">
-            <div className="mb-1.5 text-sm text-text">Summary detail</div>
-            <div className="flex gap-2">
-              {(['concise', 'detailed'] as const).map((d) => (
-                <button
-                  key={d}
-                  onClick={() => setSummaryDetail(d)}
-                  className={`flex-1 rounded-xl px-3 py-2 text-sm capitalize transition-colors ${
-                    summaryDetail === d ? 'bg-accent/10 text-accent' : 'bg-bg-sunken text-text-muted'
-                  }`}
-                >
-                  {d}
-                </button>
-              ))}
-            </div>
-            <p className="mt-1.5 text-xs text-text-muted">
-              Concise trades detail for fewer tokens spent on memory; detailed keeps more texture at a
-              higher ongoing cost.
-            </p>
+      <Section
+        title="Long-term memory"
+        description="Once a chat outgrows the context window, older turns are folded into a running summary by the connected model instead of being silently dropped."
+      >
+        <Toggle
+          checked={autoSummarize}
+          onChange={setAutoSummarize}
+          label="Auto-summarize older history"
+          description="Runs after each reply, and proactively if a turn is about to hit the context limit"
+        />
+        <Slider
+          label="Keep verbatim"
+          min={4}
+          max={40}
+          step={2}
+          value={keepRecentMessages}
+          onChange={setKeepRecentMessages}
+          formatValue={(v) => `${v} messages`}
+          description="Recent messages kept word-for-word; anything older gets summarized"
+        />
+        <div className="pt-3">
+          <div className="mb-1.5 text-sm text-text">Summary detail</div>
+          <div className="flex gap-2">
+            {(['concise', 'detailed'] as const).map((d) => (
+              <button
+                key={d}
+                onClick={() => setSummaryDetail(d)}
+                className={`flex-1 rounded-xl px-3 py-2 text-sm capitalize transition-colors ${
+                  summaryDetail === d ? 'bg-accent/10 text-accent' : 'bg-bg-sunken text-text-muted'
+                }`}
+              >
+                {d}
+              </button>
+            ))}
           </div>
+          <p className="mt-1.5 text-xs text-text-muted">
+            Concise trades detail for fewer tokens spent on memory; detailed keeps more texture at a
+            higher ongoing cost.
+          </p>
         </div>
-      </section>
+      </Section>
 
-      <section>
-        <h3 className="mb-1 text-sm font-semibold text-text">Objectives</h3>
-        <p className="mb-3 text-xs text-text-muted">
-          Set a goal from a chat's → button and the character's replies steer toward it. Tasks can be
-          checked off by hand, or detected automatically as they happen in the scene.
-        </p>
-        <div className="rounded-2xl bg-bg-elevated p-6">
-          <Toggle
-            checked={autoDetectTasks}
-            onChange={setAutoDetectTasks}
-            label="Auto-detect completed tasks"
-            description="A quick check after each reply — conservative by design, so it only ever checks things off, never invents progress"
-          />
-        </div>
-      </section>
+      <Section
+        title="Objectives"
+        description="Set a goal from a chat's Target button and the character's replies steer toward it. Tasks can be checked off by hand, or detected automatically as they happen in the scene."
+      >
+        <Toggle
+          checked={autoDetectTasks}
+          onChange={setAutoDetectTasks}
+          label="Auto-detect completed tasks"
+          description="A quick check after each reply — conservative by design, so it only ever checks things off, never invents progress"
+        />
+      </Section>
 
-      <section>
-        <h3 className="mb-1 text-sm font-semibold text-text">Relationship tracking</h3>
-        <p className="mb-3 text-xs text-text-muted">
-          Scores affection and six relationship dimensions after each reply, gating gift/sprite/
-          background/gallery unlocks — turn off for a chat you don't want dating-sim mechanics in.
-        </p>
-        <div className="rounded-2xl bg-bg-elevated p-6">
-          <Toggle
-            checked={autoTrackRelationship}
-            onChange={setAutoTrackRelationship}
-            label="Auto-track relationship"
-            description="Runs in the background right after a reply lands — never blocks or delays it"
-          />
-          <div className="pt-3">
-            <div className="mb-1.5 text-sm text-text">Difficulty</div>
-            <div className="flex gap-2">
-              {(['gentle', 'normal', 'harsh'] as const).map((d) => (
-                <button
-                  key={d}
-                  onClick={() => setRelationshipDifficulty(d)}
-                  className={`flex-1 rounded-xl px-3 py-2 text-sm capitalize transition-colors ${
-                    relationshipDifficulty === d ? 'bg-accent/10 text-accent' : 'bg-bg-sunken text-text-muted'
-                  }`}
-                >
-                  {d}
-                </button>
-              ))}
-            </div>
-            <p className="mt-1.5 text-xs text-text-muted">
-              How far affection and relationship stats swing on any given moment or date — never what
-              a character says or how a scene plays out. Gentle softens the swings, harsh sharpens them.
-            </p>
+      <Section
+        title="Relationship tracking"
+        description="Scores affection and six relationship dimensions after each reply, gating gift/sprite/background/gallery unlocks — turn off for a chat you don't want dating-sim mechanics in."
+      >
+        <Toggle
+          checked={autoTrackRelationship}
+          onChange={setAutoTrackRelationship}
+          label="Auto-track relationship"
+          description="Runs in the background right after a reply lands — never blocks or delays it"
+        />
+        <div className="pt-3">
+          <div className="mb-1.5 text-sm text-text">Difficulty</div>
+          <div className="flex gap-2">
+            {(['gentle', 'normal', 'harsh'] as const).map((d) => (
+              <button
+                key={d}
+                onClick={() => setRelationshipDifficulty(d)}
+                className={`flex-1 rounded-xl px-3 py-2 text-sm capitalize transition-colors ${
+                  relationshipDifficulty === d ? 'bg-accent/10 text-accent' : 'bg-bg-sunken text-text-muted'
+                }`}
+              >
+                {d}
+              </button>
+            ))}
           </div>
+          <p className="mt-1.5 text-xs text-text-muted">
+            How far affection and relationship stats swing on any given moment or date — never what
+            a character says or how a scene plays out. Gentle softens the swings, harsh sharpens them.
+          </p>
         </div>
-      </section>
+      </Section>
 
-      <section>
-        <h3 className="mb-1 text-sm font-semibold text-text">Roleplay choices</h3>
-        <p className="mb-3 text-xs text-text-muted">
-          A few suggested next lines/actions appear above the composer after each reply — pick one to
-          steer the scene forward, or ignore them and write your own.
-        </p>
-        <div className="rounded-2xl bg-bg-elevated p-6">
-          <Toggle
-            checked={autoSuggestChoices}
-            onChange={setAutoSuggestChoices}
-            label="Suggest choices after each reply"
-            description="Runs in the background right after a reply lands — never blocks or delays it"
-          />
-        </div>
-      </section>
+      <Section
+        title="Roleplay choices"
+        description="A few suggested next lines/actions appear above the composer after each reply — pick one to steer the scene forward, or ignore them and write your own."
+      >
+        <Toggle
+          checked={autoSuggestChoices}
+          onChange={setAutoSuggestChoices}
+          label="Suggest choices after each reply"
+          description="Runs in the background right after a reply lands — never blocks or delays it"
+        />
+      </Section>
 
-      <section>
-        <h3 className="mb-1 text-sm font-semibold text-text">Instruct template</h3>
-        <p className="mb-2 text-xs text-text-muted">
-          How turns are formatted for the model. Match this to your model's training format.
-        </p>
+      <Section
+        title="Instruct template"
+        description="How turns are formatted for the model. Match this to your model's training format."
+        surface="bare"
+      >
         <select
           value={instructTemplateId}
           onChange={(e) => setInstructTemplateId(e.target.value)}
@@ -248,14 +231,13 @@ export function SamplingControls() {
             </option>
           ))}
         </select>
-      </section>
+      </Section>
 
-      <section>
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-text">Generation</h3>
-          <Toggle checked={advancedSamplerMode} onChange={setAdvancedSamplerMode} label="Advanced mode" />
-        </div>
-
+      <Section
+        title="Generation"
+        surface="bare"
+        action={<Toggle checked={advancedSamplerMode} onChange={setAdvancedSamplerMode} label="Advanced mode" />}
+      >
         <div className="mb-3 flex flex-wrap gap-2">
           {BUILTIN_PRESETS.map((p) => (
             <Button key={p.name} onClick={() => setSampler(p.params)}>
@@ -265,7 +247,7 @@ export function SamplingControls() {
         </div>
 
         {!advancedSamplerMode ? (
-          <div className="rounded-2xl bg-bg-elevated p-6">
+          <div className="rounded-xl bg-bg-elevated p-5">
             <Slider
               label="Creativity"
               min={0}
@@ -292,7 +274,7 @@ export function SamplingControls() {
             />
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1 rounded-2xl bg-bg-elevated p-6 sm:grid-cols-3">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 rounded-xl bg-bg-elevated p-5 sm:grid-cols-3">
             {ADVANCED_FIELDS.map((f) => (
               <TextField
                 key={f.key}
@@ -315,10 +297,9 @@ export function SamplingControls() {
             />
           </div>
         )}
-      </section>
+      </Section>
 
-      <section>
-        <h3 className="mb-3 text-sm font-semibold text-text">Presets</h3>
+      <Section title="Presets" surface="bare">
         <TextField label="Preset name" value={presetName} onChange={(e) => setPresetName(e.target.value)} />
         <div className="flex flex-wrap gap-2">
           <Button variant="primary" onClick={savePreset}>
@@ -351,7 +332,7 @@ export function SamplingControls() {
             ))}
           </div>
         )}
-      </section>
-    </div>
+      </Section>
+    </SettingsPage>
   )
 }

@@ -9,6 +9,7 @@ import { DEFAULT_EXPRESSIONS, slugifyExpressionId, type CustomExpression } from 
 import { newId } from '@/lib/id'
 import { TextAreaField, TextField } from '@/components/ui/Field'
 import { Button } from '@/components/ui/Button'
+import { Toggle } from '@/components/ui/Toggle'
 import { errorMessage, toastError, toastSuccess } from '@/lib/store/useToastStore'
 import { TTS_PROVIDER_LABELS, type TtsProviderId } from '@/lib/voice/ttsProviders'
 import { GenerateCharacterDialog } from './GenerateCharacterDialog'
@@ -44,6 +45,9 @@ export function CharacterEditor({
   const [customExpressions, setCustomExpressions] = useState<CustomExpression[]>(character?.customExpressions ?? [])
   const [newExpressionLabel, setNewExpressionLabel] = useState('')
   const [giftPreferences, setGiftPreferences] = useState<Record<string, number>>(character?.giftPreferences ?? {})
+  const [giftLikes, setGiftLikes] = useState<string[]>(character?.giftLikes ?? [])
+  const [giftDislikes, setGiftDislikes] = useState<string[]>(character?.giftDislikes ?? [])
+  const [loveLanguage, setLoveLanguage] = useState(character?.loveLanguage ?? '')
   const [gallery, setGallery] = useState<GalleryEntry[]>(character?.gallery ?? [])
   const [relationshipStarters, setRelationshipStarters] = useState<RelationshipStarter[]>(
     character?.relationshipStarters ?? [],
@@ -68,6 +72,9 @@ export function CharacterEditor({
     setCustomExpressions(character?.customExpressions ?? [])
     setNewExpressionLabel('')
     setGiftPreferences(character?.giftPreferences ?? {})
+    setGiftLikes(character?.giftLikes ?? [])
+    setGiftDislikes(character?.giftDislikes ?? [])
+    setLoveLanguage(character?.loveLanguage ?? '')
     setGallery(character?.gallery ?? [])
     setRelationshipStarters(character?.relationshipStarters ?? [])
     setVoiceProvider(character?.voice?.provider ?? '')
@@ -122,6 +129,9 @@ export function CharacterEditor({
           spriteUnlocks,
           customExpressions: customExpressions.length ? customExpressions : undefined,
           giftPreferences,
+          giftLikes: giftLikes.length ? giftLikes : undefined,
+          giftDislikes: giftDislikes.length ? giftDislikes : undefined,
+          loveLanguage: loveLanguage.trim() || undefined,
           gallery,
           relationshipStarters,
           voice,
@@ -138,6 +148,9 @@ export function CharacterEditor({
           spriteUnlocks,
           customExpressions: customExpressions.length ? customExpressions : undefined,
           giftPreferences,
+          giftLikes: giftLikes.length ? giftLikes : undefined,
+          giftDislikes: giftDislikes.length ? giftDislikes : undefined,
+          loveLanguage: loveLanguage.trim() || undefined,
           gallery,
           relationshipStarters,
           voice,
@@ -176,6 +189,30 @@ export function CharacterEditor({
   const handleSpritePick = async (expressionId: string, file: File) => {
     const dataUrl = await fileToDataUrl(file)
     setSprites((s) => ({ ...s, [expressionId]: dataUrl }))
+  }
+
+  /**
+   * Bulk sprite upload: pick every expression image at once, matched to a slot by filename
+   * (`laughing.png` -> the `laughing` expression) instead of one at a time per slot — the natural
+   * shape for art that was already generated/exported with expression-named files.
+   */
+  const handleBulkSpritePick = async (files: FileList) => {
+    const knownIds = new Set([...DEFAULT_EXPRESSIONS.map((e) => e.id), ...customExpressions.map((e) => e.id)])
+    const matched: string[] = []
+    const unmatched: string[] = []
+    const updates: Record<string, string> = {}
+    for (const file of Array.from(files)) {
+      const baseName = file.name.replace(/\.[^.]+$/, '').toLowerCase().trim()
+      if (knownIds.has(baseName)) {
+        updates[baseName] = await fileToDataUrl(file)
+        matched.push(baseName)
+      } else {
+        unmatched.push(file.name)
+      }
+    }
+    if (Object.keys(updates).length > 0) setSprites((s) => ({ ...s, ...updates }))
+    if (matched.length > 0) toastSuccess(`Matched ${matched.length} expression${matched.length === 1 ? '' : 's'}: ${matched.join(', ')}`)
+    if (unmatched.length > 0) toastError(`No matching expression for: ${unmatched.join(', ')} — rename to match an expression id, or add a custom expression with that id first.`)
   }
 
   const removeSprite = (expressionId: string) => {
@@ -449,6 +486,16 @@ export function CharacterEditor({
           for anything the default set doesn't cover — a signature smirk unique to this character,
           say.
         </p>
+        <label className="mb-3 inline-flex cursor-pointer items-center gap-2 rounded-xl bg-bg-sunken px-3 py-2 text-xs text-text-muted hover:text-text">
+          + Bulk upload by filename (e.g. laughing.png → Laughing)
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            multiple
+            className="hidden"
+            onChange={(e) => e.target.files && e.target.files.length > 0 && handleBulkSpritePick(e.target.files)}
+          />
+        </label>
         <div className="grid grid-cols-3 gap-3 sm:grid-cols-4">
           {[...DEFAULT_EXPRESSIONS, ...customExpressions.map((e) => ({ ...e, emoji: '✨' }))].map((exp) => {
             const isCustom = customExpressions.some((c) => c.id === exp.id)
@@ -595,6 +642,12 @@ export function CharacterEditor({
                   placeholder="first_date, confession"
                 />
               </div>
+              <Toggle
+                checked={entry.isEnding ?? false}
+                onChange={(v) => updateGalleryEntry(entry.id, { isEnding: v || undefined })}
+                label="Ending"
+                description="Unlocks the moment the relationship reaches Sweethearts, ignoring the unlock affection/flags above — a once-per-relationship epilogue, shown separately in the Gallery tab."
+              />
             </div>
           ))}
           <Button onClick={addGalleryEntry}>+ Add CG entry</Button>
@@ -605,6 +658,32 @@ export function CharacterEditor({
         <summary className="cursor-pointer text-sm font-medium text-text">Gift preferences</summary>
         <p className="mt-2 mb-3 text-xs text-text-muted">
           Controls how much affection each gift tends to add: -2 disliked, 0 neutral, 3 favorite.
+        </p>
+        <div className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <TextField
+            label="Loves gifts like"
+            value={giftLikes.join(', ')}
+            onChange={(e) => setGiftLikes(e.target.value.split(',').map((v) => v.trim()).filter(Boolean))}
+            placeholder="thoughtful books, anything handmade"
+          />
+          <TextField
+            label="Not moved by gifts like"
+            value={giftDislikes.join(', ')}
+            onChange={(e) => setGiftDislikes(e.target.value.split(',').map((v) => v.trim()).filter(Boolean))}
+            placeholder="anything flashy or impersonal"
+          />
+          <TextField
+            label="Love language"
+            value={loveLanguage}
+            onChange={(e) => setLoveLanguage(e.target.value)}
+            placeholder="e.g. quality time, acts of service"
+            className="sm:col-span-2"
+          />
+        </div>
+        <p className="mb-3 text-xs text-text-muted">
+          Unlike the numeric scores below, these three feed the model directly so it can react to a
+          gift in character — genuinely delighted, politely lukewarm, whatever fits — instead of
+          generic flavor text keyed only off a number.
         </p>
         <div className="space-y-2">
           {getGiftCatalog(editingWorld).map((gift) => (

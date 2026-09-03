@@ -1,16 +1,29 @@
+import {
+  BookOpen,
+  CircleUserRound,
+  GalleryHorizontalEnd,
+  Globe,
+  MessageCircle,
+  Mic,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Settings as SettingsIcon,
+  Users,
+  type LucideIcon,
+} from 'lucide-react'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 
 export type ViewId = 'chat' | 'companion' | 'characters' | 'worlds' | 'personas' | 'worldinfo' | 'gallery' | 'settings'
 
-const NAV: { id: ViewId; label: string; icon: string }[] = [
-  { id: 'chat', label: 'Chat', icon: '>_' },
-  { id: 'companion', label: 'Companion', icon: '))' },
-  { id: 'characters', label: 'Characters', icon: '#' },
-  { id: 'worlds', label: 'Worlds', icon: '~' },
-  { id: 'personas', label: 'Personas', icon: '@' },
-  { id: 'worldinfo', label: 'World Info', icon: '¶' },
-  { id: 'gallery', label: 'Gallery', icon: '[]' },
-  { id: 'settings', label: 'Settings', icon: '{}' },
+const NAV: { id: ViewId; label: string; icon: LucideIcon }[] = [
+  { id: 'chat', label: 'Chat', icon: MessageCircle },
+  { id: 'companion', label: 'Companion', icon: Mic },
+  { id: 'characters', label: 'Characters', icon: Users },
+  { id: 'worlds', label: 'Worlds', icon: Globe },
+  { id: 'personas', label: 'Personas', icon: CircleUserRound },
+  { id: 'worldinfo', label: 'World Info', icon: BookOpen },
+  { id: 'gallery', label: 'Gallery', icon: GalleryHorizontalEnd },
+  { id: 'settings', label: 'Settings', icon: SettingsIcon },
 ]
 
 export function Sidebar({ view, onChange }: { view: ViewId; onChange: (v: ViewId) => void }) {
@@ -37,7 +50,7 @@ export function Sidebar({ view, onChange }: { view: ViewId; onChange: (v: ViewId
               : 'text-text-muted hover:bg-bg-sunken hover:text-text'
           }`}
         >
-          <span className="font-mono text-[13px] leading-none">{item.icon}</span>
+          <item.icon size={18} strokeWidth={1.75} className="shrink-0" />
           {expanded && <span>{item.label}</span>}
         </button>
       ))}
@@ -46,11 +59,11 @@ export function Sidebar({ view, onChange }: { view: ViewId; onChange: (v: ViewId
         onClick={() => setExpanded(!expanded)}
         title={expanded ? 'Collapse sidebar' : 'Expand sidebar'}
         aria-label={expanded ? 'Collapse sidebar' : 'Expand sidebar'}
-        className={`mt-auto flex items-center rounded-xl font-mono text-xs text-text-muted transition-colors hover:bg-bg-sunken hover:text-text ${
+        className={`mt-auto flex items-center rounded-xl text-text-muted transition-colors hover:bg-bg-sunken hover:text-text ${
           expanded ? 'justify-start gap-3 px-3 py-2.5' : 'h-10 w-10 justify-center'
         }`}
       >
-        <span className="leading-none">{expanded ? '«' : '»'}</span>
+        {expanded ? <PanelLeftClose size={18} strokeWidth={1.75} /> : <PanelLeftOpen size={18} strokeWidth={1.75} />}
       </button>
     </nav>
   )

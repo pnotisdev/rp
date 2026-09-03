@@ -30,6 +30,26 @@ export type RelationshipDimension = 'trust' | 'chemistry' | 'comfort' | 'respect
 export type SceneFlag = 'first_date' | 'confession' | 'jealousy' | 'promise'
 
 /**
+ * 10c's "Define-the-Relationship ladder" — a player-driven progression, separate from the
+ * warmth-derived `RelationshipStage` above (which only ever tracks how close things *feel*, never
+ * an explicit status). Warmth gates which tier can be *asked for* (see `stage.ts`'s
+ * `commitmentTierThreshold`); actually reaching a tier always requires asking and the character
+ * accepting — never an automatic side effect of warmth crossing a number.
+ */
+export type CommitmentStatus = 'none' | 'dating' | 'exclusive' | 'living_together'
+
+/**
+ * A committed relationship under real strain (10c's "Breakups & reconciliation") — a grace period
+ * before neglect or tension actually breaks things, rather than an instant, unwarned snap. Cleared
+ * the moment the underlying strain resolves; if it doesn't within the grace period, the
+ * relationship breaks on its own the next time relationship state is evaluated.
+ */
+export interface RelationshipWarning {
+  startedAt: number
+  reason: string
+}
+
+/**
  * One turn's worth of relationship movement, logged append-only alongside the overwritten
  * running totals on `Chat` — answers "why is trust 62 now" instead of only ever showing the
  * current number. `deltas` holds only the dimensions that actually moved that turn (zeros
@@ -70,6 +90,28 @@ export interface GiftItem {
   rarity: GiftRarity
   price: number
   tags: string[]
+}
+
+/**
+ * 10d's "Item catalog beyond gifts" — deliberately the deterministic subset of the originally
+ * envisioned effect model: an immediate, permanent relationship nudge, a scene flag, or coins.
+ * "Permanently raise a character's base dating stat" isn't included — there's no such concept
+ * distinct from the tracked `relationshipStats` today — and "grant a time-limited buff" isn't
+ * either, since that needs a whole new active-effects-with-expiry system. Both stay open.
+ */
+export type ItemEffect =
+  | { kind: 'relationship'; dimension: 'affection' | RelationshipDimension; amount: number }
+  | { kind: 'flag'; flag: SceneFlag }
+  | { kind: 'currency'; amount: number }
+
+export interface ItemDef {
+  id: string
+  name: string
+  rarity: GiftRarity
+  price: number
+  tags: string[]
+  description?: string
+  effect: ItemEffect
 }
 
 export interface ChoiceOption {
@@ -125,6 +167,13 @@ export interface StoredMessage extends ChatMessage {
    * migration. Only set when a non-primary participant generated the reply.
    */
   speakerId?: string
+  /**
+   * True when this (char) message's generation attempt failed outright — `text` stays empty
+   * rather than persisting an error string as the character's actual dialogue, which would
+   * otherwise get fed back into every future prompt as something they genuinely said. The UI
+   * renders a "Generation failed" indicator itself, driven by this flag, not by message text.
+   */
+  failed?: boolean
 }
 
 export interface Chat {
@@ -141,10 +190,18 @@ export interface Chat {
   /** The six dimensions beyond `affection` — see `RelationshipDimension`. Missing keys read as 0. */
   relationshipStats?: Partial<Record<RelationshipDimension, number>>
   relationshipStage?: RelationshipStage
+  /** 10c's Define-the-Relationship ladder — unset/'none' until the player asks and the character accepts. */
+  commitmentStatus?: CommitmentStatus
+  /** Set while a committed relationship is under real strain and hasn't yet broken or recovered. */
+  relationshipWarning?: RelationshipWarning
+  /** How many times this relationship has broken up (deliberately or from unresolved strain) — the "lasting scar" persists as this counter plus a one-time stat hit at break time, not a literal permanent ceiling. */
+  breakupCount?: number
   sceneFlags?: SceneFlag[]
   giftCoins?: number
   giftInventory?: Record<string, number>
   giftsGiven?: Record<string, number>
+  /** Owned quantity per `ItemDef.id` — 10d's item catalog, separate from `giftInventory` since items are used/consumed, not given to a character. */
+  itemInventory?: Record<string, number>
   unlockedGalleryIds?: string[]
   activeEvent?: DateEventCard
   /** Running long-term memory log covering everything older than summaryUpToTimestamp. */
@@ -181,6 +238,8 @@ export interface WorldCard {
   backgroundUnlocks?: Record<string, number>
   /** Overrides the default gift catalog for characters living here. Empty/unset falls back to the built-in default catalog. */
   gifts?: GiftItem[]
+  /** Per-world item catalog (10d) — no built-in default catalog the way gifts have one, since items are optional; empty/unset just means no items exist yet. */
+  items?: ItemDef[]
   /** Overrides the default warmth thresholds for characters living here. Unset stages fall back to the default. */
   relationshipThresholds?: Partial<Record<Exclude<RelationshipStage, 'near_strangers'>, number>>
   /** Absolute day count in the shared 112-day calendar (src/lib/world/calendar.ts) — 0 if the clock has never been advanced. */

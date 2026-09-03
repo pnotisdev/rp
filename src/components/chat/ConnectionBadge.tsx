@@ -5,8 +5,7 @@ export function ConnectionBadge() {
   const baseUrl = useSettingsStore((s) => s.baseUrl)
   const { status, model, maxContext } = useConnectionStatus(baseUrl)
 
-  const color =
-    status === 'online' ? 'bg-green-500' : status === 'offline' ? 'bg-danger' : 'bg-yellow-500'
+  const color = status === 'online' ? 'bg-success' : status === 'offline' ? 'bg-danger' : 'bg-warning'
   const tooltip =
     status === 'online'
       ? `Connected — ${model || baseUrl}${maxContext !== null ? ` (${maxContext.toLocaleString()} ctx)` : ''}`

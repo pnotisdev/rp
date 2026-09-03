@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { Objective } from '@/lib/types'
 import { Button } from '@/components/ui/Button'
 import { TextAreaField, TextField } from '@/components/ui/Field'
+import { Modal } from '@/components/ui/Modal'
 
 interface ObjectivePanelProps {
   activeObjective: Objective | undefined
@@ -46,15 +47,7 @@ export function ObjectivePanel({
   const done = activeObjective?.tasks.filter((t) => t.status === 'done') ?? []
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="flex max-h-[85vh] w-full max-w-lg flex-col rounded-2xl border border-border bg-bg-elevated p-7 themed-shadow">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-text">Objective</h2>
-          <Button variant="ghost" onClick={onClose}>
-            Close
-          </Button>
-        </div>
-
+    <Modal onClose={onClose} title="Objective" size="lg" scrollable>
         {error && <p className="mb-3 text-xs text-danger">{error}</p>}
 
         {!activeObjective ? (
@@ -163,7 +156,6 @@ export function ObjectivePanel({
             </div>
           </div>
         )}
-      </div>
-    </div>
+    </Modal>
   )
 }

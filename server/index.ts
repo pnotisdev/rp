@@ -1,5 +1,8 @@
 import { app } from './app.ts'
 import { dataDir } from './db.ts'
+import { runSeedIfNeeded } from './seed.ts'
+
+runSeedIfNeeded()
 
 const port = Number(process.env.API_PORT) || 3001
 

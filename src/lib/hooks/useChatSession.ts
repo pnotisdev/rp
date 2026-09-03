@@ -2,35 +2,56 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { charactersApi, chatFactsApi, chatsApi, messagesApi, objectivesApi, personasApi, relationshipEventsApi, worldInfoBooksApi, worldsApi } from '@/lib/api/client'
 import { newId } from '@/lib/id'
-import type { Chat, DateEventCard, ObjectiveTask, StoredMessage, WorldCard } from '@/lib/types'
+import type { Chat, CommitmentStatus, DateEventCard, ObjectiveTask, RelationshipStage, StoredMessage, WorldCard } from '@/lib/types'
 import { collectImageBase64, composeMessageText, type PendingAttachment } from '@/lib/attachments'
 import { KoboldClient, makeGenKey } from '@/lib/api/kobold'
 import { buildPrompt, estimateTokens, type ChatMessage } from '@/lib/prompt/builder'
 import { SUMMARY_MAX_LENGTH, summarizeMessages } from '@/lib/prompt/summarize'
 import { generateChoices } from '@/lib/prompt/choices'
 import { detectCompletedTasks, generateTasks, suggestObjective } from '@/lib/objectives/objectiveAssist'
-import { assessDateOutcome, assessRelationshipMoment, detectGalleryUnlocks, scaleDeltasForDifficulty, suggestDateEvent } from '@/lib/dating/relationshipAssist'
-import { describePresence, describeWorldMoment, getCurrentActivity } from '@/lib/world/calendar'
 import {
+  assessCommitmentAsk,
+  assessDateOutcome,
+  assessRelationshipMoment,
+  detectGalleryUnlocks,
+  scaleDeltasForDifficulty,
+  suggestDateEvent,
+} from '@/lib/dating/relationshipAssist'
+import {
+  describePresence,
+  describeWeather,
+  describeWorldMoment,
+  getCurrentActivity,
+  getEnergyRemaining,
+  getWeather,
+  spendEnergy,
+} from '@/lib/world/calendar'
+import {
+  applyBreakupScar,
   clampAffection,
   clampStat,
   computeWarmth,
+  crossedMilestone,
+  evaluateRelationshipRisk,
+  formatCommitmentStatus,
   formatRelationshipStage,
   getRelationshipStats,
+  nextCommitmentTier,
   RELATIONSHIP_DIMENSIONS,
-  RELATIONSHIP_MILESTONES,
   relationshipMilestonesFor,
   relationshipStageForWarmth,
+  unlockedEndingIds,
 } from '@/lib/dating/stage'
 import { defaultGiftInventory, getGiftCatalog, giftById, giftImpactBase } from '@/lib/dating/gifts'
+import { itemById } from '@/lib/dating/items'
 import { getInstructTemplate } from '@/lib/prompt/instructTemplates'
 import { extractSceneTag, stripSceneTagForDisplay, type SceneTag } from '@/lib/vn/sceneTag'
 import { DEFAULT_EXPRESSION_IDS } from '@/lib/vn/expressions'
 import { DEFAULT_BACKGROUND_IDS } from '@/lib/vn/backgrounds'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
-import { errorMessage, toastError, toastSuccess } from '@/lib/store/useToastStore'
+import { errorMessage, toastError, toastInfo, toastSuccess } from '@/lib/store/useToastStore'
 import type { Character, Lorebook } from '@/lib/characters/cardSpec'
-import type { ChoiceOption, RelationshipDimension, SceneFlag } from '@/lib/types'
+import type { ChoiceOption, RelationshipDimension, RelationshipWarning, SceneFlag } from '@/lib/types'
 
 /** Minimum number of newly-eligible messages before auto-summarize bothers running (avoids a summarization call on every single turn). */
 const MIN_BATCH_FOR_AUTO_SUMMARY = 6
@@ -61,6 +82,81 @@ function getUnlockedBackgroundIds(world: WorldCard | undefined, affection: numbe
 }
 
 /**
+ * Fires the player-facing toast for a warmth-band crossing (10c's "Milestones" — the banner half;
+ * a next-morning text and a social-circle ripple stay open, both needing machinery this doesn't
+ * have yet) and, new here, records it as a `ChatFact` "keepsake memory" — so the model actually
+ * knows the relationship deepened rather than only the unlock gates silently changing underneath
+ * it. Reuses the exact same synthetic-lorebook plumbing every other fact already rides through.
+ */
+function announceMilestone(opts: {
+  charName: string
+  personaName: string
+  chatId: string
+  previousStage: RelationshipStage
+  relationshipStage: RelationshipStage
+  sourceMessageId?: string
+}): void {
+  if (!crossedMilestone(opts.previousStage, opts.relationshipStage)) return
+  const label = formatRelationshipStage(opts.relationshipStage)
+  toastSuccess(`${opts.charName}'s relationship with you is now "${label}"`)
+  chatFactsApi
+    .create({
+      chatId: opts.chatId,
+      text: `${opts.personaName} and ${opts.charName}'s relationship recently deepened to "${label}."`,
+      sourceMessageId: opts.sourceMessageId,
+    })
+    .catch(() => {})
+}
+
+/**
+ * The shared choke point for 10c's "Breakups & reconciliation" — called after every relationship-
+ * stat recomputation (per-turn, end-of-date, and a DTR ask), so the pure decision in
+ * `evaluateRelationshipRisk` only has to be wired up once. Applies the one-time stat scar and
+ * fires the matching toast; callers persist the returned `commitmentStatus`/`relationshipWarning`/
+ * `breakupCount` alongside whatever else they're already updating.
+ */
+function applyRelationshipRisk(opts: {
+  charName: string
+  commitmentStatus: CommitmentStatus
+  stats: Record<RelationshipDimension, number>
+  existingWarning?: RelationshipWarning
+  breakupCount: number
+}): {
+  commitmentStatus: CommitmentStatus
+  stats: Record<RelationshipDimension, number>
+  relationshipWarning?: RelationshipWarning
+  breakupCount: number
+  warnedJustNow: boolean
+  brokeUpJustNow: boolean
+  clearedJustNow: boolean
+} {
+  const result = evaluateRelationshipRisk({
+    commitmentStatus: opts.commitmentStatus,
+    stats: opts.stats,
+    existingWarning: opts.existingWarning,
+    breakupCount: opts.breakupCount,
+  })
+  let stats = opts.stats
+  if (result.brokeUpJustNow) {
+    stats = applyBreakupScar(opts.stats)
+    toastError(`${opts.charName} broke things off — the strain never got resolved in time.`)
+  } else if (result.warnedJustNow) {
+    toastError(`${opts.charName}'s relationship is on the rocks: ${result.warning?.reason}. Fix things before it's too late.`)
+  } else if (result.clearedJustNow) {
+    toastSuccess(`${opts.charName}'s relationship has stabilized.`)
+  }
+  return {
+    commitmentStatus: result.commitmentStatus,
+    stats,
+    relationshipWarning: result.warning,
+    breakupCount: result.breakupCount,
+    warnedJustNow: result.warnedJustNow,
+    brokeUpJustNow: result.brokeUpJustNow,
+    clearedJustNow: result.clearedJustNow,
+  }
+}
+
+/**
  * Until now, relationship state only ever gated WHICH content is available (lorebook entries,
  * sprites, backgrounds, gallery) — nothing ever told the model itself how the relationship is
  * going, so a character's in-character warmth couldn't actually track the numbers under the
@@ -68,12 +164,30 @@ function getUnlockedBackgroundIds(world: WorldCard | undefined, affection: numbe
  * short, qualitative nudge (never raw numbers) for the same late "right before generation" slot
  * the objective block already uses — the placement `builder.ts` itself notes is most effective.
  */
+/**
+ * 10d's "Authored reactions" — richer than the numeric `giftPreferences[-2..3]` score, which only
+ * ever drives the mechanical affection delta a gift gives, never the model's own in-character
+ * reaction. Folded into the same always-on relationship line rather than a gift-turn-only prompt
+ * section, so the model already has the character's tastes in context the moment `*I give X gift*`
+ * shows up in the same turn's user message — no new plumbing needed to detect "a gift was just given."
+ */
+function buildGiftTasteNote(character: Character): string | undefined {
+  const { giftLikes, giftDislikes, loveLanguage } = character
+  const parts: string[] = []
+  if (loveLanguage?.trim()) parts.push(`feels most loved through ${loveLanguage.trim()}`)
+  if (giftLikes?.length) parts.push(`tends to genuinely love gifts like ${giftLikes.join(', ')}`)
+  if (giftDislikes?.length) parts.push(`isn't really moved by gifts like ${giftDislikes.join(', ')}`)
+  if (parts.length === 0) return undefined
+  return `${character.card.name} ${parts.join('; ')} — react to any gift given accordingly, in character, never reciting this as a checklist.`
+}
+
 function buildRelationshipDescription(
-  chat: Pick<Chat, 'affection' | 'relationshipStats'>,
+  chat: Pick<Chat, 'affection' | 'relationshipStats' | 'commitmentStatus' | 'relationshipWarning' | 'breakupCount'>,
   world: WorldCard | undefined,
-  primaryName: string,
+  character: Character,
 ): string | undefined {
   if (chat.affection === undefined) return undefined
+  const primaryName = character.card.name
   const stats = getRelationshipStats(chat)
   const stage = relationshipStageForWarmth(computeWarmth(chat.affection, stats), relationshipMilestonesFor(world?.relationshipThresholds))
   const notes: string[] = []
@@ -81,13 +195,35 @@ function buildRelationshipDescription(
   if (stats.chemistry >= 70) notes.push('there is a strong romantic spark')
   if (stats.tension >= 60) notes.push('real unresolved tension between them')
   if (stats.comfort <= 20 && stage !== 'near_strangers') notes.push('things still feel a little unsettled between them')
+  const giftTasteNote = buildGiftTasteNote(character)
+  // Only stated when there's an actual explicit status (10c's DTR ladder) — an unset/'none'
+  // commitment is the ordinary default for most chats and isn't worth a line every single turn.
+  const commitmentNote =
+    chat.commitmentStatus && chat.commitmentStatus !== 'none'
+      ? `{{user}} and ${primaryName} are officially ${formatCommitmentStatus(chat.commitmentStatus)}.`
+      : undefined
+  // 10c's "Breakups & reconciliation" — a standing warning is the model's cue to actually play the
+  // strain, not just have the numbers move; a past breakup colors things even once patched up.
+  const warningNote = chat.relationshipWarning
+    ? `The relationship is genuinely on the rocks right now (${chat.relationshipWarning.reason}) — let that show, don't just narrate past it.`
+    : undefined
+  const breakupNote =
+    chat.breakupCount && chat.breakupCount > 0
+      ? `${primaryName} and {{user}} have broken up before — some caution or guardedness is earned here, whether or not that's fully behind them now.`
+      : undefined
   // `primaryName` is spelled out rather than left as a `{{char}}` macro — this stays about the
   // scene's primary/relationship-tracked character even in a group chat, where `{{char}}` would
   // otherwise resolve to whoever's currently speaking instead (see resolveSpeaker/buildCurrentPrompt).
   return [
     `Relationship: {{user}} and ${primaryName} are at the "${formatRelationshipStage(stage)}" stage${notes.length ? ` — ${notes.join('; ')}` : ''}.`,
     '(Let this color tone, warmth, and what feels earned right now — never state a number, "affection", or "stage" out loud.)',
-  ].join('\n')
+    commitmentNote,
+    warningNote,
+    breakupNote,
+    giftTasteNote,
+  ]
+    .filter(Boolean)
+    .join('\n')
 }
 
 function sanitizeSceneTag(
@@ -290,7 +426,7 @@ export function useChatSession(chatId: string | null) {
       // participant's own dialogue should be steered by.
       const relationshipDescription =
         autoTrackRelationship && speaker.id === character.id
-          ? buildRelationshipDescription(freshChat, world, character.card.name)
+          ? buildRelationshipDescription(freshChat, world, character)
           : undefined
 
       const contextBudget = sampler.max_context_length - sampler.max_length - 32
@@ -431,16 +567,27 @@ export function useChatSession(chatId: string | null) {
         }
       }
       const affection = clampAffection(currentAffection + deltas.affection)
-      const nextStats = { ...currentStats }
+      let nextStats = { ...currentStats }
       for (const dim of RELATIONSHIP_DIMENSIONS) nextStats[dim] = clampStat(currentStats[dim] + deltas[dim])
       const milestones = relationshipMilestonesFor(world?.relationshipThresholds)
       const previousStage = relationshipStageForWarmth(computeWarmth(currentAffection, currentStats), milestones)
+      const risk = applyRelationshipRisk({
+        charName: character.card.name,
+        commitmentStatus: freshChat.commitmentStatus ?? 'none',
+        stats: nextStats,
+        existingWarning: freshChat.relationshipWarning,
+        breakupCount: freshChat.breakupCount ?? 0,
+      })
+      nextStats = risk.stats
       const warmth = computeWarmth(affection, nextStats)
       const relationshipStage = relationshipStageForWarmth(warmth, milestones)
       const unlockedSet = new Set(freshChat.unlockedGalleryIds ?? [])
       const previouslyUnlockedIds = new Set(unlockedSet)
+      // Endings unlock deterministically off the stage itself, not the AI CG-matching pass below —
+      // excluded from `lockedGallery` so they're never sent to `detectGalleryUnlocks`.
+      unlockedEndingIds(character.gallery, relationshipStage, unlockedSet).forEach((id) => unlockedSet.add(id))
       const lockedGallery = (character.gallery ?? []).filter(
-        (g) => !unlockedSet.has(g.id) && hasRequiredFlags(g.requiredFlags, existingFlags),
+        (g) => !g.isEnding && !unlockedSet.has(g.id) && hasRequiredFlags(g.requiredFlags, existingFlags),
       )
       if (lockedGallery.length > 0) {
         const unlockedIds = await detectGalleryUnlocks(client, {
@@ -453,7 +600,14 @@ export function useChatSession(chatId: string | null) {
       }
       const nextCoins = Math.max(0, (freshChat.giftCoins ?? 0) + 2)
       const noStatChange = Object.values(deltas).every((d) => d === 0)
-      if (noStatChange && newFlags.length === 0 && unlockedSet.size === (freshChat.unlockedGalleryIds ?? []).length && nextCoins === (freshChat.giftCoins ?? 0)) {
+      const noRiskChange = !risk.warnedJustNow && !risk.brokeUpJustNow && !risk.clearedJustNow
+      if (
+        noStatChange &&
+        noRiskChange &&
+        newFlags.length === 0 &&
+        unlockedSet.size === (freshChat.unlockedGalleryIds ?? []).length &&
+        nextCoins === (freshChat.giftCoins ?? 0)
+      ) {
         return
       }
       await chatsApi.update(chatIdForRelationship, {
@@ -463,6 +617,9 @@ export function useChatSession(chatId: string | null) {
         sceneFlags: [...existingFlags],
         giftCoins: nextCoins,
         unlockedGalleryIds: [...unlockedSet],
+        commitmentStatus: risk.commitmentStatus,
+        relationshipWarning: risk.relationshipWarning ?? null,
+        breakupCount: risk.breakupCount,
       })
       // Append-only history alongside the overwritten running totals above — answers "why is
       // trust 62 now" instead of only ever showing the current number. Only log when a dimension
@@ -481,14 +638,18 @@ export function useChatSession(chatId: string | null) {
       }
       // Quiet, player-facing rewards — these are milestones worth surfacing, unlike the raw
       // scene flags (internal bookkeeping) or per-turn stat deltas (would be constant noise).
-      const stageOrder = RELATIONSHIP_MILESTONES.map((m) => m.stage)
-      if (stageOrder.indexOf(relationshipStage) > stageOrder.indexOf(previousStage)) {
-        toastSuccess(`${character.card.name}'s relationship with you is now "${formatRelationshipStage(relationshipStage)}"`)
-      }
+      announceMilestone({
+        charName: character.card.name,
+        personaName: persona?.name || 'You',
+        chatId: chatIdForRelationship,
+        previousStage,
+        relationshipStage,
+        sourceMessageId: history[history.length - 1]?.id,
+      })
       for (const id of unlockedSet) {
         if (previouslyUnlockedIds.has(id)) continue
         const entry = character.gallery?.find((g) => g.id === id)
-        toastSuccess(`New gallery scene unlocked: ${entry?.title ?? 'untitled'}`)
+        toastSuccess(entry?.isEnding ? `An ending unlocked: ${entry.title}` : `New gallery scene unlocked: ${entry?.title ?? 'untitled'}`)
       }
     },
     [activeFacts, character, client, persona?.name, relationshipDifficulty, world],
@@ -512,6 +673,181 @@ export function useChatSession(chatId: string | null) {
     },
     [chatId, world],
   )
+
+  const buyItem = useCallback(
+    async (itemId: string) => {
+      if (!chatId) return
+      const def = itemById(itemId, world)
+      if (!def) return
+      const freshChat = await chatsApi.get(chatId)
+      if (!freshChat) return
+      const coins = freshChat.giftCoins ?? 0
+      if (coins < def.price) return
+      const inventory = { ...(freshChat.itemInventory ?? {}) }
+      inventory[itemId] = (inventory[itemId] ?? 0) + 1
+      await chatsApi.update(chatId, {
+        giftCoins: coins - def.price,
+        itemInventory: inventory,
+      })
+    },
+    [chatId, world],
+  )
+
+  /**
+   * Applies an owned item's authored effect immediately and deterministically (10d) — no judge
+   * call, unlike a gift's in-scene reaction, since an item's effect is authored, not reacted to.
+   */
+  const useItem = useCallback(
+    async (itemId: string) => {
+      if (!chatId || !character) return
+      const def = itemById(itemId, world)
+      if (!def) return
+      const freshChat = await chatsApi.get(chatId)
+      if (!freshChat) return
+      const inStock = freshChat.itemInventory?.[itemId] ?? 0
+      if (inStock <= 0) return
+      const inventory = { ...freshChat.itemInventory }
+      inventory[itemId] = inStock - 1
+      if (inventory[itemId] <= 0) delete inventory[itemId]
+
+      const patch: Record<string, unknown> = { itemInventory: inventory }
+      let toastMessage = `Used ${def.name}.`
+      if (def.effect.kind === 'currency') {
+        patch.giftCoins = Math.max(0, (freshChat.giftCoins ?? 0) + def.effect.amount)
+        toastMessage = `Used ${def.name} — gained ${def.effect.amount} coins.`
+      } else if (def.effect.kind === 'flag') {
+        const flags = new Set((freshChat.sceneFlags ?? []) as SceneFlag[])
+        flags.add(def.effect.flag)
+        patch.sceneFlags = [...flags]
+        toastMessage = `Used ${def.name}.`
+      } else {
+        const dim = def.effect.dimension
+        if (dim === 'affection') {
+          patch.affection = clampAffection((freshChat.affection ?? 0) + def.effect.amount)
+        } else {
+          const stats = getRelationshipStats(freshChat)
+          patch.relationshipStats = { ...stats, [dim]: clampStat(stats[dim] + def.effect.amount) }
+        }
+        toastMessage = `Used ${def.name} — ${def.effect.amount > 0 ? '+' : ''}${def.effect.amount} ${dim}.`
+      }
+      await chatsApi.update(chatId, patch)
+      toastSuccess(toastMessage)
+    },
+    [character, chatId, world],
+  )
+
+  /**
+   * A single Define-the-Relationship ask (10c) — whichever tier the button offers is already
+   * gated on warmth by the caller (`RelationshipPanel`'s `canAskForCommitment`), so this only ever
+   * needs to judge how the character actually reacts to being asked right now.
+   */
+  const askForCommitment = useCallback(
+    async (tier: Exclude<CommitmentStatus, 'none'>) => {
+      if (!chatId || !character) return
+      const freshChat = await chatsApi.get(chatId)
+      if (!freshChat) return
+      const currentStatus = freshChat.commitmentStatus ?? 'none'
+      const currentStats = getRelationshipStats(freshChat)
+      const currentAffection = freshChat.affection ?? 0
+      const historyForAssist: ChatMessage[] = messages.map((m) => ({ id: m.id, role: m.role, name: m.name, text: m.text }))
+      let outcome
+      try {
+        outcome = await assessCommitmentAsk(client, {
+          history: historyForAssist,
+          charName: character.card.name,
+          charPersonality: character.card.personality,
+          userName: persona?.name || 'You',
+          tierLabel: formatCommitmentStatus(tier),
+          currentStatusLabel: formatCommitmentStatus(currentStatus),
+          current: { affection: currentAffection, ...currentStats },
+        })
+      } catch (e) {
+        toastError(errorMessage(e))
+        return
+      }
+      const deltas = scaleDeltasForDifficulty(outcome.deltas, relationshipDifficulty)
+      const affection = clampAffection(currentAffection + deltas.affection)
+      let nextStats = { ...currentStats }
+      for (const dim of RELATIONSHIP_DIMENSIONS) nextStats[dim] = clampStat(currentStats[dim] + deltas[dim])
+      const milestones = relationshipMilestonesFor(world?.relationshipThresholds)
+      const previousStage = relationshipStageForWarmth(computeWarmth(currentAffection, currentStats), milestones)
+      const statusAfterAsk = outcome.decision === 'accept' ? tier : currentStatus
+      const risk = applyRelationshipRisk({
+        charName: character.card.name,
+        commitmentStatus: statusAfterAsk,
+        stats: nextStats,
+        existingWarning: freshChat.relationshipWarning,
+        breakupCount: freshChat.breakupCount ?? 0,
+      })
+      nextStats = risk.stats
+      const warmth = computeWarmth(affection, nextStats)
+      const relationshipStage = relationshipStageForWarmth(warmth, milestones)
+
+      await chatsApi.update(chatId, {
+        affection,
+        relationshipStats: nextStats,
+        relationshipStage,
+        commitmentStatus: risk.commitmentStatus,
+        relationshipWarning: risk.relationshipWarning ?? null,
+        breakupCount: risk.breakupCount,
+      })
+
+      const changedDeltas = Object.fromEntries(Object.entries(deltas).filter(([, v]) => v !== 0))
+      relationshipEventsApi
+        .create({
+          chatId,
+          reason: `Asked to be ${formatCommitmentStatus(tier)}: ${outcome.reason}`,
+          deltas: changedDeltas,
+          sourceMessageId: messages[messages.length - 1]?.id,
+        })
+        .catch(() => {})
+
+      if (outcome.decision === 'accept') {
+        toastSuccess(`${character.card.name} said yes — you're ${formatCommitmentStatus(tier)} now. ${outcome.reason}`)
+        chatFactsApi
+          .create({
+            chatId,
+            text: `${persona?.name || 'You'} and ${character.card.name} are officially ${formatCommitmentStatus(tier)}.`,
+          })
+          .catch(() => {})
+      } else if (outcome.decision === 'backfire') {
+        toastError(`That didn't land well. ${outcome.reason}`)
+      } else {
+        toastInfo(`Not the right moment. ${outcome.reason}`)
+      }
+      announceMilestone({
+        charName: character.card.name,
+        personaName: persona?.name || 'You',
+        chatId,
+        previousStage,
+        relationshipStage,
+      })
+    },
+    [character, chatId, client, messages, persona?.name, relationshipDifficulty, world],
+  )
+
+  /**
+   * The player deliberately ending a committed relationship (10c) — behind a confirmation in the
+   * UI so a joke line can't blow one up by accident. Applies the same one-time scar a strain-driven
+   * breakup does, via the shared `applyRelationshipRisk` plumbing, so a deliberate and an
+   * unresolved-strain breakup leave the same kind of mark rather than two different mechanisms.
+   */
+  const endRelationship = useCallback(async () => {
+    if (!chatId || !character) return
+    const freshChat = await chatsApi.get(chatId)
+    if (!freshChat || (freshChat.commitmentStatus ?? 'none') === 'none') return
+    const scarredStats = applyBreakupScar(getRelationshipStats(freshChat))
+    await chatsApi.update(chatId, {
+      commitmentStatus: 'none',
+      relationshipStats: scarredStats,
+      relationshipWarning: null,
+      breakupCount: (freshChat.breakupCount ?? 0) + 1,
+    })
+    chatFactsApi
+      .create({ chatId, text: `${persona?.name || 'You'} and ${character.card.name} broke things off.` })
+      .catch(() => {})
+    toastInfo(`You and ${character.card.name} are no longer together.`)
+  }, [character, chatId, persona?.name])
 
   const previewPrompt = useCallback(async () => {
     const historyForPrompt: ChatMessage[] = messages.map((m) => ({
@@ -648,6 +984,7 @@ export function useChatSession(chatId: string | null) {
             activeSwipe,
             scene,
             tokenCount: await countTokens(combined),
+            failed: false,
           })
         } else {
           const freshMsg = await messagesApi.get(targetMessageId)
@@ -663,6 +1000,7 @@ export function useChatSession(chatId: string | null) {
             activeSwipe,
             scene,
             tokenCount: await countTokens(combined),
+            failed: false,
           })
         }
         await chatsApi.update(chat.id, {}) // bumps updatedAt so the chat resorts to the top
@@ -688,7 +1026,10 @@ export function useChatSession(chatId: string | null) {
       } catch (e) {
         toastError(errorMessage(e))
         if (!continuing) {
-          await messagesApi.update(targetMessageId, { text: '⚠ Generation failed. See notification for details.' })
+          // Empty text, not an error string baked into the message — that string would otherwise
+          // get fed back into every future prompt as something the character genuinely said. The
+          // UI shows the failure itself, driven by `failed`, not by message content.
+          await messagesApi.update(targetMessageId, { text: '', failed: true })
         }
       } finally {
         setIsGenerating(false)
@@ -809,7 +1150,7 @@ export function useChatSession(chatId: string | null) {
         name: m.name,
         text: m.text,
       }))
-      await messagesApi.update(messageId, { text: '' })
+      await messagesApi.update(messageId, { text: '', failed: false })
       // Regenerating keeps whoever originally said it, rather than letting a regenerate silently
       // switch the speaker — that's a distinct, explicit action (editing the message).
       await runGeneration(historyForPrompt, messageId, latestImages(priorMessages), { speakerId: messages[idx].speakerId })
@@ -976,9 +1317,30 @@ export function useChatSession(chatId: string | null) {
     })
   }, [character, chat, client, persona?.name, world])
 
+  /**
+   * Starting a `kind: 'date'` card spends one of the world's daily actions (10a's "Energy/action
+   * economy") — gift/milestone cards aren't a "spend a chunk of the day doing something" activity
+   * the way a date is, so they're left free. No world assigned to this character means no clock
+   * to spend against, so energy simply doesn't apply (unlimited, same as before this existed).
+   */
   const startDateEvent = useCallback(
     async (event: DateEventCard) => {
       if (!chatId || !event.title.trim() || !event.objectiveTitle.trim()) return
+      if (event.kind === 'date' && world) {
+        const freshWorld = await worldsApi.get(world.id)
+        const day = freshWorld?.currentDay ?? 0
+        const phaseIndex = freshWorld?.currentPhaseIndex ?? 0
+        if (getEnergyRemaining(day, phaseIndex) <= 0) {
+          toastError("No energy left today — get some rest before starting another date.")
+          return
+        }
+        const result = spendEnergy(day, phaseIndex)
+        await worldsApi.update(world.id, { currentDay: result.day, currentPhaseIndex: result.phaseIndex })
+        if (result.slept) {
+          const weather = getWeather(world.id, result.day)
+          toastSuccess(`Tired after a full day, you call it a night. A new morning dawns — ${describeWeather(weather)}.`)
+        }
+      }
       await createObjective(event.objectiveTitle, event.objectiveDescription ?? event.description ?? '', 'ai')
       // Stamped on every event regardless of kind — harmless metadata for gift/milestone cards,
       // which never read it — but for a `kind: 'date'` card its presence is what marks this as a
@@ -986,7 +1348,7 @@ export function useChatSession(chatId: string | null) {
       // value is the cutoff `endDateEvent` uses to gather this date's own transcript.
       await chatsApi.update(chatId, { activeEvent: { ...event, startedAt: Date.now() } })
     },
-    [chatId, createObjective],
+    [chatId, createObjective, world],
   )
 
   /**
@@ -1038,17 +1400,26 @@ export function useChatSession(chatId: string | null) {
       }
     }
     const affection = clampAffection(currentAffection + deltas.affection)
-    const nextStats = { ...currentStats }
+    let nextStats = { ...currentStats }
     for (const dim of RELATIONSHIP_DIMENSIONS) nextStats[dim] = clampStat(currentStats[dim] + deltas[dim])
     const milestones = relationshipMilestonesFor(world?.relationshipThresholds)
     const previousStage = relationshipStageForWarmth(computeWarmth(currentAffection, currentStats), milestones)
+    const risk = applyRelationshipRisk({
+      charName: character.card.name,
+      commitmentStatus: freshChat.commitmentStatus ?? 'none',
+      stats: nextStats,
+      existingWarning: freshChat.relationshipWarning,
+      breakupCount: freshChat.breakupCount ?? 0,
+    })
+    nextStats = risk.stats
     const warmth = computeWarmth(affection, nextStats)
     const relationshipStage = relationshipStageForWarmth(warmth, milestones)
 
     const unlockedSet = new Set(freshChat.unlockedGalleryIds ?? [])
     const previouslyUnlockedIds = new Set(unlockedSet)
+    unlockedEndingIds(character.gallery, relationshipStage, unlockedSet).forEach((id) => unlockedSet.add(id))
     const lockedGallery = (character.gallery ?? []).filter(
-      (g) => !unlockedSet.has(g.id) && hasRequiredFlags(g.requiredFlags, existingFlags),
+      (g) => !g.isEnding && !unlockedSet.has(g.id) && hasRequiredFlags(g.requiredFlags, existingFlags),
     )
     if (lockedGallery.length > 0) {
       const unlockedIds = await detectGalleryUnlocks(client, {
@@ -1060,12 +1431,23 @@ export function useChatSession(chatId: string | null) {
       unlockedIds.forEach((id) => unlockedSet.add(id))
     }
 
+    // 10a's "Economy" bullet, first slice: coins earned from how the date actually went, not
+    // handed out flat — a date that lands earns real money, a flat or hurtful one earns none.
+    // Still chat-scoped (`Chat.giftCoins`) like every other coin flow today, not the shared
+    // per-world wallet the roadmap ultimately wants — that's a bigger migration, left open.
+    const coinsEarned = Math.max(0, Math.round(deltas.affection * 2))
+    const nextCoins = (freshChat.giftCoins ?? 0) + coinsEarned
+
     await chatsApi.update(chatId, {
       affection,
       relationshipStats: nextStats,
       relationshipStage,
       sceneFlags: [...existingFlags],
       unlockedGalleryIds: [...unlockedSet],
+      giftCoins: nextCoins,
+      commitmentStatus: risk.commitmentStatus,
+      relationshipWarning: risk.relationshipWarning ?? null,
+      breakupCount: risk.breakupCount,
     })
     await closeOutEvent()
 
@@ -1081,14 +1463,19 @@ export function useChatSession(chatId: string | null) {
       .catch(() => {})
 
     toastSuccess(outcome.recap)
-    const stageOrder = RELATIONSHIP_MILESTONES.map((m) => m.stage)
-    if (stageOrder.indexOf(relationshipStage) > stageOrder.indexOf(previousStage)) {
-      toastSuccess(`${character.card.name}'s relationship with you is now "${formatRelationshipStage(relationshipStage)}"`)
-    }
+    if (coinsEarned > 0) toastSuccess(`Earned ${coinsEarned} coins from the date`)
+    announceMilestone({
+      charName: character.card.name,
+      personaName: persona?.name || 'You',
+      chatId,
+      previousStage,
+      relationshipStage,
+      sourceMessageId: transcript[transcript.length - 1]?.id,
+    })
     for (const id of unlockedSet) {
       if (previouslyUnlockedIds.has(id)) continue
       const entry = character.gallery?.find((g) => g.id === id)
-      toastSuccess(`New gallery scene unlocked: ${entry?.title ?? 'untitled'}`)
+      toastSuccess(entry?.isEnding ? `An ending unlocked: ${entry.title}` : `New gallery scene unlocked: ${entry?.title ?? 'untitled'}`)
     }
   }, [activeFacts, activeObjective, character, chatId, client, messages, persona?.name, relationshipDifficulty, world])
 
@@ -1166,6 +1553,10 @@ export function useChatSession(chatId: string | null) {
     endDateEvent,
     regenerateChoices,
     buyGift,
+    buyItem,
+    useItem,
+    askForCommitment,
+    endRelationship,
     forkChat,
     client,
   }

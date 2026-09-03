@@ -2,6 +2,8 @@ import { useRef, useState } from 'react'
 import { downloadBackup, restoreBackupFile } from '@/lib/backup'
 import { errorMessage, toastError, toastSuccess } from '@/lib/store/useToastStore'
 import { Button } from '@/components/ui/Button'
+import { Section } from '@/components/ui/Section'
+import { SettingsPage } from '@/components/ui/SettingsPage'
 
 export function DataSettings() {
   const [busy, setBusy] = useState<'backup' | 'restore' | null>(null)
@@ -35,29 +37,21 @@ export function DataSettings() {
   }
 
   return (
-    <div className="max-w-2xl space-y-8">
-      <section>
-        <h3 className="mb-2 text-sm font-semibold text-text">Backup</h3>
-        <p className="mb-3 text-xs text-text-muted">
-          Downloads everything in this app — every character, chat, world, persona, and setting,
-          plus every avatar/sprite/background/gallery image — as one JSON file.
-        </p>
+    <SettingsPage>
+      <Section
+        title="Backup"
+        description="Downloads everything in this app — every character, chat, world, persona, and setting, plus every avatar/sprite/background/gallery image — as one JSON file."
+      >
         <Button variant="primary" onClick={runBackup} disabled={busy !== null}>
           {busy === 'backup' ? 'Preparing…' : 'Download backup'}
         </Button>
-      </section>
+      </Section>
 
-      <section>
-        <h3 className="mb-2 text-sm font-semibold text-text">Restore</h3>
-        <p className="mb-3 text-xs text-text-muted">
-          Replaces everything currently in this app with the contents of a backup file. This is
-          destructive and cannot be undone — anything created since that backup was taken is lost.
-        </p>
-        <Button
-          variant="danger"
-          onClick={() => fileRef.current?.click()}
-          disabled={busy !== null}
-        >
+      <Section
+        title="Restore"
+        description="Replaces everything currently in this app with the contents of a backup file. This is destructive and cannot be undone — anything created since that backup was taken is lost."
+      >
+        <Button variant="danger" onClick={() => fileRef.current?.click()} disabled={busy !== null}>
           {busy === 'restore' ? 'Restoring…' : 'Restore from backup…'}
         </Button>
         <input
@@ -67,7 +61,7 @@ export function DataSettings() {
           className="hidden"
           onChange={(e) => e.target.files?.[0] && runRestore(e.target.files[0])}
         />
-      </section>
-    </div>
+      </Section>
+    </SettingsPage>
   )
 }

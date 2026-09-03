@@ -1,6 +1,7 @@
 import { urlToDataUrl } from '@/lib/characters/pack'
 import type { Character } from '@/lib/characters/cardSpec'
 import type { Chat, Persona, StoredMessage } from '@/lib/types'
+import { splitMessageSegments } from '@/lib/text/messageSegments'
 
 function escapeHtml(text: string): string {
   return text
@@ -9,6 +10,17 @@ function escapeHtml(text: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;')
+}
+
+/** Same action/quote emphasis convention as the live chat UI (`renderMessageText`), built from the same parser. */
+function messageTextHtml(text: string): string {
+  return splitMessageSegments(text)
+    .map((seg) => {
+      if (seg.type === 'action') return `<em>${escapeHtml(seg.content)}</em>`
+      if (seg.type === 'quote') return `<span class="quote">${escapeHtml(seg.content)}</span>`
+      return escapeHtml(seg.content)
+    })
+    .join('')
 }
 
 function avatarHtml(dataUrl: string | undefined, initials: string): string {
@@ -52,7 +64,7 @@ export async function buildChatTranscriptHtml(opts: {
         <div class="bubble">
           <div class="meta"><span class="name">${escapeHtml(name)}</span><span class="time">${escapeHtml(time)}</span></div>
           ${imagesBlock}
-          <div class="text">${escapeHtml(m.text)}</div>
+          <div class="text">${messageTextHtml(m.text)}</div>
         </div>
       </div>`
     })
@@ -89,6 +101,8 @@ export async function buildChatTranscriptHtml(opts: {
   .row-user .meta { flex-direction: row-reverse; }
   .name { font-weight: 600; color: #c8c9d1; }
   .text { white-space: pre-wrap; word-break: break-word; }
+  .text em { color: #8b8d98; font-style: italic; }
+  .text .quote { color: #f2f2f4; font-weight: 600; }
   .attachments { margin-bottom: 0.4rem; }
   .attachment { max-width: 160px; max-height: 160px; border-radius: 8px; margin: 0 4px 4px 0; object-fit: cover; }
   footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #2a2b31; color: #8b8d98; font-size: 0.7rem; }

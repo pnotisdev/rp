@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { RotateCcw } from 'lucide-react'
 import { KoboldClient } from '@/lib/api/kobold'
 import { regenerateCardField } from '@/lib/characters/aiAssist'
 import type { CharacterCardData } from '@/lib/characters/cardSpec'
@@ -40,9 +41,9 @@ export function RegenerateFieldButton({
         disabled={busy}
         title="Regenerate this field with AI, keeping it consistent with the rest of the card"
         aria-label="Regenerate this field with AI"
-        className="font-mono text-xs text-text-muted transition-colors hover:text-accent disabled:opacity-40"
+        className="text-text-muted transition-colors hover:text-accent disabled:opacity-40"
       >
-        {busy ? '…' : '⟲'}
+        <RotateCcw size={13} strokeWidth={2} className={busy ? 'animate-spin' : ''} />
       </button>
       {error && (
         <span className="absolute right-0 top-5 z-10 w-48 rounded-lg bg-danger/10 p-2 text-[11px] text-danger">

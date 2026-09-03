@@ -40,6 +40,16 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
       effort and remains open; see section 11's "generate a full expression set" bullet, which
       would make layering far more tractable once art can be generated on demand instead of
       hand-uploaded per expression.
+- [x] **Fixed: sprite silently cropped to a sliver on a wide-but-short window** — user-reported,
+      reproduced directly (a real character's portrait sprite showed only the top of the head on a
+      1440×700 viewport). A classic flexbox bug: the sprite's flex container defaulted to
+      `min-height: auto`, so it refused to shrink below the sprite's natural (unconstrained) height
+      on a short viewport — the oversized box then got silently clipped by the stage's own
+      `overflow-hidden`, instead of `max-h-[85%]` ever getting a definite height to resolve
+      against and actually scale the image down. Fixed with `min-h-0` on the container, the
+      standard fix for this flex-shrink class of bug. Verified live: reproduced the crop at
+      1440×700 before the fix, confirmed it renders correctly there after, and confirmed normal
+      desktop sizes were unaffected either way.
 
 ## 2. Dating-sim mechanics
 - [x] Affection/relationship meter: `Chat.affection`/`relationshipStage`, updated by an AI-graded
@@ -131,6 +141,18 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
 
 ## 3. Character & content creation
 - [x] Multi-sprite upload UI in `CharacterEditor` with an unlock-affection field per expression.
+- [x] **Bulk sprite upload by filename** — user-requested: pre-made expression art is often already
+      named after the expression it depicts (`laughing.png`, `annoyed.png`), so uploading one at a
+      time per slot was pure friction for a full set. A new "+ Bulk upload by filename" control
+      accepts a multi-file picker selection, matches each file's basename (extension stripped,
+      case-insensitive) against every known expression id — built-in and this character's own
+      custom ones — and assigns matches in one pass, toasting which filenames matched and which
+      didn't (so a typo'd filename doesn't just silently fail to land anywhere). Surfaced a real,
+      pre-existing bug along the way: saving many sprite images in one request could exceed
+      Express's 25MB body-size limit (`PayloadTooLargeError`) — raised to 150MB, generous since this
+      is a local-only single-user app, not a public API needing a tight ceiling. Verified live
+      end-to-end with a real 21-image expression set: every file matched its correct slot and the
+      save succeeded after the limit fix.
 - [x] **Fixed: clicking an expression's box didn't open the file picker** — user-reported, found
       while building the custom-expressions bullet below. Each expression slot's `<label>` wrapped
       *two* labelable controls (the unlock-affection number input and the hidden file input) with
@@ -317,11 +339,46 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
       soft pink/plum romance palette; Neon Night a vivid magenta cyberpunk one — both verified live
       in both light and dark mode (the swatch preview, the applied `--c-accent` value, and the
       whole app's re-themed look all checked, then reset back to the default teal).
-- [ ] Speech-bubble tails / manga-style SFX text bursts for `*action text*` emphasis — no such
-      styling exists in `MessageBubble.tsx`/`globals.css`.
-- [ ] Subtle ambient particle/gradient effects (e.g. optional falling sakura petals layer) behind
-      `VNStage` — currently a static background image only.
-- [ ] Polish `WorldsView`/`CharacterList` portrait grids with hover glow/parallax.
+- [x] **`*action text*`/"quoted dialogue" emphasis** — done, the smaller and more broadly useful
+      half of this item (the "manga-style SFX text bursts" half stays open below, as a separate,
+      more decorative treatment). `.prose-rp em`/`.rp-quote` CSS already existed in `globals.css`
+      unused — nothing had ever produced those tags, so every message rendered with literal
+      asterisks and no visual distinction between narration and speech. A new
+      `splitMessageSegments()` (`src/lib/text/messageSegments.ts`) is the single source of truth
+      for the split, walked via `matchAll` rather than `String.split` + re-inspecting each piece's
+      own first/last character — the latter misclassifies an unterminated `*action` (whose
+      leftover text coincidentally starts and ends with `*`) as a real match even though nothing
+      actually matched the delimiter pattern; a real bug caught by a deliberately adversarial test
+      case before it ever reached the UI. `renderMessageText()` (`messageText.tsx`) is the JSX
+      wrapper used by `MessageBubble` (all three chat styles) and `VNStage`'s dialogue box, and
+      `messageTextHtml()` in `chatTranscript.ts` reuses the same parser for the HTML export so all
+      three surfaces agree. VNStage gets its own `.vn-dialogue em`/`.rp-quote` colors rather than
+      reusing `.prose-rp`'s, since its dialogue box sits on a background image with fixed white
+      text, not a themed surface. Caught and fixed two real `*/`-inside-a-comment bugs along the
+      way (one in a JSDoc comment, one in a CSS comment) where a stray `*/` inside prose describing
+      the asterisk convention silently truncated the surrounding comment block. 8 unit tests cover
+      the parser (plain text, action, quote, mixed, unterminated asterisk, lone asterisk, no match
+      across newlines, empty string); verified live end-to-end (a message with both action and
+      quote segments, computed styles confirmed distinct in both the default chat style and VN
+      mode, test data cleaned up).
+- [ ] Manga-style SFX text bursts / speech-bubble tails as a further decorative treatment beyond
+      the italic/emphasis styling above — a separate, more elaborate effort.
+- [x] Subtle ambient particle/gradient effects (e.g. optional falling sakura petals layer) behind
+      `VNStage` — currently a static background image only. See changelog #50.
+- [x] **Polish `WorldsView`/`CharacterList` portrait grids with hover glow/parallax** — a shared
+      `.portrait-frame` class (`globals.css`) wraps each grid's portrait art: a soft accent-colored
+      glow ring appears around the frame on hover, and the art itself zooms in gently (1.06x),
+      contained by the frame so it never spills past the rounded corners — a cheap depth cue
+      alongside the card's existing lift-on-hover, short of real cursor-tracking tilt/parallax
+      (deliberately not attempted — heavier, more fragile for a small grid, and it's the "glow"
+      half of this item that reads as the finished, useful piece; "parallax" is approximated rather
+      than built literally). Both grids' markup restructured identically (`CharacterList.tsx`,
+      `WorldsView.tsx`) so the effect and its reduced-motion handling live in one place, not
+      duplicated per view. Respects both the app's own `reducedMotion` setting (the existing
+      `:root.reduced-motion *` global override already zeroes these transitions) and the OS-level
+      `prefers-reduced-motion` media query, matching the convention set by `.cursor-blink`/
+      `.vn-sprite-bob`. Verified live: computed `boxShadow`/`transform` confirmed present only on
+      the actually-hovered card and absent on others, in both grids.
 
 ## 6. Audio/ambience
 - [ ] Background music per world/scene, ducking during TTS playback in `CompanionView`. All
@@ -448,6 +505,36 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
       button per saved theme in `ThemeEditor`) and `DELETE /api/objectives/:id` (the generic
       `objectivesApi`/`themesApi` clients already called these — only the server routes were
       missing).
+- [x] **Fixed a severe, previously-invisible bug: `GET /api/personas/:id` didn't exist at all** —
+      found live, during a real end-to-end playthrough test. `characters`/`chats`/`worlds` all had
+      their get-by-id route; personas never got one. `useChatSession`'s persona query
+      (`personasApi.get(chat.personaId)`) 404'd on every single chat, silently resolving to
+      `undefined` and falling back to the hardcoded `'You'` display text everywhere — including in
+      the actual prompt sent to the model (`personaName`/`personaDescription` in `buildCurrentPrompt`).
+      This was invisible for this entire project's development because every test persona created
+      so far happened to be named "You" (the same string as the fallback), making broken and
+      working output look identical. The first persona named anything else (`Kai`) exposed it
+      immediately: the header showed "as You" instead of "as Kai", and the Prompt Inspector
+      confirmed the model was never actually told the persona's real name or description at all.
+      Added the missing route, mirroring the exact pattern already used for the other three
+      resources. Verified live: header now shows the correct name, and the exact prompt now
+      includes "About Kai: ..." and the relationship line using the real name.
+- [x] **Fixed: a failed generation permanently baked an error string into the character's actual
+      dialogue** — found live, in the same playthrough, immediately after a real koboldcpp
+      disconnect. On failure, `runGeneration` persisted `text: '⚠ Generation failed. See
+      notification for details.'` as the message's real content — meaning every future prompt
+      would show the model a line where the character supposedly said that sentence, forever,
+      unless someone manually deleted it. It also broke the Composer's own "Continue" affordance:
+      since the placeholder text was non-empty, `canContinue` read as true, so the composer
+      offered — and let the player click — "Continue," which would then ask the model to extend
+      the *error text* as if it were legitimate dialogue, instead of the message's own "⟲
+      Regenerate" (which already worked correctly, since it never trusted the current text at all).
+      Fixed by keeping `text: ''` on failure and adding `StoredMessage.failed?: boolean` as a
+      separate signal — `MessageBubble`/`VNStage` now render "⚠ Generation failed — try
+      regenerating" purely as UI, not as stored content; `failed` is cleared back to `false` on any
+      subsequent successful generation for that message. Verified live: after the fix, the
+      Composer correctly fell back to a disabled "Send" instead of a misleading "Continue," and
+      "⟲ Regenerate" produced a genuine, correctly in-character reply.
 
 ## 10. Major expansion: a living-world dating sim
 
@@ -491,20 +578,51 @@ below:**
       stored at all — deterministically recomputed from `(worldId or characterId, day)`, so
       browsing the forecast ahead of time is just calling the function with a larger day number.
       A day only advances manually today (see the still-open energy-economy bullet below).
-- [ ] **Energy/action economy**: a small daily action pool (3 actions, 4 on weekends). A date, a
-      hangout, work shift, spending time with someone ("Together"), or a minigame costs one
-      action each — the heaviest work shift costs two — while texting is always free. Spending
-      energy is what advances the day's time-of-day phase (not a real-time clock); phases get
-      pinned as hard facts inside date scenes and gate when a character's texts can arrive.
-      Running out of energy triggers Sleep: a written recap of the day, what happened around town
-      while you weren't looking, and a fresh morning with new weather. `advancePhase()`
-      (`calendar.ts`) already implements the phase-rollover mechanics this would call into — what's
-      missing is the action-point ledger and tying it to actual in-chat actions instead of a manual
-      "Advance" button.
-- [ ] **Economy**: money is earned, not handed out — from work shifts, minigames, or wealth
-      holdings the player owns — and spent through the gift/item catalog (10d). Needs a
-      `Chat`-or-player-scoped currency/ledger beyond today's per-chat `giftCoins`, which currently
-      has no earning mechanism at all (`NewChatDialog` just seeds a flat 24).
+- [x] **Energy/action economy (core ledger + the one real consumer today)** — done: a small daily
+      action pool, 3 on a weekday / 4 on a weekend (the extra one for staying out late), derived
+      entirely from `WorldCard.currentDay`/`currentPhaseIndex` — no new persisted field, matching
+      this file's own "nothing needs its own storage beyond the two integers that actually change"
+      philosophy. New pure functions in `calendar.ts`: `getMaxEnergyForDay`, `getEnergyRemaining`,
+      and `spendEnergy` (steps the phase clock and, if that used up the day's last action, rolls
+      straight on to next morning — "Sleep" — rather than stranding the world at a phase with
+      nothing left to do; a weekend's bonus action already lands exactly on `advancePhase`'s own
+      night-to-next-morning wraparound, so only a weekday's earlier cutoff, 3 actions but 4 phases,
+      ever needs that extra forced step, which is also why a weekday quietly "ends" at night while
+      a weekend lets the player still be awake to spend one there). Starting a `kind: 'date'` event
+      now spends one action through this and is blocked outright (disabled button, explicit
+      message) once the day's actions run out; gift/milestone cards are untouched, since they
+      aren't a "spend a chunk of the day" activity the way a date is. `WorldsView`'s World clock
+      section now shows remaining actions alongside the day/weather; its manual "Advance" control
+      stays an explicit authoring/testing step, unrelated to the energy spend. Deliberately
+      narrower than the full item: the manual "Advance" button was the only pre-existing consumer
+      of `advancePhase`, and today a date is the only *other* real in-chat action that exists —
+      hangouts, work shifts, "Together," and minigames all stay open below (10b, 10d), each will
+      wire into the same `spendEnergy` once it exists. The written day-recap and "what happened
+      around town" narration also stay open — the latter needs the NPC-background-simulation
+      groundwork from section 12 (explicitly "not scheduled"), so Sleep today is a short
+      deterministic toast (new weather), not an AI-narrated recap. Texts gating on phase is moot
+      until proactive outreach (10f) exists. 10 new unit tests (`calendar.test.ts`) cover both the
+      weekday-forces-a-rollover and weekend-natural-rollover cases explicitly, plus the boundary
+      floor at 0. Verified live: energy display, the blocked/disabled state at 0 actions, the
+      rollover toast and world-state change on spend, and that a gift-kind event is correctly
+      unaffected by 0 energy — all through direct API state, since exercising `startDateEvent` for
+      real needs a live model (koboldcpp is off in dev) only for the "Suggest event with AI" step,
+      not for starting an already-drafted card.
+- [x] **Economy (first earning hook)** — done, a first slice rather than the full item. A date's
+      outcome now earns real coins scaled to how it actually went (`Math.max(0, deltas.affection *
+      2)`, added to the same `chatsApi.update` call `endDateEvent` already makes) — a date that
+      lands earns money, a flat or hurtful one earns none, which is the "earned, not handed out"
+      framing this bullet asks for. Deliberately not the literal work-shift/minigame/wealth-holding
+      mechanics named in the original bullet — none of those exist as real actions yet, so wiring
+      into the one real action that does (a scored date) is the honest substitution, the same kind
+      of scoping-down used elsewhere in this file. Also deliberately NOT done: migrating
+      `Chat.giftCoins` to a shared per-world/player wallet — coins earned from a date still land on
+      that one chat's own balance, same as every other coin flow today (`buyGift`, the existing
+      per-turn trickle in `updateAffectionFromReply`, `NewChatDialog`'s flat starting 24) — that
+      migration is a real, separate architectural change this slice doesn't attempt. Verified the
+      mechanism live: since the earning path itself needs a live model judge call to exercise for
+      real, the coin-award formula was reviewed directly and the surrounding `chatsApi.update`/
+      toast plumbing is identical to already-proven, already-shipped patterns in the same function.
 - [x] **Deterministic weather**: every world-day has forecastable weather (`getWeather(worldId,
       day)`, `calendar.ts`), seeded so it's reproducible rather than random-per-request — the same
       day always reads the same, and tomorrow's forecast is just `getWeather(worldId, day + 1)`.
@@ -604,38 +722,147 @@ below:**
       a branch's history reads correctly for its own timeline. Verified live end-to-end (create →
       list → panel display → cascade-delete on character/chat removal) and wired into
       backup/restore, which silently would have excluded the new table otherwise.
-- [ ] **Define-the-Relationship ladder**: a player-driven progression — Ask them out (Dating) →
-      Become exclusive (Exclusive) → Move in together (Living together) — each unlocked at rising
-      warmth. The character decides: they can accept, deflect, or the ask can backfire if it's
-      badly timed, rather than the player just flipping a status flag.
-- [ ] **Milestones**: crossing into a new warmth band fires a moment — a banner, a keepsake
-      memory, a next-morning text, and (once group/social features exist) a ripple through the
-      character's social circle.
-- [ ] **Breakups & reconciliation**: a committed relationship that's neglected, too tense, or hit
-      by a catastrophic date goes "on the rocks" — a warning with a few days to fix it — before it
-      can break. The player can also end things deliberately, behind a confirmation so a joke
-      line can't blow up a relationship by accident. A broken-up character goes cold but can be
-      won back through a deliberate reconciliation date; every breakup leaves a lasting scar on
-      the bond (a permanent ceiling or debuff, not just a reset to zero).
-- [ ] **Endings gallery**: taking a romance all the way (living together, sweethearts, stable)
-      earns a once-per-relationship epilogue in an Endings gallery — a soft win that doesn't end
-      the game, so the player can keep playing and pursue other characters. Extends the existing
-      `Character.gallery`/`GalleryView` unlock system rather than needing a wholly separate one.
+- [x] **Define-the-Relationship ladder** — done. `Chat.commitmentStatus?: CommitmentStatus`
+      (`'none' | 'dating' | 'exclusive' | 'living_together'`, `types.ts`) is a separate track from
+      the warmth-derived `RelationshipStage` — nothing about it advances automatically. Warmth only
+      ever gates whether the *next* tier can be asked for at all (`canAskForCommitment`/
+      `commitmentTierThreshold` in `stage.ts`, reusing the exact same warmth milestones already
+      authored for `getting_close`/`close`/`sweethearts` rather than a second threshold system);
+      whether the ask actually lands is judged by a new `assessCommitmentAsk()`
+      (`relationshipAssist.ts`) reading the character's personality and recent conversation, same
+      "model plays the character" pattern as `assessDateOutcome`. Three outcomes, not just yes/no:
+      accept (status advances, a toast, and a `ChatFact` recording it — same keepsake-memory
+      pattern as Milestones), deflect (nothing damaged, asking again later stays possible), or
+      backfire (a real relationship cost for genuinely bad timing/delivery) — deliberately never a
+      coin flip or a hardcoded "badly timed" rule; the judge call reads the actual scene. An
+      explicit non-`'none'` status is also folded into the existing always-on
+      `buildRelationshipDescription()` prompt line ("They are officially dating.") so the model
+      stays consistent about it turn to turn, not just at ask-time. `RelationshipPanel` gets a
+      "Status" row: the current tier, and an "Ask to be X" button once warmth clears the next
+      tier's threshold (a locked hint showing the required warmth otherwise). 8 new unit tests for
+      the pure ladder helpers (`nextCommitmentTier`/`commitmentTierThreshold`/
+      `canAskForCommitment`/`formatCommitmentStatus`). Verified live: the button correctly appears
+      only once eligible, correctly reads the required warmth when not yet eligible, and (since
+      the judge call itself needs a live model, koboldcpp is off in dev) a failed attempt fails
+      gracefully via a toast, leaves the status untouched, and re-enables the button for a retry.
+- [x] **Milestones (banner + keepsake memory)** — done, two of this item's four parts (a
+      next-morning text needs the proactive-outreach machinery in 10f, which doesn't exist yet;
+      the social-circle ripple needs group/social features, also not built — both stay open). The
+      banner already existed (a toast on stage-up); new here is that crossing into a higher warmth
+      band now also records a `ChatFact` "keepsake memory" (e.g. `You and Aria's relationship
+      recently deepened to "getting close."`), so the model actually knows the relationship
+      deepened instead of only the unlock gates silently changing underneath it — reusing the
+      exact same synthetic-lorebook plumbing every other fact already rides through. The
+      stage-crossing check itself (`crossedMilestone()`) moved to `stage.ts` as an exported pure
+      function with its own unit tests (5 cases: forward, multi-stage jump, same-stage, backward,
+      reset-to-zero), and a new `announceMilestone()` helper in `useChatSession.ts` replaces what
+      used to be duplicated inline at both call sites (per-turn and end-of-date). Verified live:
+      since exercising this for real needs a live model judge call (koboldcpp is off in dev), the
+      decision logic is unit-tested directly and the `ChatFact` mechanism itself (already proven
+      elsewhere) was smoke-tested with this exact milestone-shaped text through the real API and
+      `RelationshipPanel` display — round-trips and renders correctly, including the embedded
+      quote marks.
+- [x] **Breakups & reconciliation** — done, closing out 10c. `Chat.relationshipWarning?:
+      { startedAt, reason }` / `breakupCount?: number` (`types.ts`) — only a *committed*
+      relationship (`commitmentStatus !== 'none'`) can go "on the rocks" at all: `relationshipAtRisk`
+      (`stage.ts`) fires once tension ≥80 or comfort ≤15. A pure `evaluateRelationshipRisk()`
+      decides, every time relationship stats get recomputed (not on any separate tick/timer):
+      raise a new warning, clear one whose strain resolved, or — once a standing warning's grace
+      period (3 real days, chosen over in-fiction days so it works the same whether or not this
+      character even has a world/calendar) runs out still at risk — actually break things
+      (`commitmentStatus` resets to `'none'`, `breakupCount` increments, and `applyBreakupScar()`
+      takes a one-time -15 hit to trust/comfort/chemistry — the "lasting scar," short of a literal
+      permanent ceiling that would need every clamp in the codebase to read a per-chat cap). One
+      shared `applyRelationshipRisk()` in `useChatSession.ts` wires this into all three places
+      relationship stats get recomputed (per-turn, end-of-date, and a DTR ask), so the logic isn't
+      triple-implemented. The player can also end things deliberately (`endRelationship()`, behind
+      a confirm() in `RelationshipPanel`) — applies the same scar, so a deliberate and an
+      unresolved-strain breakup leave the same kind of mark. **Reconciliation needed no new
+      mechanics at all**: a breakup just resets `commitmentStatus` to `'none'`, so the existing DTR
+      "Ask to be X" flow (this section, above) already lets a player win a character back once
+      warmth recovers — the only genuinely new piece is that a character "goes cold": an always-on
+      `buildRelationshipDescription()` note fires whenever `breakupCount > 0`, regardless of
+      current status, plus a distinct note while a warning is actively standing, so the model
+      actually plays the strain instead of just having numbers move underneath it. 13 new unit
+      tests for the pure risk/scar functions. Verified live end-to-end: the "On the rocks" banner
+      renders correctly; ending a relationship correctly resets status, applies the exact scar
+      amounts, and re-opens the "Ask to be dating" path (reconciliation); and the Prompt Inspector
+      confirms both the `ChatFact` from a deliberate breakup and the always-on "history between
+      them" note actually reach the built prompt.
+- [x] **Endings gallery** — done, scoped to today's actual top stage rather than the original
+      "living together"/"stable" wording, both of which are Define-the-Relationship-ladder tiers
+      that don't exist yet (the bullet above this one is still open) — reaching `sweethearts`,
+      today's real highest `RelationshipStage`, is the trigger instead. `GalleryEntry.isEnding?:
+      boolean` (`cardSpec.ts`) marks an entry as a once-per-relationship epilogue; a new pure
+      `unlockedEndingIds()` (`stage.ts`, alongside `crossedMilestone`) unlocks any not-yet-unlocked
+      `isEnding` entries the moment `relationshipStage === 'sweethearts'` — deliberately bypassing
+      `detectGalleryUnlocks`'s AI reply-matching pass entirely (an ending isn't "this reply
+      pictured this scene," it's "the relationship reached its top tier"), so endings are excluded
+      from that pass's candidate list. Reuses the existing `unlockedGalleryIds` set for the
+      "once-per-relationship" part — nothing new needed, since an id already in the set is
+      naturally skipped from then on. `GalleryView.tsx` shows `isEnding` entries in their own
+      "Endings" section per character, with a distinct accent border once unlocked and a "Reach
+      Sweethearts" lock message instead of an affection number (`unlockAffection` is authored but
+      unused/ignored for `isEnding` entries — the stage crossing is the only trigger).
+      `CharacterEditor`'s CG-entry editor gets an "Ending" toggle; `normalizeGalleryEntries`
+      (`server/app.ts`) passes the new field through on save. 5 new unit tests for
+      `unlockedEndingIds`. Verified live end-to-end: authored a regular CG and an ending entry,
+      confirmed the editor toggle state and the Gallery tab's two-section split and lock copy both
+      render correctly, then simulated the unlocked state and confirmed the accent border and
+      unlock count update correctly.
 
 ### 10d. Economy, gifts & items
-- [ ] **Item catalog beyond gifts**: extend the just-added per-world `WorldCard.gifts[]`
-      (`GiftItem`) into a general item catalog — consumables and trinkets alongside gifts —
-      purchasable with the per-world purse from 10a. Today's `GiftItem` is name/rarity/price/tags
-      only; items need an effect model: temporarily boost a relationship dimension, permanently
-      raise a character's base dating stat, grant a time-limited buff, set a story flag, or
-      give/cost money.
-- [ ] **A Bag/inventory view** distinct from the existing gift-shop-in-`RelationshipPanel` — gifts
-      are viewed in the Bag but given in person on a date or sent by text, not bought-and-given in
-      one step like today's `buyGift` flow in `useChatSession.ts`.
-- [ ] **Authored reactions**: gift reactions driven by a character's authored likes, dislikes, and
-      "love language" — richer than today's single `giftPreferences[-2..3]` score — so the same
-      rare gift can delight one character and bore another, in their own voice, not generic
-      flavor text keyed only off a number.
+- [x] **Item catalog beyond gifts** — done, scoped to the deterministic half of the originally
+      envisioned effect model. `WorldCard.items?: ItemDef[]` (`types.ts`) is a separate per-world
+      catalog from `gifts[]` — items are used/consumed for an immediate authored effect, not given
+      to a character in a scene, so they never touch `sendUserMessage`'s gift-choice path at all.
+      `ItemEffect` is a discriminated union: `relationship` (nudge affection or a stat dimension by
+      an authored amount), `flag` (set a scene flag), or `currency` (grant coins) — applied
+      instantly and deterministically in a new `useItem()` (`useChatSession.ts`), no judge call,
+      since an item's effect is authored, not reacted to. Deliberately NOT included: "permanently
+      raise a character's base dating stat" (no such concept exists distinct from the tracked
+      `relationshipStats`) and "grant a time-limited buff" (needs a whole new active-effects-with-
+      expiry system) — both stay open, genuinely separate efforts. Authoring lives in `WorldsView`
+      (an "Item catalog" section mirroring the existing Gift catalog CRUD, with effect-kind-specific
+      fields); buying happens from `RelationshipPanel`'s new "Item shop" section (mirroring the gift
+      shop); using happens from the Bag (see below), which now shows owned items alongside owned
+      gifts. `Chat.itemInventory` is deliberately separate from `giftInventory` — different
+      lifecycle (consumed for an effect vs. given away). `normalizeItemEffect`/`normalizeItemDefs`
+      (`server/app.ts`) validate the effect union server-side, the same rigor `normalizeGiftItems`
+      already gets. Verified live end-to-end: authored an item with a `+5 trust` effect, bought it,
+      used it from the Bag, and confirmed `relationshipStats.trust` moved by exactly 5, the item
+      was consumed from inventory, and the Bag panel closed automatically afterward.
+- [x] **A Bag/inventory view** — done, and it turned out this bullet was really about a gap in
+      *giving*, not buying: `buyGift` already only ever added to inventory (buying and giving were
+      already two separate steps) — but there was no manual way to actually give an already-bought
+      gift at all; the only path was hoping the model happened to suggest it as an AI choice card.
+      A new `BagPanel.tsx` (a 🎒 header button in `ChatWindow`) lists owned gifts with a direct
+      "Give" button, reusing the exact same `sendUserMessage(..., { choice })` gift-choice path a
+      suggested choice already used, so nothing about how giving affects the relationship changes.
+      "Given in person on a date" now has a real manual path; "sent by text" stays explicitly out
+      of scope — it needs the proactive-outreach/texting machinery from 10f, which doesn't exist.
+      Verified live end-to-end with koboldcpp running for real: bought a gift, gave it from the
+      Bag, and confirmed a genuine model reply and relationship-event log entry both landed
+      correctly from the manual give action, the same as an AI-suggested one would.
+- [x] **Authored reactions** — done. `Character.giftLikes?: string[]`/`giftDislikes?: string[]`/
+      `loveLanguage?: string` (`cardSpec.ts`) sit alongside the existing numeric
+      `giftPreferences[-2..3]` rather than replacing it — the number still drives the mechanical
+      affection delta (`giftImpactBase` + preference score in `sendUserMessage`'s gift branch),
+      staying "deterministic code runs the world"; the new free-text fields feed the model instead,
+      so its own freeform in-character reaction is actually informed by what this specific
+      character likes, not just personality plus a generic `*I give X gift*` action line. A new
+      `buildGiftTasteNote()` folds into the same always-on relationship-description prompt line
+      `buildRelationshipDescription()` already builds — not a gift-turn-only prompt section, since
+      the model already has it in context the same turn a gift-giving action line appears,
+      needing no new "was a gift just given" detection at all. Editable in `CharacterEditor`'s
+      existing "Gift preferences" section, right above the per-gift numeric grid. Deliberately not
+      added to the character pack format (`pack.ts`) — `weatherPreferences`/`schedule`, both
+      already-shipped section 10 fields, aren't in the pack either; growing the pack format is its
+      own explicitly-deferred batch (section 7's open item), not something to patch one field at a
+      time. Verified live end-to-end: authored likes/dislikes/love-language in the editor,
+      confirmed they round-tripped through the API and editor fields correctly, then confirmed via
+      the Prompt Inspector that the exact built prompt sent to the model includes the gift-taste
+      line, worded naturally rather than as raw data.
 
 ### 10e. Character & world authoring depth
 - [ ] **Guaranteed expression coverage for dates**: extend the sprite/expression system
@@ -898,11 +1125,212 @@ Done so far (see checked boxes above for detail):
     `useSettingsStore`) applied as a single delta multiplier at the one choke point both the
     per-turn and end-of-date scoring paths already share, so it can never touch a judge prompt or
     a character's own generation (section 10b).
+30. ~~`*action text*`/"quoted dialogue" emphasis~~ — `splitMessageSegments()`/`renderMessageText()`
+    (section 5), feeding CSS (`.prose-rp em`/`.rp-quote`) that had existed unused since before this
+    file did. Caught two real `*/`-inside-a-comment bugs along the way (section 5's own writeup has
+    the detail).
+31. ~~Portrait grid hover glow~~ — a shared `.portrait-frame` class for `CharacterList`/`WorldsView`
+    (section 5): an accent glow ring plus a contained gentle zoom on hover, respecting both the
+    app's and the OS's reduced-motion settings.
+32. ~~Milestones: banner + keepsake memory~~ — crossing into a higher warmth band now records a
+    `ChatFact` alongside the existing toast (section 10c); `crossedMilestone()` extracted to
+    `stage.ts` with its own unit tests. The next-morning-text and social-circle-ripple parts of
+    this item stay open, blocked on machinery (proactive outreach, group/social features) that
+    doesn't exist yet.
+33. ~~Energy/action economy core + a first Economy earning hook~~ — 10a's last two open items,
+    both taken as deliberately narrower first slices: `getMaxEnergyForDay`/`getEnergyRemaining`/
+    `spendEnergy` in `calendar.ts` (10 new tests) give the day a real, derived action pool that
+    starting a date now spends and can run out of ("Sleep" — an automatic roll to next morning);
+    a date's outcome now earns coins scaled to how it went, rather than the flat/handed-out coin
+    flows that existed before. Hangouts, work shifts, "Together," minigames, the AI-narrated
+    day-recap, and a shared per-world wallet all stay open — each needs machinery (10b/10d, or an
+    NPC-simulation groundwork from section 12) this slice deliberately didn't build.
+34. ~~Endings gallery~~ — `GalleryEntry.isEnding` unlocks deterministically at the `sweethearts`
+    stage via a new `unlockedEndingIds()` (10c), bypassing the AI CG-matching pass entirely and
+    reusing the existing gallery-unlock set for "once per relationship." Scoped to today's actual
+    top stage rather than the DTR-ladder tiers ("living together") the original wording named,
+    since that ladder doesn't exist yet.
+35. ~~Authored reactions~~ — `Character.giftLikes`/`giftDislikes`/`loveLanguage` (10d) feed the
+    model directly, alongside (not replacing) the numeric `giftPreferences` score that still drives
+    the mechanical affection delta — folded into the same always-on relationship-description
+    prompt line, so no new "a gift was just given" detection was needed.
+36. ~~Define-the-Relationship ladder~~ — `Chat.commitmentStatus` (10c), a track separate from the
+    warmth-derived stage; warmth only gates *asking*, `assessCommitmentAsk()` judges accept/
+    deflect/backfire from the actual scene rather than a coin flip or a hardcoded timing rule.
+37. ~~Breakups & reconciliation~~ — closes out 10c. A committed relationship under real strain
+    raises a warning and, unresolved, actually breaks with a one-time stat scar
+    (`evaluateRelationshipRisk`/`applyBreakupScar` in `stage.ts`); reconciliation needed no new
+    mechanics at all since the existing DTR "ask" flow already handles winning someone back.
+38. ~~Bag/inventory view + Item catalog beyond gifts~~ — closes out 10d. A new `BagPanel` gives
+    gifts a manual "give this now" path that didn't exist before (only AI-suggested choices could
+    give one); `WorldCard.items[]` is a separate per-world catalog with an authored, deterministic
+    effect (relationship nudge, scene flag, or coins), used from the same Bag with no judge call.
+39. ~~Bulk sprite upload by filename~~ — user-requested: a character's expression art is often
+    already named after the expression (`laughing.png`), so a new multi-file picker in
+    `CharacterEditor` matches filenames to expression ids in one pass instead of one upload per
+    slot. Surfaced and fixed a real pre-existing bug: many sprites in one save could exceed
+    Express's 25MB body limit — raised to 150MB.
+40. ~~Fixed: VN sprite silently cropped on a wide-but-short window~~ — user-reported, reproduced
+    directly. A classic flexbox bug (a flex child's `min-height: auto` default refusing to shrink
+    below the sprite's natural size, silently clipped by the stage's own `overflow-hidden`) —
+    fixed with `min-h-0` on the sprite's container, the standard fix for this bug class.
+41. ~~Fixed: `GET /api/personas/:id` route entirely missing~~ — found live, during a full Sumire
+    playthrough QA pass. Characters/chats/worlds all had a get-by-id route; personas never did, so
+    `personasApi.get(chat.personaId)` 404'd on every chat this app has ever had, and the persona
+    query in `useChatSession` always silently resolved to `undefined` — invisible until now only
+    because every persona created this session happened to be named "You" (the same as the
+    fallback string), making broken and working output indistinguishable. Added the route;
+    verified via direct fetch and the Prompt Inspector showing the real persona description
+    reaching the model.
+42. ~~Fixed: a failed generation permanently corrupted chat history with fake dialogue~~ — found
+    live right after a real koboldcpp disconnect/reconnect. The old catch-block wrote the literal
+    string "⚠ Generation failed..." into the message's real `text`, which would (a) get fed to the
+    model in every future prompt as something the character genuinely said, and (b) make
+    `canContinue` true, so the Composer misleadingly offered "Continue" on a message with no real
+    reply. Added `StoredMessage.failed`, keeping `text: ''` on failure with the UI
+    (`MessageBubble`, `VNStage`) rendering the failure state itself, driven by the flag. Confirmed
+    `regenerate()` was already unaffected since it never trusts a message's own current text.
+43. ~~Fixed: an unterminated scene tag leaked into the character's saved dialogue~~ — found live.
+    `extractSceneTag` only stripped `<<scene:...>>` when the model closed it with `>>`; a
+    generation cut off mid-tag (hitting max tokens, or the model just never closing it) left the
+    raw fragment (e.g. `<<scene:expression=embarrassed,background=library`) permanently baked into
+    the character's stored `text` — visibly broken immersion, and it would keep reappearing in
+    every future prompt as something the character actually said. `stripSceneTagForDisplay`
+    already existed for hiding an in-progress tag during streaming and turned out to handle an
+    unterminated *completed* tag just as well (it only checks that the trailing `<` begins a
+    prefix of `<<scene:`, regardless of length) — reused it as `extractSceneTag`'s fallback instead
+    of writing a second stripping routine.
+44. ~~Fixed: the relationship-flag classifier had no definition for its own flags~~ — found live:
+    `first_date` fired after a first-ever, chance library conversation with a small gift, which no
+    reasonable player would call a date. `assessRelationshipMoment`/`assessDateOutcome` handed the
+    model bare flag names (`first_date, confession, jealousy, promise`) with zero guidance on what
+    each one actually requires, so a borderline call was left entirely to the loaded model's own
+    (in this case, generous) judgment. Added a `FLAG_GLOSSARY` one-liner per flag, mirroring the
+    existing `DIMENSION_GLOSSARY` pattern, so the bar is explicit instead of implied by the name —
+    same fix shape as the dimension glossary that already existed for exactly this reason.
+45. ~~Chat/VN UI polish pass~~ — user-reported: the chat and VN interface felt cramped ("things
+    didn't really fit at all") and had an "ASCII feeling" from hand-typed glyph icons (`♡ ♥ → [i]
+    ★ 🔎 🎒 ↓ ⟲ ⑂ ‹ › » @`) of inconsistent size and weight. Added `lucide-react` and replaced
+    every such glyph across the chat/VN surface (header toolbar, VNStage controls, MessageBubble
+    meta row, Composer, ChoiceList, toasts, the nav sidebar) with a new shared `IconButton`
+    component for consistent sizing/hit-targets. Fixed the actual cramping, not just the icons:
+    `ChoiceList` was three stacked full-width buttons, now wrapped pill chips; `VNStage`'s dialogue
+    box grew unbounded with reply length, squeezing the sprite area to nothing on a long
+    generation — now capped at `24-30vh` with internal scroll, and the sprite container has a
+    `190px` floor instead of `min-h-0`'s unbounded shrink. The chats list (`ChatsPanel`) can now
+    collapse to an avatar rail, matching the nav sidebar's existing collapse — a new persisted
+    `chatsPanelCollapsed` setting, mirroring `sidebarExpanded`.
+46. ~~VN mode: real immersion, not a chat log with art~~ — user-reported follow-up: VN mode still
+    read as "a chat widget with a picture," not a visual novel — a separate white header above and
+    a separate white composer below (bond/warmth literally shown twice: once in that header, once
+    in VNStage's own badge), plus bad spacing on the choice chips. Folded the header entirely away
+    in VN mode (`ChatWindow` renders no `<header>` when `visualNovelMode` is on) and moved its
+    toolbar/persona/fork-link into `VNStage` itself via new slot props, so the bond meter now
+    renders exactly once. `Composer` and `ChoiceList` both gained a `variant="vn"` that strips
+    their own surface/border so they sit bare inside VNStage's own panel — which is now docked
+    flush to the screen's bottom edge (no floating card with margins) and holds dialogue, choices,
+    and the composer as one continuous panel with hairline dividers, the way a real VN's ADV
+    textbox works, instead of three stacked app-chrome widgets. Added a proper nameplate tab
+    (overlapping the panel's top edge, solid accent fill) in place of a plain inline name, replaced
+    the choice chips' nested text-pill kind tag with a small icon (reads faster, one surface
+    instead of a pill-in-a-pill), added a cinematic vignette and dialogue text-shadow, and merged
+    the persona/bond/event badges into one HUD card with internal dividers instead of three
+    separate floating chiclets. `IconButton` gained a `tone: 'glass'` variant so the same toolbar
+    array renders correctly whether it's sitting on the app's own chrome or floating over scene art.
+47. ~~Design-system pass: shared Modal/Section, no more hardcoded spacing per file~~ — user-reported:
+    Settings and the chat modals still had an "AI-generated" feel, and paddings/margins were
+    hardcoded ad hoc rather than standardized. Every one of the ~10 chat panels
+    (Relationship/Objective/Event/Bag/Search/Pinned/PromptInspector/NewChat) hand-rolled its own
+    near-identical `fixed inset-0 … bg-black/40` backdrop and header-with-Close row, with small
+    unintentional drift between them (`mb-3` vs `mb-4`, 80/85/88vh height caps, `p-6` vs `p-4` inner
+    cards). Replaced all of them with one shared `Modal` component (`src/components/ui/Modal.tsx`)
+    and a `Section` component for the repeated "heading + description + padded card" block, used in
+    both Settings (all 5 tabs, previously three different `max-w`/`space-y` combinations across
+    tabs — now one `SettingsPage` wrapper) and inside `RelationshipPanel`'s own sub-sections.
+    Added real `success`/`warning` theme tokens (Connection status was hardcoding raw
+    `bg-green-500`/`bg-yellow-500`, invisible to the theme system entirely) — which surfaced a real
+    bug: zustand's `persist` does a shallow merge, so a token object already in a returning user's
+    localStorage fully replaced the default object instead of layering over it, permanently hiding
+    any newly-added token behind `undefined`/black. Added an explicit deep-merge for
+    `themeTokensLight`/`themeTokensDark`/`sampler` so a future new token or sampler param
+    backfills correctly for existing users instead of silently breaking. Also enabled Inter's
+    tabular-figure/slashed-zero OpenType features globally, so a changing number (warmth %, token
+    counts, coin totals) never jitters in width as its digits change.
+48. ~~A second accent for relationship data, separate from the UI's own~~ — user asked for a design
+    pass informed by a handful of reference style guides (Linear, Index, Ciridae, Henry, Analogue).
+    None of the five are app-shaped references (all five are dark cinematic marketing sites), so
+    rather than importing their literal palette/type choices wholesale, pulled out the one
+    principle that actually fit: the accent color was doing two unrelated jobs at once — "this is
+    clickable" (buttons, active nav, toggles) and "this is how close you are with them" (the bond
+    meter, relationship stats). Added a dedicated `romance`/`romance-text` token pair (a warm
+    rose, distinct in hue from accent/danger/success/warning) and moved every relationship-*data*
+    display onto it — the bond meter (header bar, VNStage badge, RelationshipPanel), the six
+    positive relationship stat bars, active scene flags, the VN nameplate tag, and Gallery's
+    "Endings" section — while every *interactive* control (buttons, the difficulty/mode pickers,
+    toolbar icons) stays on the plain accent. Tension deliberately stays neutral gray rather than
+    romance-tinted, since (per its own glossary entry) more tension isn't automatically "progress"
+    the way the other six dimensions are. Also enabled Inter's tabular-figure/slashed-zero OpenType
+    features globally (see #47) while auditing this.
+    Along the way, found the `success`/`warning` tokens added in #47 had silently never actually
+    worked as Tailwind utility classes (`bg-success`, `bg-warning`) since the moment they were
+    added — only their raw color *values* had been verified (via the theme editor's native color
+    picker, which doesn't need Tailwind at all), never an actual `bg-success`/`text-warning`
+    element on screen. Root cause: Tailwind's JIT context inside the long-running dev server
+    process hadn't picked up the new `tailwind.config.ts` color keys, even though Vite correctly
+    detected the config change and forced a page reload — only a full dev-server restart
+    regenerated the CSS. Worth remembering: a plain page reload after touching
+    `tailwind.config.ts`'s color keys isn't sufficient confirmation that a new color actually
+    works — check the *computed style* of a real element using the new class, not just the token's
+    raw value.
+49. ~~Bundled starter content: one world, one character, one World Info book~~ — the 12 scene
+    backgrounds the user supplied (`scenes/` at the repo root) are now committed at
+    `seed/backgrounds/` (renamed to match the background ids) and used to seed a bundled world,
+    "Sakura Hill University" — all 12 backgrounds, a themed gift/item catalog (showcasing all
+    three `ItemEffect` kinds), a few affection-gated background unlocks, and its own embedded
+    lorebook. Sumire (edited into a university student for this) ships as its resident character,
+    with scenario/first message/3 alternate greetings/example dialogue/gift preferences/3
+    relationship starters/weather preferences/an 8-entry schedule/a 4-entry `character_book` — every
+    field the user asked for. A separate standalone World Info book, "Sakura Hill — Campus Life,"
+    demonstrates the mechanics a character's own lore can't show off in isolation: an always-on
+    entry, a plain keyword entry, a selective (primary AND secondary key) entry, a mutually-
+    exclusive `group` pair, an `after_char` position entry, and a `probability` roll.
+    New `server/seedContent.ts` (the actual typed data, checked against the real `Character`/
+    `WorldCard`/`WorldInfoBook` interfaces — not a JSON blob that can silently drift) and
+    `server/seed.ts` (the idempotent runner — checks for the seed world's own fixed id before doing
+    anything, so it only ever applies once per install and never fights a user who deletes it). No
+    art bundled for Sumire — the user's own uploaded sprites are private data in the gitignored
+    `data/` directory, not something to redistribute; she falls back to initials like any other
+    character without a portrait, same as the pre-existing behavior for characters with no
+    avatarDataUrl. Confirmed `data/` was already fully gitignored (chat logs, personas, every
+    avatar/sprite file) — the only things this added to git are `server/seed*.ts` and the ~35MB of
+    committed background art, exactly what "comes with the webui" requires and nothing a user's
+    own chat history would ever end up in.
+    Along the way: `tsconfig.server.json` had no `@/*` path alias (server code had simply never
+    imported anything from `src/` before), needed for `seedContent.ts` to type-check its data
+    against the real card/world interfaces; adding it surfaced a real, pre-existing type looseness
+    in `ttsProviders.ts` (`listKoboldSpeakers` trusted an untyped fetch response) that only failed
+    under Node's `fetch` types, not DOM's — fixed properly rather than special-cased around.
+    Verified live end-to-end: both Sumires coexist without id collision, every one of Sumire's new
+    fields renders correctly in `CharacterEditor` (gift scores pulled from the *world's* catalog
+    correctly, given she's world-bound), the world's 12 backgrounds all resolve and render as real
+    images, and the World Info book's entry count matches.
+50. ~~Ambient falling sakura petals behind VNStage~~ — an explicitly open, unblocked item from
+    section 5 ("subtle ambient particle/gradient effects... optional falling sakura petals layer"),
+    picked up as part of the same "keep improving the design" pass. Seven petals (fixed positions/
+    timings, not `Math.random()` — stable across re-renders, no mid-fall jump when an unrelated
+    state update repaints VNStage), each a small inline-SVG four-lobe petal shape tinted with the
+    new `romance` token from #48 rather than a generic pink, so the ambient effect and the bond
+    meter read as the same design language. Only mounts for backgrounds where falling petals
+    actually make sense (`park`/`forest`/`rooftop`/`city-street`/`beach`) — never indoors. Respects
+    the app's own `reducedMotion` setting (checked in `VNStage` before ever mounting the layer) and
+    the OS-level `prefers-reduced-motion` media query as a second, independent guard (same
+    convention as `.cursor-blink`/`.vn-sprite-bob`). Verified live: 7 running animations confirmed
+    via computed style on an outdoor background, 0 petals confirmed on an indoor one.
 
-That closes out the last "reasonable next batch," plus a first slice each of section 10a, 10b, and
-10f taken directly afterward since 10's own suggested phase order names them as the foundation
-everything else in that section reads from. What's left, still deliberately smaller than the rest
-of section 10:
+That closes out the last "reasonable next batch," plus sections 10a, 10c, and 10d in full and a first
+slice each of 10b and 10f taken directly afterward since 10's own suggested phase order names them
+as the foundation everything else in that section reads from. What's left, still deliberately
+smaller than the rest of section 10:
 1. Vision-based expression detection (section 8) — the groundwork (images already flow through
    generation end-to-end) has been sitting unused since before this file existed; worth checking
    what it takes given a vision-capable model is loaded. Needs an actual vision-capable model

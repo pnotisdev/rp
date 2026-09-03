@@ -3,6 +3,8 @@ import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import { listKoboldSpeakers, TTS_PROVIDER_LABELS, type TtsProviderId } from '@/lib/voice/ttsProviders'
 import { TextField } from '@/components/ui/Field'
 import { Button } from '@/components/ui/Button'
+import { Section } from '@/components/ui/Section'
+import { SettingsPage } from '@/components/ui/SettingsPage'
 
 const PROVIDERS = Object.keys(TTS_PROVIDER_LABELS) as TtsProviderId[]
 
@@ -24,14 +26,11 @@ export function VoiceSettings() {
   }
 
   return (
-    <div className="max-w-2xl space-y-8">
-      <section>
-        <h3 className="mb-1 text-sm font-semibold text-text">Voice — the Companion's mouth</h3>
-        <p className="mb-3 text-xs text-text-muted">
-          Text-to-speech provider for the Companion view. Keys are stored only in this browser and sent
-          directly to the provider you pick — never through any other server.
-        </p>
-        <div className="rounded-2xl bg-bg-elevated p-6">
+    <SettingsPage>
+      <Section
+        title="Voice — the Companion's mouth"
+        description="Text-to-speech provider for the Companion view. Keys are stored only in this browser and sent directly to the provider you pick — never through any other server."
+      >
           <label className="mb-3 block">
             <span className="mb-1 block text-xs font-medium text-text-muted">Provider</span>
             <select
@@ -143,17 +142,19 @@ export function VoiceSettings() {
               account, so this was left honest rather than guessed at. The other four providers work now.
             </p>
           )}
-        </div>
-      </section>
+      </Section>
 
-      <section>
-        <h3 className="mb-1 text-sm font-semibold text-text">Ears (speech-to-text)</h3>
-        <p className="text-xs text-text-muted">
-          Uses KoboldCpp's own Whisper endpoint over your existing connection — no separate setup. Launch
-          KoboldCpp with a Whisper model loaded (<code className="font-mono">--whispermodel</code>) for the
-          Companion's push-to-talk mic to work.
-        </p>
-      </section>
-    </div>
+      <Section
+        title="Ears (speech-to-text)"
+        description={
+          <>
+            Uses KoboldCpp's own Whisper endpoint over your existing connection — no separate setup.
+            Launch KoboldCpp with a Whisper model loaded (<code className="font-mono">--whispermodel</code>)
+            for the Companion's push-to-talk mic to work.
+          </>
+        }
+        surface="bare"
+      />
+    </SettingsPage>
   )
 }

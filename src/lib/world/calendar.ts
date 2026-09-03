@@ -7,11 +7,10 @@
  * demand, never persisted, and always reproducible for the same inputs (weather is "browsable a
  * few days ahead" for free, just by calling getWeather with a larger day number).
  *
- * Deliberately NOT built yet (see ROADMAP.md 10a): the energy/action economy that's meant to
- * drive phase advancement during real play, and the economy/currency system. `advancePhase` is
- * exposed as a plain manual step for now (a creator/testing control in the World editor) so the
- * clock itself is usable and its output can start feeding the prompt before that larger system
- * exists — advancing it is not yet tied to any in-chat action.
+ * The economy/currency system (ROADMAP.md 10a's "Economy" bullet) is still not built here — see
+ * `endDateEvent` in `useChatSession.ts` for the one earning hook that exists today. `advancePhase`
+ * is also still exposed as a plain manual step in the World editor for authoring/testing,
+ * independent of the energy ledger below (`spendEnergy`), which is the real in-play path now.
  */
 
 export const SEASONS = ['spring', 'summer', 'autumn', 'winter'] as const
@@ -124,6 +123,43 @@ export function advancePhase(day: number, phaseIndex: number): { day: number; ph
   const next = phaseIndex + 1
   if (next >= PHASES.length) return { day: day + 1, phaseIndex: 0 }
   return { day, phaseIndex: next }
+}
+
+/**
+ * The day's action pool (ROADMAP.md 10a's "Energy/action economy") — 3 actions on a weekday, 4 on
+ * a weekend, one bonus action for staying out late. Never stored: like everything else here it's
+ * derived, this time from how far `currentPhaseIndex` already is into the day.
+ */
+export function getMaxEnergyForDay(day: number): number {
+  const { weekday } = getCalendarInfo(day)
+  return weekday === 'saturday' || weekday === 'sunday' ? 4 : 3
+}
+
+/** How many actions are left today — floors at 0 rather than going negative once the day's spent. */
+export function getEnergyRemaining(day: number, phaseIndex: number): number {
+  return Math.max(0, getMaxEnergyForDay(day) - phaseIndex)
+}
+
+export interface EnergySpendResult {
+  day: number
+  phaseIndex: number
+  /** True when this spend used the day's last action and the clock rolled straight to next morning ("Sleep"). */
+  slept: boolean
+}
+
+/**
+ * Spends one action: steps the phase clock forward, then — if that step used up today's last
+ * action — rolls straight on to next morning instead of leaving the world sitting at a phase with
+ * nothing left to do. A weekend's bonus 4th action already lands exactly on `advancePhase`'s own
+ * night-to-next-morning wraparound, so only a weekday's earlier cutoff (3 actions but 4 phases)
+ * ever needs the extra forced step — which is also why a weekday "ends" at night with no action
+ * left to spend there, while a weekend lets the player still be awake and spend one at night.
+ */
+export function spendEnergy(day: number, phaseIndex: number): EnergySpendResult {
+  const stepped = advancePhase(day, phaseIndex)
+  if (stepped.day !== day) return { ...stepped, slept: true }
+  if (getEnergyRemaining(stepped.day, stepped.phaseIndex) > 0) return { ...stepped, slept: false }
+  return { ...advancePhase(stepped.day, stepped.phaseIndex), slept: true }
 }
 
 export interface WeatherPreferences {

@@ -8,6 +8,8 @@ import { Slider } from '@/components/ui/Slider'
 import { Toggle } from '@/components/ui/Toggle'
 import { Button } from '@/components/ui/Button'
 import { TextAreaField, TextField } from '@/components/ui/Field'
+import { Section } from '@/components/ui/Section'
+import { SettingsPage } from '@/components/ui/SettingsPage'
 
 const COLOR_KEYS: { key: string; label: string }[] = [
   { key: '--c-bg', label: 'Background' },
@@ -21,6 +23,10 @@ const COLOR_KEYS: { key: string; label: string }[] = [
   { key: '--c-msg-user', label: 'Your message background' },
   { key: '--c-msg-char', label: "Character's message background" },
   { key: '--c-danger', label: 'Danger / destructive' },
+  { key: '--c-success', label: 'Success / connected' },
+  { key: '--c-warning', label: 'Warning / checking' },
+  { key: '--c-romance', label: 'Romance / bond meter' },
+  { key: '--c-romance-text', label: 'Text on romance' },
 ]
 
 export function ThemeEditor() {
@@ -124,9 +130,8 @@ export function ThemeEditor() {
   }
 
   return (
-    <div className="max-w-2xl space-y-14">
-      <section>
-        <h3 className="mb-3 text-sm font-semibold text-text">Presets</h3>
+    <SettingsPage>
+      <Section title="Presets" surface="bare">
         <div className="flex flex-wrap gap-3">
           {THEME_PRESETS.map((preset) => {
             const swatch = colorMode === 'light' ? preset.light : preset.dark
@@ -146,11 +151,11 @@ export function ThemeEditor() {
             )
           })}
         </div>
-      </section>
+      </Section>
 
-      <section>
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-text">Colors</h3>
+      <Section
+        title="Colors"
+        action={
           <div className="flex rounded-lg border border-border p-0.5">
             {(['light', 'dark'] as ColorMode[]).map((m) => (
               <button
@@ -164,25 +169,23 @@ export function ThemeEditor() {
               </button>
             ))}
           </div>
-        </div>
-        <div className="rounded-2xl bg-bg-elevated p-6">
-          {COLOR_KEYS.map(({ key, label }) => (
-            <ColorField
-              key={key}
-              label={label}
-              value={tokens[key] ?? '0 0 0'}
-              onChange={(v) => setThemeToken(key, v, colorMode)}
-            />
-          ))}
-        </div>
-        <Button variant="ghost" onClick={resetTheme} className="mt-2">
+        }
+      >
+        {COLOR_KEYS.map(({ key, label }) => (
+          <ColorField
+            key={key}
+            label={label}
+            value={tokens[key] ?? '0 0 0'}
+            onChange={(v) => setThemeToken(key, v, colorMode)}
+          />
+        ))}
+        <Button variant="ghost" onClick={resetTheme} className="mt-3">
           Reset to defaults
         </Button>
-      </section>
+      </Section>
 
-      <section>
-        <h3 className="mb-3 text-sm font-semibold text-text">Chat style</h3>
-        <div className="mb-4 flex gap-2">
+      <Section title="Chat style" surface="bare">
+        <div className="flex gap-2">
           {(['flat', 'bubbles', 'document'] as ChatStyle[]).map((s) => (
             <button
               key={s}
@@ -195,8 +198,8 @@ export function ThemeEditor() {
             </button>
           ))}
         </div>
-        <h3 className="mb-2 text-sm font-semibold text-text">Avatar style</h3>
-        <div className="mb-4 flex gap-2">
+        <div className="mb-2 mt-4 text-sm font-semibold text-text">Avatar style</div>
+        <div className="flex gap-2">
           {(['circle', 'rounded', 'square', 'rectangle'] as AvatarShape[]).map((s) => (
             <button
               key={s}
@@ -209,67 +212,60 @@ export function ThemeEditor() {
             </button>
           ))}
         </div>
-      </section>
+      </Section>
 
-      <section>
-        <h3 className="mb-3 text-sm font-semibold text-text">Layout</h3>
-        <div className="rounded-2xl bg-bg-elevated p-6">
-          <Slider
-            label="Chat width"
-            min={32}
-            max={80}
-            value={chatWidthRem}
-            onChange={(v) => setLayout({ chatWidthRem: v })}
-            formatValue={(v) => `${v}rem`}
-          />
-          <Slider
-            label="Font scale"
-            min={0.8}
-            max={1.4}
-            step={0.05}
-            value={fontScale}
-            onChange={(v) => setLayout({ fontScale: v })}
-            formatValue={(v) => `${Math.round(v * 100)}%`}
-          />
-          <Slider
-            label="Background blur"
-            min={0}
-            max={20}
-            value={blurPx}
-            onChange={(v) => setLayout({ blurPx: v })}
-            formatValue={(v) => `${v}px`}
-          />
-          <Slider
-            label="Shadow strength"
-            min={0}
-            max={2}
-            step={0.1}
-            value={shadowStrength}
-            onChange={(v) => setLayout({ shadowStrength: v })}
-            formatValue={(v) => `${Math.round(v * 100)}%`}
-          />
-        </div>
-      </section>
+      <Section title="Layout">
+        <Slider
+          label="Chat width"
+          min={32}
+          max={80}
+          value={chatWidthRem}
+          onChange={(v) => setLayout({ chatWidthRem: v })}
+          formatValue={(v) => `${v}rem`}
+        />
+        <Slider
+          label="Font scale"
+          min={0.8}
+          max={1.4}
+          step={0.05}
+          value={fontScale}
+          onChange={(v) => setLayout({ fontScale: v })}
+          formatValue={(v) => `${Math.round(v * 100)}%`}
+        />
+        <Slider
+          label="Background blur"
+          min={0}
+          max={20}
+          value={blurPx}
+          onChange={(v) => setLayout({ blurPx: v })}
+          formatValue={(v) => `${v}px`}
+        />
+        <Slider
+          label="Shadow strength"
+          min={0}
+          max={2}
+          step={0.1}
+          value={shadowStrength}
+          onChange={(v) => setLayout({ shadowStrength: v })}
+          formatValue={(v) => `${Math.round(v * 100)}%`}
+        />
+      </Section>
 
-      <section>
-        <h3 className="mb-3 text-sm font-semibold text-text">Behavior</h3>
-        <div className="rounded-2xl bg-bg-elevated p-6 divide-y divide-border">
-          <Toggle checked={reducedMotion} onChange={() => toggleFlag('reducedMotion')} label="Reduced motion" />
-          <Toggle checked={showTimestamps} onChange={() => toggleFlag('showTimestamps')} label="Show timestamps" />
-          <Toggle checked={showTokenCounts} onChange={() => toggleFlag('showTokenCounts')} label="Show token counts" />
-          <Toggle checked={tagsAsFolders} onChange={() => toggleFlag('tagsAsFolders')} label="Tags as folders" />
-          <Toggle checked={clickToEdit} onChange={() => toggleFlag('clickToEdit')} label="Click message to edit" />
-          <Toggle
-            checked={visualNovelMode}
-            onChange={() => toggleFlag('visualNovelMode')}
-            label="Visual Novel mode"
-            description="Compact log + large character art (coming soon)"
-          />
-        </div>
-      </section>
+      <Section title="Behavior" contentClassName="divide-y divide-border">
+        <Toggle checked={reducedMotion} onChange={() => toggleFlag('reducedMotion')} label="Reduced motion" />
+        <Toggle checked={showTimestamps} onChange={() => toggleFlag('showTimestamps')} label="Show timestamps" />
+        <Toggle checked={showTokenCounts} onChange={() => toggleFlag('showTokenCounts')} label="Show token counts" />
+        <Toggle checked={tagsAsFolders} onChange={() => toggleFlag('tagsAsFolders')} label="Tags as folders" />
+        <Toggle checked={clickToEdit} onChange={() => toggleFlag('clickToEdit')} label="Click message to edit" />
+        <Toggle
+          checked={visualNovelMode}
+          onChange={() => toggleFlag('visualNovelMode')}
+          label="Visual Novel mode"
+          description="Full-bleed scene art with a docked dialogue box, in place of the ordinary scrolling chat log"
+        />
+      </Section>
 
-      <section>
-        <h3 className="mb-3 text-sm font-semibold text-text">Custom CSS</h3>
+      <Section title="Custom CSS" surface="bare">
         <TextAreaField
           label=""
           rows={6}
@@ -277,10 +273,9 @@ export function ThemeEditor() {
           onChange={(e) => setCustomCss(e.target.value)}
           placeholder=".prose-rp { font-family: 'Georgia', serif; }"
         />
-      </section>
+      </Section>
 
-      <section>
-        <h3 className="mb-3 text-sm font-semibold text-text">Save / share theme</h3>
+      <Section title="Save / share theme" surface="bare">
         <TextField label="Theme name" value={themeName} onChange={(e) => setThemeName(e.target.value)} />
         <div className="flex flex-wrap gap-2">
           <Button variant="primary" onClick={saveThemeToLibrary}>
@@ -320,7 +315,7 @@ export function ThemeEditor() {
             ))}
           </div>
         )}
-      </section>
-    </div>
+      </Section>
+    </SettingsPage>
   )
 }

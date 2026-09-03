@@ -7,9 +7,12 @@ import {
   describeWorldMoment,
   getCalendarInfo,
   getCurrentActivity,
+  getEnergyRemaining,
+  getMaxEnergyForDay,
   getMoodOfDay,
   getWeather,
   PHASES,
+  spendEnergy,
   WEATHER_KINDS,
   type ScheduleEntry,
 } from './calendar'
@@ -102,6 +105,67 @@ describe('advancePhase', () => {
 
   it('rolls over to the next day at morning after night', () => {
     expect(advancePhase(5, PHASES.length - 1)).toEqual({ day: 6, phaseIndex: 0 })
+  })
+})
+
+describe('getMaxEnergyForDay', () => {
+  it('gives 3 actions on a weekday', () => {
+    for (const day of [0, 1, 2, 3, 4]) expect(getMaxEnergyForDay(day)).toBe(3)
+  })
+
+  it('gives 4 actions on a weekend', () => {
+    expect(getMaxEnergyForDay(5)).toBe(4) // Saturday
+    expect(getMaxEnergyForDay(6)).toBe(4) // Sunday
+  })
+})
+
+describe('getEnergyRemaining', () => {
+  it('starts the day at the full weekday allowance', () => {
+    expect(getEnergyRemaining(0, 0)).toBe(3)
+  })
+
+  it('counts down as the phase advances', () => {
+    expect(getEnergyRemaining(0, 1)).toBe(2)
+    expect(getEnergyRemaining(0, 2)).toBe(1)
+  })
+
+  it('floors at 0 rather than going negative', () => {
+    expect(getEnergyRemaining(0, 3)).toBe(0)
+    expect(getEnergyRemaining(0, 10)).toBe(0)
+  })
+
+  it('reflects the weekend bonus action at night', () => {
+    expect(getEnergyRemaining(5, 3)).toBe(1)
+  })
+})
+
+describe('spendEnergy', () => {
+  it('steps the phase forward normally while energy remains', () => {
+    expect(spendEnergy(0, 0)).toEqual({ day: 0, phaseIndex: 1, slept: false })
+    expect(spendEnergy(0, 1)).toEqual({ day: 0, phaseIndex: 2, slept: false })
+  })
+
+  it('forces a rollover to next morning once a weekday runs out at night', () => {
+    // Monday evening (phase 2), remaining energy 1 — this spend reaches night with 0 left,
+    // so it should roll straight on rather than stranding the world at night with nothing to do.
+    expect(spendEnergy(0, 2)).toEqual({ day: 1, phaseIndex: 0, slept: true })
+  })
+
+  it("lets a weekend's bonus action be spent at night, rolling over naturally", () => {
+    // Saturday night (phase 3) still has 1 energy left (weekend max 4) — advancePhase's own
+    // night -> next-morning wraparound already lands exactly on the rollover, no forcing needed.
+    expect(spendEnergy(5, 3)).toEqual({ day: 6, phaseIndex: 0, slept: true })
+  })
+
+  it('never leaves the day sitting at a phase with 0 energy remaining', () => {
+    let state = { day: 0, phaseIndex: 0 }
+    for (let i = 0; i < 3; i++) {
+      const result = spendEnergy(state.day, state.phaseIndex)
+      state = { day: result.day, phaseIndex: result.phaseIndex }
+      if (i < 2) expect(result.slept).toBe(false)
+    }
+    expect(state).toEqual({ day: 1, phaseIndex: 0 })
+    expect(getEnergyRemaining(state.day, state.phaseIndex)).toBe(3)
   })
 })
 

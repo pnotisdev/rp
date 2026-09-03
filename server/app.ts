@@ -19,7 +19,11 @@ import {
 import { removeAvatar, resolveAvatar, resolveAvatarMap } from './avatars.ts'
 
 export const app = express()
-app.use(express.json({ limit: '25mb' }))
+// A character save can carry many sprite images at once now (10d's bulk expression upload) —
+// each already capped at 8MB decoded by decodeImageDataUrl(), but a full ~21-expression set in
+// one request easily clears a 25MB body. Raised generously since this is a local-only, single-user
+// app with no untrusted-request concern, not a public API needing a tight body-size ceiling.
+app.use(express.json({ limit: '150mb' }))
 app.use('/avatars', express.static(avatarsDir))
 
 function notFound(res: express.Response) {
@@ -56,6 +60,7 @@ function normalizeGalleryEntries(id: string, galleryRaw: unknown) {
         requiredFlags: Array.isArray(g.requiredFlags)
           ? g.requiredFlags.filter((f): f is string => typeof f === 'string' && !!f.trim())
           : undefined,
+        isEnding: g.isEnding === true ? true : undefined,
       }
     })
   const resolvedMap = resolveAvatarMap('characters', 'gallery', id, mapInput) ?? {}
@@ -75,6 +80,45 @@ function normalizeGiftItems(raw: unknown) {
       price: Math.max(0, Number(g.price) || 0),
       tags: Array.isArray(g.tags) ? g.tags.filter((t): t is string => typeof t === 'string' && !!t.trim()) : [],
     }))
+}
+
+const RELATIONSHIP_DELTA_KEYS = new Set(['affection', 'trust', 'chemistry', 'comfort', 'respect', 'curiosity', 'tension'])
+const SCENE_FLAGS = new Set(['first_date', 'confession', 'jealousy', 'promise'])
+
+/** 10d's item catalog — validates the effect union so a malformed save can never persist an item with no usable effect. */
+function normalizeItemEffect(raw: unknown): { kind: string; dimension?: string; flag?: string; amount?: number } {
+  const obj = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
+  if (obj.kind === 'flag' && SCENE_FLAGS.has(obj.flag as string)) {
+    return { kind: 'flag', flag: obj.flag as string }
+  }
+  if (obj.kind === 'currency') {
+    return { kind: 'currency', amount: Math.max(0, Number(obj.amount) || 0) }
+  }
+  const dimension = RELATIONSHIP_DELTA_KEYS.has(obj.dimension as string) ? (obj.dimension as string) : 'affection'
+  const amount = Number(obj.amount)
+  return { kind: 'relationship', dimension, amount: Number.isInteger(amount) ? Math.max(-10, Math.min(10, amount)) : 1 }
+}
+
+function normalizeItemDefs(raw: unknown) {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .filter((i): i is Record<string, unknown> => !!i && typeof i === 'object')
+    .map((i, idx) => ({
+      id: typeof i.id === 'string' && i.id.trim() ? i.id.trim() : `item-${idx}`,
+      name: typeof i.name === 'string' && i.name.trim() ? i.name.trim() : `Item ${idx + 1}`,
+      rarity: GIFT_RARITIES.has(i.rarity as string) ? (i.rarity as string) : 'common',
+      price: Math.max(0, Number(i.price) || 0),
+      tags: Array.isArray(i.tags) ? i.tags.filter((t): t is string => typeof t === 'string' && !!t.trim()) : [],
+      description: typeof i.description === 'string' ? i.description : undefined,
+      effect: normalizeItemEffect(i.effect),
+    }))
+}
+
+/** A trimmed, non-empty-string array or undefined — used for the free-text `giftLikes`/`giftDislikes` lists. */
+function normalizeStringArray(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const cleaned = raw.filter((v): v is string => typeof v === 'string' && !!v.trim()).map((v) => v.trim())
+  return cleaned.length > 0 ? cleaned : undefined
 }
 
 function normalizeRelationshipThresholds(raw: unknown) {
@@ -113,6 +157,9 @@ app.post('/api/characters', (req, res) => {
     spriteUnlocks: req.body.spriteUnlocks ?? {},
     customExpressions: normalizeCustomExpressions(req.body.customExpressions),
     giftPreferences: req.body.giftPreferences ?? {},
+    giftLikes: normalizeStringArray(req.body.giftLikes),
+    giftDislikes: normalizeStringArray(req.body.giftDislikes),
+    loveLanguage: typeof req.body.loveLanguage === 'string' ? req.body.loveLanguage : undefined,
     gallery,
     relationshipStarters: req.body.relationshipStarters ?? [],
     voice: req.body.voice ?? undefined,
@@ -136,6 +183,9 @@ app.put('/api/characters/:id', (req, res) => {
   if ('spriteUnlocks' in req.body) patch.spriteUnlocks = req.body.spriteUnlocks ?? {}
   if ('customExpressions' in req.body) patch.customExpressions = normalizeCustomExpressions(req.body.customExpressions)
   if ('giftPreferences' in req.body) patch.giftPreferences = req.body.giftPreferences ?? {}
+  if ('giftLikes' in req.body) patch.giftLikes = normalizeStringArray(req.body.giftLikes)
+  if ('giftDislikes' in req.body) patch.giftDislikes = normalizeStringArray(req.body.giftDislikes)
+  if ('loveLanguage' in req.body) patch.loveLanguage = typeof req.body.loveLanguage === 'string' ? req.body.loveLanguage : undefined
   if ('gallery' in req.body) patch.gallery = normalizeGalleryEntries(id, req.body.gallery)
   if ('relationshipStarters' in req.body) patch.relationshipStarters = req.body.relationshipStarters ?? []
   if ('voice' in req.body) patch.voice = req.body.voice ?? undefined
@@ -174,6 +224,12 @@ app.delete('/api/characters/:id', (req, res) => {
 
 app.get('/api/personas', (_req, res) => {
   res.json(personaStore.list({ orderBy: 'createdAt' }))
+})
+
+app.get('/api/personas/:id', (req, res) => {
+  const row = personaStore.get(req.params.id)
+  if (!row) return notFound(res)
+  res.json(row)
 })
 
 app.post('/api/personas', (req, res) => {
@@ -451,6 +507,7 @@ app.post('/api/worlds', (req, res) => {
     backgrounds,
     backgroundUnlocks: req.body.backgroundUnlocks ?? {},
     gifts: normalizeGiftItems(req.body.gifts),
+    items: normalizeItemDefs(req.body.items),
     relationshipThresholds: normalizeRelationshipThresholds(req.body.relationshipThresholds),
     createdAt: now,
     updatedAt: now,
@@ -466,6 +523,7 @@ app.put('/api/worlds/:id', (req, res) => {
   if ('backgrounds' in req.body) patch.backgrounds = resolveAvatarMap('worlds', 'backgrounds', id, req.body.backgrounds)
   if ('backgroundUnlocks' in req.body) patch.backgroundUnlocks = req.body.backgroundUnlocks ?? {}
   if ('gifts' in req.body) patch.gifts = normalizeGiftItems(req.body.gifts)
+  if ('items' in req.body) patch.items = normalizeItemDefs(req.body.items)
   if ('relationshipThresholds' in req.body) patch.relationshipThresholds = normalizeRelationshipThresholds(req.body.relationshipThresholds)
   const updated = worldStore.update(id, patch)
   res.json(updated)

@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { ChevronsRight, FileText, Paperclip, Send, Square, Wand2, X } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { readAttachment, type PendingAttachment } from '@/lib/attachments'
 
@@ -16,6 +17,8 @@ interface ComposerProps {
   replyAsOptions?: { id: string; name: string }[]
   replyAsId?: string | null
   onChangeReplyAs?: (id: string | null) => void
+  /** 'vn' strips its own chrome (border/background/margin) to sit bare inside the glass dialogue box it's nested in, and switches text/icon colors for a photo backdrop instead of the app surface. */
+  variant?: 'default' | 'vn'
 }
 
 export function Composer({
@@ -31,12 +34,14 @@ export function Composer({
   replyAsOptions = [],
   replyAsId,
   onChangeReplyAs,
+  variant = 'default',
 }: ComposerProps) {
   const [attachments, setAttachments] = useState<PendingAttachment[]>([])
   const [composerError, setComposerError] = useState<string | null>(null)
   const [impersonating, setImpersonating] = useState(false)
   const textRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const vn = variant === 'vn'
 
   const isEmpty = !value.trim() && attachments.length === 0
 
@@ -82,10 +87,18 @@ export function Composer({
     setAttachments((prev) => prev.filter((_, i) => i !== index))
   }
 
+  const iconBtnClass = vn
+    ? 'text-white/70 hover:bg-white/15 hover:text-white'
+    : 'text-text-muted hover:bg-bg-elevated hover:text-text'
+  const attachmentChipClass = vn ? 'bg-white/10 text-white' : 'bg-bg-elevated text-text'
+  const attachmentRemoveClass = vn
+    ? 'bg-black/50 text-white/70 hover:text-danger'
+    : 'bg-bg-elevated text-text-muted hover:text-danger'
+
   return (
-    <div className="bg-bg-elevated p-4">
-      <div className="mx-auto max-w-chat rounded-2xl bg-bg-sunken p-3">
-        {composerError && <p className="mb-2 px-1 text-xs text-danger">{composerError}</p>}
+    <div className={vn ? 'w-full' : 'border-t border-border bg-bg-elevated p-3'}>
+      <div className={vn ? 'w-full' : 'mx-auto max-w-chat rounded-2xl bg-bg-sunken p-2.5'}>
+        {composerError && <p className="mb-2 px-1.5 text-xs text-danger">{composerError}</p>}
         {attachments.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-2 px-1">
             {attachments.map((a, i) => (
@@ -93,8 +106,8 @@ export function Composer({
                 {a.kind === 'image' ? (
                   <img src={a.dataUrl} alt={a.name} className="h-14 w-14 rounded-lg object-cover" />
                 ) : (
-                  <div className="flex h-14 max-w-[10rem] items-center gap-1.5 rounded-lg bg-bg-elevated px-2.5 text-xs text-text">
-                    <span className="font-mono text-text-muted">[f]</span>
+                  <div className={`flex h-14 max-w-[10rem] items-center gap-1.5 rounded-lg px-2.5 text-xs ${attachmentChipClass}`}>
+                    <FileText size={14} strokeWidth={1.75} className="shrink-0 opacity-70" />
                     <span className="truncate">{a.name}</span>
                   </div>
                 )}
@@ -102,9 +115,9 @@ export function Composer({
                   onClick={() => removeAttachment(i)}
                   title="Remove"
                   aria-label={`Remove attachment ${a.name}`}
-                  className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-bg-elevated text-[11px] text-text-muted opacity-0 transition-opacity hover:text-danger group-hover:opacity-100"
+                  className={`absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full opacity-0 transition-opacity group-hover:opacity-100 ${attachmentRemoveClass}`}
                 >
-                  ✕
+                  <X size={12} strokeWidth={2.5} />
                 </button>
               </div>
             ))}
@@ -129,11 +142,13 @@ export function Composer({
                 : 'Write a message… (Enter to send, Shift+Enter for newline)'
           }
           disabled={disabled}
-          rows={2}
-          className="w-full resize-none bg-transparent px-1 py-1 text-sm text-text outline-none placeholder:text-text-muted"
+          rows={1}
+          className={`w-full resize-none bg-transparent px-1.5 py-1.5 text-sm outline-none ${
+            vn ? 'text-white placeholder:text-white/45' : 'text-text placeholder:text-text-muted'
+          }`}
         />
 
-        <div className="flex items-center justify-between px-1 pt-1">
+        <div className="flex items-center justify-between px-0.5 pt-0.5">
           <div className="flex items-center gap-1">
             {replyAsOptions.length > 1 && (
               <select
@@ -141,7 +156,9 @@ export function Composer({
                 onChange={(e) => onChangeReplyAs?.(e.target.value)}
                 title="Reply as"
                 aria-label="Reply as"
-                className="mr-1 rounded-full bg-bg-elevated px-2.5 py-1.5 text-xs text-text-muted outline-none hover:text-text"
+                className={`mr-1 rounded-full px-2.5 py-1.5 text-xs outline-none ${
+                  vn ? 'bg-white/10 text-white/80' : 'bg-bg-elevated text-text-muted hover:text-text'
+                }`}
               >
                 {replyAsOptions.map((o) => (
                   <option key={o.id} value={o.id}>
@@ -155,27 +172,27 @@ export function Composer({
               disabled={disabled}
               title="Attach images or text files for the model to read"
               aria-label="Attach images or text files"
-              className="flex h-8 w-8 items-center justify-center rounded-full font-mono text-base text-text-muted transition-colors hover:bg-bg-elevated hover:text-text disabled:opacity-40"
+              className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors disabled:opacity-40 ${iconBtnClass}`}
             >
-              +
+              <Paperclip size={16} strokeWidth={1.75} />
             </button>
             <button
               onClick={onContinue}
               disabled={disabled || isGenerating || !canContinue}
               title="Continue the last reply"
               aria-label="Continue the last reply"
-              className="flex h-8 w-8 items-center justify-center rounded-full font-mono text-sm text-text-muted transition-colors hover:bg-bg-elevated hover:text-text disabled:opacity-40"
+              className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors disabled:opacity-40 ${iconBtnClass}`}
             >
-              »
+              <ChevronsRight size={16} strokeWidth={1.75} />
             </button>
             <button
               onClick={handleImpersonate}
               disabled={disabled || isGenerating || impersonating}
               title="Suggest what you'd say next"
               aria-label="Suggest what you'd say next"
-              className="flex h-8 w-8 items-center justify-center rounded-full font-mono text-sm text-text-muted transition-colors hover:bg-bg-elevated hover:text-text disabled:opacity-40"
+              className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors disabled:opacity-40 ${iconBtnClass}`}
             >
-              {impersonating ? '…' : '@'}
+              <Wand2 size={16} strokeWidth={1.75} className={impersonating ? 'animate-pulse' : ''} />
             </button>
           </div>
           <input
@@ -188,7 +205,8 @@ export function Composer({
           />
 
           {isGenerating ? (
-            <Button variant="danger" onClick={onAbort} className="rounded-full">
+            <Button variant="danger" onClick={onAbort} className="flex items-center gap-1.5 rounded-full">
+              <Square size={13} strokeWidth={2} fill="currentColor" />
               Stop
             </Button>
           ) : (
@@ -196,8 +214,9 @@ export function Composer({
               variant="primary"
               onClick={submit}
               disabled={disabled || (isEmpty && !canContinue)}
-              className="rounded-full"
+              className="flex items-center gap-1.5 rounded-full"
             >
+              <Send size={13} strokeWidth={2} />
               {isEmpty && canContinue ? 'Continue' : 'Send'}
             </Button>
           )}

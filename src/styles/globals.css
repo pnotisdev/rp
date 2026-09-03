@@ -20,6 +20,10 @@
   --c-msg-user: 13 121 105;
   --c-msg-char: 255 255 255;
   --c-danger: 197 48 48;
+  --c-success: 22 130 74;
+  --c-warning: 180 108 8;
+  --c-romance: 201 63 122;
+  --c-romance-text: 255 255 255;
 
   --radius: 1rem;
   --chat-width: 48rem;
@@ -42,6 +46,10 @@
   --c-msg-user: 94 224 197;
   --c-msg-char: 26 27 27;
   --c-danger: 240 120 120;
+  --c-success: 94 220 150;
+  --c-warning: 240 190 90;
+  --c-romance: 236 108 184;
+  --c-romance-text: 12 13 13;
 }
 
 :root.reduced-motion * {
@@ -75,6 +83,12 @@ body {
     Arial,
     sans-serif;
   line-height: 1.6;
+  /* Tabular figures so a changing number (warmth %, token counts, coin totals, timestamps) never
+     jitters in width as its digits change, plus a dotted/slashed zero so it's never mistaken for
+     the letter O in an id or a stat. Both are "on" by default in Inter's OpenType table but most
+     browsers don't enable them without being asked. */
+  font-feature-settings: 'tnum' 1, 'zero' 1;
+  font-variant-numeric: tabular-nums slashed-zero;
 }
 
 h1,
@@ -115,6 +129,31 @@ h6 {
   .vn-sprite { animation: none; }
 }
 
+/* A handful of sakura petals drifting down behind the scene — VNStage renders this layer only
+   for outdoor backgrounds (park/forest/rooftop/city-street/beach) where falling petals actually
+   make sense, and never at all when the app's own reducedMotion setting is on. The @media rule
+   is a second, independent guard for the OS-level prefers-reduced-motion, same convention as
+   .cursor-blink/.vn-sprite above, for anyone who reaches this layer some other way. */
+@keyframes sakura-fall {
+  0% { transform: translate3d(0, -10%, 0) rotate(0deg); opacity: 0; }
+  10% { opacity: 0.75; }
+  90% { opacity: 0.75; }
+  100% { transform: translate3d(var(--drift, 40px), 110vh, 0) rotate(340deg); opacity: 0; }
+}
+.sakura-petal {
+  position: absolute;
+  top: 0;
+  left: var(--x, 50%);
+  width: var(--size, 14px);
+  height: var(--size, 14px);
+  animation: sakura-fall var(--duration, 14s) linear infinite;
+  animation-delay: var(--delay, 0s);
+  will-change: transform, opacity;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sakura-petal { display: none; }
+}
+
 /* thin, theme-aware scrollbars */
 * {
   scrollbar-width: thin;
@@ -132,6 +171,37 @@ h6 {
 .themed-shadow {
   box-shadow: 0 1px 2px rgb(0 0 0 / calc(0.04 * var(--shadow-strength))),
     0 4px 12px rgb(0 0 0 / calc(0.06 * var(--shadow-strength)));
+}
+
+/* Character/world portrait grid hover: a soft accent glow around the frame plus a contained,
+   gentle zoom on the art itself — cheap depth cue alongside the card's existing lift-on-hover,
+   short of real cursor-tracking parallax. Shared by CharacterList and WorldsView. */
+.portrait-frame {
+  position: relative;
+  overflow: hidden;
+  transition: box-shadow 200ms ease;
+}
+.group:hover .portrait-frame {
+  box-shadow: 0 0 0 2px rgb(var(--c-accent) / 0.45), 0 10px 28px -6px rgb(var(--c-accent) / 0.35);
+}
+.portrait-frame > img,
+.portrait-frame > div {
+  transition: transform 200ms ease;
+}
+.group:hover .portrait-frame > img,
+.group:hover .portrait-frame > div {
+  transform: scale(1.06);
+}
+@media (prefers-reduced-motion: reduce) {
+  .portrait-frame,
+  .portrait-frame > img,
+  .portrait-frame > div {
+    transition: none;
+  }
+  .group:hover .portrait-frame > img,
+  .group:hover .portrait-frame > div {
+    transform: none;
+  }
 }
 
 /* The manga-mood display face — deliberately scoped to character name-plates (VNStage,
@@ -153,4 +223,15 @@ h6 {
 }
 .prose-rp p + p {
   margin-top: 0.6em;
+}
+
+/* VNStage's dialogue box sits on a background image with fixed white text, not the themed
+   surface `.prose-rp` assumes — same action/quote emphasis convention, its own contrast-safe colors. */
+.vn-dialogue em {
+  color: rgb(255 255 255 / 75%);
+  font-style: italic;
+}
+.vn-dialogue .rp-quote {
+  color: rgb(255 255 255 / 100%);
+  font-weight: 600;
 }

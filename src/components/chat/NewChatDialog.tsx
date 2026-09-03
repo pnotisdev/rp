@@ -6,6 +6,7 @@ import { computeWarmth, getRelationshipStats, relationshipMilestonesFor, relatio
 import { defaultGiftInventory } from '@/lib/dating/gifts'
 import type { RelationshipDimension } from '@/lib/types'
 import { Button } from '@/components/ui/Button'
+import { Modal } from '@/components/ui/Modal'
 
 function parseGreetingGate(line: string): { minAffection: number; text: string } {
   const match = line.match(/^\s*\[affection>=\s*(\d{1,3})\]\s*/i)
@@ -88,10 +89,7 @@ export function NewChatDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-sm rounded-2xl border border-border bg-bg-elevated p-7 themed-shadow">
-        <h2 className="mb-3 text-sm font-semibold text-text">New chat</h2>
-
+    <Modal onClose={onClose} title="New chat" size="sm" hideHeaderClose>
         <label className="mb-1 block text-xs text-text-muted">Character</label>
         <select
           value={characterId}
@@ -203,7 +201,6 @@ export function NewChatDialog({
             Start chat
           </Button>
         </div>
-      </div>
-    </div>
+    </Modal>
   )
 }

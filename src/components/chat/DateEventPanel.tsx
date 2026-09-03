@@ -2,19 +2,23 @@ import { useState } from 'react'
 import type { DateEventCard } from '@/lib/types'
 import { errorMessage, toastError } from '@/lib/store/useToastStore'
 import { Button } from '@/components/ui/Button'
+import { Modal } from '@/components/ui/Modal'
 
 interface DateEventPanelProps {
   currentEvent?: DateEventCard
+  /** Actions left today in this character's world, per 10a's energy economy — undefined when there's no world (unlimited). */
+  energyRemaining?: number
   onClose: () => void
   onSuggest: () => Promise<DateEventCard | null>
   onStart: (event: DateEventCard) => Promise<void>
   onEnd: () => Promise<void>
 }
 
-export function DateEventPanel({ currentEvent, onClose, onSuggest, onStart, onEnd }: DateEventPanelProps) {
+export function DateEventPanel({ currentEvent, energyRemaining, onClose, onSuggest, onStart, onEnd }: DateEventPanelProps) {
   const [event, setEvent] = useState<DateEventCard | null>(currentEvent ?? null)
   const [busy, setBusy] = useState<string | null>(null)
   const isLiveDate = currentEvent?.kind === 'date' && !!currentEvent.startedAt
+  const outOfEnergy = event?.kind === 'date' && energyRemaining === 0
 
   const run = async (label: string, fn: () => Promise<void>) => {
     setBusy(label)
@@ -29,14 +33,7 @@ export function DateEventPanel({ currentEvent, onClose, onSuggest, onStart, onEn
 
   if (isLiveDate && currentEvent) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-        <div className="w-full max-w-lg rounded-2xl border border-border bg-bg-elevated p-7 themed-shadow">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-text">Live date in progress</h2>
-            <Button variant="ghost" onClick={onClose}>
-              Close
-            </Button>
-          </div>
+      <Modal onClose={onClose} title="Live date in progress" size="lg">
           <p className="mb-3 text-xs text-text-muted">
             Relationship movement is scored once, honestly, when the date ends — not turn by turn
             while it's happening. A flat or awkward date won't quietly move things forward.
@@ -57,21 +54,12 @@ export function DateEventPanel({ currentEvent, onClose, onSuggest, onStart, onEn
           >
             {busy === 'end' ? 'Ending…' : 'End date'}
           </Button>
-        </div>
-      </div>
+      </Modal>
     )
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-lg rounded-2xl border border-border bg-bg-elevated p-7 themed-shadow">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-text">Date / Event</h2>
-          <Button variant="ghost" onClick={onClose}>
-            Close
-          </Button>
-        </div>
-
+    <Modal onClose={onClose} title="Date / Event" size="lg">
         <p className="mb-3 text-xs text-text-muted">
           Generate a scene event card and start it as the active objective. This also biases VN backgrounds to the event location.
           Starting a "date" card begins a live, end-of-scene-scored date.
@@ -111,12 +99,18 @@ export function DateEventPanel({ currentEvent, onClose, onSuggest, onStart, onEn
           <Button
             variant="primary"
             onClick={() => event && run('start', async () => onStart(event))}
-            disabled={busy !== null || !event}
+            disabled={busy !== null || !event || outOfEnergy}
           >
             {busy === 'start' ? 'Starting…' : 'Start this event'}
           </Button>
         </div>
-      </div>
-    </div>
+        {event?.kind === 'date' && energyRemaining !== undefined && (
+          <p className="mt-2 text-[11px] text-text-muted">
+            {outOfEnergy
+              ? 'No energy left today — get some rest before starting another date.'
+              : `Uses 1 of your ${energyRemaining} remaining actions today.`}
+          </p>
+        )}
+    </Modal>
   )
 }

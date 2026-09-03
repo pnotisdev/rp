@@ -97,6 +97,6 @@ export async function synthesizeSpeech(config: TtsConfig, text: string, koboldBa
 export async function listKoboldSpeakers(koboldBaseUrl: string): Promise<string[]> {
   const res = await fetch(`${koboldBaseUrl.replace(/\/+$/, '')}/api/extra/speakers_list`)
   if (!res.ok) return []
-  const data = await res.json().catch(() => null)
-  return Array.isArray(data?.speakers) ? data.speakers.map((s: { name?: string }) => s.name).filter(Boolean) : []
+  const data = (await res.json().catch(() => null)) as { speakers?: { name?: string }[] } | null
+  return Array.isArray(data?.speakers) ? data.speakers.map((s) => s.name).filter((n): n is string => !!n) : []
 }

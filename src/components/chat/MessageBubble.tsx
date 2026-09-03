@@ -1,7 +1,9 @@
 import { useState } from 'react'
+import { ChevronLeft, ChevronRight, GitFork, RotateCcw, Star, TriangleAlert, X } from 'lucide-react'
 import type { StoredMessage } from '@/lib/types'
 import { useSettingsStore, type AvatarShape } from '@/lib/store/useSettingsStore'
 import { messageAnchorId } from '@/lib/scrollToMessage'
+import { renderMessageText } from '@/lib/text/messageText'
 
 function avatarClass(shape: AvatarShape): string {
   switch (shape) {
@@ -66,6 +68,10 @@ export function MessageBubble({
   const displayText = isStreaming ? streamingText ?? '' : message.text
   const swipes = message.swipes ?? []
   const canSwipe = !isUser && swipes.length > 0 && !isStreaming
+  // Text stays empty on a failed generation — see `useChatSession.ts` — rather than persisting an
+  // error string as the character's actual dialogue, which would otherwise get fed back into
+  // every future prompt. The failure itself is shown here, driven by the flag, not by content.
+  const showFailedIndicator = !isUser && message.failed && !isStreaming
 
   const startEdit = () => {
     if (!clickToEdit || isStreaming) return
@@ -103,30 +109,41 @@ export function MessageBubble({
       onClick={startEdit}
       className={`prose-rp whitespace-pre-wrap break-words text-sm leading-relaxed ${clickToEdit ? 'cursor-text' : ''}`}
     >
-      {displayText}
+      {showFailedIndicator ? (
+        <span className="flex items-center gap-1.5 text-danger">
+          <TriangleAlert size={14} strokeWidth={2} className="shrink-0" />
+          Generation failed — try regenerating below.
+        </span>
+      ) : (
+        renderMessageText(displayText)
+      )}
       {isStreaming && <span className="cursor-blink font-mono">▋</span>}
     </div>
   )
 
   const meta = (
-    <div className="flex items-center gap-3 text-[11px] text-text-muted">
-      {showTimestamps && <span>{new Date(message.createdAt).toLocaleTimeString()}</span>}
-      {showTokenCounts && message.tokenCount ? <span>{message.tokenCount} tok</span> : null}
+    <div className="flex items-center gap-0.5 text-[11px] text-text-muted">
+      {showTimestamps && <span className="mr-1.5">{new Date(message.createdAt).toLocaleTimeString()}</span>}
+      {showTokenCounts && message.tokenCount ? <span className="mr-1.5">{message.tokenCount} tok</span> : null}
       {canSwipe && (
-        <span className="flex items-center gap-1">
+        <span className="mr-1 flex items-center gap-0.5">
           <button
             onClick={() => onSwipe('left')}
-            className="hover:text-text"
+            className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-bg-sunken hover:text-text disabled:opacity-30"
             disabled={(message.activeSwipe ?? 0) === 0}
             aria-label="Previous swipe"
           >
-            ‹
+            <ChevronLeft size={14} strokeWidth={2} />
           </button>
-          <span>
+          <span className="px-0.5 tabular-nums">
             {(message.activeSwipe ?? 0) + 1}/{swipes.length}
           </span>
-          <button onClick={() => onSwipe('right')} className="hover:text-text" aria-label="Next swipe">
-            ›
+          <button
+            onClick={() => onSwipe('right')}
+            className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-bg-sunken hover:text-text"
+            aria-label="Next swipe"
+          >
+            <ChevronRight size={14} strokeWidth={2} />
           </button>
         </span>
       )}
@@ -134,20 +151,35 @@ export function MessageBubble({
         <>
           <button
             onClick={onTogglePin}
-            className={message.pinned ? 'text-accent hover:text-accent' : 'hover:text-text'}
+            className={`flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-bg-sunken ${message.pinned ? 'text-accent' : 'hover:text-text'}`}
             title={message.pinned ? 'Unpin' : 'Pin this moment'}
             aria-label={message.pinned ? 'Unpin message' : 'Pin message'}
           >
-            {message.pinned ? '★' : '☆'}
+            <Star size={13} strokeWidth={2} fill={message.pinned ? 'currentColor' : 'none'} />
           </button>
-          <button onClick={onRegenerate} className="hover:text-text" title="Regenerate" aria-label="Regenerate">
-            ⟲
+          <button
+            onClick={onRegenerate}
+            className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-bg-sunken hover:text-text"
+            title="Regenerate"
+            aria-label="Regenerate"
+          >
+            <RotateCcw size={13} strokeWidth={2} />
           </button>
-          <button onClick={onFork} className="hover:text-text" title="Fork chat from here" aria-label="Fork chat from here">
-            ⑂
+          <button
+            onClick={onFork}
+            className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-bg-sunken hover:text-text"
+            title="Fork chat from here"
+            aria-label="Fork chat from here"
+          >
+            <GitFork size={13} strokeWidth={2} />
           </button>
-          <button onClick={onDelete} className="hover:text-danger" title="Delete" aria-label="Delete message">
-            ✕
+          <button
+            onClick={onDelete}
+            className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-bg-sunken hover:text-danger"
+            title="Delete"
+            aria-label="Delete message"
+          >
+            <X size={13} strokeWidth={2} />
           </button>
         </>
       )}
@@ -155,12 +187,12 @@ export function MessageBubble({
   )
   // Meta (timestamp, regenerate/delete, swipe) only appears on hover — keeps the resting
   // conversation calm and free of per-line chrome, matching the reference screens.
-  const metaHoverable = <div className="mt-1.5 h-4 opacity-0 transition-opacity group-hover:opacity-100">{meta}</div>
+  const metaHoverable = <div className="mt-1 h-6 opacity-0 transition-opacity group-hover:opacity-100">{meta}</div>
   // Unlike the rest of `meta`, a pin needs to stay visible at rest — otherwise there's no way to
   // spot favorited moments while scrolling without hovering every single bubble.
   const pinBadge = message.pinned ? (
-    <span className="text-accent" title="Pinned">
-      ★
+    <span className="inline-flex text-accent" title="Pinned">
+      <Star size={12} strokeWidth={2} fill="currentColor" />
     </span>
   ) : null
   const anchorId = messageAnchorId(message.id)
@@ -177,7 +209,14 @@ export function MessageBubble({
             textBlock
           ) : (
             <>
-              {displayText}
+              {showFailedIndicator ? (
+                <span className="inline-flex items-center gap-1.5 text-danger">
+                  <TriangleAlert size={14} strokeWidth={2} className="shrink-0" />
+                  Generation failed — try regenerating below.
+                </span>
+              ) : (
+                renderMessageText(displayText)
+              )}
               {isStreaming && <span className="cursor-blink font-mono">▋</span>}
             </>
           )}

@@ -1,9 +1,10 @@
 import { useEffect } from 'react'
+import { X } from 'lucide-react'
 import { useToastStore, type ToastItem, type ToastVariant } from '@/lib/store/useToastStore'
 
 const VARIANT_CLASSES: Record<ToastVariant, string> = {
   error: 'border-danger/30 bg-danger/10 text-danger',
-  success: 'border-accent/30 bg-accent/10 text-accent',
+  success: 'border-success/30 bg-success/10 text-success',
   info: 'border-border bg-bg-elevated text-text',
 }
 
@@ -34,9 +35,9 @@ function Toast({ id, message, variant }: ToastItem) {
       <button
         onClick={() => dismiss(id)}
         aria-label="Dismiss notification"
-        className="shrink-0 leading-none opacity-60 hover:opacity-100"
+        className="shrink-0 opacity-60 hover:opacity-100"
       >
-        ✕
+        <X size={14} strokeWidth={2} />
       </button>
     </div>
   )

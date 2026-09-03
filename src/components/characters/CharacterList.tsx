@@ -75,13 +75,15 @@ export function CharacterList({
             onClick={() => onSelect(c)}
             className="themed-shadow group rounded-2xl bg-bg-elevated p-4 text-left transition-transform hover:-translate-y-0.5"
           >
-            {c.avatarDataUrl ? (
-              <img src={c.avatarDataUrl} className="mb-3 aspect-[3/4] w-full rounded-xl object-cover" />
-            ) : (
-              <div className="mb-3 flex aspect-[3/4] w-full items-center justify-center rounded-xl bg-bg-sunken text-2xl text-text-muted">
-                {c.card.name.slice(0, 1).toUpperCase()}
-              </div>
-            )}
+            <div className="portrait-frame mb-3 aspect-[3/4] w-full rounded-xl">
+              {c.avatarDataUrl ? (
+                <img src={c.avatarDataUrl} className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center bg-bg-sunken text-2xl text-text-muted">
+                  {c.card.name.slice(0, 1).toUpperCase()}
+                </div>
+              )}
+            </div>
             <div className="truncate text-sm font-medium text-text">{c.card.name}</div>
             <div className="truncate text-xs text-text-muted">{c.card.creator || ' '}</div>
           </button>

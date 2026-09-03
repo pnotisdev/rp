@@ -9,7 +9,12 @@ const TAG_RE = /\n?<<scene:([^>]*)>>\s*$/i
 /** Pulls the trailing <<scene:...>> directive off a completed generation, if present. */
 export function extractSceneTag(raw: string): { text: string; scene?: SceneTag } {
   const match = raw.match(TAG_RE)
-  if (!match) return { text: raw.trimEnd() }
+  if (!match) {
+    // Generation can get cut off (max tokens, or the model just never emits `>>`) before the tag
+    // closes — there's no usable expression/background then, but the raw, unterminated fragment
+    // must never end up saved as if it were part of the character's actual dialogue.
+    return { text: stripSceneTagForDisplay(raw).trimEnd() }
+  }
   const scene: SceneTag = {}
   for (const pair of match[1].split(',')) {
     const [key, value] = pair.split('=').map((s) => s.trim().toLowerCase())

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { StoredMessage } from '@/lib/types'
 import { charactersApi, chatsApi, messagesApi } from '@/lib/api/client'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
-import { Button } from '@/components/ui/Button'
+import { Modal } from '@/components/ui/Modal'
 
 interface SearchPanelProps {
   /** The currently open chat — its own matches jump in-place instead of "switching" to it. */
@@ -59,14 +59,7 @@ export function SearchPanel({ chatId, messages, onClose, onJumpToMessage, onJump
   const inChatResults = q ? messages.filter((m) => m.text.toLowerCase().includes(q.toLowerCase())) : []
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="flex max-h-[80vh] w-full max-w-xl flex-col rounded-2xl border border-border bg-bg-elevated p-7 themed-shadow">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-text">Search messages</h2>
-          <Button variant="ghost" onClick={onClose}>
-            Close
-          </Button>
-        </div>
+    <Modal onClose={onClose} title="Search messages" size="xl" scrollable>
         <input
           autoFocus
           value={query}
@@ -131,7 +124,6 @@ export function SearchPanel({ chatId, messages, onClose, onJumpToMessage, onJump
               </button>
             ))}
         </div>
-      </div>
-    </div>
+    </Modal>
   )
 }

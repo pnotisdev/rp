@@ -52,6 +52,22 @@ const DIMENSION_GLOSSARY: Record<RelationshipDeltaKey, string> = {
   tension: 'friction or unresolved conflict — a positive delta here means MORE tension, which is not automatically a bad thing dramatically',
 }
 
+/**
+ * Bare flag names with no definition invited false positives (e.g. "first_date" firing for an
+ * ordinary friendly hangout with a small gift, nothing either party understood as a date) — one
+ * short line per flag gives the classifier an actual bar to clear instead of guessing from the name.
+ */
+const FLAG_GLOSSARY: Record<SceneFlag, string> = {
+  first_date: 'an explicit, mutually understood date has now happened — not just a friendly hangout, chance encounter, or a gift given in passing',
+  confession: 'one of them stated real romantic feelings out loud, not just flirted or hinted',
+  jealousy: 'clear jealousy or possessiveness was shown over a rival or another relationship',
+  promise: 'a specific, meaningful promise was made that the story should remember later',
+}
+
+function describeFlags(): string {
+  return SCENE_FLAGS.map((f) => `${f} (${FLAG_GLOSSARY[f]})`).join('; ')
+}
+
 const ZERO_DELTAS: RelationshipDeltas = Object.fromEntries(DELTA_KEYS.map((k) => [k, 0])) as RelationshipDeltas
 
 /** Gentle/Normal/Harsh — a global scale on how far consequences swing (10b), never what a character says or how a scene opens. */
@@ -109,7 +125,7 @@ export async function assessRelationshipMoment(
     `Recent context:\n${recentText(params.history, params.charName, params.userName, 8)}`,
     `Latest reply from ${params.charName}:\n${params.latestReply}`,
     `Dimension meanings: ${DELTA_KEYS.map((k) => `${k} = ${DIMENSION_GLOSSARY[k]}`).join('; ')}.`,
-    `Known route flags: ${SCENE_FLAGS.join(', ')}.`,
+    `Known route flags: ${describeFlags()}.`,
     params.knownFacts?.length ? `Facts already remembered (don't repeat these): ${params.knownFacts.join('; ')}.` : '',
     'Return ONLY a minified JSON object: {"deltas":{ one integer -2..2 per dimension key },"newFlags":[ any newly-established flags from the known set, or [] ],"reason":"...","newFacts":[ any new durable facts, or [] ]}.',
     'Only move a dimension if this specific exchange clearly affected it — leave the rest at 0. Most turns should move only one or two dimensions and add no new flags.',
@@ -213,7 +229,7 @@ export async function assessDateOutcome(
     `Current scores (0-100 each): ${DELTA_KEYS.map((k) => `${k}=${params.current[k]}`).join(', ')}.`,
     `Full transcript of the date:\n${transcriptText || '(nothing was said)'}`,
     `Dimension meanings: ${DELTA_KEYS.map((k) => `${k} = ${DIMENSION_GLOSSARY[k]}`).join('; ')}.`,
-    `Known route flags: ${SCENE_FLAGS.join(', ')}.`,
+    `Known route flags: ${describeFlags()}.`,
     params.knownFacts?.length ? `Facts already remembered (don't repeat these): ${params.knownFacts.join('; ')}.` : '',
     'Return ONLY a minified JSON object: {"deltas":{ one integer -5..5 per dimension key, judged across the WHOLE date, not per line },"newFlags":[ any newly-established flags from the known set, or [] ],"recap":"...","newFacts":[ any new durable facts, or [] ]}.',
     'Judge the date honestly: a flat, awkward, one-sided, or hurtful date should score low or even negative deltas, not a token positive bump just for happening. A genuinely warm, attentive date should score well across the relevant dimensions.',
@@ -290,4 +306,63 @@ export async function suggestDateEvent(
     kind: obj.kind === 'gift' || obj.kind === 'milestone' ? obj.kind : 'date',
     affectionRequirement: params.affection,
   }
+}
+
+export interface CommitmentAskOutcome {
+  decision: 'accept' | 'deflect' | 'backfire'
+  /** One short in-character sentence explaining the reaction — shown to the player. */
+  reason: string
+  deltas: RelationshipDeltas
+}
+
+/**
+ * Judges a single Define-the-Relationship ask (10c) — reaching warmth just unlocks asking; it
+ * never guarantees a yes. The character can accept, deflect (not right now, but nothing damaged —
+ * asking again later stays possible), or the ask can backfire (genuinely bad timing or delivery, a
+ * real relationship cost) — decided by the model reading the actual relationship texture, not a
+ * coin flip or a hardcoded rule for what counts as "badly timed."
+ */
+export async function assessCommitmentAsk(
+  client: KoboldClient,
+  params: {
+    history: ChatMessage[]
+    charName: string
+    charPersonality?: string
+    userName: string
+    tierLabel: string
+    currentStatusLabel: string
+    current: RelationshipDeltas
+  },
+): Promise<CommitmentAskOutcome> {
+  const recent = recentText(params.history, params.charName, params.userName, 10)
+  const prompt = [
+    `You are judging a single pivotal moment in an in-character roleplay: ${params.userName} has just asked ${params.charName} to move their relationship from "${params.currentStatusLabel}" to "${params.tierLabel}".`,
+    `Current scores (0-100 each): ${DELTA_KEYS.map((k) => `${k}=${params.current[k]}`).join(', ')}.`,
+    params.charPersonality ? `${params.charName}'s personality: ${params.charPersonality}` : '',
+    `Recent conversation leading up to the ask:\n${recent || '(no prior conversation)'}`,
+    'Decide how {{char}} genuinely reacts, in character — never an automatic yes just because they were asked. Three possible outcomes:',
+    '- "accept": they genuinely want this too, right now.',
+    '- "deflect": not right now — caught off guard, needs more time, or it feels premature — but nothing is damaged; asking again later should still be possible.',
+    '- "backfire": the timing or delivery was genuinely bad given how things have actually been going (e.g. asked too soon, mid-argument, or reads as presumptuous) — this stings and costs something real.',
+    'Return ONLY a minified JSON object: {"decision":"accept"|"deflect"|"backfire","reason":"one short in-character sentence explaining the reaction","deltas":{ one integer -3..3 per dimension key }}.',
+    '"accept" should generally have positive deltas; "deflect" should stay close to neutral; "backfire" should have real negative deltas, not just zeros.',
+    'Example: {"decision":"accept","reason":"She laughs and pulls you into a hug — of course she wants that too.","deltas":{"affection":3,"trust":2,"chemistry":2,"comfort":1,"respect":1,"curiosity":0,"tension":-1}}',
+    'JSON:',
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+
+  const text = await client.generate({ ...REL_PARAMS, max_length: 260, max_context_length: await client.getEffectiveMaxContext(), prompt })
+  const parsed = parseLenientJson(text)
+  const obj = (parsed && typeof parsed === 'object' ? parsed : {}) as Record<string, unknown>
+  const decision = obj.decision === 'accept' || obj.decision === 'backfire' ? obj.decision : 'deflect'
+  const reason =
+    typeof obj.reason === 'string' && obj.reason.trim() ? obj.reason.trim().slice(0, 300) : 'They need a moment to process this.'
+  const deltasObj = (obj.deltas && typeof obj.deltas === 'object' ? obj.deltas : {}) as Record<string, unknown>
+  const deltas = { ...ZERO_DELTAS }
+  for (const key of DELTA_KEYS) {
+    const v = Number(deltasObj[key])
+    deltas[key] = Number.isInteger(v) ? Math.max(-3, Math.min(3, v)) : 0
+  }
+  return { decision, reason, deltas }
 }

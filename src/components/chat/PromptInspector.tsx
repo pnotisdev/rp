@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
+import { RotateCcw } from 'lucide-react'
 import type { PromptBuildResult } from '@/lib/prompt/builder'
 import { Button } from '@/components/ui/Button'
+import { Modal } from '@/components/ui/Modal'
 
 export function PromptInspector({
   loadPrompt,
@@ -42,15 +44,7 @@ export function PromptInspector({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-2xl border border-border bg-bg-elevated p-7 themed-shadow">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-text">Prompt inspector</h2>
-          <Button variant="ghost" onClick={onClose}>
-            Close
-          </Button>
-        </div>
-
+    <Modal onClose={onClose} title="Prompt inspector" size="2xl" scrollable>
         {result === null && <p className="text-sm text-text-muted">Building…</p>}
         {result === 'error' && (
           <p className="text-sm text-danger">Couldn't build the prompt — pick a character first.</p>
@@ -72,8 +66,9 @@ export function PromptInspector({
             <div className="mb-5 rounded-xl bg-bg-sunken p-4">
               <div className="mb-2 flex items-center justify-between">
                 <h3 className="text-xs font-semibold text-text-muted">Long-term memory (summary)</h3>
-                <Button variant="ghost" onClick={refreshSummary} disabled={summarizing}>
-                  {summarizing ? 'Updating…' : '↻ Update now'}
+                <Button variant="ghost" onClick={refreshSummary} disabled={summarizing} className="flex items-center gap-1.5">
+                  <RotateCcw size={12} strokeWidth={2} className={summarizing ? 'animate-spin' : ''} />
+                  {summarizing ? 'Updating…' : 'Update now'}
                 </Button>
               </div>
               {summaryError && <p className="mb-2 text-xs text-danger">{summaryError}</p>}
@@ -121,7 +116,6 @@ export function PromptInspector({
             <pre className="whitespace-pre-wrap rounded-xl bg-bg-sunken p-4 text-xs text-text">{result.prompt}</pre>
           </div>
         )}
-      </div>
-    </div>
+    </Modal>
   )
 }
