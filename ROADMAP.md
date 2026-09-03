@@ -386,8 +386,23 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
       a track (or crossfade) per scene mood (romantic, tense, festival, rain) reads as a much more
       finished VN than one static per-world loop, and mood/scene-flag data already exists to drive
       it (`Chat.sceneFlags`, `SceneTag`).
-- [ ] Optional UI SFX (message-send blip, notification chime) with a `reducedAudio` setting (no such
-      setting exists in `useSettingsStore.ts` today).
+- [x] **Optional UI SFX (message-send blip, notification chime) with a `reducedAudio` setting** —
+      done. `src/lib/audio/sfx.ts` synthesizes both sounds with WebAudio (short sine-tone envelopes
+      via `OscillatorNode`/`GainNode`) rather than shipping audio files — nothing to source/license,
+      nothing added to the bundle, and it degrades silently (try/catch, no-op with no `AudioContext`)
+      instead of ever risking breaking a send. The blip fires from `sendUserMessage` in
+      `useChatSession.ts`, right after the empty-message guard. The chime is wired through
+      `toastSuccess(message, { chime: true })` — a new optional second argument, defaulting to
+      falsy, since most success toasts (coins earned, a chat forked) are mundane and would turn a
+      chime into noise; `chime: true` is set only at the genuine reward moments: a relationship
+      stage-up, a gallery/ending unlock, a commitment-ask accepted, and a relationship stabilizing
+      after a breakup warning — the same set of moments that already got the "Milestone/unlock
+      toasts" treatment in section 2. `reducedAudio` (`useSettingsStore.ts`) mutes both, added next
+      to `reducedMotion` in Settings → Appearance, matching its naming and default (off — sound
+      plays by default, same as motion). Verified live: toggled the setting and confirmed it
+      persists, sent a real chat message and confirmed the send path runs clean with no console
+      errors, and confirmed `AudioContext`/`OscillatorNode` work correctly in this app's actual
+      browser context.
 
 ## 7. Data, backup, sharing
 - [x] One-click full backup/restore: `GET /api/backup` snapshots every table (with original ids)
@@ -1098,13 +1113,30 @@ below:**
       save, same as today's `GenerateCharacterDialog`/`RegenerateFieldButton` pattern. This is
       image → text only; see section 11 for actual image *generation* (portraits, sprites, CGs),
       which is a separate, larger integration.
-- [ ] **World templates**: a starting point picked when creating a world (Freeform RP / Visual
-      Novel / Dating Sim / Slice of Life / etc.) that pre-configures which of the above systems are
-      even active — which stats exist, whether the calendar/energy economy is on, what the
-      relationship ladder looks like — instead of every creator manually deciding all of section 10
-      applies to their world. Keeps a plain roleplay world simple while a dedicated dating-sim
-      world gets the full mechanic set; ties into the per-character/world "content/feature flags"
-      bullet above.
+- [~] **World templates**: a starting point picked when creating a world (Freeform RP / Visual
+      Novel / Dating Sim / Slice of Life), pulled forward out of section 10's phase order per
+      section 13's own note that it's the structural fix for "which toggles do I want." Shipped: a
+      `WorldTemplateGallery.tsx` modal (mirrors the character `TemplateGallery.tsx` pattern) shown
+      from "New world," `WorldCard.template?: WorldTemplateId` (unset behaves exactly like
+      `'dating_sim'` — the full set, so every pre-existing world is unaffected), and
+      `hiddenWorldTabs()` (`src/lib/world/worldTemplates.ts`, unit-tested) narrows which
+      `WorldEditor` tabs even show up: freeform hides Dating sim + Clock, Visual Novel and Slice of
+      Life each hide just Dating sim, Dating Sim hides nothing. A Chip picker on the Overview tab
+      makes the template editable after creation too — switching narrower never touches data
+      already entered on a hidden tab, only what's shown. Threaded through `pack.ts` (world
+      bundling) and the backup/restore path (already generic, no change needed there).
+      **Deliberately not done, and worth being honest about**: this does not yet gate "which stats
+      exist" or "whether the calendar/energy economy is on" in the way the original wording
+      promised — `autoTrackRelationship`/`autoSuggestChoices`/`visualNovelMode` are still global
+      `useSettingsStore` toggles shared by every chat, not per-world or per-chat, so a Freeform
+      world's characters still get a relationship-tracking prompt line if the user's global setting
+      has it on. Properly closing that gap needs those settings to become per-chat/per-world first —
+      a genuinely separate, larger change, not a natural extension of the tab-hiding done here.
+      Tracked as its own follow-up rather than silently implied by this item being checked off.
+      6 new tests (`worldTemplates.test.ts`). Verified live end-to-end: created a Freeform world
+      (confirmed Dating sim/Clock tabs absent), switched its template chip to Dating Sim mid-edit
+      (confirmed the Dating sim tab reappeared immediately), saved a Visual Novel world and
+      confirmed `template: "visual_novel"` round-tripped through a fresh `GET /api/worlds`.
 
 ### 10f. Proactive, scheduled characters (the core ask)
 - [x] **Schedules** — the explicit prerequisite for proactive outreach below, shipped on its own
@@ -1370,14 +1402,40 @@ SillyTavern docs/releases, RisuAI (CCv3, CBS/trigger system, regex scripts), Agn
       floated was dropped for that reason). Verified live: a `WIDGET → gizmo` "both" rule showed
       "gizmo" in the rendered greeting AND in the assembled prompt via the Prompt Inspector.
       Per-character/per-world scoping stays a later refinement.
-- [ ] **Prompt/context template manager** — in ST the order, on/off state, and content of every
+- [~] **Prompt/context template manager** — in ST the order, on/off state, and content of every
       prompt section is a drag-to-reorder editable list. Here `builder.ts`'s `fixedSections` array
-      is a hardcoded order, and instruct formatting is 5 fixed builtins (`instructTemplates.ts`)
-      with no editing, no per-character override, and no auto-detection from the template KoboldCpp
-      reports for the loaded model. Rough shape, smallest first: (a) let a user duplicate + edit an
-      instruct template and save it (mirrors the sampler-preset UI that already exists in
-      `SamplingControls`); (b) `Character.instructTemplateId?` override; (c) later, expose the
-      section order/enable flags as data.
+      is still a hardcoded order (part (c) below stays open), but instruct-template editing itself
+      is done: (a) and (b) of the rough shape this bullet originally sketched.
+      - **(a) Duplicate + edit + save, mirroring the sampler-preset UI** — done.
+        `instructTemplatesApi`/`instruct_templates` table (server/client, same shape as
+        presets/themes: list/create/update/delete) plus `resolveInstructTemplate(id, custom[])`
+        (`instructTemplates.ts`), which checks a user's saved custom templates before falling back
+        to the 5 builtins — used everywhere `getInstructTemplate` used to be, so a custom template
+        resolves correctly wherever a builtin id would have. `InstructTemplateSection.tsx`
+        (Settings → Generation) replaces the old plain builtin-only `<select>`: a dropdown picks
+        the active global default (builtin or custom), "Duplicate active template into editor
+        below" copies its 8 fields (prefixes/suffixes/stop sequences/`namesInPrompt`) into an
+        editable form, and "Save as new template" persists it and switches to it immediately —
+        exactly the sampler-preset "Save current" pattern, just with a duplicate-first step since
+        an instruct template has no single "live" object the way `sampler` does. Saved custom
+        templates get Use/Edit a copy/Delete rows, same as the Presets list.
+      - **(b) `Character.instructTemplateId?` override** — done. A character can pin a specific
+        instruct format (builtin or custom) regardless of the global default — useful for a
+        character always run against one particular model/format. Added to `CharacterEditor`'s
+        Advanced tab, next to the existing prompt-override fields; `useChatSession.ts` resolves
+        `character?.instructTemplateId || instructTemplateId` (character wins, empty/unset falls
+        back to global), same precedence style as the voice override. Uses the same
+        `null`-not-`undefined` clearing convention as every other optional character field.
+        Deliberately **not** added to `.rppack.json` — a custom template id is only meaningful on
+        the install that created it, and bundling a dangling reference into a shared pack would be
+        worse than just leaving the field unset for the importer to set themselves.
+      - **(c) Section order/enable flags as data** — still open; `fixedSections` stays hardcoded.
+      5 new tests (`instructTemplates.test.ts`) covering builtin/custom resolution and the unknown-id
+      fallback. Verified live end-to-end: duplicated ChatML, edited its system prefix, saved it as
+      "My ChatML Variant" (appeared as the active template immediately), set it as a per-character
+      override on the seeded Sumire, confirmed both persisted via a fresh fetch, and confirmed
+      `template` (the resolved object) is genuinely threaded into `buildCurrentPrompt` and the
+      generation call's merged stop-sequence list, not just computed and discarded.
 - [ ] **World Info depth ST/RisuAI still have that we don't**:
       - **sticky / cooldown / delay** — already flagged as deferred in section 3; the blocker is
         real and worth restating here: no stable per-entry key exists across this app's lorebook
@@ -1853,6 +1911,19 @@ Done so far (see checked boxes above for detail):
     "Your name" / "a line about you" fields and mints a reusable persona from them on start,
     instead of silently sending the model a hardcoded "You". Once a persona exists, the normal
     dropdown returns. ~40 lines, one file.
+64. ~~Instruct-template manager~~ — the first item off the "still unblocked" list below, parts (a)
+    and (b) of section 14's prompt/context-template-manager bullet: duplicate + edit + save a
+    custom instruct template, and a per-character override. See that section's checked item for
+    the full writeup; (c) — section order/enable flags as data — stays open.
+65. ~~World templates~~ — pulled forward out of section 10e per this file's own note that it's the
+    structural fix for "which toggles do I want." A creation-time picker (Freeform RP / Visual
+    Novel / Dating Sim / Slice of Life) that narrows which `WorldEditor` tabs show up, editable
+    after the fact via a Chip picker. See section 10e's checked item for the full writeup,
+    including what's honestly still open (it doesn't yet gate the global assist-toggle settings).
+66. ~~UI SFX + `reducedAudio` setting~~ — the last item off that same list. A synthesized (not
+    shipped-as-files) message-send blip and a milestone/unlock reward chime, muted by a new
+    `reducedAudio` setting next to `reducedMotion`. See section 6's checked item for the full
+    writeup.
 
 That closes out the last "reasonable next batch," plus sections 10a, 10c, and 10d in full and a first
 slice each of 10b and 10f taken directly afterward since 10's own suggested phase order names them
@@ -1895,12 +1966,18 @@ KoboldCpp off): ~~Author's Note~~ (#55), ~~global-lorebook binding UI~~ (#56), ~
 rebuild~~ (#57, which also part-closed section 13's "actionable empty states" and "inline help"),
 ~~on-disk persistence audit~~ (#58), ~~regex scripts~~ (#59), ~~per-turn assist "thinking"
 indicator~~ (#60), ~~read CCv3 character cards~~ (#61), ~~first-run Welcome screen + actionable
-empty states~~ (#62).
+empty states~~ (#62), ~~persona nudge~~ (#63), ~~instruct-template manager~~ (#64, parts (a)/(b)
+only — (c) stays open), ~~world templates~~ (#65, pulled forward from 10e — doesn't yet gate the
+global assist toggles, see that item's own honest accounting of what's cut), ~~UI SFX +
+`reducedAudio`~~ (#66).
 
-Still unblocked and worth doing next, roughly in order: a **prompt/instruct-template manager**
-(section 14, smallest slice first: duplicate + edit an instruct template); **manga-style SFX
-bursts** (section 5) or **background music per scene** (section 6) for VN polish; **UI SFX +
-`reducedAudio` setting** (section 6). **World templates** (section 10e) is the structural key to
-section 13's
-"which toggles do I want" problem and is worth pulling forward out of 10's phase order. Mobile/
-responsive (section 14) is larger but is the single biggest limiter on who can use the app at all.
+Still unblocked and worth doing next, roughly in order: a **prompt/instruct-template manager,
+part (c)** — expose `builder.ts`'s `fixedSections` order/enable-flags as editable data, now that
+(a)/(b) have shipped; **gate the global assist toggles per-chat or per-world** — the real remaining
+half of world templates (#65): today `autoTrackRelationship`/`autoSuggestChoices`/`visualNovelMode`
+are still one setting shared by every chat, so a Freeform world's characters still carry a
+relationship-tracking prompt line if that global toggle is on — needs those settings to become
+per-chat/per-world before a template can honestly claim to turn mechanics off, not just hide editor
+tabs; **manga-style SFX bursts** (section 5) or **background music per scene** (section 6) for VN
+polish, now that the UI-SFX groundwork (#66) exists to build on. Mobile/responsive (section 14) is
+larger but is the single biggest limiter on who can use the app at all.

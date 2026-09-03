@@ -1,6 +1,8 @@
 import type { Lorebook } from '@/lib/characters/cardSpec'
 import type { ChatMessage } from '@/lib/prompt/builder'
+import type { InstructTemplate } from '@/lib/prompt/instructTemplates'
 import type { SceneTag } from '@/lib/vn/sceneTag'
+import type { WorldTemplateId } from '@/lib/world/worldTemplates'
 
 export interface Persona {
   id: string
@@ -320,6 +322,8 @@ export interface WorldCard {
   currentDay?: number
   /** Index into calendar.ts's PHASES (morning/afternoon/evening/night) — 0 if never advanced. */
   currentPhaseIndex?: number
+  /** Picked at creation (src/lib/world/worldTemplates.ts), editable after — narrows which editor tabs are shown. Unset behaves exactly like 'dating_sim' (the full feature set, matching every world created before this field existed). */
+  template?: WorldTemplateId
   createdAt: number
   updatedAt: number
 }
@@ -354,5 +358,10 @@ export interface Theme {
   id: string
   name: string
   tokens: Record<string, string>
+  createdAt: number
+}
+
+/** A user-authored instruct template (duplicated from a builtin, or made from scratch), saved and reusable across chats. */
+export interface CustomInstructTemplate extends InstructTemplate {
   createdAt: number
 }

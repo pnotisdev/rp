@@ -3,7 +3,6 @@ import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { presetsApi } from '@/lib/api/client'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import type { GenerationParams } from '@/lib/api/types'
-import { BUILTIN_INSTRUCT_TEMPLATES } from '@/lib/prompt/instructTemplates'
 import { BUILTIN_PRESETS } from '@/lib/prompt/builtinPresets'
 import { Slider } from '@/components/ui/Slider'
 import { Toggle } from '@/components/ui/Toggle'
@@ -12,6 +11,7 @@ import { TextField } from '@/components/ui/Field'
 import { Section } from '@/components/ui/Section'
 import { SettingsPage } from '@/components/ui/SettingsPage'
 import { RegexScriptsSection } from './RegexScriptsSection'
+import { InstructTemplateSection } from './InstructTemplateSection'
 
 // Simple-mode sliders derive several raw params from one intuitive 0-100 value each.
 function creativityToParams(v: number) {
@@ -57,8 +57,6 @@ export function SamplingControls() {
   const setAdvancedSamplerMode = useSettingsStore((s) => s.setAdvancedSamplerMode)
   const sampler = useSettingsStore((s) => s.sampler)
   const setSampler = useSettingsStore((s) => s.setSampler)
-  const instructTemplateId = useSettingsStore((s) => s.instructTemplateId)
-  const setInstructTemplateId = useSettingsStore((s) => s.setInstructTemplateId)
   const autoSummarize = useSettingsStore((s) => s.autoSummarize)
   const setAutoSummarize = useSettingsStore((s) => s.setAutoSummarize)
   const keepRecentMessages = useSettingsStore((s) => s.keepRecentMessages)
@@ -216,23 +214,7 @@ export function SamplingControls() {
         />
       </Section>
 
-      <Section
-        title="Instruct template"
-        description="How turns are formatted for the model. Match this to your model's training format."
-        surface="bare"
-      >
-        <select
-          value={instructTemplateId}
-          onChange={(e) => setInstructTemplateId(e.target.value)}
-          className="w-full rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none"
-        >
-          {BUILTIN_INSTRUCT_TEMPLATES.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name}
-            </option>
-          ))}
-        </select>
-      </Section>
+      <InstructTemplateSection />
 
       <Section
         title="Generation"

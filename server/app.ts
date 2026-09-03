@@ -6,6 +6,7 @@ import {
   chatFactStore,
   chatStore,
   db,
+  instructTemplateStore,
   messageStore,
   newId,
   objectiveStore,
@@ -215,6 +216,7 @@ app.post('/api/characters', (req, res) => {
     gallery,
     relationshipStarters: req.body.relationshipStarters ?? [],
     voice: req.body.voice ?? undefined,
+    instructTemplateId: typeof req.body.instructTemplateId === 'string' ? req.body.instructTemplateId : undefined,
     weatherPreferences: req.body.weatherPreferences ?? undefined,
     schedule: Array.isArray(req.body.schedule) ? req.body.schedule : undefined,
     worldId: req.body.worldId || undefined,
@@ -250,6 +252,7 @@ app.put('/api/characters/:id', (req, res) => {
   if ('gallery' in req.body) patch.gallery = normalizeGalleryEntries(id, req.body.gallery)
   if ('relationshipStarters' in req.body) patch.relationshipStarters = req.body.relationshipStarters ?? []
   if ('voice' in req.body) patch.voice = req.body.voice ?? undefined
+  if ('instructTemplateId' in req.body) patch.instructTemplateId = typeof req.body.instructTemplateId === 'string' ? req.body.instructTemplateId : undefined
   if ('weatherPreferences' in req.body) patch.weatherPreferences = req.body.weatherPreferences ?? undefined
   if ('schedule' in req.body) patch.schedule = Array.isArray(req.body.schedule) ? req.body.schedule : undefined
   if ('likes' in req.body) patch.likes = normalizeStringArray(req.body.likes)
@@ -580,6 +583,50 @@ app.delete('/api/themes/:id', (req, res) => {
   res.status(204).end()
 })
 
+// ---- Custom instruct templates ----
+
+app.get('/api/instruct-templates', (_req, res) => {
+  res.json(instructTemplateStore.list({ orderBy: 'createdAt' }))
+})
+
+app.post('/api/instruct-templates', (req, res) => {
+  const created = instructTemplateStore.insert({
+    id: newId(),
+    name: req.body.name,
+    systemPrefix: req.body.systemPrefix ?? '',
+    systemSuffix: req.body.systemSuffix ?? '',
+    userPrefix: req.body.userPrefix ?? '',
+    userSuffix: req.body.userSuffix ?? '',
+    assistantPrefix: req.body.assistantPrefix ?? '',
+    assistantSuffix: req.body.assistantSuffix ?? '',
+    stopSequences: Array.isArray(req.body.stopSequences) ? req.body.stopSequences : [],
+    namesInPrompt: req.body.namesInPrompt === true,
+    createdAt: Date.now(),
+  })
+  res.status(201).json(created)
+})
+
+app.put('/api/instruct-templates/:id', (req, res) => {
+  const patch: Record<string, unknown> = {}
+  if ('name' in req.body) patch.name = req.body.name
+  if ('systemPrefix' in req.body) patch.systemPrefix = req.body.systemPrefix ?? ''
+  if ('systemSuffix' in req.body) patch.systemSuffix = req.body.systemSuffix ?? ''
+  if ('userPrefix' in req.body) patch.userPrefix = req.body.userPrefix ?? ''
+  if ('userSuffix' in req.body) patch.userSuffix = req.body.userSuffix ?? ''
+  if ('assistantPrefix' in req.body) patch.assistantPrefix = req.body.assistantPrefix ?? ''
+  if ('assistantSuffix' in req.body) patch.assistantSuffix = req.body.assistantSuffix ?? ''
+  if ('stopSequences' in req.body) patch.stopSequences = Array.isArray(req.body.stopSequences) ? req.body.stopSequences : []
+  if ('namesInPrompt' in req.body) patch.namesInPrompt = req.body.namesInPrompt === true
+  const updated = instructTemplateStore.update(req.params.id, patch)
+  if (!updated) return notFound(res)
+  res.json(updated)
+})
+
+app.delete('/api/instruct-templates/:id', (req, res) => {
+  instructTemplateStore.remove(req.params.id)
+  res.status(204).end()
+})
+
 // ---- Worlds ----
 
 app.get('/api/worlds', (_req, res) => {
@@ -604,6 +651,7 @@ app.post('/api/worlds', (req, res) => {
     name: req.body.name,
     description: req.body.description,
     rules: req.body.rules,
+    template: req.body.template ?? undefined,
     lorebook: req.body.lorebook,
     avatarDataUrl,
     backgrounds,
@@ -738,6 +786,7 @@ const BACKUP_STORES = {
   worldInfoBooks: worldInfoBookStore,
   presets: presetStore,
   themes: themeStore,
+  instructTemplates: instructTemplateStore,
   worlds: worldStore,
   objectives: objectiveStore,
   relationshipEvents: relationshipEventStore,

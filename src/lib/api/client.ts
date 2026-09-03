@@ -2,6 +2,7 @@ import type { Character } from '@/lib/characters/cardSpec'
 import type {
   Chat,
   ChatFact,
+  CustomInstructTemplate,
   Objective,
   Persona,
   RelationshipEvent,
@@ -126,6 +127,7 @@ export const chatsApi = {
 export const worldInfoBooksApi = makeResource<WorldInfoBook>('world-info-books', '/world-info-books')
 export const presetsApi = makeResource<SamplerPreset>('presets', '/presets')
 export const themesApi = makeResource<Theme>('themes', '/themes')
+export const instructTemplatesApi = makeResource<CustomInstructTemplate>('instruct-templates', '/instruct-templates')
 export const worldsApi = {
   ...makeResource<WorldCard>('worlds', '/worlds'),
   // Un-assigns any characters living here server-side, rather than deleting them.

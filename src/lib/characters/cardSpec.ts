@@ -114,6 +114,8 @@ export interface Character {
   relationshipStarters?: RelationshipStarter[]
   /** Per-character TTS override — unset fields fall back to the global Settings → Voice config. */
   voice?: { provider?: TtsProviderId; voiceId?: string }
+  /** Per-character instruct-template override (builtin or custom id) — unset falls back to the global Settings → Generation default. */
+  instructTemplateId?: string
   /** Weather this character loves/hates (src/lib/world/calendar.ts) — nudges the world-moment prompt line, never dictates it. */
   weatherPreferences?: WeatherPreferences
   /** Daily/weekly routine (src/lib/world/calendar.ts) — where they are and what they're doing at a given world day/phase. Only meaningful for a world-bound character, since it reads the world's shared clock. */

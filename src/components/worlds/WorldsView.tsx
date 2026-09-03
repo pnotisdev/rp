@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Globe, ImagePlus } from 'lucide-react'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { worldsApi } from '@/lib/api/client'
@@ -7,14 +7,17 @@ import { fileToDataUrl } from '@/lib/characters/importExport'
 import { DEFAULT_BACKGROUNDS } from '@/lib/vn/backgrounds'
 import { combinedSceneFlags, formatRelationshipStage, RELATIONSHIP_MILESTONES } from '@/lib/dating/stage'
 import { advancePhase, getCalendarInfo, getEnergyRemaining, getMaxEnergyForDay, getWeather, describeWeather, PHASES } from '@/lib/world/calendar'
+import { WORLD_TEMPLATES, getWorldTemplate, hiddenWorldTabs, type WorldTemplateId } from '@/lib/world/worldTemplates'
 import { newId } from '@/lib/id'
 import { NumberField, SelectField, TextAreaField, TextField } from '@/components/ui/Field'
 import { Button } from '@/components/ui/Button'
+import { Chip } from '@/components/ui/Chip'
 import { Section } from '@/components/ui/Section'
 import { EditorShell, type EditorTab } from '@/components/ui/EditorShell'
 import { ListEditor } from '@/components/ui/ListEditor'
 import { errorMessage, toastError } from '@/lib/store/useToastStore'
 import { LorebookEditor } from '@/components/worldinfo/LorebookEditor'
+import { WorldTemplateGallery } from './WorldTemplateGallery'
 
 const GIFT_RARITIES: GiftRarity[] = ['common', 'uncommon', 'rare', 'epic']
 const RELATIONSHIP_DELTA_DIMENSIONS: ('affection' | RelationshipDimension)[] = [
@@ -33,28 +36,48 @@ const DEFAULT_THRESHOLDS = Object.fromEntries(RELATIONSHIP_MILESTONES.map((m) =>
 >
 const DEFAULT_STAGE_HINT = EDITABLE_STAGES.map((s) => `${formatRelationshipStage(s)} ${DEFAULT_THRESHOLDS[s]}`).join(', ')
 
-function blankWorld(): Omit<WorldCard, 'id' | 'createdAt' | 'updatedAt'> {
+function blankWorld(template?: WorldTemplateId): Omit<WorldCard, 'id' | 'createdAt' | 'updatedAt'> {
+  const def = template ? getWorldTemplate(template) : undefined
   return {
     name: 'New World',
-    description: '',
-    rules: '',
+    description: def?.description ?? '',
+    rules: def?.rules ?? '',
     lorebook: { name: '', entries: [], token_budget: 512, scan_depth: 8 },
+    template,
   }
 }
 
 export function WorldsView() {
   const worlds = useApiQuery('worlds', () => worldsApi.list(), []) ?? []
   const [selected, setSelected] = useState<WorldCard | 'new' | null>(null)
+  const [pendingTemplate, setPendingTemplate] = useState<WorldTemplateId | undefined>(undefined)
+  const [showTemplateGallery, setShowTemplateGallery] = useState(false)
 
   if (selected) {
-    return <WorldEditor world={selected === 'new' ? null : selected} onDone={() => setSelected(null)} />
+    return (
+      <WorldEditor
+        world={selected === 'new' ? null : selected}
+        initialTemplate={selected === 'new' ? pendingTemplate : undefined}
+        onDone={() => setSelected(null)}
+      />
+    )
   }
 
   return (
     <div className="mx-auto w-full max-w-4xl flex-1 overflow-y-auto p-8">
+      {showTemplateGallery && (
+        <WorldTemplateGallery
+          onChoose={(template) => {
+            setPendingTemplate(template)
+            setShowTemplateGallery(false)
+            setSelected('new')
+          }}
+          onClose={() => setShowTemplateGallery(false)}
+        />
+      )}
       <div className="mb-2 flex items-center justify-between">
         <h2 className="font-display text-lg text-text">Worlds</h2>
-        <Button variant="primary" onClick={() => setSelected('new')}>
+        <Button variant="primary" onClick={() => setShowTemplateGallery(true)}>
           New world
         </Button>
       </div>
@@ -107,12 +130,21 @@ const WORLD_TABS: EditorTab[] = [
   { id: 'clock', label: 'Clock' },
 ]
 
-function WorldEditor({ world, onDone }: { world: WorldCard | null; onDone: () => void }) {
-  const base = world ?? { id: '', createdAt: 0, updatedAt: 0, ...blankWorld() }
+function WorldEditor({
+  world,
+  initialTemplate,
+  onDone,
+}: {
+  world: WorldCard | null
+  initialTemplate?: WorldTemplateId
+  onDone: () => void
+}) {
+  const base = world ?? { id: '', createdAt: 0, updatedAt: 0, ...blankWorld(initialTemplate) }
   const [tab, setTab] = useState('overview')
   const [name, setName] = useState(base.name)
   const [description, setDescription] = useState(base.description)
   const [rules, setRules] = useState(base.rules ?? '')
+  const [template, setTemplate] = useState<WorldTemplateId>(base.template ?? 'dating_sim')
   const [lorebook, setLorebook] = useState(base.lorebook)
   const [avatarDataUrl, setAvatarDataUrl] = useState(base.avatarDataUrl)
   const [backgrounds, setBackgrounds] = useState<Record<string, string>>(base.backgrounds ?? {})
@@ -135,6 +167,7 @@ function WorldEditor({ world, onDone }: { world: WorldCard | null; onDone: () =>
       name,
       description,
       rules,
+      template,
       lorebook,
       avatarDataUrl,
       backgrounds,
@@ -254,9 +287,16 @@ function WorldEditor({ world, onDone }: { world: WorldCard | null; onDone: () =>
     onDone()
   }
 
-  const tabs = WORLD_TABS.filter((t) => t.id !== 'clock' || world).map((t) =>
+  const hidden = hiddenWorldTabs(template)
+  const tabs = WORLD_TABS.filter((t) => (t.id !== 'clock' || world) && !hidden.includes(t.id)).map((t) =>
     t.id === 'lore' ? { ...t, badge: lorebook.entries.length } : t,
   )
+
+  // Switching to a narrower template can hide the tab currently open (e.g. away from "Dating sim") —
+  // fall back to Overview rather than leaving the editor showing a tab no longer in the strip.
+  useEffect(() => {
+    if (!tabs.some((t) => t.id === tab)) setTab('overview')
+  }, [hidden.join(','), tab])
 
   return (
     <EditorShell
@@ -323,6 +363,21 @@ function WorldEditor({ world, onDone }: { world: WorldCard | null; onDone: () =>
             value={rules}
             onChange={(e) => setRules(e.target.value)}
           />
+          <div>
+            <div className="mb-1.5 text-sm text-text">Template</div>
+            <p className="mb-2 text-xs text-text-muted">
+              Which tabs this world shows — gifts/items/thresholds ("Dating sim") and the world clock
+              ("Clock") aren't every setting's business. Switching doesn't touch anything you've already
+              entered on a hidden tab.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {WORLD_TEMPLATES.map((t) => (
+                <Chip key={t.id} on={template === t.id} onClick={() => setTemplate(t.id)}>
+                  {t.label}
+                </Chip>
+              ))}
+            </div>
+          </div>
         </div>
       )}
 

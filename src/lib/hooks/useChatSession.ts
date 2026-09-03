@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
-import { charactersApi, chatFactsApi, chatsApi, messagesApi, objectivesApi, personasApi, relationshipEventsApi, worldInfoBooksApi, worldsApi } from '@/lib/api/client'
+import { charactersApi, chatFactsApi, chatsApi, instructTemplatesApi, messagesApi, objectivesApi, personasApi, relationshipEventsApi, worldInfoBooksApi, worldsApi } from '@/lib/api/client'
 import { newId } from '@/lib/id'
 import type { AuthorNote, Chat, CommitmentStatus, DateEventCard, ObjectiveTask, RelationshipStage, StoredMessage, WorldCard } from '@/lib/types'
 import { collectImageBase64, composeMessageText, type PendingAttachment } from '@/lib/attachments'
@@ -44,13 +44,14 @@ import {
 } from '@/lib/dating/stage'
 import { defaultGiftInventory, getGiftCatalog, giftById, giftImpactBase } from '@/lib/dating/gifts'
 import { itemById } from '@/lib/dating/items'
-import { getInstructTemplate } from '@/lib/prompt/instructTemplates'
+import { resolveInstructTemplate } from '@/lib/prompt/instructTemplates'
 import { extractSceneTag, stripSceneTagForDisplay, type SceneTag } from '@/lib/vn/sceneTag'
 import { DEFAULT_EXPRESSION_IDS } from '@/lib/vn/expressions'
 import { DEFAULT_BACKGROUND_IDS } from '@/lib/vn/backgrounds'
 import { bookAppliesToChat } from '@/lib/worldinfo/scope'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import { errorMessage, toastError, toastInfo, toastSuccess } from '@/lib/store/useToastStore'
+import { playSendBlip } from '@/lib/audio/sfx'
 import type { Character, Lorebook } from '@/lib/characters/cardSpec'
 import type { ChoiceOption, RelationshipDimension, RelationshipWarning, SceneFlag } from '@/lib/types'
 
@@ -99,7 +100,7 @@ function announceMilestone(opts: {
 }): void {
   if (!crossedMilestone(opts.previousStage, opts.relationshipStage)) return
   const label = formatRelationshipStage(opts.relationshipStage)
-  toastSuccess(`${opts.charName}'s relationship with you is now "${label}"`)
+  toastSuccess(`${opts.charName}'s relationship with you is now "${label}"`, { chime: true })
   chatFactsApi
     .create({
       chatId: opts.chatId,
@@ -144,7 +145,7 @@ function applyRelationshipRisk(opts: {
   } else if (result.warnedJustNow) {
     toastError(`${opts.charName}'s relationship is on the rocks: ${result.warning?.reason}. Fix things before it's too late.`)
   } else if (result.clearedJustNow) {
-    toastSuccess(`${opts.charName}'s relationship has stabilized.`)
+    toastSuccess(`${opts.charName}'s relationship has stabilized.`, { chime: true })
   }
   return {
     commitmentStatus: result.commitmentStatus,
@@ -291,9 +292,10 @@ export function useChatSession(chatId: string | null) {
   const relationshipDifficulty = useSettingsStore((s) => s.relationshipDifficulty)
   const autoSuggestChoices = useSettingsStore((s) => s.autoSuggestChoices)
   const regexScripts = useSettingsStore((s) => s.regexScripts)
+  const reducedAudio = useSettingsStore((s) => s.reducedAudio)
   const setActiveChatId = useSettingsStore((s) => s.setActiveChatId)
   const client = useMemo(() => new KoboldClient(baseUrl), [baseUrl])
-  const template = getInstructTemplate(instructTemplateId)
+  const customInstructTemplates = useApiQuery('instruct-templates', () => instructTemplatesApi.list(), []) ?? []
 
   const chat = useApiQuery('chats', () => (chatId ? chatsApi.get(chatId) : Promise.resolve(undefined)), [chatId])
   const character = useApiQuery(
@@ -301,6 +303,8 @@ export function useChatSession(chatId: string | null) {
     () => (chat ? charactersApi.get(chat.characterId) : Promise.resolve(undefined)),
     [chat?.characterId],
   )
+  // A character's own override wins over the global Settings -> Generation default; empty/unset falls back.
+  const template = resolveInstructTemplate(character?.instructTemplateId || instructTemplateId, customInstructTemplates)
   // Extra characters in a group chat, beyond the primary — [] for today's ordinary single-character
   // chats. Fetched by id rather than a batched endpoint since the character list is small (a local,
   // single-user app) and this reuses the exact same reactive `characters` resource as `character` above.
@@ -723,7 +727,7 @@ export function useChatSession(chatId: string | null) {
       for (const id of unlockedSet) {
         if (previouslyUnlockedIds.has(id)) continue
         const entry = character.gallery?.find((g) => g.id === id)
-        toastSuccess(entry?.isEnding ? `An ending unlocked: ${entry.title}` : `New gallery scene unlocked: ${entry?.title ?? 'untitled'}`)
+        toastSuccess(entry?.isEnding ? `An ending unlocked: ${entry.title}` : `New gallery scene unlocked: ${entry?.title ?? 'untitled'}`, { chime: true })
       }
     },
     [activeFacts, character, client, persona?.name, relationshipDifficulty, world],
@@ -877,7 +881,7 @@ export function useChatSession(chatId: string | null) {
         .catch(() => {})
 
       if (outcome.decision === 'accept') {
-        toastSuccess(`${character.card.name} said yes — you're ${formatCommitmentStatus(tier)} now. ${outcome.reason}`)
+        toastSuccess(`${character.card.name} said yes — you're ${formatCommitmentStatus(tier)} now. ${outcome.reason}`, { chime: true })
         chatFactsApi
           .create({
             chatId,
@@ -1189,6 +1193,7 @@ export function useChatSession(chatId: string | null) {
       const composedText = composeMessageText(text, attachments).trim()
       const apiImages = collectImageBase64(attachments)
       if (!composedText && apiImages.length === 0) return
+      if (!reducedAudio) playSendBlip()
 
       // Stored as full data: URLs (renderable as-is); the API only ever sees the base64 payload.
       const storedImages = attachments.filter((a) => a.kind === 'image').map((a) => a.dataUrl)
@@ -1231,7 +1236,7 @@ export function useChatSession(chatId: string | null) {
       }))
       await runGeneration(historyForPrompt, charMsg.id, apiImages, { speakerId: replyAsCharacterId })
     },
-    [character, chatId, isGenerating, messages, persona, replyAsCharacterId, resolveSpeaker, runGeneration, world],
+    [character, chatId, isGenerating, messages, persona, reducedAudio, replyAsCharacterId, resolveSpeaker, runGeneration, world],
   )
 
   const regenerate = useCallback(

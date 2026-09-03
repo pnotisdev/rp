@@ -98,6 +98,7 @@ interface SettingsState {
   blurPx: number
   shadowStrength: number
   reducedMotion: boolean
+  reducedAudio: boolean
   showTimestamps: boolean
   showTokenCounts: boolean
   tagsAsFolders: boolean
@@ -114,6 +115,7 @@ interface SettingsState {
   toggleFlag: (
     key:
       | 'reducedMotion'
+      | 'reducedAudio'
       | 'showTimestamps'
       | 'showTokenCounts'
       | 'tagsAsFolders'
@@ -217,6 +219,7 @@ export const useSettingsStore = create<SettingsState>()(
       blurPx: 0,
       shadowStrength: 1,
       reducedMotion: false,
+      reducedAudio: false,
       showTimestamps: true,
       showTokenCounts: false,
       tagsAsFolders: true,

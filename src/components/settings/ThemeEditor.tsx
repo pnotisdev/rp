@@ -48,6 +48,7 @@ export function ThemeEditor() {
   const setLayout = useSettingsStore((s) => s.setLayout)
 
   const reducedMotion = useSettingsStore((s) => s.reducedMotion)
+  const reducedAudio = useSettingsStore((s) => s.reducedAudio)
   const showTimestamps = useSettingsStore((s) => s.showTimestamps)
   const showTokenCounts = useSettingsStore((s) => s.showTokenCounts)
   const tagsAsFolders = useSettingsStore((s) => s.tagsAsFolders)
@@ -253,6 +254,12 @@ export function ThemeEditor() {
 
       <Section title="Behavior" contentClassName="divide-y divide-border">
         <Toggle checked={reducedMotion} onChange={() => toggleFlag('reducedMotion')} label="Reduced motion" />
+        <Toggle
+          checked={reducedAudio}
+          onChange={() => toggleFlag('reducedAudio')}
+          label="Reduced audio"
+          description="Mutes the message-send blip and the reward chime on relationship milestones/unlocks"
+        />
         <Toggle checked={showTimestamps} onChange={() => toggleFlag('showTimestamps')} label="Show timestamps" />
         <Toggle checked={showTokenCounts} onChange={() => toggleFlag('showTokenCounts')} label="Show token counts" />
         <Toggle checked={tagsAsFolders} onChange={() => toggleFlag('tagsAsFolders')} label="Tags as folders" />

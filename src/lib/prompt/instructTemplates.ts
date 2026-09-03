@@ -78,3 +78,17 @@ export const BUILTIN_INSTRUCT_TEMPLATES: InstructTemplate[] = [
 export function getInstructTemplate(id: string): InstructTemplate {
   return BUILTIN_INSTRUCT_TEMPLATES.find((t) => t.id === id) ?? BUILTIN_INSTRUCT_TEMPLATES[0]
 }
+
+/**
+ * Same lookup as `getInstructTemplate`, but checks a user's saved custom templates first — so a
+ * duplicated-and-edited template (Settings -> Generation, or a per-character override) resolves
+ * correctly instead of always falling back to a builtin. `customTemplates` accepts
+ * `CustomInstructTemplate[]` (types.ts) too, since it's a strict superset of this shape.
+ */
+export function resolveInstructTemplate(id: string, customTemplates: InstructTemplate[] = []): InstructTemplate {
+  return (
+    customTemplates.find((t) => t.id === id) ??
+    BUILTIN_INSTRUCT_TEMPLATES.find((t) => t.id === id) ??
+    BUILTIN_INSTRUCT_TEMPLATES[0]
+  )
+}

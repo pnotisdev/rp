@@ -1,4 +1,6 @@
 import { create } from 'zustand'
+import { playNotificationChime } from '@/lib/audio/sfx'
+import { useSettingsStore } from '@/lib/store/useSettingsStore'
 
 export type ToastVariant = 'error' | 'success' | 'info'
 
@@ -35,7 +37,10 @@ export function toastError(message: string): string {
   return useToastStore.getState().push(message, 'error')
 }
 
-export function toastSuccess(message: string): string {
+/** `chime: true` is reserved for genuine reward moments (a stage-up, an unlock, a "yes") — most
+ *  success toasts (coins earned, a fork made) stay silent so the chime doesn't turn into noise. */
+export function toastSuccess(message: string, opts?: { chime?: boolean }): string {
+  if (opts?.chime && !useSettingsStore.getState().reducedAudio) playNotificationChime()
   return useToastStore.getState().push(message, 'success')
 }
 

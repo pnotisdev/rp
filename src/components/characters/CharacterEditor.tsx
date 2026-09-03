@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ImagePlus, Plus, Sparkles, X } from 'lucide-react'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
-import { charactersApi, worldsApi } from '@/lib/api/client'
+import { charactersApi, instructTemplatesApi, worldsApi } from '@/lib/api/client'
 import type { Character, GalleryEntry, RelationshipStarter, SocialConnection } from '@/lib/characters/cardSpec'
 import { blankCharacterData } from '@/lib/characters/cardSpec'
 import { downloadJson, downloadPng, fileToDataUrl, importCharacterFile } from '@/lib/characters/importExport'
@@ -18,6 +18,7 @@ import { ListEditor } from '@/components/ui/ListEditor'
 import { FileButton } from '@/components/ui/FileButton'
 import { errorMessage, toastError, toastSuccess } from '@/lib/store/useToastStore'
 import { TTS_PROVIDER_LABELS, type TtsProviderId } from '@/lib/voice/ttsProviders'
+import { BUILTIN_INSTRUCT_TEMPLATES } from '@/lib/prompt/instructTemplates'
 import { GenerateCharacterDialog } from './GenerateCharacterDialog'
 import { TemplateGallery } from './TemplateGallery'
 import { RegenerateFieldButton } from './RegenerateFieldButton'
@@ -74,6 +75,7 @@ export function CharacterEditor({
   const [schedule, setSchedule] = useState<ScheduleEntry[]>(character?.schedule ?? [])
   const [voiceProvider, setVoiceProvider] = useState<TtsProviderId | ''>(character?.voice?.provider ?? '')
   const [voiceId, setVoiceId] = useState(character?.voice?.voiceId ?? '')
+  const [instructTemplateId, setInstructTemplateId] = useState(character?.instructTemplateId ?? '')
   const [worldId, setWorldId] = useState(character?.worldId ?? '')
   const [occupation, setOccupation] = useState(character?.occupation ?? '')
   const [workplace, setWorkplace] = useState(character?.workplace ?? '')
@@ -90,6 +92,7 @@ export function CharacterEditor({
   const [importError, setImportError] = useState<string | null>(null)
   const worlds = useApiQuery('worlds', () => worldsApi.list(), []) ?? []
   const editingWorld = worlds.find((w) => w.id === worldId)
+  const customInstructTemplates = useApiQuery('instruct-templates', () => instructTemplatesApi.list(), []) ?? []
 
   useEffect(() => {
     setForm(character?.card ?? blankCharacterData())
@@ -106,6 +109,7 @@ export function CharacterEditor({
     setRelationshipStarters(character?.relationshipStarters ?? [])
     setVoiceProvider(character?.voice?.provider ?? '')
     setVoiceId(character?.voice?.voiceId ?? '')
+    setInstructTemplateId(character?.instructTemplateId ?? '')
     setWeatherLoves(character?.weatherPreferences?.loves ?? [])
     setWeatherHates(character?.weatherPreferences?.hates ?? [])
     setSchedule(character?.schedule ?? [])
@@ -174,6 +178,7 @@ export function CharacterEditor({
       gallery,
       relationshipStarters,
       voice,
+      instructTemplateId: instructTemplateId || null,
       weatherPreferences,
       schedule: schedule.length ? schedule : null,
       worldId: worldId || null,
@@ -936,6 +941,30 @@ export function CharacterEditor({
               value={form.post_history_instructions ?? ''}
               onChange={(e) => set('post_history_instructions', e.target.value)}
             />
+            <SelectField
+              label="Instruct template override"
+              hint="Overrides the global Settings → Generation default for chats with this character — useful for a character you always run against a specific model."
+              value={instructTemplateId}
+              onChange={(e) => setInstructTemplateId(e.target.value)}
+            >
+              <option value="">Use global default</option>
+              <optgroup label="Builtin">
+                {BUILTIN_INSTRUCT_TEMPLATES.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </optgroup>
+              {customInstructTemplates.length > 0 && (
+                <optgroup label="Custom">
+                  {customInstructTemplates.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+            </SelectField>
           </Section>
 
           <Section title="Metadata" surface="bare">

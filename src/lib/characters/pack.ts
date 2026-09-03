@@ -40,6 +40,7 @@ export interface CharacterPackV1 {
     name: string
     description: string
     rules?: string
+    template?: WorldCard['template']
     lorebook: Lorebook
     avatarDataUrl?: string
     backgrounds?: Record<string, string>
@@ -121,6 +122,7 @@ export async function buildCharacterPack(character: Character, world?: WorldCard
       name: world.name,
       description: world.description,
       rules: world.rules,
+      template: world.template,
       lorebook: world.lorebook,
       avatarDataUrl: worldAvatarDataUrl,
       backgrounds,
@@ -172,6 +174,7 @@ export async function importCharacterPack(pack: CharacterPackV1): Promise<{ char
       name: pack.world.name,
       description: pack.world.description,
       rules: pack.world.rules,
+      template: pack.world.template,
       lorebook: pack.world.lorebook,
       avatarDataUrl: pack.world.avatarDataUrl,
       backgrounds: pack.world.backgrounds,
