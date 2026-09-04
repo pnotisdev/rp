@@ -104,27 +104,14 @@ npm test            # run the test suite once
 npm run test:watch  # run it in watch mode
 ```
 
-## Contributing
-
-This is a hobby project built and maintained mostly with the help of Claude Code, and [ROADMAP.md](ROADMAP.md) is the living record of that: every shipped feature, why it exists, and what's still open, kept in sync with the actual code rather than written once and left to rot.
-
-If you want to contribute:
-
-1. Read `ROADMAP.md` first. It's the real source of truth for what exists and what's planned, not this file.
-2. Keep changes typed and tested. `npm run typecheck` and `npm test` should both pass before you open a pull request.
-3. If you touch anything a model actually talks to (prompts, sampler params, judge calls), verify it against a real running KoboldCpp instance, not just the type checker. A change that looks correct on paper can still read wrong to a model.
-4. Small, focused pull requests are much easier to review than large ones. If you're planning something big, open an issue first so it doesn't collide with work already in progress.
-
-Bug reports and feature requests are welcome even without code attached. A clear description of what you expected versus what happened is worth more than a vague one.
-
 ## License
 
 MIT. See [LICENSE](LICENSE).
 
 ## Credits and inspirations
 
-Built by [pnotisdev](https://github.com/pnotisdev), with Claude Code doing most of the actual typing.
+Built by [pnotisdev](https://github.com/pnotisdev).
 
-- [SillyTavern](https://github.com/SillyTavern/SillyTavern), for proving what a deep local roleplay client could look like, and for the character card and World Info formats this app reads directly.
-- [KoboldCpp](https://github.com/LostRuins/koboldcpp), the model server this entire project is built around.
+- [SillyTavern](https://github.com/SillyTavern/SillyTavern), for a lot of inspiration.
+- [KoboldCpp](https://github.com/LostRuins/koboldcpp), the main backend the UI uses.
 - The broader local-model and visual novel communities whose card formats, conventions, and expectations this project tries to meet rather than reinvent.
