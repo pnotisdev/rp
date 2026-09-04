@@ -218,7 +218,9 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
       change): sticky (an entry stays active for N more turns after it stops matching) and cooldown
       (an entry can't refire for N turns after it does). ~~Both shipped later, in #94~~ — via a new
       `Lorebook.sourceKey` (the composite-key prerequisite the roadmap kept flagging) and
-      `Chat.worldInfoState`. `delay` is still open. 14 new vitest cases in
+      `Chat.worldInfoState`. ~~`delay` followed in #95~~ (`LorebookEntry.delay`, gated on the same
+      threaded turn counter, applies to every activation mode) — the activation engine now matches
+      SillyTavern's own in full. 14 new vitest cases in
       `activation.test.ts` (probability boundaries, regex matching incl. invalid-pattern fallback,
       group exclusivity, recursive scanning incl. a cycle/no-infinite-loop case) — 33/33 passing.
       Verified live: new "Chance %"/"Group"/"Recursive scanning" controls render and behave
@@ -1674,11 +1676,13 @@ SillyTavern docs/releases, RisuAI (CCv3, CBS/trigger system, regex scripts), Agn
       `template` (the resolved object) is genuinely threaded into `buildCurrentPrompt` and the
       generation call's merged stop-sequence list, not just computed and discarded.
 - [ ] **World Info depth ST/RisuAI still have that we don't**:
-      - ~~**sticky / cooldown**~~ — done (#94). The blocker (no stable per-entry key across this
-        app's merged lorebook sources) was solved with `Lorebook.sourceKey`, stamped by
-        `useChatSession` as it assembles the list; `Chat.worldInfoState` holds the per-entry
-        `{activeUntil, blockedUntil, activeAt}` bookkeeping. **`delay`** (an entry can't fire until
-        turn N) is still open — smaller, same machinery now in place.
+      - ~~**sticky / cooldown / delay**~~ — done (sticky/cooldown in #94, `delay` in #95). The
+        blocker (no stable per-entry key across this app's merged lorebook sources) was solved with
+        `Lorebook.sourceKey`, stamped by `useChatSession` as it assembles the list;
+        `Chat.worldInfoState` holds the per-entry `{activeUntil, blockedUntil, activeAt}`
+        bookkeeping. `delay` (an entry can't fire until the chat has N messages) needs no persisted
+        state, just the same threaded turn counter, and applies to every activation mode. The
+        activation engine now covers SillyTavern's full set.
       - ~~**injection at a chat depth**~~ — done. `LorebookEntry.position` gained `'at_depth'`
         alongside `before_char`/`after_char`, with its own `depth` field (same convention as
         `AuthorNote.depth`) — a new "At depth" option in `LorebookEditor`'s Position select, with a
@@ -2780,10 +2784,23 @@ Done so far (see checked boxes above for detail):
       `chatsApi.update(chat.id, ...)` that already fired after each generation round, read on the
       next. Stripped on fork (its turn numbers are absolute and meaningless in an earlier branch).
     - 6 new `activation.test.ts` cases walking multi-turn sequences. 255 tests green.
-    **Still open:** `delay` (an entry can't fire until turn N of the chat) — the third ST field,
-    smaller, not done here.
+    ~~**Still open:** `delay`~~ — shipped in #95.
+95. ~~World Info `delay`~~ — the last SillyTavern activation field, and the small remaining piece of
+    "World Info depth" once #94 put the turn-counter plumbing in place. `LorebookEntry.delay`
+    (turns/messages): an entry can't activate at all until the chat has at least that many messages.
+    Unlike sticky/cooldown it needs no persisted per-entry state, just the turn counter already
+    threaded through for #94 — so it's a single gate near the top of `activateWorldInfo`'s per-entry
+    loop, before the mode branch, and therefore applies to every activation mode (`always` /
+    keyword / `manual`), matching ST. Like sticky/cooldown it's a no-op for old callers that pass no
+    runtime (always threaded in-app). A "Delay" `NumberField` sits in `LorebookEditor`'s options
+    grid next to "Unlock warmth" (shown for all modes, not gated to keyword like Sticky/Cooldown).
+    `normalizeLorebook` copies it straight through on card import; `wrapCardV2` export and
+    `.rppack.json` carry it for free. 4 new `activation.test.ts` cases (delay gate on keyword and
+    always entries, no-runtime bypass, no sticky window started while delayed) — 259 tests green.
+    Verified live: the field renders for both an always-mode and a keyword-mode entry, a set value
+    round-trips through the API and clears back to absent.
 
-That closes out the last "reasonable next batch," plus sections 10a, 10c, and 10d in full and a first
+That closes out SillyTavern's full World Info activation engine, plus the last "reasonable next batch," plus sections 10a, 10c, and 10d in full and a first
 slice each of 10b and 10f taken directly afterward since 10's own suggested phase order names them
 as the foundation everything else in that section reads from. What's left, still deliberately
 smaller than the rest of section 10:

@@ -54,6 +54,8 @@ export interface LorebookEntry {
   sticky?: number
   /** ST's "cooldown": after a keyword-mode entry deactivates, it can't reactivate by keyword for this many turns. 0/undefined = off. */
   cooldown?: number
+  /** ST's "delay": the entry can't activate at all until the chat has at least this many messages. 0/undefined = off. Applies to every activation mode. */
+  delay?: number
   extensions?: Record<string, unknown>
 }
 
@@ -249,6 +251,7 @@ function normalizeLorebook(raw: unknown): Lorebook | undefined {
       // ST calls these `sticky` / `cooldown` too — copy them straight through when present.
       sticky: typeof e.sticky === 'number' && e.sticky > 0 ? Math.floor(e.sticky) : undefined,
       cooldown: typeof e.cooldown === 'number' && e.cooldown > 0 ? Math.floor(e.cooldown) : undefined,
+      delay: typeof e.delay === 'number' && e.delay > 0 ? Math.floor(e.delay) : undefined,
       extensions: (e.extensions as Record<string, unknown>) ?? {},
     })
   }

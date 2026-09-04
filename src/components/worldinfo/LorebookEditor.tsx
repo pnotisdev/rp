@@ -218,6 +218,18 @@ export function LorebookEditor({
                         }
                       />
                     )}
+                    <NumberField
+                      label="Delay"
+                      min={0}
+                      hint="Won't activate until the chat has this many messages."
+                      value={entry.delay ?? ''}
+                      onChange={(e) =>
+                        updateEntry(entry.id!, {
+                          delay: e.target.value === '' ? undefined : Math.max(0, Math.floor(Number(e.target.value)) || 0),
+                        })
+                      }
+                      placeholder="off"
+                    />
                   </div>
 
                   {mode === 'keyword' && (

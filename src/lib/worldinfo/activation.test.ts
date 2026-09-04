@@ -368,6 +368,37 @@ describe('activateWorldInfo', () => {
       expect(activateWorldInfo([b], 'gone').activated).toHaveLength(0)
     })
   })
+
+  describe('delay', () => {
+    it('holds a matching keyword entry back until the chat reaches `delay` messages', () => {
+      const b = book([entry({ content: 'X', keys: ['tavern'], delay: 3 })])
+      const at = (turn: number) =>
+        activateWorldInfo([b], 'the tavern was loud', 0, { turn, prevState: {} }).activated.length
+      expect(at(0)).toBe(0)
+      expect(at(2)).toBe(0)
+      expect(at(3)).toBe(1)
+      expect(at(9)).toBe(1)
+    })
+
+    it('applies to always-mode entries too, not just keyword entries', () => {
+      const b = book([entry({ content: 'X', constant: true, activationMode: 'always', delay: 2 })])
+      expect(activateWorldInfo([b], 'text', 0, { turn: 1, prevState: {} }).activated).toHaveLength(0)
+      expect(activateWorldInfo([b], 'text', 0, { turn: 2, prevState: {} }).activated).toHaveLength(1)
+    })
+
+    it('is ignored entirely when no runtime is passed (old callers)', () => {
+      const b = book([entry({ content: 'X', keys: ['tavern'], delay: 99 })])
+      expect(activateWorldInfo([b], 'the tavern was loud').activated).toHaveLength(1)
+    })
+
+    it('does not start a sticky window while still delayed', () => {
+      const e = entry({ content: 'X', keys: ['tavern'], delay: 2, sticky: 5 })
+      const b: Lorebook = { entries: [e], sourceKey: 'test' }
+      const r = activateWorldInfo([b], 'tavern', 0, { turn: 0, prevState: {} })
+      expect(r.activated).toHaveLength(0)
+      expect(r.nextState).toEqual({})
+    })
+  })
 })
 
 describe('recentMessagesText', () => {

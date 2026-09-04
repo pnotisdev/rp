@@ -96,6 +96,10 @@ export function activateWorldInfo(
       if (mode !== 'manual' && !entry.enabled) continue
       const requiredAffection = Number((entry.extensions as Record<string, unknown> | undefined)?.affectionMin ?? 0)
       if (Number.isFinite(requiredAffection) && affection < requiredAffection) continue
+      // ST's "delay": hold the entry back until the chat is at least `delay` messages long. Needs the
+      // turn counter, so like sticky/cooldown it only applies when a runtime is threaded through
+      // (always the case in-app; old callers that pass no runtime keep today's behaviour).
+      if (runtime && entry.delay !== undefined && runtime.turn < entry.delay) continue
       if (mode === 'always') {
         matched.push(entry)
         continue
