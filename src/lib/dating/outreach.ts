@@ -8,6 +8,9 @@ import { buildPrompt, estimateTokens, type ChatMessage } from '@/lib/prompt/buil
 import type { InstructTemplate } from '@/lib/prompt/instructTemplates'
 import type { KoboldClient } from '@/lib/api/kobold'
 import type { GenerationParams } from '@/lib/api/types'
+import { truncateAtStrayTurnMarker } from '@/lib/text/slop'
+
+export { truncateAtStrayTurnMarker } from '@/lib/text/slop'
 
 /**
  * ROADMAP.md 10f's "proactive outreach" — characters that can text the player first, unprompted.
@@ -108,29 +111,6 @@ const REASON_HINTS: Record<OutreachReason, string> = {
     "Given what you're currently doing right now, you decided to text {{user}} first, unprompted — casual and brief, mentioning what's going on with you only if it comes up naturally.",
   warmth:
     'Things have been going well between you and {{user}} lately, and you found yourself wanting to reach out first, unprompted — just a short, warm text because you were thinking of them.',
-}
-
-/**
- * A stray turn marker in the model's completion — it started narrating a whole back-and-forth
- * exchange (or a `<START>`-style scene break) instead of writing the one text message it was
- * asked for. Seen live during development with a real local model, even after giving it an
- * explicit single-message instruction and the template's own stop sequences (`plain-chat`, this
- * project's default, has none at all — it normally relies on the model pattern-matching stop
- * points from alternating turns already in the visible history, a pattern that breaks down here
- * since outreach deliberately puts two consecutive character turns back to back with no
- * intervening player line). Cuts the text at the first such marker rather than trusting the whole
- * completion — the same "never trust raw model output" principle `relationshipAssist.ts`'s judge
- * calls already apply to structured output, just applied to free text here instead.
- */
-export function truncateAtStrayTurnMarker(text: string, charName: string, personaName: string): string {
-  const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const markers = [/<START>/i, new RegExp(`\\n\\s*${escape(charName)}\\s*:`, 'i'), new RegExp(`\\n\\s*${escape(personaName)}\\s*:`, 'i')]
-  let cut = text.length
-  for (const marker of markers) {
-    const match = text.match(marker)
-    if (match?.index !== undefined && match.index < cut) cut = match.index
-  }
-  return text.slice(0, cut).trim()
 }
 
 export interface GenerateOutreachParams {

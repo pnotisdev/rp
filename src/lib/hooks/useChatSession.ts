@@ -47,6 +47,7 @@ import { itemById } from '@/lib/dating/items'
 import { buildRelationshipDescription } from '@/lib/dating/relationshipDescription'
 import { resolveInstructTemplate } from '@/lib/prompt/instructTemplates'
 import { extractSceneTag, stripSceneTagForDisplay, type SceneTag } from '@/lib/vn/sceneTag'
+import { buildSlopAvoidanceNote, cleanModelOutput } from '@/lib/text/slop'
 import { SCENE_MOOD_IDS } from '@/lib/vn/moods'
 import { DEFAULT_EXPRESSION_IDS } from '@/lib/vn/expressions'
 import { DEFAULT_BACKGROUND_IDS } from '@/lib/vn/backgrounds'
@@ -448,6 +449,12 @@ export function useChatSession(chatId: string | null) {
         effectiveAssistFlag(freshChat.assistOverrides?.autoTrackRelationship, autoTrackRelationship) && speaker.id === character.id
           ? buildRelationshipDescription(freshChat, world, character)
           : undefined
+      // Names back to the model the specific AI-prose tells and verbatim repeats this character
+      // has just used, so it has something concrete to avoid rather than a generic "write well"
+      // line it will agree with and ignore. Costs zero tokens when the recent turns are clean.
+      const slopAvoidance = buildSlopAvoidanceNote(
+        recentHistory.filter((m) => m.role === 'char' && m.name === speaker.card.name).map((m) => m.text),
+      )
       const styleGuidance =
         [
           avoidEmDashes ? 'Never use em dashes (the — character) in your writing. Use a comma, period, or parentheses instead.' : '',
@@ -455,6 +462,7 @@ export function useChatSession(chatId: string | null) {
             ? "Pace intimacy like a slow burn. Earn it through many small moments; don't grant it just because it was asked for. If pushed toward more affection, a kiss, or closeness faster than the relationship has earned, react the way your character actually would. Hesitation, deflection, or a flat no are often the right call, especially early on. Don't cave just to be agreeable."
             : '',
           styleGuidanceNote.trim(),
+          slopAvoidance ?? '',
         ]
           .filter(Boolean)
           .join(' ') || undefined
@@ -1098,7 +1106,12 @@ export function useChatSession(chatId: string | null) {
           const unlockedExpressions = getUnlockedExpressionIds(character, chat.affection ?? 0)
           const unlockedBackgrounds = getUnlockedBackgroundIds(world, chat.affection ?? 0)
           const { text: extractedText, scene: parsedScene } = extractSceneTag(combinedRaw)
-          combined = extractedText
+          // Deterministic scrub before this reply is stored: it fixes both what's displayed and
+          // what's fed back into every later prompt (a tell left in history is one the model
+          // imitates next turn). Idempotent, so the auto-continue rounds below re-running it over
+          // already-cleaned text is harmless. `combinedRaw` keeps the untouched original for the
+          // Prompt Inspector's raw/processed toggle.
+          combined = cleanModelOutput(extractedText, { charName: speaker.card.name, personaName: persona?.name || 'You' })
           scene = sanitizeSceneTag(parsedScene, unlockedExpressions, unlockedBackgrounds)
 
           if (continuing) {

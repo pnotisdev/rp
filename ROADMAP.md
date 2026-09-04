@@ -3053,6 +3053,36 @@ Done so far (see checked boxes above for detail):
      against both a regenerate of a real broken message from the user's own session and a
      completely organic follow-up message they sent mid-verification.
 
+103. ~~Runtime slop scrub + per-character slop steering~~ — #93 de-slopped every *authored* string
+     the model sees; this closes the loop on the model's *own output*. New `src/lib/text/slop.ts`
+     consolidates three jobs around one shared corpus of AI-prose tells:
+     - **`cleanModelOutput`** — a deterministic scrub run once on every completion before it's
+       stored (`useChatSession.ts`, right after `extractSceneTag`), so it fixes both what's shown
+       and what's fed back into later prompts. Strictly whole-line meta removals that are never
+       legitimate character speech: an echoed `Name:` prefix, a leading "Certainly!"-style
+       affirmation, an OOC aside, "let me know if…" assistant chatter, a markdown heading, a lone
+       unclosed trailing `*`. Never rewrites phrasing inside the fiction. `StoredMessage.rawText`
+       keeps the untouched original for the Prompt Inspector toggle. Idempotent, so the
+       auto-continue rounds re-running it are harmless.
+     - **`truncateAtStrayTurnMarker`** — moved here verbatim from `outreach.ts` (which now
+       re-exports it) so the `<START>` / fabricated-turn backstop is one implementation shared by
+       the live-chat and proactive-outreach paths instead of two copies. Folded into
+       `cleanModelOutput` when `charName`/`personaName` are supplied.
+     - **`buildSlopAvoidanceNote`** — steering, not editing. Scans the character's own last 6 turns
+       and, only when it finds them, names the *specific* tells and verbatim repeats back to the
+       model ("you have already written 'couldn't help but' twice; don't reach for it again"),
+       appended to the existing `styleGuidance` string. Returns undefined on clean turns, so it
+       costs zero prompt tokens the common case. `findRepeatedPhrases` catches the "keeps saying
+       the same thing" habit that no sampler `rep_pen` reaches.
+     `SLOP_PATTERNS` deliberately excludes anything merely plain, anything frequency-based, and
+     anything a character might plausibly say aloud. 19 new `slop.test.ts` cases (339 total),
+     typecheck + build clean. Structural verification only — koboldcpp was offline; the
+     end-to-end "does a real model's slop actually drop" pass still needs a live model.
+     **Still open:** reply-length-from-card (`src/lib/characters/voice.ts`, written but unwired) —
+     measure a character's own `mes_example` turn length and both instruct and hard-cap
+     `max_length` to it, so a terse card stops getting essay-length replies. Needs a
+     `Character.replyLength` override field + editor control before wiring.
+
 That closes out SillyTavern's full World Info activation engine, plus the last "reasonable next batch," plus sections 10a, 10c, and 10d in full and a first
 slice each of 10b and 10f taken directly afterward since 10's own suggested phase order names them
 as the foundation everything else in that section reads from. What's left, still deliberately
