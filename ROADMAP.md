@@ -962,6 +962,90 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
       its own. Purely a convenience for anyone copying `rp.db` by hand — WAL-mode writes were
       already durable on disk. Part of the on-disk persistence audit (changelog #58); the full
       data layout is now documented in the README.
+- [~] **Full-codebase audit pass (koboldcpp offline, so read-only — code review, not live
+      verification)**: every `src/lib` and `server` file read end to end against the README's own
+      threat model ("local-only, no auth, must never be reachable off this machine"), plus
+      `npm audit` and a scan for the usual danger patterns (`dangerouslySetInnerHTML`, `eval`,
+      `child_process`, unvalidated file paths). The good news first: no XSS sink anywhere in the
+      client, no shell/`eval` execution anywhere, avatar/sprite/background file handling
+      (`server/avatars.ts`) already rejects path traversal via a strict UUID/key allowlist *and*
+      caps upload size *and* prunes stale files, backup restore (`POST /api/restore`) is already
+      transactional (one SQL `BEGIN`/`COMMIT`/`ROLLBACK`) and writes into a temp directory before
+      atomically swapping it in so a failed restore can't half-destroy the old data, and there is
+      not one `@ts-ignore`, `TODO`, or `as any` escape hatch anywhere in either `src` or `server`.
+      What the pass actually found:
+      - **No explicit origin check on the Express API** — `server/app.ts` has no CORS/Origin
+        allowlist at all. In practice this mostly self-protects today, since the browser requires a
+        preflight (which gets no `Access-Control-Allow-Origin` back, so it's blocked) for `DELETE`/
+        `PUT` and for any `POST` sent with `Content-Type: application/json` — but a "simple" POST
+        (`text/plain`, no custom headers) from *any other site or tab open in the same browser*
+        still reaches action-only endpoints with no body needed, blind. `POST /api/chats/:id/restore`
+        (just shipped, below) is exactly that shape: no body, real side effect. A small
+        `Origin`/`Referer` allowlist middleware rejecting anything outside the app's own expected
+        origins would close this properly instead of relying on incidental browser preflight
+        behavior that a future endpoint could easily reopen without anyone noticing.
+      - **ReDoS via user-authored/imported regex, unbounded** — both World Info's regex-key syntax
+        (`parseRegexKey` in `activation.ts`, `/pattern/flags` keys) and Settings → Generation's
+        Regex Scripts (`regexScripts.ts`) compile arbitrary regex from the lorebook/character
+        card/preset and run `.test()`/`.replace()` against the full conversation text on every
+        single turn, with no complexity check, no length cap on the input, and no execution budget.
+        A pathological pattern (classic catastrophic-backtracking shapes like `(a+)+$`) in an
+        imported card or lorebook — the SillyTavern ecosystem is built on downloading cards shared
+        by strangers — would hang the tab, not just that one turn. No JS-level fix stops a hung
+        `RegExp.test()` mid-flight; realistic mitigations are capping the haystack length before
+        testing, a basic pattern-complexity/nested-quantifier linter on save (flag it, don't
+        silently block it — some legitimate patterns look scary), or, if it's ever worth the
+        complexity, running activation in a Worker with a hard timeout.
+      - [x] **Known moderate/high vulnerability in the pinned dev toolchain — fixed (#116)** —
+        `npm audit` flagged the `esbuild`/Vite pair then pinned (`vite@^5.4.10`):
+        [GHSA-67mh-4wv8-2f99](https://github.com/advisories/GHSA-67mh-4wv8-2f99), "esbuild enables
+        any website to send any requests to the development server and read the response." Dev-only
+        (`npm run dev`), not the production build, but this app's own README recommends `npm run
+        dev` as the *only* way to run it day to day, so it wasn't a theoretical-only exposure.
+        `npm audit fix --force`'s own suggestion (`vite@8.x`) overstated the fix needed — it
+        defaults to the latest major regardless of where the actual fix landed. Checked the real
+        dependency chain directly (`npm view`) instead of trusting that: the vulnerable esbuild
+        range is `<=0.24.2`, the patch is `0.25.0`, and **Vite 6.2.0 was the first version to bundle
+        it** — Vite 6.0–6.1 still ship the vulnerable `esbuild@^0.24.2`, so "just Vite 6" wasn't
+        quite enough either, it had to be 6.2+. `@vitejs/plugin-react@4.3.3` (then pinned) only
+        supports Vite up to `^5.0.0`; `4.7.0` adds `^6.0.0`/`^7.0.0` without jumping to the newer
+        Rolldown/oxc-based `5.x` line tied to Vite 8. `vitest@^3.2.7` already declared support for
+        Vite `^5 || ^6 || ^7` with no changes needed. Bumped to `vite@^6.4.3` +
+        `@vitejs/plugin-react@^4.7.0` — no `vite.config.ts` changes needed, the config only uses
+        options that carried over unchanged. Verified: `npm audit` now reports 0 vulnerabilities;
+        typecheck, all 442 tests, and a production build all pass clean; dev server boots
+        (`VITE v6.4.3`) with a correct `Re-optimizing dependencies because lockfile has changed`
+        one-time notice; live-verified the app actually loads and the `/api` proxy to the Express
+        backend still resolves correctly (`GET /api/chats/trash` / `GET /api/characters` both
+        200, confirmed via the browser's own network log).
+      - **Minor: static avatar files carry no access control beyond UUID obscurity** — `/avatars`
+        is a plain `express.static` mount with no origin check; any page open in the same browser
+        that discovers (not just guesses — UUIDs are fine against guessing) an avatar URL can
+        hotlink it. Very low practical severity, noted for completeness rather than urgency.
+      - **Minor: TTS provider API keys sit in the persisted settings store in plain text**
+        (`localStorage`, via `useSettingsStore`) — normal for a local-only app with no server-side
+        secret store to put them in instead, and there's no XSS sink to chain it through today, but
+        worth remembering if that ever changes.
+      - **Accessibility: the shared `<Modal>` (`src/components/ui/Modal.tsx`) that every one of the
+        dozen-plus panels in this app is built on has no focus trap, no initial-focus management,
+        and no ARIA dialog semantics** — no `role="dialog"`/`aria-modal`/`aria-labelledby`, and
+        background content stays fully tabbable and screen-reader-reachable while it's "open."
+        The fix pattern already exists in this exact codebase and just needs porting over:
+        `<ConfirmDialog>` (`src/components/ui/ConfirmDialog.tsx`) already does this correctly —
+        `role="alertdialog"`, `aria-modal="true"`, `aria-label`, focuses its confirm button on open,
+        and closes on a backdrop click. Because every bigger panel shares the one `<Modal>` shell,
+        fixing it once fixes accessibility for all of them at once rather than needing a pass per
+        panel.
+      - **Small UX gap, not a bug**: no way to pin/favorite a whole *chat* to keep it at the top of
+        the sidebar regardless of `updatedAt` — `StoredMessage.pinned` exists (the "Pinned moments"
+        panel), but nothing equivalent exists on `Chat` itself. A natural complement to both the
+        existing tag-folders (`CharacterList.tsx`) and the trash feature just shipped above.
+      **Deliberately not attempted in the audit pass itself**: this was a read-only pass, not an
+      implementation round — koboldcpp being offline also ruled out live-verifying anything
+      model-dependent even if it had been. Each finding was sized to be its own follow-up; the
+      dev-toolchain CVE above was the first one actually picked up, right after the pass. The rest
+      (CORS/origin allowlist, World Info/Regex Script ReDoS hardening, `<Modal>` accessibility,
+      chat pinning) are still open.
 
 ## 10. Major expansion: a living-world dating sim
 
