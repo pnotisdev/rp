@@ -5,6 +5,7 @@ import { suggestLoreEntries, type AiLoreSubject } from '@/lib/characters/aiAssis
 import { KoboldClient } from '@/lib/api/kobold'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import { errorMessage, toastError } from '@/lib/store/useToastStore'
+import { anyKeyIsRisky } from '@/lib/text/regexSafety'
 import { Button } from '@/components/ui/Button'
 import { Toggle } from '@/components/ui/Toggle'
 import { NumberField, SelectField, TextAreaField, TextField } from '@/components/ui/Field'
@@ -114,6 +115,12 @@ export function LorebookEditor({
                       updateEntry(entry.id!, { keys: e.target.value.split(',').map((k) => k.trim()).filter(Boolean) })
                     }
                   />
+                  {anyKeyIsRisky(entry.keys) && (
+                    <p className="-mt-2 mb-3 text-[11px] text-warning">
+                      One of these regex keys has a nested-quantifier shape that can run catastrophically slowly on
+                      the wrong input — worth double-checking, though plenty of legitimate patterns look like this too.
+                    </p>
+                  )}
                 </div>
                 <button
                   type="button"
@@ -303,16 +310,25 @@ export function LorebookEditor({
                         </label>
                       </div>
                       {entry.selective && (
-                        <TextField
-                          label="Secondary keys"
-                          hint="Comma separated — any one is enough, alongside a primary key match."
-                          value={(entry.secondary_keys ?? []).join(', ')}
-                          onChange={(e) =>
-                            updateEntry(entry.id!, {
-                              secondary_keys: e.target.value.split(',').map((k) => k.trim()).filter(Boolean),
-                            })
-                          }
-                        />
+                        <>
+                          <TextField
+                            label="Secondary keys"
+                            hint="Comma separated — any one is enough, alongside a primary key match."
+                            value={(entry.secondary_keys ?? []).join(', ')}
+                            onChange={(e) =>
+                              updateEntry(entry.id!, {
+                                secondary_keys: e.target.value.split(',').map((k) => k.trim()).filter(Boolean),
+                              })
+                            }
+                          />
+                          {anyKeyIsRisky(entry.secondary_keys ?? []) && (
+                            <p className="-mt-2 mb-3 text-[11px] text-warning">
+                              One of these regex keys has a nested-quantifier shape that can run catastrophically
+                              slowly on the wrong input — worth double-checking, though plenty of legitimate patterns
+                              look like this too.
+                            </p>
+                          )}
+                        </>
                       )}
                     </>
                   )}

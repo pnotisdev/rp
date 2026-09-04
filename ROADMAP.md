@@ -297,15 +297,74 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
       - **Deliberately cut, not silently missing**: VN mode still only ever shows the primary's
         sprite/expression, even mid-scene with a participant speaking (VNStage is built entirely
         around one character's sprite state — per-participant sprites is a separate, larger lift);
-        no `Scene` entity (location/objective/atmosphere) and no AI-"director" turn policy, both
-        explicitly deferred per the design conversation this bullet originally called for; dates
-        (10b) were NOT unified with this — kept as their own separate mechanic.
+        ~~no `Scene` entity (location/objective/atmosphere) and no AI-"director" turn policy~~ —
+        built later, as #120, once multi-character relationship tracking (#118) gave manual group
+        chats an actual reason to see real use; dates (10b) were NOT unified with this — kept as
+        their own separate mechanic.
       5 new tests (`builder.test.ts`, covering per-turn speaker naming, the roster block, and
       `nextSpeakerName`), typecheck clean, full suite (86 tests) green. Verified live end-to-end
       with two real test characters: created a group chat, sent a message replying as each
       character in turn, confirmed `speakerId`/avatar/name all resolved correctly in the transcript,
       and confirmed via the Prompt Inspector that the assembled prompt correctly swaps identity
       blocks and roster depending on who's replying.
+- [x] **A proper `Scene` entity + turn policies beyond manual** (#120) — closes out section 4/12's
+      long-deferred item, picked up specifically because #118 (multi-character relationship
+      tracking) gave manual group chats a real reason to see more use, which is exactly the
+      condition this item's own deferral note was waiting on.
+      - **Deliberately narrow scope**: `Scene` (`types.ts`) carries location/atmosphere framing plus
+        a turn policy — genuinely new state — but *not* an objective, which stays on the existing
+        `Objective`/`activeObjective` system rather than being duplicated. `Chat.scene?: Scene`,
+        purely additive; unset behaves exactly like every chat that predates this (manual, no
+        framing). Location/atmosphere fold into the same prompt slot `activeEvent.title`/
+        `description` already use, independent of whether the chat even has a bound `World` — a
+        plain group chat with no world at all can still say where it's happening.
+      - **Four turn policies** (`src/lib/chat/scene.ts`, new — pure functions plus the one judge
+        call): `'manual'` (today's exact "reply as" picker, untouched), `'round_robin'` (cycles the
+        primary and every participant in a fixed order; the bookkeeping index is read defensively —
+        modulo, not trusted — so a roster that's since shrunk can't produce an invalid pick),
+        `'mention'` (an `@Name` in the player's own message routes the reply there, longest-name-
+        first so "Aria" can't shadow "Aria Kestrel," word-boundary matched so "@Ari" can't hit
+        "Aria"), and `'director'` (a cheap classification call — same "model plays the character,
+        code applies the result" shape as `assessRelationshipMoment` — reads the scene and picks who
+        would naturally respond). `'mention'`/`'director'` both fall back to the primary on no
+        match/any failure, never leaving a reply unattributed.
+      - **Gift-giving deliberately stays independent of the turn policy** — an explicit "give this
+        to them" action shouldn't get silently redirected by round-robin or an AI director, so it
+        keeps following the composer's "reply as" choice regardless of what policy is active (the
+        one place the two can genuinely diverge).
+      - **UI**: a new "Scene" toolbar entry (hidden until a chat actually has participants, same
+        gating the "reply as" picker already uses) opens `ScenePanel.tsx` for location/atmosphere/
+        policy. Once a non-`'manual'` policy is active, the composer's own "reply as" `<select>`
+        gives way to a read-only hint (`Next: {name}` for round-robin, a one-line explainer for the
+        other two) — there's nothing left to manually pick.
+      - **Caught one real bug live, not in review**: the `TuningPanel` slide-over (a much earlier
+        session item) used `translate-x-full` to sit off-screen when closed — a `transform` moves an
+        element visually but its box still counts toward an ancestor's scrollable area, so the
+        "hidden" panel was quietly widening the whole page into a permanent horizontal scrollbar you
+        could scroll to reveal it through. Unrelated to this item's own code, found while verifying
+        it live in the same session; fixed with `overflow-hidden` on the `ChatWindow` root the panel
+        docks to (the `<Modal>` shell and `ReactivePortrait` both use `position: fixed`/their own
+        nested wrapper, neither clipped by a plain `overflow` on an ancestor with no transform of
+        its own, so nothing else needed touching).
+      11 new tests (`scene.test.ts`): round-robin's start/advance/wrap/stale-index/empty-roster
+      cases, mention's longest-match/case-insensitivity/word-boundary/no-match cases, and the roster
+      builder. Full suite (474 tests at the time), typecheck, and build all clean. **Verified live
+      end-to-end** with a real throwaway participant added to the seeded Sumire chat (koboldcpp off,
+      so `'director'`'s own model call failed exactly the way it was designed to survive): set
+      round-robin and sent two messages, confirming the reply alternated Sumire → Kestrel with
+      `speakerId` set correctly on the second and the composer's "Next:" hint updating each time,
+      including a stale-index wrap back to Sumire; switched to `'mention'` and confirmed an
+      `@Sumire` in a message correctly overrode what would otherwise have been the "next" speaker,
+      and that a message with no mention fell back to the primary; switched to `'director'` and, via
+      a patched `fetch`, captured the judge call's own prompt (correctly naming both characters and
+      the scene's location) and confirmed its failure (no model reachable) fell back to the primary
+      rather than leaving the reply unattributed; confirmed the scene's location/atmosphere reached
+      the *actual reply* prompt, not just the director's own judge call. Deleted the test character
+      afterward and confirmed the existing participant-cleanup cascade correctly emptied
+      `participants` while leaving the chat intact; reverted every other mutation (messages, scene,
+      pin state) and diffed the chat back to its exact pre-test snapshot. A plain single-character
+      chat was re-verified afterward to show no "Scene" entry and no turn-policy hint at all — the
+      gating holds.
 - [x] **Message search across a chat or across all chats** — a 🔎 header button opens
       `SearchPanel.tsx` with a "This chat" / "All chats" toggle. In-chat search filters the
       already-loaded `messages` client-side (instant, no round trip); all-chats search hits a new
@@ -978,28 +1037,24 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
       atomically swapping it in so a failed restore can't half-destroy the old data, and there is
       not one `@ts-ignore`, `TODO`, or `as any` escape hatch anywhere in either `src` or `server`.
       What the pass actually found:
-      - **No explicit origin check on the Express API** — `server/app.ts` has no CORS/Origin
-        allowlist at all. In practice this mostly self-protects today, since the browser requires a
-        preflight (which gets no `Access-Control-Allow-Origin` back, so it's blocked) for `DELETE`/
+      - ~~**No explicit origin check on the Express API**~~ — `server/app.ts` had no CORS/Origin
+        allowlist at all. In practice this mostly self-protected already, since the browser requires
+        a preflight (which gets no `Access-Control-Allow-Origin` back, so it's blocked) for `DELETE`/
         `PUT` and for any `POST` sent with `Content-Type: application/json` — but a "simple" POST
         (`text/plain`, no custom headers) from *any other site or tab open in the same browser*
-        still reaches action-only endpoints with no body needed, blind. `POST /api/chats/:id/restore`
-        (just shipped, below) is exactly that shape: no body, real side effect. A small
-        `Origin`/`Referer` allowlist middleware rejecting anything outside the app's own expected
-        origins would close this properly instead of relying on incidental browser preflight
-        behavior that a future endpoint could easily reopen without anyone noticing.
-      - **ReDoS via user-authored/imported regex, unbounded** — both World Info's regex-key syntax
-        (`parseRegexKey` in `activation.ts`, `/pattern/flags` keys) and Settings → Generation's
+        still reached action-only endpoints with no body needed, blind. `POST /api/chats/:id/restore`
+        (shipped below) is exactly that shape: no body, real side effect. Fixed as part of #119 —
+        see that entry for the full write-up.
+      - ~~**ReDoS via user-authored/imported regex, unbounded**~~ — both World Info's regex-key
+        syntax (`parseRegexKey` in `activation.ts`, `/pattern/flags` keys) and Settings → Generation's
         Regex Scripts (`regexScripts.ts`) compile arbitrary regex from the lorebook/character
         card/preset and run `.test()`/`.replace()` against the full conversation text on every
         single turn, with no complexity check, no length cap on the input, and no execution budget.
         A pathological pattern (classic catastrophic-backtracking shapes like `(a+)+$`) in an
         imported card or lorebook — the SillyTavern ecosystem is built on downloading cards shared
-        by strangers — would hang the tab, not just that one turn. No JS-level fix stops a hung
-        `RegExp.test()` mid-flight; realistic mitigations are capping the haystack length before
-        testing, a basic pattern-complexity/nested-quantifier linter on save (flag it, don't
-        silently block it — some legitimate patterns look scary), or, if it's ever worth the
-        complexity, running activation in a Worker with a hard timeout.
+        by strangers — would hang the tab, not just that one turn. Fixed as part of #119 with the two
+        mitigations this finding itself named as realistic (a haystack cap + an authoring-time
+        complexity linter) — see that entry.
       - [x] **Known moderate/high vulnerability in the pinned dev toolchain — fixed (#116)** —
         `npm audit` flagged the `esbuild`/Vite pair then pinned (`vite@^5.4.10`):
         [GHSA-67mh-4wv8-2f99](https://github.com/advisories/GHSA-67mh-4wv8-2f99), "esbuild enables
@@ -1026,30 +1081,91 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
         is a plain `express.static` mount with no origin check; any page open in the same browser
         that discovers (not just guesses — UUIDs are fine against guessing) an avatar URL can
         hotlink it. Very low practical severity, noted for completeness rather than urgency.
+        **Deliberately left open, not missed**: the app's own threat model is "local-only, no auth"
+        (see the README) — real access control here would mean adding session auth or signed URLs,
+        a materially bigger architectural change than this finding's severity justifies, not a gap
+        the Origin-allowlist fix (#119) happens to close (an `<img>` tag never sends an `Origin`
+        header at all, so it wouldn't be affected either way).
       - **Minor: TTS provider API keys sit in the persisted settings store in plain text**
         (`localStorage`, via `useSettingsStore`) — normal for a local-only app with no server-side
         secret store to put them in instead, and there's no XSS sink to chain it through today, but
-        worth remembering if that ever changes.
-      - **Accessibility: the shared `<Modal>` (`src/components/ui/Modal.tsx`) that every one of the
-        dozen-plus panels in this app is built on has no focus trap, no initial-focus management,
-        and no ARIA dialog semantics** — no `role="dialog"`/`aria-modal`/`aria-labelledby`, and
-        background content stays fully tabbable and screen-reader-reachable while it's "open."
-        The fix pattern already exists in this exact codebase and just needs porting over:
-        `<ConfirmDialog>` (`src/components/ui/ConfirmDialog.tsx`) already does this correctly —
-        `role="alertdialog"`, `aria-modal="true"`, `aria-label`, focuses its confirm button on open,
-        and closes on a backdrop click. Because every bigger panel shares the one `<Modal>` shell,
-        fixing it once fixes accessibility for all of them at once rather than needing a pass per
-        panel.
-      - **Small UX gap, not a bug**: no way to pin/favorite a whole *chat* to keep it at the top of
-        the sidebar regardless of `updatedAt` — `StoredMessage.pinned` exists (the "Pinned moments"
-        panel), but nothing equivalent exists on `Chat` itself. A natural complement to both the
-        existing tag-folders (`CharacterList.tsx`) and the trash feature just shipped above.
-      **Deliberately not attempted in the audit pass itself**: this was a read-only pass, not an
-      implementation round — koboldcpp being offline also ruled out live-verifying anything
-      model-dependent even if it had been. Each finding was sized to be its own follow-up; the
-      dev-toolchain CVE above was the first one actually picked up, right after the pass. The rest
-      (CORS/origin allowlist, World Info/Regex Script ReDoS hardening, `<Modal>` accessibility,
-      chat pinning) are still open.
+        worth remembering if that ever changes. **Deliberately left open**: a real fix needs an OS
+        keychain integration, a genuinely separate, larger effort this finding's own severity
+        doesn't call for yet.
+      - ~~**Accessibility: the shared `<Modal>`... has no focus trap, no initial-focus management,
+        and no ARIA dialog semantics**~~ — fixed as part of #119.
+      - ~~**Small UX gap, not a bug**: no way to pin/favorite a whole *chat*~~ — fixed as part of
+        #119.
+      **The read-only audit pass itself deliberately implemented nothing** — koboldcpp being offline
+      also ruled out live-verifying anything model-dependent even if it had. Each finding was sized
+      to be its own follow-up; the dev-toolchain CVE (#116) was the first one picked up, right after
+      the pass. #119 closes out every remaining *actionable* finding — see that entry — leaving only
+      the two "minor, deliberately left open" ones above, both blocked on a genuinely separate,
+      larger architectural change rather than anything this pass could reasonably fold in.
+- [x] **Closes out section 9: origin allowlist, ReDoS hardening, `<Modal>` accessibility, chat
+      pinning** (#119) — the four actionable findings the audit pass above left open, all picked up
+      in one pass since none of them touch the others.
+      - **Origin/Referer allowlist** (`server/app.ts`) — this API has no auth to fall back on (the
+        README's own threat model: local-only, must never be reachable off this machine), so Origin
+        is the only signal available. A browser can never lie about its own Origin header, so a real
+        cross-site request can't spoof its way past this the way it could spoof a body field — only
+        a *present-but-mismatched* Origin (or, failing that, Referer) is rejected; both absent
+        entirely (some same-origin request shapes, and non-browser tools like curl or this project's
+        own live-verification passes) stay allowed, since neither can be a cross-site browser attack.
+        `PORT` mirrors the exact env var `vite.config.ts` already reads for the client's own dev port,
+        so a customized port only needs setting once. **Verified against the real server, not just
+        the client** (a browser can't forge its own Origin header, so this needed `curl` directly
+        against port 3001, bypassing the Vite proxy): a matching Origin and no Origin at all both
+        return 200 on both a read and a mutating `POST`; a mismatched Origin returns 403 on both.
+      - **ReDoS hardening** (`src/lib/text/regexSafety.ts`, new) — both mitigations the audit finding
+        itself named as realistic, applied to both surfaces the finding named:
+        - `MAX_REGEX_HAYSTACK_LENGTH` (50,000 chars) caps what a World Info regex *key* is ever
+          tested against (`activation.ts`) — only the regex path, never the plain `.includes()`
+          keyword path, which can't catastrophically backtrack regardless of length and would only
+          lose real matches if truncated. Regex Scripts deliberately did *not* get the same
+          haystack cap — they `.replace()` the actual message text rather than just testing it, so
+          truncating would silently corrupt real content; the linter below is that surface's
+          mitigation instead.
+        - `isRiskyRegexPattern()` — a shallow, fast heuristic for the textbook "nested quantifier"
+          shape (`(a+)+`, `(a*)+`, ...) the audit's own example used, deliberately not a real static
+          analyzer (general regex-complexity analysis is undecidable). Flags, never blocks — some
+          legitimate patterns look like this too, exactly per the finding's own "flag it, don't
+          silently block it" guidance. Wired into both authoring surfaces: `RegexScriptsSection.tsx`
+          (the find pattern) and `LorebookEditor.tsx` (both primary and secondary regex keys, which
+          share the exact same `test()` closure in `matchesKeywords` and so are equally exposed).
+        12 new tests (`regexSafety.test.ts`) covering the heuristic, the key-pattern extractor, and
+        the haystack cap's non-effect on ordinary-length input. Verified live: added a script with
+        `(a+)+$` through the real Settings UI and confirmed the amber (not red — this isn't an
+        error) warning renders with the correct computed color, matching `--c-warning`.
+      - **`<Modal>` accessibility** (new `src/lib/hooks/useFocusTrap.ts`, shared by every panel built
+        on `<Modal>` — a dozen-plus of them) — ported `<ConfirmDialog>`'s already-correct pattern
+        (`role`, `aria-modal`, `aria-label`, backdrop-click-to-close) onto the shared shell, plus a
+        real keyboard focus trap `<ConfirmDialog>` itself didn't actually have: Tab/Shift+Tab now
+        cycle only among the dialog's own focusable elements rather than escaping into the page
+        behind it, initial focus lands on the first focusable element (or the dialog container
+        itself if there isn't one) instead of nowhere in particular, and closing restores focus to
+        whatever opened it. Deliberately a manual Tab-cycling trap rather than migrating to the
+        native `<dialog>` element, which would need every existing modal's positioning/backdrop
+        styling reset — a much larger, riskier change than this finding asked for.
+        **Verified live against the real DOM**, not just code review: opened the Relationship panel
+        and confirmed `role="dialog"`/`aria-modal="true"`/`aria-label="Relationship"` and that focus
+        landed on its first focusable element; pressed Shift+Tab from there and confirmed it wrapped
+        to the *last* of the panel's 13 focusable elements (not out into the page); pressed Tab once
+        more and confirmed it wrapped back to the first; clicked the backdrop and confirmed the
+        dialog closed *and* focus returned to the toolbar button that opened it.
+      - **Chat pin/favorite** (`Chat.pinned`, `ChatsPanel.tsx`) — the chat-level analog of
+        `StoredMessage.pinned`. A pinned chat sorts to the top of the list (a stable sort, so the
+        rest keeps its existing `updatedAt` order) and shows a filled star next to its title at
+        rest, not hover-only — same "otherwise there'd be no way to spot it while scrolling"
+        reasoning message-pinning already established. "Pin to top"/"Unpin" added to the row's
+        existing "•••" menu, next to Rename/Duplicate/Delete. Verified live: pinned the seeded
+        Sumire chat through the real menu, confirmed `pinned: true` server-side and the star
+        rendering with the theme's actual `--c-accent` color, then unpinned and confirmed both
+        cleared.
+      12 new tests total (`regexSafety.test.ts`; the Modal/pin changes are UI-only, covered by live
+      verification rather than unit tests, matching how this codebase already treats other
+      component-level fixes). Typecheck + full suite (463 tests at the time) + production build all
+      clean.
 
 ## 10. Major expansion: a living-world dating sim
 
@@ -3609,15 +3725,16 @@ smaller than the rest of section 10:
    `detectExpressionFromSprites` + `classifyAttachedImageScene` (`src/lib/vn/sceneVision.ts`), an
    opt-in post-reply assist that looks at the character's real sprites (and any attached photo) to
    correct the model's blind `<<scene:>>` tag. Verified live with Heimdallr-26B + mmproj.
-2. A proper `Scene` entity (location, objective/atmosphere) and turn-policy options beyond fully
-   manual (round-robin, an AI "director," @mention) — the group-chat bullet above deliberately
-   shipped the smallest useful slice of this rather than the full concept; revisit once manual
-   group chats have actually been used enough to know whether the extra machinery is worth it.
+2. ~~A proper `Scene` entity (location, objective/atmosphere) and turn-policy options beyond fully
+   manual (round-robin, an AI "director," @mention)~~ — shipped as #120 (see section 4's own
+   checked items for the full write-up), picked up once item 3 below gave manual group chats an
+   actual reason to see real use, exactly the condition this item's own deferral note was waiting
+   on. Objective-setting deliberately stayed on the existing `Objective` system rather than being
+   duplicated into `Scene`.
 3. ~~Multi-character relationship tracking~~ — shipped as #118 (see 10c's own checked items for
    the full write-up): a non-primary participant now has their own tracked affection/stats/gifts/
    gallery, resolved through a new `RelationshipTrack`/`participantRelationships` pair that leaves
-   every existing single-character chat's data untouched. The Scene entity (item 2 above) stays the
-   one deliberately separate, still-deferred piece.
+   every existing single-character chat's data untouched.
 4. ~~The rest of proactive outreach (section 10f)~~ — shipped as #102 (see section 10f's own
    checked items for the full write-up), including the harder, cross-cutting half of context
    budget tiers left deliberately unattempted for now (still genuinely open, just no longer
@@ -3668,11 +3785,10 @@ section's own checked items for the full write-up, including a real turn-boundar
 verification pass caught and fixed in the main chat pipeline too, not just this new feature) is
 now shipped, and so is ~~10b's breaking-the-ice opener + reactive portrait~~ (#117), closing out
 10b as originally scoped. ~~Multi-character relationship tracking~~ (#118) is shipped too — a
-non-primary participant is a tracked relationship now, not a scene NPC. What's left in section 10
-is the larger, longer-standing tracks: a proper `Scene` entity (deliberately deferred until manual
-group chats see more real use — #118 was built around that machinery, not a reason to revisit the
-deferral) and section 12's living-world core — see section 10's own "Suggested phase order" for how
-to sequence those instead of folding them into this list.
+non-primary participant is a tracked relationship now, not a scene NPC — and once that gave manual
+group chats a real reason to see more use, ~~the `Scene` entity + turn policies beyond manual~~
+(#120, section 4) followed in the same session. What's left in section 10 now is just section 12's
+living-world core — see section 10's own "Suggested phase order" for how to sequence that.
 
 Section 15 (added from a user-supplied AI Dungeon competitive analysis) is a separate set of ideas,
 not yet folded into this priority order. The high-contrast theme preset (#73) and raw-vs-processed

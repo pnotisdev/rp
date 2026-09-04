@@ -1,5 +1,6 @@
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import { isValidRegexScript } from '@/lib/text/regexScripts'
+import { isRiskyRegexPattern } from '@/lib/text/regexSafety'
 import { newId } from '@/lib/id'
 import type { RegexScript } from '@/lib/types'
 import { Section } from '@/components/ui/Section'
@@ -35,6 +36,7 @@ export function RegexScriptsSection() {
         emptyHint="No scripts. Add one to trim artifacts, reformat narration, or strip a tic the model keeps copying."
         renderItem={(script) => {
           const valid = isValidRegexScript(script)
+          const risky = valid && isRiskyRegexPattern(script.find)
           return (
             <div className="space-y-1">
               <div className="grid grid-cols-1 gap-x-3 sm:grid-cols-[1fr_150px]">
@@ -71,6 +73,13 @@ export function RegexScriptsSection() {
                 />
               </div>
               {!valid && <p className="text-[11px] text-danger">That pattern doesn't compile — it's being skipped.</p>}
+              {risky && (
+                <p className="text-[11px] text-warning">
+                  This has a nested-quantifier shape (a repeated group inside another repetition) that can run
+                  catastrophically slowly on the wrong input — worth double-checking, though plenty of legitimate
+                  patterns look like this too.
+                </p>
+              )}
               <div className="rounded-lg bg-bg-sunken px-3">
                 <Toggle checked={script.enabled} onChange={(v) => update(script.id, { enabled: v })} label="Enabled" />
               </div>

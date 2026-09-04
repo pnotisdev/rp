@@ -48,6 +48,7 @@ import {
   unlockedEndingIds,
 } from '@/lib/dating/stage'
 import { defaultGiftInventory, getGiftCatalog, giftById, giftImpactBase } from '@/lib/dating/gifts'
+import { nextRoundRobinSpeaker, parseMention, pickDirectorSpeaker, rosterFrom } from '@/lib/chat/scene'
 import { itemById } from '@/lib/dating/items'
 import { buildRelationshipDescription } from '@/lib/dating/relationshipDescription'
 import { resolveInstructTemplate } from '@/lib/prompt/instructTemplates'
@@ -67,7 +68,7 @@ import { errorMessage, toastError, toastInfo, toastSuccess } from '@/lib/store/u
 import { playSendBlip } from '@/lib/audio/sfx'
 import type { Character, Lorebook } from '@/lib/characters/cardSpec'
 import { buildCharacterProfileNote } from '@/lib/characters/profile'
-import type { ChoiceOption, RelationshipDimension, RelationshipWarning, SceneFlag } from '@/lib/types'
+import type { ChoiceOption, RelationshipDimension, RelationshipWarning, Scene, SceneFlag } from '@/lib/types'
 
 /** Minimum number of newly-eligible messages before auto-summarize bothers running (avoids a summarization call on every single turn). */
 const MIN_BATCH_FOR_AUTO_SUMMARY = 6
@@ -439,29 +440,35 @@ export function useChatSession(chatId: string | null) {
       const worldLorebook = world?.lorebook ? [{ ...world.lorebook, sourceKey: `world:${world.id}` }] : []
       const factsLorebook = buildFactsLorebook(activeFacts).map((b) => ({ ...b, sourceKey: 'facts' }))
       const affection = freshChat.affection ?? 0
-      const worldDescription = world
-        ? [
-            world.description?.trim(),
-            world.rules?.trim() ? `World rules: ${world.rules.trim()}` : '',
-            describeWorldMoment({
-              worldId: world.id,
-              characterId: speaker.id,
-              day: world.currentDay ?? 0,
-              phaseIndex: world.currentPhaseIndex ?? 0,
-              weatherPreferences: speaker.weatherPreferences,
-            }),
-            // Only worth a prompt line when this character actually has a schedule authored —
-            // otherwise every character would get a generic "is currently free" non-fact.
-            speaker.schedule?.length
-              ? describePresence(getCurrentActivity(speaker.schedule, world.currentDay ?? 0, world.currentPhaseIndex ?? 0))
-              : '',
-            freshChat.activeEvent?.title
-              ? `Current event: ${freshChat.activeEvent.title}${freshChat.activeEvent.description ? `. ${freshChat.activeEvent.description}` : ''}`
-              : '',
-          ]
-            .filter(Boolean)
-            .join('\n')
-        : undefined
+      const worldDescriptionLines = [
+        ...(world
+          ? [
+              world.description?.trim(),
+              world.rules?.trim() ? `World rules: ${world.rules.trim()}` : '',
+              describeWorldMoment({
+                worldId: world.id,
+                characterId: speaker.id,
+                day: world.currentDay ?? 0,
+                phaseIndex: world.currentPhaseIndex ?? 0,
+                weatherPreferences: speaker.weatherPreferences,
+              }),
+              // Only worth a prompt line when this character actually has a schedule authored —
+              // otherwise every character would get a generic "is currently free" non-fact.
+              speaker.schedule?.length
+                ? describePresence(getCurrentActivity(speaker.schedule, world.currentDay ?? 0, world.currentPhaseIndex ?? 0))
+                : '',
+            ]
+          : []),
+        freshChat.activeEvent?.title
+          ? `Current event: ${freshChat.activeEvent.title}${freshChat.activeEvent.description ? `. ${freshChat.activeEvent.description}` : ''}`
+          : '',
+        // Section 4/12's Scene entity — location/atmosphere framing, independent of whether this
+        // chat even has a bound World, so a plain group chat with no World at all can still be
+        // told where it's happening.
+        freshChat.scene?.location ? `Scene location: ${freshChat.scene.location}` : '',
+        freshChat.scene?.atmosphere ? `Scene atmosphere: ${freshChat.scene.atmosphere}` : '',
+      ].filter(Boolean)
+      const worldDescription = worldDescriptionLines.length > 0 ? worldDescriptionLines.join('\n') : undefined
 
       // Messages already folded into chat.summary are represented there, not sent verbatim.
       const cutoff = freshChat.summaryUpToTimestamp ?? 0
@@ -1008,6 +1015,26 @@ export function useChatSession(chatId: string | null) {
     [chatId],
   )
 
+  /**
+   * Section 4/12's Scene entity: location/atmosphere framing plus the group-chat turn policy.
+   * `null` clears it entirely (back to manual, no framing — today's exact behavior); a partial
+   * patch merges onto whatever's already set, defaulting to `'manual'` the first time a chat gets
+   * a scene at all. `scene: null`, not `undefined` — the usual `JSON.stringify` drops-`undefined`
+   * reason (see `activeEvent`/`authorNote`).
+   */
+  const updateScene = useCallback(
+    async (patch: Partial<Scene> | null) => {
+      if (!chatId) return
+      if (patch === null) {
+        await chatsApi.update(chatId, { scene: null })
+        return
+      }
+      const current: Scene = chat?.scene ?? { turnPolicy: 'manual' }
+      await chatsApi.update(chatId, { scene: { ...current, ...patch } })
+    },
+    [chat?.scene, chatId],
+  )
+
   /** Best-effort: proposes a few next-move options for the user, attached to the char message they follow from. Never blocks the reply. */
   const suggestChoicesForMessage = useCallback(
     async (messageId: string, historyForChoices: ChatMessage[]) => {
@@ -1498,15 +1525,20 @@ export function useChatSession(chatId: string | null) {
   const sendUserMessage = useCallback(
     async (text: string, attachments: PendingAttachment[] = [], opts?: { choice?: ChoiceOption; intent?: MessageIntent }) => {
       if (!chatId || isGenerating) return
-      // Resolved once, up front, and reused below for both who the gift goes to and who replies —
-      // multi-character relationship tracking's gift half: giving a gift now moves *this* target's
-      // own track, not always the primary's, using the exact same "reply as" choice the composer
-      // already exposes for a group chat rather than adding a second, separate "give to" picker.
+      // Read fresh rather than trusting the hook's own (possibly one-render-stale) `chat` — both
+      // the gift block below and the scene-policy resolution after it need this, so it's fetched
+      // once here instead of twice.
+      const freshChat = await chatsApi.get(chatId)
+      if (!freshChat) return
+      // Resolved once, up front, and reused below for who the gift goes to — multi-character
+      // relationship tracking's gift half: giving a gift moves *this* target's own track, not
+      // always the primary's, using the exact same "reply as" choice the composer already exposes
+      // for a group chat rather than adding a second, separate "give to" picker. Deliberately
+      // independent of the scene's turn policy below: a deliberate "give this to them" action
+      // shouldn't get silently redirected by round-robin or an AI director.
       const { active: giftTarget } = resolveSpeaker(replyAsCharacterId)
       let giftId: string | undefined
       if (opts?.choice?.kind === 'gift' && opts.choice.giftId && giftTarget) {
-        const freshChat = await chatsApi.get(chatId)
-        if (!freshChat) return
         const inventory = { ...(freshChat.giftInventory ?? defaultGiftInventory(world)) }
         const inStock = inventory[opts.choice.giftId] ?? 0
         if (inStock <= 0) {
@@ -1562,12 +1594,40 @@ export function useChatSession(chatId: string | null) {
       }
       await messagesApi.create(userMsg)
 
+      // Section 4/12's "proper Scene entity": who actually replies, per the chat's turn policy —
+      // `'manual'` (or no scene at all) keeps today's exact behavior, the same "reply as" choice
+      // gifting uses above. The other three only ever engage once there's an actual roster to
+      // choose among; each falls back to `giftTarget` (manual resolution) on its own terms rather
+      // than ever leaving `speaker` unset.
+      let speaker = giftTarget
+      const turnPolicy = freshChat.scene?.turnPolicy ?? 'manual'
+      if (turnPolicy !== 'manual' && character && participantCharacters.length > 0) {
+        const roster = rosterFrom(character, participantCharacters)
+        if (turnPolicy === 'round_robin') {
+          const next = nextRoundRobinSpeaker(roster, freshChat.scene?.roundRobinIndex)
+          if (next) {
+            speaker = resolveSpeaker(next.id).active
+            // Advanced immediately rather than after the reply lands, so the bookkeeping can't be
+            // reused by a rapid second send while this one is still generating.
+            await chatsApi.update(chatId, { scene: { ...freshChat.scene!, roundRobinIndex: next.nextIndex } })
+          }
+        } else if (turnPolicy === 'mention') {
+          const mention = parseMention(text, roster)
+          if (mention) speaker = resolveSpeaker(mention.id).active
+        } else if (turnPolicy === 'director') {
+          const historyForDirector: ChatMessage[] = messages.map((m) => ({ id: m.id, role: m.role, name: m.name, text: m.text }))
+          const pickedId = await pickDirectorSpeaker(client, {
+            roster,
+            history: historyForDirector,
+            userName: persona?.name || 'You',
+            sceneLocation: freshChat.scene?.location ?? undefined,
+          })
+          if (pickedId) speaker = resolveSpeaker(pickedId).active
+        }
+      }
+
       // createdAt is offset by 1ms and sent explicitly so this reply always sorts after the
-      // user's turn even though both are created in the same synchronous burst. `replyAsCharacterId`
-      // only ever differs from the primary in a group chat — every ordinary chat leaves it null.
-      // Same resolution as `giftTarget` above (reused, not re-derived) — whoever a gift went to is
-      // exactly whoever should react to receiving it.
-      const speaker = giftTarget
+      // user's turn even though both are created in the same synchronous burst.
       const charMsg: StoredMessage = {
         id: newId(),
         chatId,
@@ -1587,9 +1647,9 @@ export function useChatSession(chatId: string | null) {
         name: m.name,
         text: m.text,
       }))
-      await runGeneration(historyForPrompt, charMsg.id, apiImages, { speakerId: replyAsCharacterId, intent: opts?.intent })
+      await runGeneration(historyForPrompt, charMsg.id, apiImages, { speakerId: speaker?.id ?? null, intent: opts?.intent })
     },
-    [character, chatId, isGenerating, messages, persona, reducedAudio, replyAsCharacterId, resolveSpeaker, runGeneration, world],
+    [character, chatId, client, isGenerating, messages, participantCharacters, persona, reducedAudio, replyAsCharacterId, resolveSpeaker, runGeneration, world],
   )
 
   const regenerate = useCallback(
@@ -2105,6 +2165,7 @@ export function useChatSession(chatId: string | null) {
     abortGeneration,
     previewPrompt,
     updateAuthorNote,
+    updateScene,
     updateMemorySummary,
     continueMessage,
     canContinue,

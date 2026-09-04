@@ -1,5 +1,6 @@
 import type { Lorebook, LorebookEntry } from '@/lib/characters/cardSpec'
 import { estimateTokens } from '@/lib/tokenEstimate'
+import { MAX_REGEX_HAYSTACK_LENGTH } from '@/lib/text/regexSafety'
 
 export interface ActivationOptions {
   /** How many recent messages (rendered as plain text) to scan for keyword hits. */
@@ -285,7 +286,10 @@ function matchesKeywords(entry: LorebookEntry, haystackOriginal: string, haystac
   if (entry.keys.length === 0) return false
   const test = (k: string) => {
     const regex = parseRegexKey(k, !!entry.case_sensitive)
-    if (regex) return regex.test(haystackOriginal)
+    // Section 9's ReDoS finding: only the regex path can catastrophically backtrack, so only it
+    // gets capped — plain `.includes()` below stays uncapped since substring matching can't blow
+    // up regardless of input length, and truncating it would just silently miss real content.
+    if (regex) return regex.test(haystackOriginal.slice(0, MAX_REGEX_HAYSTACK_LENGTH))
     const needle = entry.case_sensitive ? k : k.toLowerCase()
     const hay = entry.case_sensitive ? haystackOriginal : haystackLower
     return needle.length > 0 && hay.includes(needle)

@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   Backpack,
   CalendarHeart,
+  Clapperboard,
   Download,
   GitFork,
   Heart,
@@ -55,6 +56,8 @@ import { BagPanel } from './BagPanel'
 import { DirectorPanel } from './DirectorPanel'
 import { TuningPanel } from './TuningPanel'
 import { ReactivePortrait } from './ReactivePortrait'
+import { ScenePanel } from './ScenePanel'
+import { nextRoundRobinSpeaker, rosterFrom } from '@/lib/chat/scene'
 import { getGiftCatalog } from '@/lib/dating/gifts'
 import { getItemCatalog } from '@/lib/dating/items'
 
@@ -92,6 +95,7 @@ export function ChatWindow({
     abortGeneration,
     previewPrompt,
     updateAuthorNote,
+    updateScene,
     updateMemorySummary,
     continueMessage,
     canContinue,
@@ -129,6 +133,7 @@ export function ChatWindow({
   const [showEvent, setShowEvent] = useState(false)
   const [showRelationship, setShowRelationship] = useState(false)
   const [showAuthorNote, setShowAuthorNote] = useState(false)
+  const [showScene, setShowScene] = useState(false)
   const [showSearch, setShowSearch] = useState(false)
   const [showPinned, setShowPinned] = useState(false)
   const [showBag, setShowBag] = useState(false)
@@ -314,6 +319,16 @@ export function ChatWindow({
       onClick: () => setShowAuthorNote(true),
     },
     {
+      key: 'scene',
+      icon: Clapperboard,
+      label: chat.scene ? `Scene (${chat.scene.turnPolicy.replace('_', ' ')})` : 'Scene',
+      // Only meaningful once there's a roster to frame/hand turns between — a single-character
+      // chat has no one to choose among, same gating the composer's own "reply as" picker uses.
+      hidden: participantCharacters.length === 0,
+      active: !!chat.scene && (!!chat.scene.location || !!chat.scene.atmosphere || chat.scene.turnPolicy !== 'manual'),
+      onClick: () => setShowScene(true),
+    },
+    {
       key: 'pinned',
       icon: Star,
       label: pinnedCount > 0 ? `Pinned moments (${pinnedCount})` : 'Pinned moments',
@@ -400,6 +415,24 @@ export function ChatWindow({
     setArmedIntent(null)
   }
 
+  // Section 4/12's Scene entity: once a non-'manual' policy is active, the composer's own "reply
+  // as" picker gives way to a read-only hint — there's nothing to manually choose once the scene
+  // is deciding automatically. Computed here (not inside `useChatSession`) since it's pure display
+  // text derived from state the hook already exposes, not something anything else needs to read.
+  const turnPolicy = chat.scene?.turnPolicy ?? 'manual'
+  const turnPolicyHint =
+    turnPolicy === 'manual' || participantCharacters.length === 0
+      ? undefined
+      : turnPolicy === 'round_robin'
+        ? (() => {
+            const roster = rosterFrom(character, participantCharacters)
+            const next = nextRoundRobinSpeaker(roster, chat.scene?.roundRobinIndex)
+            return next ? `Next: ${roster.find((r) => r.id === next.id)?.name}` : undefined
+          })()
+        : turnPolicy === 'director'
+          ? 'AI director picks who replies'
+          : 'Type @Name to address them'
+
   const composerNode = (variant: 'default' | 'vn') => (
     <Composer
       variant={variant}
@@ -417,6 +450,7 @@ export function ChatWindow({
       }
       replyAsId={replyAsCharacterId}
       onChangeReplyAs={(id) => setReplyAsCharacterId(id === character?.id ? null : id)}
+      turnPolicyHint={turnPolicyHint}
       intentSlot={
         showIntentChips ? (
           <IntentChips variant={variant} stats={intentStats} armed={armedIntent} onArm={setArmedIntent} />
@@ -426,7 +460,15 @@ export function ChatWindow({
   )
 
   return (
-    <div className="relative flex flex-1 flex-col min-w-0">
+    // overflow-hidden matters here, not just cosmetically: TuningPanel docks to this container via
+    // `absolute right-0` + `translate-x-full` when closed — a transform moves an element visually
+    // but its box still counts toward an ancestor's scrollable area, so without this the closed
+    // (off to the right, still `w-96` wide) panel was quietly widening the whole page's scrollWidth,
+    // showing up as a permanent horizontal scrollbar that could scroll the "hidden" panel into view.
+    // Every panel that needs to escape this box on purpose already does — the `<Modal>` shell (and
+    // ReactivePortrait's own nested `relative` wrapper) use `position: fixed`, which an ancestor's
+    // plain `overflow` (no transform of its own) does not clip.
+    <div className="relative flex flex-1 flex-col min-w-0 overflow-hidden">
       {!visualNovelMode && (
         <header className="flex items-center justify-between gap-4 border-b border-border bg-bg-elevated px-5 py-3">
           <div className="flex min-w-0 items-center gap-3">
@@ -543,6 +585,9 @@ export function ChatWindow({
           onClose={() => setShowAuthorNote(false)}
           onSave={updateAuthorNote}
         />
+      )}
+      {showScene && (
+        <ScenePanel scene={chat.scene} onClose={() => setShowScene(false)} onSave={updateScene} />
       )}
       {showSearch && (
         <SearchPanel

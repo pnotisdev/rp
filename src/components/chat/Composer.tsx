@@ -17,6 +17,8 @@ interface ComposerProps {
   replyAsOptions?: { id: string; name: string }[]
   replyAsId?: string | null
   onChangeReplyAs?: (id: string | null) => void
+  /** Section 4/12's Scene entity: a non-'manual' turn policy replaces the "reply as" picker with this read-only pill instead — there's nothing to manually pick once the scene is deciding automatically. */
+  turnPolicyHint?: string
   /** A row that belongs *to* the message being composed (10b's intent chips) — sits inside the card, above the textarea, so it reads as part of writing the line rather than a separate bar. */
   intentSlot?: ReactNode
   /** 'vn' strips its own chrome (border/background/margin) to sit bare inside the glass dialogue box it's nested in, and switches text/icon colors for a photo backdrop instead of the app surface. */
@@ -36,6 +38,7 @@ export function Composer({
   replyAsOptions = [],
   replyAsId,
   onChangeReplyAs,
+  turnPolicyHint,
   intentSlot,
   variant = 'default',
 }: ComposerProps) {
@@ -164,22 +167,31 @@ export function Composer({
 
         <div className="flex items-center justify-between px-0.5 pt-0.5">
           <div className="flex items-center gap-1">
-            {replyAsOptions.length > 1 && (
-              <select
-                value={replyAsId || replyAsOptions[0].id}
-                onChange={(e) => onChangeReplyAs?.(e.target.value)}
-                title="Reply as"
-                aria-label="Reply as"
-                className={`mr-1 rounded-full px-2.5 py-1.5 text-xs outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40 ${
-                  vn ? 'bg-white/10 text-white/80' : 'bg-bg-elevated text-text-muted hover:text-text'
-                }`}
+            {turnPolicyHint ? (
+              <span
+                title="The scene's turn policy is deciding who replies — see the Scene panel to change it"
+                className={`mr-1 rounded-full px-2.5 py-1.5 text-xs ${vn ? 'bg-white/10 text-white/70' : 'bg-bg-elevated text-text-muted'}`}
               >
-                {replyAsOptions.map((o) => (
-                  <option key={o.id} value={o.id}>
-                    {o.name}
-                  </option>
-                ))}
-              </select>
+                {turnPolicyHint}
+              </span>
+            ) : (
+              replyAsOptions.length > 1 && (
+                <select
+                  value={replyAsId || replyAsOptions[0].id}
+                  onChange={(e) => onChangeReplyAs?.(e.target.value)}
+                  title="Reply as"
+                  aria-label="Reply as"
+                  className={`mr-1 rounded-full px-2.5 py-1.5 text-xs outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40 ${
+                    vn ? 'bg-white/10 text-white/80' : 'bg-bg-elevated text-text-muted hover:text-text'
+                  }`}
+                >
+                  {replyAsOptions.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.name}
+                    </option>
+                  ))}
+                </select>
+              )
             )}
             <button
               onClick={() => fileRef.current?.click()}

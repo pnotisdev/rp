@@ -134,6 +134,35 @@ export interface RelationshipTrack {
 }
 
 /**
+ * Section 4/12's "proper Scene entity" — deliberately narrow: location/atmosphere framing (folded
+ * into the prompt the same way `DateEventCard.title`/`description` already are) plus a turn
+ * policy, which is the genuinely new piece with no existing analog. Objective-setting stays on the
+ * existing `Objective`/`activeObjective` system rather than being duplicated here.
+ *
+ * - `'manual'` — today's exact behavior: the Composer's "reply as ▾" picker decides, unchanged.
+ * - `'round_robin'` — cycles through the primary and every participant in a fixed order.
+ * - `'director'` — a cheap judge call (same "model plays the character, code applies the result"
+ *   shape as `assessRelationshipMoment`) reads the scene and picks who'd naturally respond;
+ *   falls back to the primary on any parse/network failure, never blocking the reply.
+ * - `'mention'` — an `@Name` in the player's own message routes the reply to them; no mention
+ *   found falls back to the primary.
+ *
+ * Only meaningful once a chat actually has participants — a single-character chat has nobody to
+ * choose between, so the UI for this stays hidden until then, same gating as the reply-as picker
+ * itself already uses.
+ */
+export type ScenePolicy = 'manual' | 'round_robin' | 'director' | 'mention'
+
+export interface Scene {
+  /** `null` clears just this field via `updateScene`'s partial-patch merge — same "JSON.stringify drops `undefined`" reason as `RelationshipTrack.relationshipWarning`. */
+  location?: string | null
+  atmosphere?: string | null
+  turnPolicy: ScenePolicy
+  /** Round-robin bookkeeping only: index into `[primaryId, ...participantIds]` whose turn is next. Read defensively (clamped/modulo) since the roster can shrink out from under a stale index. */
+  roundRobinIndex?: number
+}
+
+/**
  * A discrete, durable fact about the user worth recalling much later — a name, a stated
  * preference, a promise made — distinct from `Chat.summary`'s one rolling prose blob, which is
  * lossy and gets rewritten wholesale on every resummarization. Fed into the prompt as a synthetic
@@ -335,6 +364,8 @@ export interface Chat {
   participants?: string[]
   /** Multi-character relationship tracking: a non-primary participant's own `RelationshipTrack`, keyed by their character id — the primary's own copy stays on this `Chat`'s own top-level fields (affection/relationshipStats/etc.) unchanged, for backward compatibility with every chat that predates this. Unset/empty for every chat with no participants. See `getRelationshipTrack`/`patchRelationshipTrack` in `stage.ts`. */
   participantRelationships?: Record<string, RelationshipTrack>
+  /** Section 4/12's "proper Scene entity" — location/atmosphere framing plus who replies next in a group chat, beyond the fully-manual "reply as" picker. Unset = today's exact behavior (manual, no framing). See `Scene`/`src/lib/chat/scene.ts`. */
+  scene?: Scene
   personaId: string
   title: string
   createdAt: number
@@ -392,6 +423,8 @@ export interface Chat {
   lastOutreachCheckedAt?: number
   /** True once the world tick has inserted an unprompted message the player hasn't opened this chat to see yet. Cleared when the chat is opened. */
   hasUnreadOutreach?: boolean
+  /** Section 9's chat-pinning gap: keeps a chat at the top of `ChatsPanel` regardless of `updatedAt` — the chat-level analog of `StoredMessage.pinned`. */
+  pinned?: boolean
   /**
    * Set the moment a chat is deleted from the normal chat list — a soft delete, not the end of it.
    * `GET /api/chats` excludes anything with this set; `GET /api/chats/trash` returns only chats

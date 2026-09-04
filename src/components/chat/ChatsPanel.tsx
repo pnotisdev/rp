@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { Copy, GitFork, MessageSquarePlus, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Trash2 } from 'lucide-react'
+import { Copy, GitFork, MessageSquarePlus, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Pin, PinOff, Plus, Star, Trash2 } from 'lucide-react'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { charactersApi, chatsApi, worldsApi } from '@/lib/api/client'
 import { KoboldClient } from '@/lib/api/kobold'
@@ -21,7 +21,11 @@ export function ChatsPanel({
   activeChatId: string | null
   onSelect: (id: string | null) => void
 }) {
-  const chats = useApiQuery('chats', () => chatsApi.list(), []) ?? []
+  const unsortedChats = useApiQuery('chats', () => chatsApi.list(), []) ?? []
+  // Section 9's chat-pinning gap: pinned chats float to the top regardless of `updatedAt`, same
+  // relative order otherwise (a stable sort — every modern JS engine's `Array.sort` guarantees
+  // this) so pinning something doesn't also silently reshuffle the rest of the list.
+  const chats = [...unsortedChats].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0))
   const characters = useApiQuery('characters', () => charactersApi.list(), []) ?? []
   const worlds = useApiQuery('worlds', () => worldsApi.list(), []) ?? []
   const [showNew, setShowNew] = useState(false)
@@ -65,6 +69,17 @@ export function ChatsPanel({
     if (!next || next === chat.title) return
     try {
       await chatsApi.update(chat.id, { title: next })
+    } catch (e) {
+      toastError(errorMessage(e))
+    }
+  }
+
+  const togglePin = async (chat: Chat) => {
+    setMenuForId(null)
+    try {
+      // Explicit true/false, never omitted — this is a plain boolean (unlike the nullable-clear
+      // fields elsewhere in this file), so there's no JSON.stringify-drops-undefined risk here.
+      await chatsApi.update(chat.id, { pinned: !chat.pinned })
     } catch (e) {
       toastError(errorMessage(e))
     }
@@ -266,6 +281,9 @@ export function ChatsPanel({
                     />
                   ) : (
                     <div className="flex items-center gap-1.5 truncate text-sm text-text">
+                      {/* Stays visible at rest, not hover-only — same reasoning as message-pinning's
+                          own star: otherwise there'd be no way to spot a pinned chat while scrolling. */}
+                      {chat.pinned && <Star size={12} strokeWidth={2} className="shrink-0 text-accent" fill="currentColor" />}
                       {chat.parentChatId && <GitFork size={12} strokeWidth={2} className="shrink-0 text-text-muted" />}
                       <span className="truncate">{character ? chat.title : `${chat.title} (character deleted)`}</span>
                     </div>
@@ -295,6 +313,17 @@ export function ChatsPanel({
                   {/* Click-outside-to-close backdrop, same technique as Modal/CommandPalette's own. */}
                   <div className="fixed inset-0 z-40" onClick={() => setMenuForId(null)} />
                   <div className="absolute right-1.5 top-10 z-50 w-52 overflow-hidden rounded-xl border border-border bg-bg-elevated py-1 themed-shadow">
+                    <button
+                      onClick={() => togglePin(chat)}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-text hover:bg-bg-sunken"
+                    >
+                      {chat.pinned ? (
+                        <PinOff size={13} strokeWidth={2} className="shrink-0 text-text-muted" />
+                      ) : (
+                        <Pin size={13} strokeWidth={2} className="shrink-0 text-text-muted" />
+                      )}
+                      {chat.pinned ? 'Unpin' : 'Pin to top'}
+                    </button>
                     <button
                       onClick={() => startRename(chat)}
                       className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-text hover:bg-bg-sunken"

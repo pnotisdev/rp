@@ -1,5 +1,6 @@
-import { useEffect, type ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { Button } from '@/components/ui/Button'
+import { useFocusTrap } from '@/lib/hooks/useFocusTrap'
 
 type ModalSize = 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl'
 
@@ -53,9 +54,23 @@ export function Modal({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [onClose])
 
+  // Section 9's accessibility finding: focus trap + initial focus + restore-on-close, shared with
+  // `<ConfirmDialog>` via the same hook rather than each shell managing it separately.
+  const panelRef = useRef<HTMLDivElement>(null)
+  useFocusTrap(panelRef, true)
+
   return (
-    <div className="animate-overlay-in fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3 backdrop-blur-sm sm:p-4">
+    <div
+      className="animate-overlay-in fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3 backdrop-blur-sm sm:p-4"
+      onClick={onClose}
+    >
       <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        tabIndex={-1}
+        onClick={(e) => e.stopPropagation()}
         className={`animate-panel-in flex w-full flex-col rounded-2xl border border-border bg-bg-elevated p-5 themed-shadow sm:p-7 ${SIZE_CLASSES[size]} ${scrollable ? 'max-h-[90vh] sm:max-h-[85vh]' : ''}`}
       >
         <div className={`flex shrink-0 items-center justify-between gap-4 ${description ? 'mb-2' : 'mb-4'}`}>

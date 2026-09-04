@@ -21,6 +21,42 @@ import {
 import { removeAvatar, resolveAvatar, resolveAvatarMap, resolveWorldMusicMap } from './avatars.ts'
 
 export const app = express()
+
+// Section 9's audit finding: this API had no Origin/Referer check at all. A browser's CORS
+// preflight already blocks a cross-site PUT/DELETE or a JSON POST (the shapes every real mutation
+// here uses), but a "simple" request — no custom headers, `Content-Type: text/plain`, no body
+// needed — reaches an action-only endpoint blind from *any other site or tab open in the same
+// browser*, no preflight involved. This app has no auth to fall back on (see the README's own
+// threat model: local-only, must never be reachable off this machine), so Origin is the only
+// signal available. `origin` is absent for same-origin fetches in some browser/request shapes and
+// for non-browser tools (curl, this project's own live-verification passes) — both legitimate, so
+// only a *present-but-mismatched* Origin (or, failing that, Referer) is rejected; a browser can
+// never lie about its own Origin header, so a real cross-site attempt can't spoof its way past
+// this the way it could spoof a body field. `PORT` mirrors the exact env var `vite.config.ts`
+// already reads for the client's own dev-server port, so a customized port only needs setting once.
+const CLIENT_PORT = Number(process.env.PORT) || 5173
+const ALLOWED_ORIGINS = new Set([`http://localhost:${CLIENT_PORT}`, `http://127.0.0.1:${CLIENT_PORT}`])
+
+function originAllowed(origin: string | undefined): boolean {
+  if (!origin) return true
+  return ALLOWED_ORIGINS.has(origin)
+}
+
+app.use((req, res, next) => {
+  if (!originAllowed(req.headers.origin)) return res.status(403).json({ error: 'Forbidden origin' })
+  // Only consulted when Origin itself is missing — a fallback for the rare request shape that
+  // sends Referer but not Origin, not a second independent check layered on a passing Origin.
+  if (!req.headers.origin && req.headers.referer) {
+    try {
+      if (!originAllowed(new URL(req.headers.referer).origin)) return res.status(403).json({ error: 'Forbidden origin' })
+    } catch {
+      // Malformed Referer — ignore rather than block; the leniency for "no signal at all" above
+      // already covers this the same way.
+    }
+  }
+  next()
+})
+
 // A character save can carry many sprite images at once now (10d's bulk expression upload) —
 // each already capped at 8MB decoded by decodeImageDataUrl(), but a full ~21-expression set in
 // one request easily clears a 25MB body. Raised generously since this is a local-only, single-user
