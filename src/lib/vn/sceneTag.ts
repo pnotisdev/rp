@@ -38,7 +38,7 @@ export function stripSceneTagForDisplay(text: string): string {
 export function buildSceneInstruction(options?: { expressionIds: string[]; backgroundIds: string[] }): string {
   if (!options || (options.expressionIds.length === 0 && options.backgroundIds.length === 0)) return ''
   return [
-    'After writing your in-character reply, end it with exactly one new line in this exact format (metadata only — never mention or explain it in the dialogue):',
+    'After writing your in-character reply, end it with exactly one new line in this exact format. This line is metadata only: never mention or explain it in the dialogue.',
     '<<scene:expression=ID,background=ID>>',
     options.expressionIds.length ? `Valid expression IDs: ${options.expressionIds.join(', ')}` : '',
     options.backgroundIds.length ? `Valid background IDs: ${options.backgroundIds.join(', ')}` : '',

@@ -222,10 +222,37 @@ export function LorebookEditor({
 
                   {mode === 'keyword' && (
                     <>
+                      <div className="grid grid-cols-2 gap-x-3">
+                        <NumberField
+                          label="Sticky"
+                          min={0}
+                          hint="Stays active this many turns after the keyword stops matching."
+                          value={entry.sticky ?? ''}
+                          onChange={(e) =>
+                            updateEntry(entry.id!, {
+                              sticky: e.target.value === '' ? undefined : Math.max(0, Math.floor(Number(e.target.value)) || 0),
+                            })
+                          }
+                          placeholder="off"
+                        />
+                        <NumberField
+                          label="Cooldown"
+                          min={0}
+                          hint="Can't re-fire by keyword for this many turns after it deactivates."
+                          value={entry.cooldown ?? ''}
+                          onChange={(e) =>
+                            updateEntry(entry.id!, {
+                              cooldown:
+                                e.target.value === '' ? undefined : Math.max(0, Math.floor(Number(e.target.value)) || 0),
+                            })
+                          }
+                          placeholder="off"
+                        />
+                      </div>
                       <div className="grid grid-cols-1 gap-x-3 sm:grid-cols-[1fr_120px]">
                         <TextField
                           label="Inclusion group"
-                          hint="Entries sharing a group are mutually exclusive — only one fires."
+                          hint="Entries sharing a group are mutually exclusive: only one fires."
                           value={entry.group ?? ''}
                           onChange={(e) => updateEntry(entry.id!, { group: e.target.value || undefined })}
                           placeholder="none"

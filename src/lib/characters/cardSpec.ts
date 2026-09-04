@@ -50,6 +50,10 @@ export interface LorebookEntry {
   group?: string
   /** Optional weighted-random pick within a `group`, mirroring ST — if ANY entry in the group sets this, the winner is a weighted random draw across the whole group (unset weight defaults to 1) instead of the deterministic highest-`insertion_order`-wins rule that applies when no entry in the group sets it. */
   groupWeight?: number
+  /** ST's "sticky": once a keyword-mode entry activates, it stays force-active for this many further turns even if the keyword stops appearing. 0/undefined = off. */
+  sticky?: number
+  /** ST's "cooldown": after a keyword-mode entry deactivates, it can't reactivate by keyword for this many turns. 0/undefined = off. */
+  cooldown?: number
   extensions?: Record<string, unknown>
 }
 
@@ -59,6 +63,8 @@ export interface Lorebook {
   scan_depth?: number
   token_budget?: number
   recursive_scanning?: boolean
+  /** A stable id for this book across turns, set by the caller assembling the merged book list — the composite `${sourceKey}:${entry.id}` is what per-entry runtime state (sticky/cooldown) is keyed on, since `entry.id` alone is only unique within one book. */
+  sourceKey?: string
   extensions?: Record<string, unknown>
   entries: LorebookEntry[]
 }
@@ -240,6 +246,9 @@ function normalizeLorebook(raw: unknown): Lorebook | undefined {
         typeof e.probability === 'number' && e.useProbability !== false ? e.probability : undefined,
       group: typeof e.group === 'string' && e.group.trim() ? e.group : undefined,
       groupWeight: typeof e.groupWeight === 'number' && e.groupWeight >= 0 ? e.groupWeight : undefined,
+      // ST calls these `sticky` / `cooldown` too — copy them straight through when present.
+      sticky: typeof e.sticky === 'number' && e.sticky > 0 ? Math.floor(e.sticky) : undefined,
+      cooldown: typeof e.cooldown === 'number' && e.cooldown > 0 ? Math.floor(e.cooldown) : undefined,
       extensions: (e.extensions as Record<string, unknown>) ?? {},
     })
   }

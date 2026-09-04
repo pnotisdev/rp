@@ -27,7 +27,7 @@ export async function generateTasks(
 ): Promise<string[]> {
   const prompt = [
     'You are helping plan a roleplay chat.',
-    `Character: ${character.name}${character.description ? ` — ${character.description}` : ''}`,
+    `Character: ${character.name}${character.description ? `. ${character.description}` : ''}`,
     `Objective: ${objectiveTitle}${objectiveDescription ? `\n${objectiveDescription}` : ''}`,
     `Break this into ${count} concrete, sequential steps that would plausibly happen in the roleplay on the way to achieving it. Each step should be something that could visibly occur in a scene, not an abstract sub-goal.`,
     `Output ONLY a minified JSON array of ${count} short strings, one per step. No markdown fences, no commentary.`,
@@ -48,9 +48,9 @@ export async function suggestObjective(
 ): Promise<{ title: string; description: string }> {
   const prompt = [
     'You are helping plan a roleplay chat between two participants.',
-    `Character: ${character.name}${character.description ? ` — ${character.description}` : ''}${character.personality ? `. Personality: ${character.personality}` : ''}`,
-    `User's persona: ${persona.name}${persona.description ? ` — ${persona.description}` : ''}`,
-    'Propose one plausible, interesting objective for this roleplay to work toward — something that fits both characters and could develop naturally over several exchanges.',
+    `Character: ${character.name}${character.description ? `. ${character.description}` : ''}${character.personality ? `. Personality: ${character.personality}` : ''}`,
+    `User's persona: ${persona.name}${persona.description ? `. ${persona.description}` : ''}`,
+    'Propose one plausible, interesting objective for this roleplay to work toward. It should fit both characters and be able to develop naturally over several exchanges.',
     'Output ONLY a minified JSON object shaped exactly {"title": "short objective name", "description": "1-2 sentences of context"}. No markdown fences, no commentary.',
     'JSON:',
   ].join('\n\n')
@@ -81,7 +81,7 @@ export async function detectCompletedTasks(
     'You are tracking task completion in an ongoing roleplay.',
     `The following just happened in the scene:\n${replyText}`,
     `Pending tasks:\n${taskList}`,
-    'Which of these tasks, if any, does this moment clearly and unambiguously accomplish? Be conservative — only include a task if it plainly happened, not if it merely became more likely.',
+    'Which of these tasks, if any, does this moment clearly and unambiguously accomplish? Be conservative: only include a task if it plainly happened, not if it merely became more likely.',
     'Output ONLY a minified JSON array of the completed tasks\' index numbers, e.g. [0,2]. Use [] if none. No commentary.',
     'JSON:',
   ].join('\n\n')

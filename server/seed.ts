@@ -1,8 +1,16 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { avatarsDir, characterStore, worldInfoBookStore, worldStore } from './db.ts'
-import { SEED_BACKGROUND_KEYS, SEED_WORLD_ID, seedCharacter, seedWorld, seedWorldInfoBook } from './seedContent.ts'
+import { avatarsDir, characterStore, personaStore, worldInfoBookStore, worldStore } from './db.ts'
+import {
+  SEED_BACKGROUND_KEYS,
+  SEED_PERSONA_ID,
+  SEED_WORLD_ID,
+  seedCharacter,
+  seedPersona,
+  seedWorld,
+  seedWorldInfoBook,
+} from './seedContent.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // Committed at the repo root (not under data/, which is gitignored) — these ship with the app.
@@ -15,7 +23,15 @@ const seedAssetsDir = path.resolve(__dirname, '..', 'seed', 'backgrounds')
  * harmless no-op once it's already been applied once.
  */
 export function runSeedIfNeeded(): void {
-  if (worldStore.get(SEED_WORLD_ID)) return
+  // The starter persona was added after the original seed shipped — back-fill it for installs that
+  // already ran the seed before it existed, guarded by its own id so it's still a one-time no-op.
+  if (worldStore.get(SEED_WORLD_ID)) {
+    if (!personaStore.get(SEED_PERSONA_ID)) {
+      personaStore.insert(seedPersona as unknown as Record<string, unknown>)
+      console.log('[rp-server] back-filled the starter persona')
+    }
+    return
+  }
 
   const backgroundsDest = path.join(avatarsDir, 'worlds', SEED_WORLD_ID, 'backgrounds')
   fs.mkdirSync(backgroundsDest, { recursive: true })
@@ -33,6 +49,9 @@ export function runSeedIfNeeded(): void {
   worldStore.insert(seedWorld as unknown as Record<string, unknown>)
   worldInfoBookStore.insert(seedWorldInfoBook as unknown as Record<string, unknown>)
   characterStore.insert(seedCharacter as unknown as Record<string, unknown>)
+  personaStore.insert(seedPersona as unknown as Record<string, unknown>)
 
-  console.log(`[rp-server] seeded starter content: 1 world, 1 World Info book, 1 character (${copied}/${SEED_BACKGROUND_KEYS.length} backgrounds copied)`)
+  console.log(
+    `[rp-server] seeded starter content: 1 world, 1 World Info book, 1 character, 1 persona (${copied}/${SEED_BACKGROUND_KEYS.length} backgrounds copied)`,
+  )
 }

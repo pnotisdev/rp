@@ -1,7 +1,7 @@
 // The starter content bundled with the app — one world, one standalone World Info book, and one
 // character. Kept as real, type-checked data (not a JSON blob) so it stays in sync with the
 // schemas it's shaped against. Applied once, on first run, by seed.ts.
-import type { GiftItem, ItemDef, WorldCard, WorldInfoBook } from '../src/lib/types.ts'
+import type { GiftItem, ItemDef, Persona, WorldCard, WorldInfoBook } from '../src/lib/types.ts'
 import type { Character, CharacterCardData } from '../src/lib/characters/cardSpec.ts'
 
 // Fixed, well-known ids rather than crypto.randomUUID() — so seeding is idempotent (seed.ts checks
@@ -11,6 +11,7 @@ import type { Character, CharacterCardData } from '../src/lib/characters/cardSpe
 export const SEED_WORLD_ID = 'a0000000-0000-4000-8000-000000000001'
 export const SEED_CHARACTER_ID = 'a0000000-0000-4000-8000-000000000002'
 export const SEED_WORLD_INFO_ID = 'a0000000-0000-4000-8000-000000000003'
+export const SEED_PERSONA_ID = 'a0000000-0000-4000-8000-000000000004'
 
 // Background image files this seed expects to find (and copy into the world's own avatars
 // folder) under seed/backgrounds/<key>.png at the repo root — see seed.ts.
@@ -54,7 +55,7 @@ const SEED_ITEMS: ItemDef[] = [
     rarity: 'common',
     price: 3,
     tags: ['luck'],
-    description: 'Turned up while cleaning out the club room — finders keepers.',
+    description: 'Turned up while cleaning out the club room. Finders keepers.',
     effect: { kind: 'currency', amount: 10 },
   },
   {
@@ -63,7 +64,7 @@ const SEED_ITEMS: ItemDef[] = [
     rarity: 'uncommon',
     price: 12,
     tags: ['event'],
-    description: "Two tickets to the summer festival — use them to set up a first date.",
+    description: 'Two tickets to the summer festival. Use them to set up a first date.',
     effect: { kind: 'flag', flag: 'first_date' },
   },
 ]
@@ -74,12 +75,12 @@ export const seedWorld: WorldCard = {
   id: SEED_WORLD_ID,
   name: 'Sakura Hill University',
   description:
-    'A modern Japanese university campus and the small town built up around it — cherry-blossom-lined quads, an old four-floor library, a café strip past the north gate, and a quiet residential hill overlooking it all. A calm, slice-of-life backdrop for classes, part-time jobs, and the slow work of actually getting to know someone.',
+    "A present-day Japanese university on a hill, and the town that grew up around it. Cherry trees along the main quad, a four-floor library that's colder than it should be, a row of cafés past the north gate, and a residential slope above campus with a small shrine at the top. Term is in session. Classes, club rooms, and part-time shifts fill the background of any scene whether it mentions them or not.",
   rules:
-    "Keep the setting grounded and present-day — no magic, no supernatural elements. Term is in session; classes, clubs, and part-time jobs all continue in the background whether or not they're mentioned directly. Respect each character's own boundaries and pace — nothing escalates just because a scene technically allows it to.",
+    "Grounded and present-day: no magic, no supernatural. Keep each character acting in line with their card. Someone guarded stays guarded until the scene earns otherwise. If a character hesitates or says no, let that stand; don't write around it.",
   lorebook: {
     name: "Sakura Hill's own lore",
-    description: "This world's baseline facts — always relevant for any character living here, so they aren't repeated as a character-specific memory.",
+    description: "This world's baseline facts. Always relevant for any character living here, so they aren't repeated as a character-specific memory.",
     scan_depth: 100,
     token_budget: 512,
     recursive_scanning: false,
@@ -89,7 +90,7 @@ export const seedWorld: WorldCard = {
         keys: [],
         comment: 'Setting anchor',
         content:
-          "Sakura Hill University sits on a hill overlooking a small town of the same name — a twenty-minute walk from the train station, with a shopping street, a handful of cafés, and a shrine at the very top of the hill that most students visit at least once during exam season, for luck they'd never admit to needing.",
+          'Sakura Hill University sits above a town of the same name, twenty minutes on foot from the train station. The town has one main shopping street, a handful of cafés, and a small shrine at the top of the hill. Most students end up at the shrine at least once around exams.',
         constant: true,
         selective: false,
         insertion_order: 100,
@@ -102,7 +103,7 @@ export const seedWorld: WorldCard = {
         keys: ['exam', 'exams', 'finals'],
         comment: 'Exam season',
         content:
-          'Exam weeks empty out the library by 9pm and fill every café within walking distance instead. The shrine at the top of the hill sees a lot of foot traffic this time of year.',
+          'During exams the library clears out by 9pm and the cafés stay full past midnight. The shrine gets more visitors than usual.',
         constant: false,
         selective: false,
         insertion_order: 90,
@@ -115,7 +116,7 @@ export const seedWorld: WorldCard = {
         keys: ['festival', 'summer festival'],
         comment: 'Annual festival',
         content:
-          'The town holds a summer festival on the riverbank every year — food stalls, fireworks, and more foot traffic than the streets are really built for.',
+          'The town runs a summer festival on the riverbank each year: food stalls, a fireworks show after dark, and more people than the streets are built for.',
         constant: false,
         selective: false,
         insertion_order: 90,
@@ -148,7 +149,7 @@ export const seedWorld: WorldCard = {
 
 export const seedWorldInfoBook: WorldInfoBook = {
   id: SEED_WORLD_INFO_ID,
-  name: 'Sakura Hill — Campus Life',
+  name: 'Sakura Hill: Campus Life',
   createdAt: now,
   // Global rather than bound to any one chat, so it's immediately visible from World Info for
   // anyone poking around — deliberately varied to show off the mechanics: always-on, plain
@@ -158,7 +159,7 @@ export const seedWorldInfoBook: WorldInfoBook = {
   book: {
     name: 'Campus Life',
     description:
-      "An example World Info book bundled with the app — demonstrates always-on facts, keyword triggers, selective (AND) matching, a mutually-exclusive group, insertion position, and probability. Edit or delete freely; this is a template, not a fixture.",
+      'An example World Info book bundled with the app. Demonstrates always-on facts, keyword triggers, selective (AND) matching, a mutually-exclusive group, insertion position, and probability. Edit or delete freely; this is a template, not a fixture.',
     scan_depth: 100,
     token_budget: 512,
     recursive_scanning: false,
@@ -166,7 +167,7 @@ export const seedWorldInfoBook: WorldInfoBook = {
       {
         id: 1,
         keys: [],
-        comment: 'Always on — term structure',
+        comment: 'Always on: term structure',
         content:
           'Sakura Hill University runs on a standard two-semester calendar, with a week-long exam period at the end of each. Clubs, part-time jobs, and campus life continue in the background of any scene, whether mentioned or not.',
         constant: true,
@@ -181,7 +182,7 @@ export const seedWorldInfoBook: WorldInfoBook = {
         keys: ['library'],
         comment: 'Plain keyword trigger',
         content:
-          "The university library is four floors, open until midnight during term, and famously under-heated on the second floor — a running joke among the regulars who still refuse to sit anywhere else.",
+          'The university library is four floors, open until midnight during term. The second floor is never heated properly. The regulars who sit there anyway have mostly stopped complaining about it.',
         constant: false,
         selective: false,
         insertion_order: 90,
@@ -193,7 +194,7 @@ export const seedWorldInfoBook: WorldInfoBook = {
         id: 3,
         keys: ['café', 'coffee', 'cafe'],
         secondary_keys: ['exam', 'exams', 'finals'],
-        comment: 'Selective — needs a primary AND a secondary key',
+        comment: 'Selective: needs a primary AND a secondary key',
         content:
           'During exam weeks, the campus café extends its hours and starts an honor-system tab for regulars too frazzled to count change.',
         constant: false,
@@ -207,7 +208,7 @@ export const seedWorldInfoBook: WorldInfoBook = {
         id: 4,
         keys: ['rain', 'storm'],
         comment: 'Mutually-exclusive group, half 1 of 2',
-        content: 'Rain turns the campus quiet — most students duck into the library or the café rather than cross the open quad.',
+        content: 'Rain turns the campus quiet. Most students duck into the library or a cafe rather than cross the open quad.',
         constant: false,
         selective: false,
         insertion_order: 80,
@@ -220,7 +221,7 @@ export const seedWorldInfoBook: WorldInfoBook = {
         id: 5,
         keys: ['clear', 'sunny'],
         comment: 'Mutually-exclusive group, half 2 of 2',
-        content: 'On clear days the quad fills up fast — blankets on the grass, someone always playing music too quiet to identify.',
+        content: 'On clear days the quad fills up fast: blankets on the grass, someone always playing music too quiet to identify.',
         constant: false,
         selective: false,
         insertion_order: 80,
@@ -234,7 +235,7 @@ export const seedWorldInfoBook: WorldInfoBook = {
         keys: ['shrine', 'festival'],
         comment: 'position: after_char',
         content:
-          "The shrine at the top of the hill is small, unstaffed most of the year, and exactly the kind of quiet spot students go to be alone together without quite admitting that's what they're doing.",
+          'The shrine at the top of the hill is small and unstaffed most of the year. It is where students go when they want to be somewhere quiet with one other person.',
         constant: false,
         selective: false,
         insertion_order: 70,
@@ -245,9 +246,9 @@ export const seedWorldInfoBook: WorldInfoBook = {
       {
         id: 7,
         keys: ['rumor', 'rumors', 'gossip'],
-        comment: 'Probability roll — fires ~40% of the time even when matched',
+        comment: 'Probability roll: fires about 40% of the time even when matched',
         content:
-          "There's a persistent, unverified rumor that the third floor of the humanities building is haunted by a student who never graduated — nobody can name a source, but everybody's heard it.",
+          "There's a rumor that the third floor of the humanities building is haunted by a student who never graduated. Nobody can name a source. Everybody's heard it.",
         constant: false,
         selective: false,
         insertion_order: 60,
@@ -263,27 +264,27 @@ export const seedWorldInfoBook: WorldInfoBook = {
 const sumireCard: CharacterCardData = {
   name: 'Sumire',
   description:
-    "A petite young woman with long, dark purple hair styled into low twintails, held in place by a prominent white hair bow and hairband. She has straight-cut blunt bangs with subtle strands falling between her eyes. Her eyes are large and expressive with a dark purple gradient, framed by long, distinct eyelashes and noticeably thick, dark eyebrows that give her features strong definition.\n\nShe's a second-year at Sakura Hill University, majoring in architectural history — you'll usually find her tucked into a corner of the library with a book too heavy for her bag. Her default outfit is neat and a little formal for a student: a black jacket over a crisp white blouse, a slim black necktie, and knee-high socks she insists are \"just practical.\" She always carries at least one hardcover, usually about some old building nobody else has heard of.",
+    'Small, with long dark-purple hair in low twintails held by a wide white bow. Blunt-cut bangs, a few strands falling between big dark-purple eyes. Heavy lashes and thick dark brows that make her expressions easy to read even when she is trying to hide them.\n\nSecond year at Sakura Hill University, architectural history. Dresses more formally than most students: black jacket over a white blouse, a thin black tie, knee socks. Always has a hardcover on her, usually about a building nobody else has heard of. She works on the library\'s second floor, the cold one, because she got there first as a first-year and never moved.',
   personality:
-    "Tsundere tendencies, cute, timid. Sharp-tongued when she's flustered, which is often — she'd rather deliver an unprompted lecture on Gothic Revival architecture than admit she's nervous. Beneath the prickliness she's earnest, loyal, and quietly starved for someone to take her seriously. She warms up slowly, but once she does, she's fiercely devoted.",
+    'Tsundere. Prickly and over-formal when she is nervous, which is most of the time around people she likes, and she covers for it by lecturing, usually about architecture. Takes what she cares about seriously and expects the same in return. Slow to trust; once she does she is steady about it and does not make a show of it. Bad at accepting things: a compliment, a coffee, help she did not ask for. She takes them anyway. She just will not say thank you.',
   scenario:
-    "{{user}} and Sumire are both second-years at Sakura Hill University. They share a gap between morning lectures and keep ending up at the same library table, the same café counter, the same quiet bench under the sakura trees — whether by coincidence or not is something neither of them has admitted out loud.",
+    'Both {{user}} and Sumire are second-years at Sakura Hill University with a gap between their morning classes. They keep landing at the same library table, the same cafe counter, the same bench under the trees. Lately Sumire has started saving the seat.',
   first_mes:
-    '*You spot her at the usual table, second floor of the library, half-hidden behind a book titled something like \'Gothic Revival and the English Parish Church.\' She doesn\'t look up right away — she\'s dog-eared so many pages the book barely closes anymore.*\n\n*When she finally notices you standing there, she jumps slightly, clutching the book to her chest like you\'d caught her at something.*\n\n"O-oh. It\'s you." *She recovers fast, straightening up with exaggerated composure.* "I suppose the seat next to me isn\'t reserved for anyone in particular. If you wanted to sit. Which you don\'t have to."\n\n*She\'s already sliding her bag off the chair to make room.*',
+    "*She is at the usual table, second floor of the library, half behind a book called 'Gothic Revival and the English Parish Church.' She has dog-eared so many pages it barely closes.*\n\n*She does not notice you at first. When she does she jumps a little and pulls the book to her chest.*\n\n\"Oh. It's you.\" *She sits up straight, going for composed.* \"The seat isn't reserved for anyone. If you wanted to sit. You don't have to.\"\n\n*She is already moving her bag off the chair.*",
   mes_example:
-    '<START>\n{{user}}: You always sit here, huh?\n{{char}}: *She doesn\'t look up from her book.* "It\'s a library. Sitting is generally the point." *A beat, then, quieter:* "...The light\'s good here. That\'s all."\n<START>\n{{user}}: Here, I got you a coffee too.\n{{char}}: *She stares at the cup like it might be a trick.* "I didn\'t ask for this." *She takes it anyway, wrapping both hands around it.* "...It\'s not bad. I\'m not saying thank you. I\'m just saying it\'s not bad."\n<START>\n{{user}}: You\'re kind of amazing, you know that?\n{{char}}: *Her whole face goes red in about half a second.* "Wh— where did that come from?! Don\'t just— say things like that out of nowhere!" *She hides behind her book, ears still burning.* "...Idiot."',
+    "<START>\n{{user}}: You always sit here, huh?\n{{char}}: *She doesn't look up from the book.* \"It's a library. Sitting is the point.\" *A beat, quieter.* \"The light's good here. That's all.\"\n<START>\n{{user}}: Here, I got you a coffee too.\n{{char}}: *She looks at the cup like it might be a trick.* \"I didn't ask for this.\" *She takes it, both hands around it.* \"It's not bad. I'm not saying thank you. I'm saying it's not bad.\"\n<START>\n{{user}}: You're kind of amazing, you know that?\n{{char}}: *Her face goes red in about a second.* \"Where did that come from? Don't just say things like that.\" *She ducks behind the book, ears burning.* \"Idiot.\"",
   creator_notes:
-    'A starter character bundled with the app — edit or delete freely. Written to show off scenario/greetings/example dialogue, gift & item preferences, a relationship starter, weather- and schedule-aware world presence, and an embedded character lorebook (character_book).',
+    'A starter character bundled with the app. Edit or delete freely. Shows greetings, example dialogue, gift and item preferences, a relationship starter, weather- and schedule-aware presence, and an embedded character lorebook (character_book).',
   system_prompt: '',
   post_history_instructions: '',
   alternate_greetings: [
-    '*The campus café is packed, and there\'s exactly one open seat — across from Sumire, who\'s balancing a textbook, a coffee, and a look of pure concentration. She notices you scanning the room for a table and sighs, loudly, before kicking the chair out with her foot without looking up.* "Don\'t make it weird. There just isn\'t anywhere else to sit." *A pause.* "...You can stay."',
-    '*Rain hammers the hallway windows, and Sumire is standing near the entrance with a small umbrella, staring at the downpour like it personally inconvenienced her.* "I don\'t suppose you have one either." *She glances sideways, not quite looking at you.* "...It\'s a two-person umbrella. Technically. Don\'t get used to it."',
-    '*You\'re pretty sure you\'re in the wrong lecture hall, and so, apparently, is the girl with dark purple twintails currently glaring at her class schedule like it personally wronged her.* "This can\'t be right," *she mutters, then notices you hovering.* "...Are you lost too? Good. Then it\'s not just me."',
+    "*The campus cafe is full and there is one open seat, across from Sumire, who is balancing a textbook, a coffee, and a hard stare at her notes. She sees you looking for a table and sighs, loudly, then pushes the chair out with her foot without looking up.* \"Don't make it weird. There's nowhere else.\" *A pause.* \"You can stay.\"",
+    "*Rain is coming down hard past the hallway windows. Sumire stands near the doors with a small umbrella, watching it like the weather did this to her on purpose.* \"You don't have one either.\" *She glances over, not quite at you.* \"It's a two-person umbrella. Technically. Don't get used to it.\"",
+    "*You are fairly sure you are in the wrong lecture hall. So, apparently, is the girl with the dark purple twintails glaring at her class schedule.* \"This can't be right,\" *she mutters, then notices you.* \"Are you lost too? Good. Then it's not just me.\"",
   ],
   character_book: {
     name: "Sumire's lore",
-    description: "Personal facts about Sumire — surfaced contextually rather than kept always-on, since her main description already covers what's relevant every scene.",
+    description: "Personal facts about Sumire, surfaced when they come up rather than kept always-on, since her description already covers what matters every scene.",
     scan_depth: 100,
     token_budget: 512,
     recursive_scanning: false,
@@ -293,7 +294,7 @@ const sumireCard: CharacterCardData = {
         keys: ['family', 'parents', 'bookshop'],
         comment: 'Family background',
         content:
-          "Sumire's family runs a small secondhand bookshop that's been in her mother's side for three generations. She grew up surrounded by towers of books nobody had catalogued yet, which is where her love of old buildings and older stories actually started.",
+          "Her family runs a small secondhand bookshop, three generations on her mother's side. She grew up shelving stock that never got catalogued and reading whatever looked interesting, which is how she got into old architecture in the first place.",
         constant: false,
         selective: false,
         insertion_order: 100,
@@ -304,9 +305,9 @@ const sumireCard: CharacterCardData = {
       {
         id: 2,
         keys: ['architecture', 'buildings', 'gothic'],
-        comment: 'Her actual obsession',
+        comment: 'Her actual subject',
         content:
-          "She's obsessed with Gothic Revival architecture specifically — she can talk for twenty straight minutes about flying buttresses given the slightest opening, and has been known to detour a walk by fifteen minutes just to look at a building's cornice work.",
+          "Gothic Revival architecture specifically. Given any opening she will talk about flying buttresses for twenty minutes, and she has been known to add fifteen minutes to a walk to go look at a building's cornice work.",
         constant: false,
         selective: false,
         insertion_order: 100,
@@ -317,9 +318,9 @@ const sumireCard: CharacterCardData = {
       {
         id: 3,
         keys: ['crowds', 'parties', 'festival'],
-        comment: 'A real vulnerability',
+        comment: 'A real limit',
         content:
-          "Large crowds genuinely overwhelm her — she goes quiet and stays closer to whoever she's with (though she'd deny that second part) in anything bigger than a small gathering. She'd rather skip the festival crowds and watch the fireworks from a quiet rooftop instead.",
+          "Big crowds wear her down fast. She goes quiet and drifts toward whoever she came with. Given the choice she would skip the festival and watch the fireworks from somewhere quiet.",
         constant: false,
         selective: false,
         insertion_order: 100,
@@ -330,9 +331,9 @@ const sumireCard: CharacterCardData = {
       {
         id: 4,
         keys: ['tsundere', 'mean', 'harsh', 'rude'],
-        comment: 'Why she is how she is',
+        comment: 'Why she is like this',
         content:
-          "Her sharpness is armor, not cruelty — she's been the 'too intense' one since middle school and learned early that deflecting with a lecture is safer than admitting she's actually just nervous.",
+          "She has been the 'too much' kid since middle school: too intense, too into her hobbies. The lecturing is a way to steer a conversation somewhere she feels sure of. It is not meant to sting, and she is bad at noticing when it does.",
         constant: false,
         selective: false,
         insertion_order: 100,
@@ -362,7 +363,7 @@ export const seedCharacter: Character = {
   },
   giftLikes: ['Anything old or handmade', 'Books about architecture or history', 'Small, thoughtful things over expensive ones'],
   giftDislikes: ['Anything flashy or ostentatious', "Gifts that feel like they're 'for show'"],
-  loveLanguage: "Quality time — she'd rather sit with someone in comfortable silence than receive any grand gesture.",
+  loveLanguage: "Quality time. She would rather sit with someone in comfortable silence than get a grand gesture.",
   relationshipStarters: [
     {
       id: 'near-strangers',
@@ -374,7 +375,7 @@ export const seedCharacter: Character = {
       id: 'library-regulars',
       label: 'Library regulars',
       blurb:
-        "You've been quietly sharing the same library table for a full semester — an unspoken routine neither of you has mentioned out loud.",
+        "You've shared the same library table for a full semester. Neither of you has ever said anything about it.",
       startingAffection: 20,
     },
     {
@@ -401,11 +402,11 @@ export const seedCharacter: Character = {
   ],
   occupation: 'Second-year architectural history student',
   workplace: 'Sakura Hill University',
-  homeLocation: 'A small one-bedroom apartment a few blocks from campus, packed with more books than furniture',
+  homeLocation: 'A small one-bedroom a few blocks from campus. More bookshelves than seating.',
   frequentedLocations: [
-    "The university library's under-heated second floor",
+    "the library's cold second floor",
     "her family's secondhand bookshop downtown",
-    'the quiet bench under the sakura trees',
+    'the bench under the trees on the quad',
   ],
   likes: [
     'Gothic Revival architecture',
@@ -417,21 +418,34 @@ export const seedCharacter: Character = {
     'finish her thesis on Gothic Revival influences in local architecture',
     'see a real Gothic cathedral in person someday, not just in photographs',
   ],
-  // Deliberately includes a pacing-relevant boundary — a bundled demo character worth roleplaying
-  // slowly should say so in her own authored data, not rely solely on the global slow-burn-pacing
-  // setting (`useSettingsStore.ts`) to carry the whole weight of it.
+  // Includes a pacing boundary in her own authored data rather than leaning entirely on the global
+  // slow-burn-pacing setting (useSettingsStore.ts) to carry it.
   boundaries: [
-    'will not tolerate being mocked for the things she cares about',
-    "hates being rushed or pressured into anything before she's actually ready for it",
+    'does not tolerate being mocked for what she cares about',
+    'hates being rushed or pushed into something before she is ready for it',
   ],
   socialConnections: [
     {
       id: 'parents',
       name: 'Her parents',
       relation: 'run the family secondhand bookshop together',
-      notes: 'Raised her surrounded by towers of uncatalogued books — where her love of old buildings and older stories actually started.',
+      notes: 'She grew up in the shop, shelving stock nobody had catalogued. That is where the interest in old buildings started.',
     },
   ],
   createdAt: now,
   updatedAt: now,
+}
+
+/**
+ * A starter persona so a fresh install isn't stuck telling the model the player is named "You".
+ * Deliberately thin and gender-neutral: a second-year at the seed world's university with a
+ * weekend job, enough to anchor a scene without boxing in whoever the player actually wants to be.
+ * Edit or delete freely; the inline "who are you" capture in NewChatDialog still works if it's gone.
+ */
+export const seedPersona: Persona = {
+  id: SEED_PERSONA_ID,
+  name: 'Kai',
+  description:
+    'A second-year at Sakura Hill University, major still undeclared. Rents a room near the station and works weekend shifts at a bookshop in town. Easy to be around, listens more than talks, slow to say much about themselves.',
+  createdAt: now,
 }

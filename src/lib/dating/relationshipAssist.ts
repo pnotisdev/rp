@@ -49,7 +49,7 @@ const DIMENSION_GLOSSARY: Record<RelationshipDeltaKey, string> = {
   comfort: 'ease being around each other',
   respect: 'how much they respect the other person',
   curiosity: 'interest in learning more about them',
-  tension: 'friction or unresolved conflict — a positive delta here means MORE tension, which is not automatically a bad thing dramatically',
+  tension: 'friction or unresolved conflict. A positive delta here means MORE tension, which is not automatically a bad thing dramatically',
 }
 
 /**
@@ -58,7 +58,7 @@ const DIMENSION_GLOSSARY: Record<RelationshipDeltaKey, string> = {
  * short line per flag gives the classifier an actual bar to clear instead of guessing from the name.
  */
 const FLAG_GLOSSARY: Record<SceneFlag, string> = {
-  first_date: 'an explicit, mutually understood date has now happened — not just a friendly hangout, chance encounter, or a gift given in passing',
+  first_date: 'an explicit, mutually understood date has now happened, not just a friendly hangout, chance encounter, or a gift given in passing',
   confession: 'one of them stated real romantic feelings out loud, not just flirted or hinted',
   jealousy: 'clear jealousy or possessiveness was shown over a rival or another relationship',
   promise: 'a specific, meaningful promise was made that the story should remember later',
@@ -137,9 +137,9 @@ export async function assessRelationshipMoment(
     `Known route flags: ${describeFlags(params.customFlags)}.`,
     params.knownFacts?.length ? `Facts already remembered (don't repeat these): ${params.knownFacts.join('; ')}.` : '',
     'Return ONLY a minified JSON object: {"deltas":{ one integer -2..2 per dimension key },"newFlags":[ any newly-established flags from the known set, or [] ],"reason":"...","newFacts":[ any new durable facts, or [] ]}.',
-    'Only move a dimension if this specific exchange clearly affected it — leave the rest at 0. Most turns should move only one or two dimensions and add no new flags.',
-    '"reason" is a short (under 12 words) in-world one-liner naming what just happened, e.g. "Complimented her cooking unprompted" — only if at least one dimension moved or a flag was added, otherwise "".',
-    '"newFacts" is for concrete, durable facts about {{user}} worth recalling much later — a name, a stated preference, a piece of backstory, a promise made. NOT every line of dialogue — most turns should add none. Each fact as one short standalone sentence, e.g. "Prefers tea over coffee" or "Promised to visit again next weekend".',
+    'Only move a dimension if this specific exchange clearly affected it. Leave the rest at 0. Most turns should move only one or two dimensions and add no new flags.',
+    '"reason" is a short (under 12 words) in-world one-liner naming what just happened, e.g. "Complimented her cooking unprompted". Give one only if at least one dimension moved or a flag was added, otherwise "".',
+    '"newFacts" is for concrete, durable facts about {{user}} worth recalling much later: a name, a stated preference, a piece of backstory, a promise made. Not every line of dialogue. Most turns should add none. Each fact as one short standalone sentence, e.g. "Prefers tea over coffee" or "Promised to visit again next weekend".',
     'Example: {"deltas":{"affection":1,"trust":0,"chemistry":0,"comfort":1,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"Stayed to help clean up without being asked","newFacts":[]}',
     'JSON:',
   ]
@@ -243,7 +243,7 @@ export async function assessDateOutcome(
     params.knownFacts?.length ? `Facts already remembered (don't repeat these): ${params.knownFacts.join('; ')}.` : '',
     'Return ONLY a minified JSON object: {"deltas":{ one integer -5..5 per dimension key, judged across the WHOLE date, not per line },"newFlags":[ any newly-established flags from the known set, or [] ],"recap":"...","newFacts":[ any new durable facts, or [] ]}.',
     'Judge the date honestly: a flat, awkward, one-sided, or hurtful date should score low or even negative deltas, not a token positive bump just for happening. A genuinely warm, attentive date should score well across the relevant dimensions.',
-    '"recap" is a short 1-3 sentence in-world summary of how the date felt from {{char}}\'s side, written for the player to read afterward — not a mechanical report.',
+    '"recap" is a short 1-3 sentence in-world summary of how the date felt from {{char}}\'s side, written for the player to read afterward, not a mechanical report.',
     '"newFacts" is for concrete, durable facts about {{user}} worth recalling much later. Most dates add one or none.',
     'Example: {"deltas":{"affection":3,"trust":2,"chemistry":2,"comfort":1,"respect":0,"curiosity":1,"tension":0},"newFlags":["first_date"],"recap":"She lit up talking about her old bakery and kept finding reasons to lean in closer.","newFacts":["Used to run a small bakery before moving here"]}',
     'JSON:',
@@ -285,7 +285,7 @@ export async function suggestDateEvent(
 ): Promise<DateEventCard | null> {
   const prompt = [
     'You design a lightweight dating-sim style event card for a roleplay chat.',
-    `Character: ${params.characterName}${params.characterDescription ? ` — ${params.characterDescription}` : ''}`,
+    `Character: ${params.characterName}${params.characterDescription ? `. ${params.characterDescription}` : ''}`,
     `User persona: ${params.personaName}`,
     params.worldDescription ? `World context: ${params.worldDescription}` : '',
     `Current affection: ${params.affection}/100`,
@@ -350,13 +350,13 @@ export async function assessCommitmentAsk(
     `Current scores (0-100 each): ${DELTA_KEYS.map((k) => `${k}=${params.current[k]}`).join(', ')}.`,
     params.charPersonality ? `${params.charName}'s personality: ${params.charPersonality}` : '',
     `Recent conversation leading up to the ask:\n${recent || '(no prior conversation)'}`,
-    'Decide how {{char}} genuinely reacts, in character — never an automatic yes just because they were asked. Three possible outcomes:',
+    'Decide how {{char}} genuinely reacts, in character. Never an automatic yes just because they were asked. Three possible outcomes:',
     '- "accept": they genuinely want this too, right now.',
-    '- "deflect": not right now — caught off guard, needs more time, or it feels premature — but nothing is damaged; asking again later should still be possible.',
-    '- "backfire": the timing or delivery was genuinely bad given how things have actually been going (e.g. asked too soon, mid-argument, or reads as presumptuous) — this stings and costs something real.',
+    '- "deflect": not right now. Caught off guard, needs more time, or it feels premature, but nothing is damaged and asking again later is still possible.',
+    '- "backfire": the timing or delivery was genuinely bad given how things have actually been going (asked too soon, mid-argument, or reads as presumptuous). This stings and costs something real.',
     'Return ONLY a minified JSON object: {"decision":"accept"|"deflect"|"backfire","reason":"one short in-character sentence explaining the reaction","deltas":{ one integer -3..3 per dimension key }}.',
     '"accept" should generally have positive deltas; "deflect" should stay close to neutral; "backfire" should have real negative deltas, not just zeros.',
-    'Example: {"decision":"accept","reason":"She laughs and pulls you into a hug — of course she wants that too.","deltas":{"affection":3,"trust":2,"chemistry":2,"comfort":1,"respect":1,"curiosity":0,"tension":-1}}',
+    'Example: {"decision":"accept","reason":"She laughs and pulls you into a hug. Of course she wants that too.","deltas":{"affection":3,"trust":2,"chemistry":2,"comfort":1,"respect":1,"curiosity":0,"tension":-1}}',
     'JSON:',
   ]
     .filter(Boolean)

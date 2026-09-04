@@ -414,7 +414,10 @@ app.post('/api/chats/:id/fork', (req, res) => {
 
   const now = Date.now()
   const newChatId = newId()
-  const { id: _id, createdAt: _ca, updatedAt: _ua, title, ...rest } = source
+  // `worldInfoState` is transient per-turn sticky/cooldown bookkeeping whose values are absolute
+  // turn numbers from the source chat — meaningless in a branch that may start from a much earlier
+  // point, so the fork begins with a clean slate rather than inheriting stale timers.
+  const { id: _id, createdAt: _ca, updatedAt: _ua, title, worldInfoState: _wis, ...rest } = source
   const forkedChat = chatStore.insert({
     ...rest,
     id: newChatId,

@@ -53,7 +53,7 @@ describe('buildPrompt — group chat (multiple speaking characters)', () => {
         participants: [{ name: 'Aria', description: 'A cheerful bard.', personality: 'Playful.' }],
       }),
     )
-    expect(result.prompt).toContain('You are Kestrel.')
+    expect(result.prompt).toContain('You are Kestrel in a roleplay with')
     expect(result.prompt).toContain('A stoic ranger.')
     expect(result.prompt).toContain('Also present in this scene:')
     expect(result.prompt).toContain('- Aria: A cheerful bard. Personality: Playful.')
@@ -92,13 +92,15 @@ describe('buildPrompt — characterProfile (10e life-context fields)', () => {
 
 describe('buildPrompt — styleGuidance', () => {
   it('folds global writing-style guidance into the late, right-before-generation block', async () => {
-    const result = await buildPrompt(baseInput({ styleGuidance: 'Never use em dashes (the — character) in your writing.' }))
-    expect(result.prompt).toContain('Never use em dashes')
+    const result = await buildPrompt(baseInput({ styleGuidance: 'STYLE_GUIDANCE_MARKER phrasing rule.' }))
+    expect(result.prompt).toContain('STYLE_GUIDANCE_MARKER')
   })
 
   it('omits nothing extra when styleGuidance is unset', async () => {
-    const result = await buildPrompt(baseInput())
-    expect(result.prompt).not.toContain('em dash')
+    const result = await buildPrompt(baseInput({ styleGuidance: 'STYLE_GUIDANCE_MARKER phrasing rule.' }))
+    const without = await buildPrompt(baseInput())
+    expect(result.prompt).toContain('STYLE_GUIDANCE_MARKER')
+    expect(without.prompt).not.toContain('STYLE_GUIDANCE_MARKER')
   })
 })
 
@@ -261,7 +263,7 @@ describe('buildPrompt — promptSections (section 13 instruct-template-manager p
         participants: [{ name: 'Kestrel' }],
       }),
     )
-    expect(result.prompt).toContain('You are Aria.')
+    expect(result.prompt).toContain('You are Aria in a roleplay with')
     expect(result.prompt).toContain('A cheerful bard.')
     expect(result.prompt).toContain('SUMMARY_LINE')
     expect(result.prompt).toContain('WORLD_LINE')
@@ -288,20 +290,47 @@ describe('buildPrompt — promptSections (section 13 instruct-template-manager p
     expect(result.prompt).toContain('About You')
   })
 
-  it('turning off the description section still lets the generic system line and history through', async () => {
+  it('turning off the description section still lets the default system prompt and history through', async () => {
     const result = await buildPrompt(
       baseInput({
         character: character({ name: 'Aria', description: 'A cheerful bard.' }),
         promptSections: { description: false },
       }),
     )
-    expect(result.prompt).toContain('You are Aria.')
+    expect(result.prompt).toContain('You are Aria in a roleplay with')
     expect(result.prompt).not.toContain('A cheerful bard.')
   })
 
-  it('turning off the system section drops the generic identity line entirely', async () => {
+  it('turning off the system section drops the default system prompt entirely', async () => {
     const result = await buildPrompt(baseInput({ promptSections: { system: false } }))
-    expect(result.prompt).not.toContain('You are Aria.')
+    expect(result.prompt).not.toContain('You are Aria in a roleplay with')
+  })
+
+  it('uses the global system prompt when the character has none, and the character override when set', async () => {
+    const withGlobal = await buildPrompt(baseInput({ globalSystemPrompt: 'GLOBAL_SYS_LINE' }))
+    expect(withGlobal.prompt).toContain('GLOBAL_SYS_LINE')
+    expect(withGlobal.prompt).not.toContain('You are Aria in a roleplay with')
+
+    const withCharOverride = await buildPrompt(
+      baseInput({
+        character: character({ name: 'Aria', system_prompt: 'CHAR_SYS_LINE' }),
+        globalSystemPrompt: 'GLOBAL_SYS_LINE',
+      }),
+    )
+    expect(withCharOverride.prompt).toContain('CHAR_SYS_LINE')
+    expect(withCharOverride.prompt).not.toContain('GLOBAL_SYS_LINE')
+  })
+
+  it('appends the global post-history steering after any character post_history_instructions', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        character: character({ name: 'Aria', post_history_instructions: 'CHAR_PHI' }),
+        globalPostHistory: 'GLOBAL_PHI',
+      }),
+    )
+    expect(result.prompt).toContain('CHAR_PHI')
+    expect(result.prompt).toContain('GLOBAL_PHI')
+    expect(result.prompt.indexOf('CHAR_PHI')).toBeLessThan(result.prompt.indexOf('GLOBAL_PHI'))
   })
 
   it('turning off persona drops the "About {{user}}" line', async () => {

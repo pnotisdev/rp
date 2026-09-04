@@ -15,6 +15,13 @@ const DEFAULT_QUICK_REPLIES: QuickReply[] = [
   { id: 'qr-change-subject', label: 'Change the subject', message: 'Anyway — so, what else is new with you?' },
 ]
 
+export interface PromptPreset {
+  id: string
+  name: string
+  systemPrompt: string
+  postHistoryInstructions: string
+}
+
 export type ChatStyle = 'flat' | 'bubbles' | 'document'
 export type AvatarShape = 'circle' | 'square' | 'rounded' | 'rectangle'
 export type ColorMode = 'light' | 'dark'
@@ -55,11 +62,13 @@ export const DEFAULT_THEME_TOKENS_DARK: Record<string, string> = {
   '--c-romance-text': '12 13 13',
 }
 
+// Kept in sync with the "Balanced" built-in preset (builtinPresets.ts) on every field that preset
+// opinionates, so a fresh install shows "Balanced" selected rather than "Custom".
 export const DEFAULT_SAMPLER: GenerationParams = {
   max_context_length: 8192,
   max_length: 300,
   temperature: 0.9,
-  top_p: 0.95,
+  top_p: 1,
   top_k: 0,
   min_p: 0.05,
   typical: 1,
@@ -193,6 +202,18 @@ interface SettingsState {
   // section 14's Quick Replies bar — a fixed row of user-configurable buttons above the composer
   quickReplies: QuickReply[]
   setQuickReplies: (replies: QuickReply[]) => void
+
+  // system prompt — the instruction block at the top of every generation. Empty = the built-in
+  // `DEFAULT_SYSTEM_PROMPT` (builder.ts); a character's own `system_prompt` still overrides both.
+  systemPrompt: string
+  /** Global steering appended after any per-character post-history instructions — applies to every chat. */
+  postHistoryInstructions: string
+  setSystemPrompt: (v: string) => void
+  setPostHistoryInstructions: (v: string) => void
+  /** User-saved {system prompt + post-history} pairs, shown as a picker in Settings → Generation. */
+  promptPresets: PromptPreset[]
+  addPromptPreset: (name: string) => void
+  removePromptPreset: (id: string) => void
 
   // writing-style steering — injected into every prompt, right before generation
   styleGuidance: string
@@ -334,6 +355,25 @@ export const useSettingsStore = create<SettingsState>()(
 
       quickReplies: DEFAULT_QUICK_REPLIES,
       setQuickReplies: (replies) => set({ quickReplies: replies }),
+
+      systemPrompt: '',
+      postHistoryInstructions: '',
+      setSystemPrompt: (v) => set({ systemPrompt: v }),
+      setPostHistoryInstructions: (v) => set({ postHistoryInstructions: v }),
+      promptPresets: [],
+      addPromptPreset: (name) =>
+        set((s) => ({
+          promptPresets: [
+            ...s.promptPresets,
+            {
+              id: `prompt-${Date.now().toString(36)}`,
+              name: name.trim() || `Preset ${s.promptPresets.length + 1}`,
+              systemPrompt: s.systemPrompt,
+              postHistoryInstructions: s.postHistoryInstructions,
+            },
+          ],
+        })),
+      removePromptPreset: (id) => set((s) => ({ promptPresets: s.promptPresets.filter((p) => p.id !== id) })),
 
       styleGuidance: '',
       avoidEmDashes: false,

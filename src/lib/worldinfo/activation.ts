@@ -30,6 +30,29 @@ export interface WorldInfoActivationResult {
   droppedForBudget: LorebookEntry[]
   /** Entries that matched but lost to a higher-priority entry in the same inclusion group. */
   droppedForGroup: LorebookEntry[]
+  /** Per-entry sticky/cooldown bookkeeping to persist for the next turn — only present when `runtime` was passed. */
+  nextState?: WorldInfoRuntimeState
+}
+
+/** Per-entry sticky/cooldown bookkeeping, keyed by `${book.sourceKey}:${entry.id}`. Persisted on `Chat.worldInfoState`. */
+export interface WorldInfoEntryRuntime {
+  /** Turn this entry stays force-active until (exclusive). Set from `sticky`. */
+  activeUntil?: number
+  /** Turn this entry can't reactivate by keyword until (exclusive). Set from `cooldown`. */
+  blockedUntil?: number
+  /** Last turn this entry was active — the trigger for a cooldown when it deactivates. */
+  activeAt?: number
+}
+export type WorldInfoRuntimeState = Record<string, WorldInfoEntryRuntime>
+
+export interface WorldInfoRuntimeInput {
+  /** Monotonic turn counter (the caller passes the chat's message count). */
+  turn: number
+  prevState: WorldInfoRuntimeState
+}
+
+function compositeKey(book: Lorebook, bookIndex: number, entry: LorebookEntry, entryIndex: number): string {
+  return `${book.sourceKey ?? `b${bookIndex}`}:${entry.id ?? `i${entryIndex}`}`
 }
 
 /** How many extra recursive-scanning passes a book gets before we stop chaining — bounds a pathological entry->entry->entry cycle to a fixed cost instead of looping. */
@@ -46,13 +69,22 @@ export function activateWorldInfo(
   books: Lorebook[],
   recentText: string,
   affection = 0,
+  runtime?: WorldInfoRuntimeInput,
 ): WorldInfoActivationResult {
   const haystackLower = recentText.toLowerCase()
   const activated: LorebookEntry[] = []
   const droppedForBudget: LorebookEntry[] = []
   const droppedForGroup: LorebookEntry[] = []
 
-  for (const book of books) {
+  // sticky/cooldown: track which composite keys ended up active this turn (and which of those
+  // were a fresh keyword hit rather than a sticky carry-over) so the per-entry state can be
+  // rolled forward once, after every book has been scanned.
+  const activeKeys = new Set<string>()
+  const freshMatchKeys = new Set<string>()
+  const stickyCandidates: { key: string; entry: LorebookEntry }[] = []
+
+  for (let bookIndex = 0; bookIndex < books.length; bookIndex++) {
+    const book = books[bookIndex]
     let matched: LorebookEntry[] = []
     const matchedIds = new Set<number>()
     const keywordEntries: LorebookEntry[] = []
@@ -78,8 +110,22 @@ export function activateWorldInfo(
       keywordEntries.push(entry)
     }
 
-    for (const entry of keywordEntries) {
-      if (matchesKeywords(entry, recentText, haystackLower) && passesProbability(entry)) {
+    for (let ei = 0; ei < keywordEntries.length; ei++) {
+      const entry = keywordEntries[ei]
+      const matchedNow = matchesKeywords(entry, recentText, haystackLower) && passesProbability(entry)
+      let active = matchedNow
+      if (runtime) {
+        const key = compositeKey(book, bookIndex, entry, ei)
+        const rt = runtime.prevState[key]
+        const stickyActive = rt?.activeUntil !== undefined && runtime.turn < rt.activeUntil
+        const onCooldown = rt?.blockedUntil !== undefined && runtime.turn < rt.blockedUntil
+        const freshHit = matchedNow && !onCooldown
+        active = stickyActive || freshHit
+        if (active) activeKeys.add(key)
+        if (freshHit) freshMatchKeys.add(key)
+        if (entry.sticky || entry.cooldown) stickyCandidates.push({ key, entry })
+      }
+      if (active) {
         matched.push(entry)
         if (entry.id !== undefined) matchedIds.add(entry.id)
       }
@@ -154,7 +200,44 @@ export function activateWorldInfo(
 
   // Higher insertion_order wins placement priority (inserted closer to the end).
   activated.sort((a, b) => a.insertion_order - b.insertion_order)
-  return { activated, droppedForBudget, droppedForGroup }
+
+  let nextState: WorldInfoRuntimeState | undefined
+  if (runtime) {
+    nextState = {}
+    const { turn, prevState } = runtime
+    // Carry forward any still-pending block from a key that wasn't even scanned this turn (e.g. its
+    // book dropped out of a group chat's roster for a turn) so a cooldown isn't silently cleared.
+    for (const [key, rt] of Object.entries(prevState)) {
+      if (rt.blockedUntil !== undefined && turn < rt.blockedUntil) nextState[key] = { blockedUntil: rt.blockedUntil }
+    }
+    for (const { key, entry } of stickyCandidates) {
+      const rt = prevState[key] ?? {}
+      const isActive = activeKeys.has(key)
+      const wasActive = rt.activeAt !== undefined && rt.activeAt >= turn - 1
+      const next: WorldInfoEntryRuntime = {}
+      if (isActive) {
+        next.activeAt = turn
+        // A fresh keyword hit (re)starts the sticky window; a sticky carry-over keeps the window it
+        // already has rather than extending it forever.
+        if (freshMatchKeys.has(key) && entry.sticky && entry.sticky > 0) {
+          next.activeUntil = turn + entry.sticky + 1
+        } else if (rt.activeUntil !== undefined && turn < rt.activeUntil) {
+          next.activeUntil = rt.activeUntil
+        }
+        if (rt.blockedUntil !== undefined && turn < rt.blockedUntil) next.blockedUntil = rt.blockedUntil
+      } else if (wasActive && entry.cooldown && entry.cooldown > 0) {
+        // Just deactivated (sticky expired, or the keyword stopped matching) — start the cooldown.
+        next.blockedUntil = turn + entry.cooldown
+      } else if (rt.blockedUntil !== undefined && turn < rt.blockedUntil) {
+        next.blockedUntil = rt.blockedUntil
+      }
+      if (next.activeAt !== undefined || next.activeUntil !== undefined || next.blockedUntil !== undefined) {
+        nextState[key] = next
+      }
+    }
+  }
+
+  return { activated, droppedForBudget, droppedForGroup, nextState }
 }
 
 /** `probability` only gates keyword-triggered entries — "always"/"manual" firing probabilistically would contradict what those modes mean. */

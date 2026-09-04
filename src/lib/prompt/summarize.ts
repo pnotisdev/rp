@@ -34,8 +34,8 @@ export async function summarizeMessages({
   const transcript = messages.map((m) => `${m.name}: ${m.text}`).join('\n')
   const lengthInstruction =
     detail === 'detailed'
-      ? 'Cover key facts established, relationship or emotional developments, important events, and notable details of setting or dialogue worth remembering. Third person, plain prose, no headers or bullet points, under 450 words.'
-      : 'Cover key facts established, relationship or emotional developments, and important events either character would remember. Third person, plain prose, no headers or bullet points, under 200 words.'
+      ? 'Cover key facts established, relationship or emotional developments, important events, and notable details of setting or dialogue worth remembering. Third person, plain prose, no headers or bullet points, no em dashes, under 450 words.'
+      : 'Cover key facts established, relationship or emotional developments, and important events either character would remember. Third person, plain prose, no headers or bullet points, no em dashes, under 200 words.'
   const prompt = [
     `Task: maintain a running memory log for a roleplay chat between ${userName} and ${charName}.`,
     existingSummary.trim() ? `Memory so far:\n${existingSummary.trim()}` : '',

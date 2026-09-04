@@ -46,7 +46,7 @@ export async function regenerateCardField(
     'You are helping write a character card for a roleplay app.',
     `Character so far:\n${context}`,
     `Rewrite ONLY the "${label}" field so it fits well with everything above.${hint ? ` Guidance: ${hint.trim()}` : ''}`,
-    'Output just the new field text — no label, no quotes, no commentary, no markdown.',
+    'Output just the new field text. No label, no quotes, no commentary, no markdown.',
     `${label}:`,
   ].join('\n\n')
 
@@ -87,7 +87,7 @@ export async function suggestLoreEntries(
     'You are helping write World Info / lorebook entries for a roleplay app.',
     `Subject:\n${context}`,
     existingKeys ? `Lore already covered (don't repeat these): ${existingKeys}` : '',
-    `Propose ${count} new lore entries — relationships, locations, important past events, or rules that would help an AI stay consistent when roleplaying in this context.`,
+    `Propose ${count} new lore entries: relationships, locations, important past events, or rules that would help an AI stay consistent when roleplaying in this context.`,
     `Output ONLY a minified JSON array of ${count} objects, each shaped exactly {"keys": ["keyword1","keyword2"], "content": "1-3 sentences of plain prose"}. 2-3 keywords per entry that would plausibly come up in conversation. No markdown fences, no commentary.`,
     'JSON:',
   ]

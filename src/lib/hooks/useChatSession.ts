@@ -190,7 +190,7 @@ function buildGiftTasteNote(character: Character): string | undefined {
   if (giftLikes?.length) parts.push(`tends to genuinely love gifts like ${giftLikes.join(', ')}`)
   if (giftDislikes?.length) parts.push(`isn't really moved by gifts like ${giftDislikes.join(', ')}`)
   if (parts.length === 0) return undefined
-  return `${character.card.name} ${parts.join('; ')} — react to any gift given accordingly, in character, never reciting this as a checklist.`
+  return `${character.card.name} ${parts.join('; ')}. React to any gift given accordingly, in character, without reciting this as a checklist.`
 }
 
 
@@ -218,18 +218,18 @@ function buildRelationshipDescription(
   // 10c's "Breakups & reconciliation" — a standing warning is the model's cue to actually play the
   // strain, not just have the numbers move; a past breakup colors things even once patched up.
   const warningNote = chat.relationshipWarning
-    ? `The relationship is genuinely on the rocks right now (${chat.relationshipWarning.reason}) — let that show, don't just narrate past it.`
+    ? `The relationship is genuinely on the rocks right now (${chat.relationshipWarning.reason}). Let that show; don't just narrate past it.`
     : undefined
   const breakupNote =
     chat.breakupCount && chat.breakupCount > 0
-      ? `${primaryName} and {{user}} have broken up before — some caution or guardedness is earned here, whether or not that's fully behind them now.`
+      ? `${primaryName} and {{user}} have broken up before. Some caution or guardedness is earned here, whether or not that's fully behind them now.`
       : undefined
   // `primaryName` is spelled out rather than left as a `{{char}}` macro — this stays about the
   // scene's primary/relationship-tracked character even in a group chat, where `{{char}}` would
   // otherwise resolve to whoever's currently speaking instead (see resolveSpeaker/buildCurrentPrompt).
   return [
-    `Relationship: {{user}} and ${primaryName} are at the "${formatRelationshipStage(stage)}" stage${notes.length ? ` — ${notes.join('; ')}` : ''}.`,
-    '(Let this color tone, warmth, and what feels earned right now — never state a number, "affection", or "stage" out loud.)',
+    `Relationship: {{user}} and ${primaryName} are at the "${formatRelationshipStage(stage)}" stage${notes.length ? `: ${notes.join('; ')}` : ''}.`,
+    '(Let this colour tone, warmth, and what feels earned right now. Never state a number, "affection", or "stage" out loud.)',
     commitmentNote,
     warningNote,
     breakupNote,
@@ -291,6 +291,8 @@ export function useChatSession(chatId: string | null) {
   const styleGuidanceNote = useSettingsStore((s) => s.styleGuidance)
   const avoidEmDashes = useSettingsStore((s) => s.avoidEmDashes)
   const slowBurnPacing = useSettingsStore((s) => s.slowBurnPacing)
+  const globalSystemPrompt = useSettingsStore((s) => s.systemPrompt)
+  const globalPostHistory = useSettingsStore((s) => s.postHistoryInstructions)
   const promptSections = useSettingsStore((s) => s.promptSections)
   const setActiveChatId = useSettingsStore((s) => s.setActiveChatId)
   const client = useMemo(() => new KoboldClient(baseUrl), [baseUrl])
@@ -423,7 +425,11 @@ export function useChatSession(chatId: string | null) {
       const freshChat = (await chatsApi.get(chat.id)) ?? chat
       // Every character present in the scene contributes their own lore, not just whoever's
       // currently speaking — a roster member's card_book stays active in the background.
-      const lorebooks = [speaker, ...roster].map((c) => c.card.character_book).filter((b): b is Lorebook => !!b)
+      // `sourceKey` is stamped on each so sticky/cooldown state (Chat.worldInfoState) has a
+      // key that's stable turn-to-turn even as the roster / book list is reassembled.
+      const lorebooks: Lorebook[] = [speaker, ...roster]
+        .filter((c) => !!c.card.character_book)
+        .map((c) => ({ ...c.card.character_book!, sourceKey: `char:${c.id}` }))
       const boundBooks = worldInfoBooks
         .filter((b) =>
           bookAppliesToChat(b, {
@@ -432,9 +438,9 @@ export function useChatSession(chatId: string | null) {
             worldId: character.worldId,
           }),
         )
-        .map((b) => b.book)
-      const worldLorebook = world?.lorebook ? [world.lorebook] : []
-      const factsLorebook = buildFactsLorebook(activeFacts)
+        .map((b) => ({ ...b.book, sourceKey: `book:${b.id}` }))
+      const worldLorebook = world?.lorebook ? [{ ...world.lorebook, sourceKey: `world:${world.id}` }] : []
+      const factsLorebook = buildFactsLorebook(activeFacts).map((b) => ({ ...b, sourceKey: 'facts' }))
       const affection = freshChat.affection ?? 0
       const worldDescription = world
         ? [
@@ -453,7 +459,7 @@ export function useChatSession(chatId: string | null) {
               ? describePresence(getCurrentActivity(speaker.schedule, world.currentDay ?? 0, world.currentPhaseIndex ?? 0))
               : '',
             freshChat.activeEvent?.title
-              ? `Current event: ${freshChat.activeEvent.title}${freshChat.activeEvent.description ? ` — ${freshChat.activeEvent.description}` : ''}`
+              ? `Current event: ${freshChat.activeEvent.title}${freshChat.activeEvent.description ? `. ${freshChat.activeEvent.description}` : ''}`
               : '',
           ]
             .filter(Boolean)
@@ -487,7 +493,7 @@ export function useChatSession(chatId: string | null) {
         [
           avoidEmDashes ? 'Never use em dashes (the — character) in your writing. Use a comma, period, or parentheses instead.' : '',
           slowBurnPacing
-            ? "Pace intimacy like a slow burn: earn it gradually through many small moments, don't grant it just because it was asked for. If pushed toward more affection, a kiss, or closeness faster than the relationship has actually earned, react as your character genuinely would — hesitation, deflection, or an outright no are often the right call, especially early on. Don't cave just to be agreeable."
+            ? "Pace intimacy like a slow burn. Earn it through many small moments; don't grant it just because it was asked for. If pushed toward more affection, a kiss, or closeness faster than the relationship has earned, react the way your character actually would. Hesitation, deflection, or a flat no are often the right call, especially early on. Don't cave just to be agreeable."
             : '',
           styleGuidanceNote.trim(),
         ]
@@ -500,6 +506,8 @@ export function useChatSession(chatId: string | null) {
         characterProfile: buildCharacterProfileNote(speaker),
         personaName: persona?.name || 'You',
         personaDescription: persona?.description || '',
+        globalSystemPrompt,
+        globalPostHistory,
         history: recentHistory,
         chatSummary: freshChat.summary,
         worldDescription,
@@ -511,6 +519,8 @@ export function useChatSession(chatId: string | null) {
         countTokens,
         continueLastTurn: opts?.continueLastTurn,
         impersonateAsUser: opts?.impersonateAsUser,
+        worldInfoState: freshChat.worldInfoState ?? {},
+        worldInfoTurn: messages.length,
         activeObjective: objectiveForPrompt,
         relationshipDescription,
         styleGuidance,
@@ -537,6 +547,8 @@ export function useChatSession(chatId: string | null) {
       character,
       chat,
       countTokens,
+      globalPostHistory,
+      globalSystemPrompt,
       messages,
       persona,
       promptSections,
@@ -1158,7 +1170,9 @@ export function useChatSession(chatId: string | null) {
             })
           }
           wroteAnything = true
-          await chatsApi.update(chat.id, {}) // bumps updatedAt so the chat resorts to the top
+          // Also rolls the sticky/cooldown bookkeeping forward for next turn (built once per round;
+          // the final round's state is the one that sticks). Bumps updatedAt regardless.
+          await chatsApi.update(chat.id, { worldInfoState: built.worldInfoState ?? {} })
 
           // Stopping the generation by hand (or the model genuinely finishing early) both mean
           // "don't keep going" regardless of how close to the token cap it landed.

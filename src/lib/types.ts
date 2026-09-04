@@ -284,6 +284,8 @@ export interface Chat {
   /** How many times this relationship has broken up (deliberately or from unresolved strain) — the "lasting scar" persists as this counter plus a one-time stat hit at break time, not a literal permanent ceiling. */
   breakupCount?: number
   sceneFlags?: SceneFlag[]
+  /** Per-lorebook-entry sticky/cooldown bookkeeping, keyed `${book.sourceKey}:${entry.id}` — written back after each generation, read on the next. Unset = fresh. */
+  worldInfoState?: Record<string, { activeUntil?: number; blockedUntil?: number; activeAt?: number }>
   /** Per-chat steering note (SillyTavern's Author's Note) — see `AuthorNote`. Unset = none. */
   authorNote?: AuthorNote
   giftCoins?: number

@@ -13,6 +13,7 @@ import { SettingsPage } from '@/components/ui/SettingsPage'
 import { RegexScriptsSection } from './RegexScriptsSection'
 import { InstructTemplateSection } from './InstructTemplateSection'
 import { PromptSectionsSection } from './PromptSectionsSection'
+import { SystemPromptSection } from './SystemPromptSection'
 import { WritingStyleSection } from './WritingStyleSection'
 import { QuickRepliesSection } from './QuickRepliesSection'
 
@@ -80,6 +81,15 @@ export function SamplingControls() {
   const presets = useApiQuery('presets', () => presetsApi.list(), []) ?? []
   const [presetName, setPresetName] = useState('My preset')
   const fileRef = useRef<HTMLInputElement>(null)
+
+  // Which built-in preset the current sampler exactly matches on every field that preset sets
+  // (fields it leaves alone don't count), or null once anything's been hand-tuned.
+  const current = sampler as unknown as Record<string, number>
+  const activeBuiltin = BUILTIN_PRESETS.find((p) =>
+    Object.entries(p.params).every(([k, v]) => current[k] === v),
+  )
+  const activeBuiltinPreset = activeBuiltin?.id ?? null
+  const activeBuiltinPresetUse = activeBuiltin?.use ?? null
 
   const savePreset = async () => {
     await presetsApi.create({ name: presetName, params: sampler as unknown as Record<string, unknown> })
@@ -229,6 +239,8 @@ export function SamplingControls() {
 
       <QuickRepliesSection />
 
+      <SystemPromptSection />
+
       <WritingStyleSection />
 
       <PromptSectionsSection />
@@ -237,16 +249,28 @@ export function SamplingControls() {
 
       <Section
         title="Generation"
+        description="How the model picks its next word. Start from a preset, then nudge it with the sliders below (or every field, in Advanced mode)."
         surface="bare"
         action={<Toggle checked={advancedSamplerMode} onChange={setAdvancedSamplerMode} label="Advanced mode" />}
       >
-        <div className="mb-3 flex flex-wrap gap-2">
+        <div className="mb-1.5 text-xs font-medium text-text-muted">Starting point</div>
+        <select
+          value={activeBuiltinPreset ?? 'custom'}
+          onChange={(e) => {
+            const preset = BUILTIN_PRESETS.find((p) => p.id === e.target.value)
+            if (preset) setSampler(preset.params)
+          }}
+          className="w-full rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40"
+        >
           {BUILTIN_PRESETS.map((p) => (
-            <Button key={p.name} onClick={() => setSampler(p.params)}>
+            <option key={p.id} value={p.id}>
               {p.name}
-            </Button>
+            </option>
           ))}
-        </div>
+          {!activeBuiltinPreset && <option value="custom">Custom (edited)</option>}
+        </select>
+        {activeBuiltinPresetUse && <p className="mb-3 mt-1.5 text-xs text-text-muted">{activeBuiltinPresetUse}</p>}
+        {!activeBuiltinPresetUse && <div className="mb-3" />}
 
         {!advancedSamplerMode ? (
           <div className="rounded-xl bg-bg-elevated p-5">

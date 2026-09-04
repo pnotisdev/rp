@@ -48,7 +48,7 @@ export async function generateChoices(
     params.availableGifts?.length
       ? `Available gifts the user can actually give now: ${params.availableGifts.map((g) => `${g.id} (${g.name}) x${g.quantity}`).join(', ')}`
       : 'No gifts are currently available to give.',
-    `Propose ${count} short, distinct options for what ${params.userName} could say or do next — different tones or approaches from each other.`,
+    `Propose ${count} short, distinct options for what ${params.userName} could say or do next. Each should take a different tone or approach from the others.`,
     `Output ONLY a minified JSON array of ${count} objects with this exact shape: {"kind":"line|action|gift","label":"short button text","text":"the actual line or action to send as the user's turn","giftId":"required for kind=gift","giftName":"optional"}.`,
     `At most one option may have kind="gift", and only when a gift exists in the available list above. No markdown fences, no commentary.`,
     'JSON:',

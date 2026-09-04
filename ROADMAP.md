@@ -214,9 +214,11 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
         though the player never typed it. Always/manual entries don't participate in the recursive
         wave (they're already fully resolved before it runs) and can't be recursively triggered
         either. A toggle lives at the book level in `LorebookEditor`.
-      Deliberately left out (need new persisted per-chat-per-entry state, a bigger change):
-      sticky (an entry stays active for N more turns after it stops matching) and cooldown (an
-      entry can't refire for N turns after it does).  14 new vitest cases in
+      Deliberately left out at the time (needed new persisted per-chat-per-entry state, a bigger
+      change): sticky (an entry stays active for N more turns after it stops matching) and cooldown
+      (an entry can't refire for N turns after it does). ~~Both shipped later, in #94~~ — via a new
+      `Lorebook.sourceKey` (the composite-key prerequisite the roadmap kept flagging) and
+      `Chat.worldInfoState`. `delay` is still open. 14 new vitest cases in
       `activation.test.ts` (probability boundaries, regex matching incl. invalid-pattern fallback,
       group exclusivity, recursive scanning incl. a cycle/no-infinite-loop case) — 33/33 passing.
       Verified live: new "Chance %"/"Group"/"Recursive scanning" controls render and behave
@@ -1672,11 +1674,11 @@ SillyTavern docs/releases, RisuAI (CCv3, CBS/trigger system, regex scripts), Agn
       `template` (the resolved object) is genuinely threaded into `buildCurrentPrompt` and the
       generation call's merged stop-sequence list, not just computed and discarded.
 - [ ] **World Info depth ST/RisuAI still have that we don't**:
-      - **sticky / cooldown / delay** — already flagged as deferred in section 3; the blocker is
-        real and worth restating here: no stable per-entry key exists across this app's lorebook
-        sources (character book + world book + global books + synthetic facts book are merged into
-        one array whose order isn't stable turn-to-turn in a group chat). Fixing that key problem
-        is the actual prerequisite, not the sticky logic itself.
+      - ~~**sticky / cooldown**~~ — done (#94). The blocker (no stable per-entry key across this
+        app's merged lorebook sources) was solved with `Lorebook.sourceKey`, stamped by
+        `useChatSession` as it assembles the list; `Chat.worldInfoState` holds the per-entry
+        `{activeUntil, blockedUntil, activeAt}` bookkeeping. **`delay`** (an entry can't fire until
+        turn N) is still open — smaller, same machinery now in place.
       - ~~**injection at a chat depth**~~ — done. `LorebookEntry.position` gained `'at_depth'`
         alongside `before_char`/`after_char`, with its own `depth` field (same convention as
         `AuthorNote.depth`) — a new "At depth" option in `LorebookEditor`'s Position select, with a
@@ -2088,8 +2090,8 @@ Done so far (see checked boxes above for detail):
     (facts via a synthetic lorebook, history via a `RelationshipPanel` log) rather than new prompt
     sections.
 19. ~~World Info / lorebook depth~~ — probability, inclusion groups, regex keys, and recursive
-    scanning added to `activateWorldInfo()` (section 3), bringing it to feature parity with
-    SillyTavern's own activation engine bar sticky/cooldown.
+    scanning added to `activateWorldInfo()` (section 3); sticky and cooldown followed in #94,
+    leaving only `delay` short of SillyTavern's own activation engine.
 20. ~~Message search and bookmarks/pinned messages~~ — `SearchPanel.tsx` (this-chat/all-chats),
     `PinnedMessagesPanel.tsx`, `StoredMessage.pinned`, and a shared scroll-to-message + highlight
     mechanism used by both (section 4).
@@ -2727,6 +2729,59 @@ Done so far (see checked boxes above for detail):
       bundle the separate "Save / share theme" library handles. Verified live end-to-end: tuned a
       colour, saved it as a preset, applied Default then the custom preset (accent tracked both
       ways), deleted it, and confirmed it survives a reload.
+
+93. ~~Prompt overhaul: de-slop every LLM-facing string, user-editable system prompts, rewritten
+    seed content~~ — user-driven, koboldcpp offline so verified structurally (typecheck + 255
+    tests + build) plus a live pass over every new Settings control:
+    - **User-editable system prompt** — the top-of-prompt instruction was a single hardcoded line
+      ("write vivid and consistent responses, never break the fourth wall"). Now: a global
+      `systemPrompt` + `postHistoryInstructions` in `useSettingsStore`, a new `SystemPromptSection`
+      (Settings -> Generation) with a preset picker, and `builder.ts` resolving
+      `character.system_prompt` -> global -> built-in default in that order. Post-history steering
+      is global and *appends* after any per-character `post_history_instructions`. `builder.ts`
+      re-exports the new `systemPrompts.ts`.
+    - **Ten built-in system-prompt variations** (`src/lib/prompt/systemPrompts.ts`), each with a
+      one-line use case: Balanced, Sparse, Rich prose, Dialogue-driven, Adventure GM, Unfiltered,
+      Cozy, Companion chat, Immersive/no-meta, Co-writer. Every one carries the same DNA (write only
+      {{char}}, take the voice from the card's own description and example dialogue, avoid the tells
+      of AI prose) with a different feel. `promptPresets` in the store lets a user save their own
+      {system + post-history} pairs on top.
+    - **Ten sampler presets** (`builtinPresets.ts` went from 4 unlabelled buttons to 10 with use
+      lines): Balanced, Precise, Creative, Wild, Smooth, Anti-repetition (DRY), Long-form, Snappy,
+      Mirostat, Small model. The Generation section's picker is now a `<select>` + description +
+      "which preset am I on" detection; `DEFAULT_SAMPLER` was aligned to "Balanced" so a fresh
+      install shows a named preset instead of "Custom".
+    - **No em dashes** in any string the model sees — swept `builder.ts`, `choices.ts`,
+      `relationshipAssist.ts` (incl. the example recap), `objectiveAssist.ts`, `aiAssist.ts`,
+      `sceneTag.ts`, `summarize.ts`, `useChatSession.ts`'s style/relationship/gift-taste lines, and
+      `GenerateCharacterDialog`'s card-writing instruction (which also gained an explicit
+      anti-slop paragraph). The default system prompt, the slow-burn steering line, and the style
+      "suggested starter" all now name em dashes as a thing to avoid.
+    - **Rewritten seed content** (`server/seedContent.ts`): Sumire's card, her character lorebook,
+      the world description + rules, the world's own lore, and the "Campus Life" example book, all
+      stripped of the hidden-depths reveal ("beneath the prickliness she's..."), the rule-of-three,
+      and the repeated "wouldn't admit it" hedge the seed leaned on. A starter persona ("Kai", thin
+      and gender-neutral) is now seeded too, with a one-time back-fill in `seed.ts` for installs
+      that predate it.
+94. ~~World Info sticky & cooldown~~ — the lorebook-activation feature deferred three times
+    (section 3, section 14) because "no stable per-entry key exists across this app's lorebook
+    sources". Solved that first: `Lorebook.sourceKey` is stamped by `useChatSession` when it
+    assembles the merged book list (`char:<id>` / `world:<id>` / `book:<id>` / `facts`), and
+    `${sourceKey}:${entry.id}` is the composite key. Then:
+    - `LorebookEntry.sticky` / `.cooldown` (turns), shown as two `NumberField`s in `LorebookEditor`
+      for keyword-mode entries only, next to Chance %. ST's own field names, copied straight through
+      by `normalizeLorebook` on card import.
+    - `activateWorldInfo` takes an optional `{ turn, prevState }` and returns `nextState`; a
+      keyword entry stays force-active for `sticky` turns after its keyword stops matching (a fresh
+      hit refreshes, a carry-over doesn't compound), and can't re-fire by keyword for `cooldown`
+      turns after it deactivates. `always`/`manual` entries ignore both. Old callers that pass no
+      runtime get exactly today's behaviour and an `undefined` `nextState`.
+    - `Chat.worldInfoState` holds the per-entry bookkeeping, written back on the
+      `chatsApi.update(chat.id, ...)` that already fired after each generation round, read on the
+      next. Stripped on fork (its turn numbers are absolute and meaningless in an earlier branch).
+    - 6 new `activation.test.ts` cases walking multi-turn sequences. 255 tests green.
+    **Still open:** `delay` (an entry can't fire until turn N of the chat) — the third ST field,
+    smaller, not done here.
 
 That closes out the last "reasonable next batch," plus sections 10a, 10c, and 10d in full and a first
 slice each of 10b and 10f taken directly afterward since 10's own suggested phase order names them

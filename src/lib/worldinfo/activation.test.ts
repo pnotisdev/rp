@@ -320,6 +320,54 @@ describe('activateWorldInfo', () => {
       expect(result.activated.map((e) => e.content)).toEqual(['Always mentions dragons.'])
     })
   })
+
+  describe('sticky and cooldown', () => {
+    // Walk several "turns", threading nextState -> prevState, and record whether the one keyword
+    // entry activated on each turn. `texts[i]` is the scan text for turn i.
+    function run(e: LorebookEntry, texts: string[]): boolean[] {
+      const b: Lorebook = { entries: [e], sourceKey: 'test' }
+      let state: NonNullable<ReturnType<typeof activateWorldInfo>['nextState']> = {}
+      const out: boolean[] = []
+      texts.forEach((text, turn) => {
+        const r = activateWorldInfo([b], text, 0, { turn, prevState: state })
+        out.push(r.activated.length > 0)
+        state = r.nextState ?? {}
+      })
+      return out
+    }
+
+    it('sticky keeps a keyword entry active for N turns after the keyword stops appearing', () => {
+      const e = entry({ content: 'About the tavern.', keys: ['tavern'], sticky: 2 })
+      // turn 0 matches, turns 1-2 carried by sticky, turn 3 expired
+      expect(run(e, ['at the tavern', 'left', 'still gone', 'still gone'])).toEqual([true, true, true, false])
+    })
+
+    it('sticky refreshes on a fresh keyword hit rather than compounding forever', () => {
+      const e = entry({ content: 'X', keys: ['tavern'], sticky: 1 })
+      // hit, carry, hit again (refresh), carry, gone
+      expect(run(e, ['tavern', 'nope', 'tavern again', 'nope', 'nope'])).toEqual([true, true, true, true, false])
+    })
+
+    it('cooldown blocks re-activation by keyword for N turns after the entry deactivates', () => {
+      const e = entry({ content: 'X', keys: ['tavern'], cooldown: 3 })
+      // turn 0 active, turn 1 deactivates (keyword gone) and the 3-turn cooldown starts, turns 2-3
+      // stay blocked even though the keyword is back, turn 4 is available again
+      expect(run(e, ['tavern', 'gone', 'tavern', 'tavern', 'tavern'])).toEqual([true, false, false, false, true])
+    })
+
+    it('an always-mode entry ignores sticky/cooldown entirely', () => {
+      const e = entry({ content: 'X', constant: true, activationMode: 'always', cooldown: 5 })
+      expect(run(e, ['a', 'b', 'c'])).toEqual([true, true, true])
+    })
+
+    it('does no sticky/cooldown bookkeeping at all when no runtime is passed (old callers)', () => {
+      const e = entry({ content: 'X', keys: ['tavern'], sticky: 3 })
+      const b: Lorebook = { entries: [e] }
+      expect(activateWorldInfo([b], 'tavern').nextState).toBeUndefined()
+      // Without runtime, the keyword must appear every turn to stay active.
+      expect(activateWorldInfo([b], 'gone').activated).toHaveLength(0)
+    })
+  })
 })
 
 describe('recentMessagesText', () => {

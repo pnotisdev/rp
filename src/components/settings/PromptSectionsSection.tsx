@@ -4,7 +4,7 @@ import { Section } from '@/components/ui/Section'
 import { Toggle } from '@/components/ui/Toggle'
 
 const SECTION_DESCRIPTIONS: Record<PromptSectionId, string> = {
-  system: 'The character\'s own system prompt, or a generic "stay in character" line if they don\'t have one.',
+  system: "The character's own system-prompt override, or the global one from the System prompt section above if they don't have one.",
   summary: 'The running long-term memory summary, once a chat has grown enough to need one.',
   world: 'The bound world\'s description, rules, and current time/weather/mood line.',
   description: 'The character\'s description, personality, scenario, and any authored profile fields (likes, goals, schedule…).',

@@ -1,11 +1,16 @@
 import type { CharacterCardData, Lorebook, LorebookEntry } from '@/lib/characters/cardSpec'
 import { substituteMacros } from '@/lib/characters/macros'
-import { activateWorldInfo, recentMessagesText } from '@/lib/worldinfo/activation'
+import { activateWorldInfo, recentMessagesText, type WorldInfoRuntimeState } from '@/lib/worldinfo/activation'
 import { estimateTokens } from '@/lib/tokenEstimate'
 import { buildSceneInstruction } from '@/lib/vn/sceneTag'
 import { applyRegexScripts } from '@/lib/text/regexScripts'
 import type { RegexScript } from '@/lib/types'
 import type { InstructTemplate } from './instructTemplates'
+import { DEFAULT_SYSTEM_PROMPT } from './systemPrompts'
+
+export { DEFAULT_SYSTEM_PROMPT }
+export type { SystemPromptPreset } from './systemPrompts'
+export { BUILTIN_SYSTEM_PROMPTS } from './systemPrompts'
 
 /**
  * Section 13's instruct-template-manager part (c): `fixedSections` below used to be a hardcoded,
@@ -40,6 +45,7 @@ export const DEFAULT_PROMPT_SECTIONS: Record<PromptSectionId, boolean> = {
   examples: true,
 }
 
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'char'
@@ -55,6 +61,10 @@ export interface PromptBuildInput {
   characterProfile?: string
   personaName: string
   personaDescription: string
+  /** Global fallback system prompt (Settings → Generation) — used only when the character has no `system_prompt` of their own. Empty/undefined falls through to `DEFAULT_SYSTEM_PROMPT`. */
+  globalSystemPrompt?: string
+  /** Global steering line appended after any character `post_history_instructions`, in the same late "right before generation" slot. Applies to every chat. */
+  globalPostHistory?: string
   history: ChatMessage[]
   /** Running long-term memory log for everything older than what's in `history`. */
   chatSummary?: string
@@ -91,6 +101,10 @@ export interface PromptBuildInput {
   sceneOptions?: { expressionIds: string[]; backgroundIds: string[] }
   /** Current relationship score for unlock-gated lore entries. */
   affection?: number
+  /** Per-entry sticky/cooldown state from the previous turn (`Chat.worldInfoState`). Omit to disable sticky/cooldown entirely (old callers). */
+  worldInfoState?: WorldInfoRuntimeState
+  /** Monotonic turn counter for sticky/cooldown (the chat's message count). Defaults to `history.length`. */
+  worldInfoTurn?: number
   /**
    * Other characters present in the scene (group chats) besides `character` — the one actually
    * generating this turn. Rendered as a compact roster, not a full identity block each; only
@@ -110,6 +124,8 @@ export interface PromptBuildResult {
   activatedEntries: LorebookEntry[]
   droppedForBudget: LorebookEntry[]
   droppedForGroup: LorebookEntry[]
+  /** Sticky/cooldown state to persist for the next turn — undefined when `worldInfoState` wasn't passed in. */
+  worldInfoState?: WorldInfoRuntimeState
 }
 
 export { estimateTokens }
@@ -135,18 +151,20 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
   // never *narrower* than the default, since there's one shared scan window across all books.
   const effectiveScanDepth = lorebooks.reduce((max, b) => Math.max(max, b.scan_depth ?? 0), scanDepth)
   const scanText = recentMessagesText(history, effectiveScanDepth)
-  const { activated: activatedEntries, droppedForBudget, droppedForGroup } = activateWorldInfo(
+  const { activated: activatedEntries, droppedForBudget, droppedForGroup, nextState: worldInfoState } = activateWorldInfo(
     lorebooks,
     scanText,
     input.affection ?? 0,
+    input.worldInfoState
+      ? { turn: input.worldInfoTurn ?? history.length, prevState: input.worldInfoState }
+      : undefined,
   )
   const before = activatedEntries.filter((e) => e.position !== 'after_char' && e.position !== 'at_depth')
   const after = activatedEntries.filter((e) => e.position === 'after_char')
   const worldAtDepth = activatedEntries.filter((e) => e.position === 'at_depth')
 
   const systemBlock = sub(
-    character.system_prompt?.trim() ||
-      `You are ${character.name}. Stay fully in character, write vivid and consistent responses, and never break the fourth wall.`,
+    character.system_prompt?.trim() || input.globalSystemPrompt?.trim() || DEFAULT_SYSTEM_PROMPT,
   )
 
   const descriptionParts = [
@@ -222,6 +240,7 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
   // which is exactly where steering toward an in-progress objective is most effective.
   const postHistoryBlock = [
     character.post_history_instructions?.trim() ? sub(character.post_history_instructions) : '',
+    input.globalPostHistory?.trim() ? sub(input.globalPostHistory) : '',
     buildObjectiveBlock(input.activeObjective, sub),
     input.relationshipDescription?.trim() ? sub(input.relationshipDescription) : '',
     input.styleGuidance?.trim() ? input.styleGuidance.trim() : '',
@@ -293,6 +312,7 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
     activatedEntries,
     droppedForBudget,
     droppedForGroup,
+    worldInfoState,
   }
 }
 
@@ -310,7 +330,7 @@ function buildObjectiveBlock(
     objective.description?.trim() ? sub(objective.description) : '',
     'Remaining steps:',
     ...objective.pendingTasks.map((t) => `- ${sub(t)}`),
-    "(Steer the scene toward these naturally, in character — don't mention \"objective\" or \"task\" out loud unless it fits.)",
+    '(Steer the scene toward these in character. Do not say "objective" or "task" out loud unless it fits.)',
   ]
   return lines.filter(Boolean).join('\n')
 }

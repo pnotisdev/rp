@@ -10,9 +10,10 @@ import { Button } from '@/components/ui/Button'
 const EM_DASH_SCRIPT_ID = 'builtin-avoid-em-dash'
 
 const STARTER_STYLE_NOTES =
-  "Write like a person, not like an AI assistant. Avoid telltale AI phrasing: \"it's not just X, it's Y\", " +
-  'rule-of-three lists, excessive parallelism, hedging words like "perhaps" or "arguably", and overwrought ' +
-  'or purple prose. Vary sentence length. Prefer plain, concrete language over grand abstractions.'
+  'Write like a person, not like an AI assistant. Plain, concrete language. Vary sentence length. ' +
+  'Avoid the tells of machine writing: em dashes, "it\'s not just X, it\'s Y" phrasing, tidy lists of three, ' +
+  'heavy parallelism, hedging words like "perhaps" or "arguably", and purple or overwrought description. ' +
+  "Don't explain a character's feelings; show them or leave them."
 
 export function WritingStyleSection() {
   const avoidEmDashes = useSettingsStore((s) => s.avoidEmDashes)
