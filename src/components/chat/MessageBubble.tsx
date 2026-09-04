@@ -259,8 +259,10 @@ export function MessageBubble({
         <Avatar name={message.name} shape={avatarShape} dataUrl={avatarDataUrl} />
         <div className={`flex max-w-[75%] flex-col ${isUser ? 'items-end' : 'items-start'}`}>
           <div
-            className={`themed-shadow rounded-2xl px-3.5 py-2.5 ${
-              isUser ? 'bg-msg-user text-accent-text rounded-tr-sm' : 'bg-msg-char text-text rounded-tl-sm'
+            className={`rp-bubble themed-shadow rounded-2xl px-3.5 py-2.5 ${
+              isUser
+                ? 'rp-bubble-user bg-msg-user text-accent-text rounded-tr-sm'
+                : 'rp-bubble-char bg-msg-char text-text rounded-tl-sm'
             }`}
           >
             {imageStrip}

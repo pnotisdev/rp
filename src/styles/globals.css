@@ -334,3 +334,31 @@ select:focus-visible,
 @media (prefers-reduced-motion: reduce) {
   .vn-dialogue .rp-sfx { animation: none; }
 }
+
+/* Speech-bubble tails — only in the `bubbles` chat style. A small triangle off the top of the
+   bubble, pointing toward its avatar and leaning gently up (as if the line came from the speaker),
+   filled to match the bubble. Each message is its own bubble here (no run-grouping), so every
+   bubble gets one. The protrusion (7px) sits comfortably inside the 12px avatar gap. */
+.rp-bubble {
+  position: relative;
+}
+.rp-bubble::before {
+  content: '';
+  position: absolute;
+  top: 6px;
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 8px solid transparent;
+  /* `box-shadow` tracks the 0x0 border box, not the visible triangle — `drop-shadow` tracks the
+     pixels, so the tail carries the same soft edge as the bubble's `themed-shadow`. */
+  filter: drop-shadow(0 1px 1px rgb(0 0 0 / calc(0.05 * var(--shadow-strength))));
+}
+.rp-bubble-char::before {
+  left: -6px;
+  border-right: 7px solid rgb(var(--c-msg-char));
+}
+.rp-bubble-user::before {
+  right: -6px;
+  border-left: 7px solid rgb(var(--c-msg-user));
+}

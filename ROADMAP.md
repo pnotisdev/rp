@@ -384,8 +384,8 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
       in quotes left alone, and no-op output-shape parity for a message with no SFX). Verified live:
       "BANG!"/"THUD"/"KA-CHUNK"/"WHIRR"/"THUMP" all render as bursts with the right computed styles
       in chat and VN, reduced-motion disables the VN animation, and a normal message with no sound
-      words is byte-identical to before. The **speech-bubble-tails** half of the original item stays
-      open — it only makes sense in the `bubbles` chat style and is pure decoration.
+      words is byte-identical to before. ~~The **speech-bubble-tails** half of the original item stays
+      open~~ — done in #101.
       **Made opt-in and per-character customizable (#99)** after the first cut shipped always-on
       with a hardcoded list. `splitMessageSegments(text, sfx?)` now takes an `SfxConfig`
       (`{ disabled?, extraWords? }`): a global **Settings → Appearance → "Sound-effect bursts"**
@@ -2961,6 +2961,16 @@ Done so far (see checked boxes above for detail):
      uploads stored as files under `data/avatars/worlds/<id>/music/` (`resolveWorldMusicMap`,
      backup/pack-covered); upload slots in the World editor → Scenes tab. 15 new tests (296 total).
      Verified live end-to-end with a generated tone.
+101. ~~Speech-bubble tails~~ (section 5, the last open item there) — a small triangle off the top
+     of each message bubble pointing toward its avatar, in the `bubbles` chat style only. Pure CSS:
+     `.rp-bubble`/`.rp-bubble-char`/`.rp-bubble-user` on the bubble `<div>` in `MessageBubble.tsx`,
+     a border-triangle `::before` in `globals.css` coloured from `--c-msg-char`/`--c-msg-user` so it
+     always matches the bubble fill (invisible when the theme makes char bubbles blend into the
+     page, which is intentional — the bubble is subtle, so is its tail). A `drop-shadow` filter
+     gives it the same soft edge as the bubble's `themed-shadow` (a `box-shadow` would track the
+     0×0 border box, not the visible pixels). The 7px protrusion sits inside the 12px avatar gap;
+     `flat`/`document` styles are untouched. Verified live: computed border colours match each
+     bubble, geometry clears the avatar, no `.rp-bubble` nodes in the other two styles.
 
 That closes out SillyTavern's full World Info activation engine, plus the last "reasonable next batch," plus sections 10a, 10c, and 10d in full and a first
 slice each of 10b and 10f taken directly afterward since 10's own suggested phase order names them
@@ -3019,13 +3029,12 @@ part (c)~~ (#77, closing out the prompt/context template manager in full), ~~Wor
 (#95, SillyTavern's full activation engine now covered), ~~mobile ergonomics pass over editors +
 settings + shared controls~~ (#96), ~~mobile toolbar curation + touch targets + a `NewChatDialog`
 collapsed-panel bug~~ (#97), ~~manga-style SFX text bursts~~ (#98), ~~SFX opt-in + per-character
-vocabulary~~ (#99), ~~background music per world/scene mood~~ (#100).
+vocabulary~~ (#99), ~~background music per world/scene mood~~ (#100), ~~speech-bubble tails~~ (#101,
+closing out section 5 entirely).
 
-Still unblocked and worth doing next, roughly in order: mobile/responsive is done as far as is
-worthwhile for a KoboldCpp-local app (#71 → #77 → #96 → #97); manga SFX bursts shipped and reworked
-to be opt-in + per-character (#98, #99); background music per scene mood shipped (#100).
-**Speech-bubble tails** (the rest of section 5) is small but only meaningful in the
-`bubbles` chat style. **Proactive outreach itself** (10f, the actual headline of section 10) is next
+The incremental-polish backlog (sections 1–9, mobile, section 5's aesthetic pass) is now empty.
+Everything left needs either a design decision or is a larger track:
+**Proactive outreach itself** (10f, the actual headline of section 10) is next
 in line for a design conversation, not more unattended coding — specifically, how an unprompted
 message even reaches the player (a notification? a separate inbox view? injected straight into the
 chat as if they just texted?) is still an open question only the user can answer, and koboldcpp being
