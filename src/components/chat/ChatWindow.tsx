@@ -226,7 +226,7 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
       key: 'event',
       icon: CalendarHeart,
       label: chat.activeEvent?.title ? `Event: ${chat.activeEvent.title}` : 'Start a date or event',
-      priority: 'primary',
+      priority: 'primary-desktop',
       active: !!chat.activeEvent,
       // 10e's content/feature flag: an author-level opt-out, not something that unlocks with more
       // warmth like every other gate in this app — so the trigger is hidden entirely rather than
@@ -238,7 +238,7 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
       key: 'objective',
       icon: Target,
       label: activeObjective ? `Objective: ${activeObjective.title}` : 'Set an objective',
-      priority: 'primary',
+      priority: 'primary-desktop',
       active: !!activeObjective,
       onClick: () => setShowObjective(true),
     },

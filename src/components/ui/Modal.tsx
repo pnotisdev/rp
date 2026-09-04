@@ -54,9 +54,9 @@ export function Modal({
   }, [onClose])
 
   return (
-    <div className="animate-overlay-in fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+    <div className="animate-overlay-in fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3 backdrop-blur-sm sm:p-4">
       <div
-        className={`animate-panel-in flex w-full flex-col rounded-2xl border border-border bg-bg-elevated p-7 themed-shadow ${SIZE_CLASSES[size]} ${scrollable ? 'max-h-[85vh]' : ''}`}
+        className={`animate-panel-in flex w-full flex-col rounded-2xl border border-border bg-bg-elevated p-5 themed-shadow sm:p-7 ${SIZE_CLASSES[size]} ${scrollable ? 'max-h-[90vh] sm:max-h-[85vh]' : ''}`}
       >
         <div className={`flex shrink-0 items-center justify-between gap-4 ${description ? 'mb-2' : 'mb-4'}`}>
           <h2 className="text-sm font-semibold text-text">{title}</h2>

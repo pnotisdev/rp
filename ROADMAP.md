@@ -1835,6 +1835,27 @@ SillyTavern docs/releases, RisuAI (CCv3, CBS/trigger system, regex scripts), Agn
       correctly, header height dropped from 114px to 104px. Both fixes verified with zero
       horizontal overflow at 375px and a full desktop-width regression check confirming the header
       and VN panel are unchanged there.
+      **Editor/settings ergonomics pass (#96)** closes most of what this item deferred: the
+      editor and Settings tab strips (7 and 5 tabs, both previously an unlabelled horizontal
+      scroll) now render as a native `<select>` under `sm` and the visible strip at `sm`+;
+      `EditorShell`/`ViewShell`/`Modal`/`Section` padding is `p-4 sm:p-*` instead of a flat `p-6`/`p-7`;
+      every shared field control is `text-base sm:text-sm` (16px on mobile stops iOS Safari
+      zooming the page on focus) with a taller mobile tap target; and the side-by-side
+      text-input pairs in `CharacterEditor` (social connections, relationship starters, weather
+      loves/hates, schedule rows) stack to one column under `sm`.
+      **Mobile toolbar + touch-target pass (#97)** closes the rest: `ChatToolbar` gained a
+      `priority: 'primary-desktop'` tier (icon on `sm`+, folds into the "•••" menu on a phone) —
+      the date/event and objective actions use it, so the mobile chat toolbar is just Relationship
+      + "•••" (+ Back and Log in VN mode), rendered purely by breakpoint with no JS media query.
+      VNStage's two top overlays (the Bond HUD on the left, the toolbar on the right) were
+      independent `absolute` elements that overlapped at 375px — the HUD literally painted over the
+      back button; now one flex row where the HUD truncates and the toolbar never shrinks, and the
+      VN "Log" button is icon-only under `sm`. Shared `Button` is `py-2.5 sm:py-1.5` (~40px tap
+      target on touch, back to 32px on desktop). Also fixed a real pre-existing bug found here:
+      `NewChatDialog` was mounted inside `ChatsPanel`'s `hidden md:flex` collapsed rail, so with a
+      persisted `chatsPanelCollapsed` preference the dialog was `display:none` and completely
+      unopenable on a phone — moved to a sibling of both panel variants. `NewChatDialog` also now
+      uses the shared `Modal`'s `scrollable` mode and 16px-on-mobile inputs.
 - [~] **Chat management basics** — rename, duplicate, and one-click "new chat, same character &
       persona" are done; folders/tags/pinned-chats stay open (below). `ChatsPanel.tsx` gained a
       per-row `MoreHorizontal` menu (a lightweight inline popover, click-outside-to-close via the
@@ -2799,6 +2820,64 @@ Done so far (see checked boxes above for detail):
     always entries, no-runtime bypass, no sticky window started while delayed) — 259 tests green.
     Verified live: the field renders for both an always-mode and a keyword-mode entry, a set value
     round-trips through the API and clears back to absent.
+96. ~~Mobile ergonomics pass: editors + settings + shared controls~~ — "the rest of mobile/responsive"
+    from the roadmap's own next-up list. #71/#77 handled page-level overflow and the core chat
+    surface; this is the pass over everything behind that. Systemic changes, mostly in shared
+    components so every screen benefits at once:
+    - **Tab strips → native `<select>` under `sm`.** `EditorShell` (character + world editors, 7
+      tabs) and `SettingsView` (5 tabs) both rendered a horizontal strip that scrolled a couple of
+      tabs off-screen with no affordance — the roadmap flagged "scrolls instead of picks" twice.
+      Now a full-height native picker on mobile, the visible strip unchanged at `sm`+. Badge counts
+      ride along as `Label (12)` in the option text.
+    - **Responsive shell padding.** `EditorShell`, `ViewShell`, `Modal`, and `Section` were a flat
+      `p-6`/`p-7`/`px-6`; now `p-4 sm:p-*` (and `Modal` `p-5 sm:p-7`, backdrop `p-3 sm:p-4`), giving
+      back ~16-24px of content width on a 375px screen. `Modal` also caps at `max-h-[90vh]` on
+      mobile (was `85vh`, or uncapped for non-scrollable).
+    - **iOS zoom guard + tap targets.** `Field.tsx`'s shared control class, the two search inputs,
+      and the chat `Composer` textarea are now `text-base sm:text-sm` — 16px on mobile stops iOS
+      Safari auto-zooming the page when a field is focused; desktop keeps the denser 14px. Mobile
+      vertical padding bumped `py-2 → py-2.5`.
+    - **Stacked field pairs in `CharacterEditor`.** Side-by-side text-input pairs that were unusable
+      at ~150px each (social connections name/relation, relationship-starter label/warmth, weather
+      loves/hates chip columns, schedule phase/status and activity/location) are now
+      `grid-cols-1 sm:grid-cols-2`.
+    - Card grids (`CharacterList`/`WorldsView`/`PersonasView`) tightened to `gap-3 sm:gap-5` and
+      `Section` headers `flex-wrap` so a long description + a header control don't crush each other.
+    Verified live at 375×812: zero horizontal overflow on every screen checked (Settings all tabs,
+    Character editor all tabs, Relationship modal), every visible input measured at 16px on mobile,
+    the tab `<select>` switches content correctly; then a full desktop regression pass confirming
+    the visible tab strips are back, inputs are 14px again, and every `sm:grid-cols-2` restores the
+    original two-column layout. 259 tests green, typecheck + build clean. Left for #97: the mobile
+    toolbar icon audit and non-shared-button touch targets.
+97. ~~Mobile toolbar curation + touch targets + a `NewChatDialog` bug~~ — the three items #96 left
+    open, plus one real bug surfaced while checking them.
+    - **`ChatToolbar` `priority: 'primary-desktop'`** — a third tier between "always an icon" and
+      "always in the •••​ menu": an icon on `sm`+, a menu row on a phone. Rendered in both places and
+      shown/hidden by breakpoint, so there's still no JS media query and the two can't disagree
+      about what exists. The date/event and objective actions moved to it, so the mobile chat
+      toolbar is Relationship + ••• (plus Back and Log in VN mode) instead of five controls fighting
+      the title for width.
+    - **VNStage top bar** — the Bond HUD (`absolute left-4`) and the toolbar (`absolute right-4`)
+      were independent overlays that overlapped at 375px: measured live, the HUD's right edge was
+      ~105px past the toolbar's left edge, painting over the back button and first icons. Now one
+      `absolute inset-x-4 top-4 flex justify-between` row — HUD `min-w-0` and truncating, toolbar
+      `shrink-0`. Re-measured after: a 12px gap between them, zero page overflow. VN "Log" button is
+      icon-only under `sm`.
+    - **Shared `Button`** — `py-2.5 sm:py-1.5`: ~40px tall on touch (measured 39px on the
+      `NewChatDialog` primary), back to 32px at `sm`+. `IconButton` left alone — it's sized to fit
+      the `h-9` glass pill and the message-meta row exactly, and bumping it there risks more than it
+      buys.
+    - **Bug: `NewChatDialog` was unopenable on a phone with a collapsed chats panel.** It was
+      mounted inside `ChatsPanel`'s `hidden w-14 … md:flex` collapsed rail; a returning user with
+      `chatsPanelCollapsed` set (a desktop preference) who opened the app on a phone got the dialog
+      rendered into a `display:none` subtree — `showNew` flipped true, nothing appeared. Moved to a
+      sibling of both panel variants. While there, `NewChatDialog` adopted the shared `Modal`'s
+      `scrollable` mode (its own `<div className="flex-1 overflow-y-auto">` wrapper) and
+      `text-base sm:text-sm` on its five raw select/input controls.
+    Verified live at 375×812: VN HUD/toolbar no longer overlap, the mobile toolbar shows only the
+    curated actions with date/objective in the ••• menu, `NewChatDialog` opens and fits; desktop
+    regression confirms all five toolbar icons return, the Log label returns, `Button` is 32px
+    again. 259 tests green, typecheck + build clean.
 
 That closes out SillyTavern's full World Info activation engine, plus the last "reasonable next batch," plus sections 10a, 10c, and 10d in full and a first
 slice each of 10b and 10f taken directly afterward since 10's own suggested phase order names them
@@ -2853,11 +2932,15 @@ context-budget tiers; the actual world-tick/outreach mechanism and the harder bu
 unification stay open), ~~high-contrast theme preset~~ (#73), ~~command palette~~ (#74),
 ~~director/debug view~~ (#75), ~~`visualNovelMode` per-chat/per-world gating~~ (#76, closing out
 world templates in full), ~~mobile/responsive re-audit (no new bugs) + instruct-template manager
-part (c)~~ (#77, closing out the prompt/context template manager in full).
+part (c)~~ (#77, closing out the prompt/context template manager in full), ~~World Info `delay`~~
+(#95, SillyTavern's full activation engine now covered), ~~mobile ergonomics pass over editors +
+settings + shared controls~~ (#96), ~~mobile toolbar curation + touch targets + a `NewChatDialog`
+collapsed-panel bug~~ (#97).
 
-Still unblocked and worth doing next, roughly in order: **the rest of mobile/responsive** — every
-editor/settings screen beyond the core chat surface (re-audited at 375px in #77, still clean); the
-toolbar icon-set redesign #71/#88 deferred is now done (#91, an overflow menu). **Manga-style SFX
+Still unblocked and worth doing next, roughly in order: **mobile/responsive is now done** as far as
+is worthwhile for a KoboldCpp-local app (#71 → #77 → #96 → #97) — no screen overflows, every dialog
+opens and fits, toolbars are curated, inputs don't trigger iOS zoom. Revisit only if a hosted-API
+backend (section 8) ever makes phone use a real scenario. **Manga-style SFX
 bursts** (section 5) or **background music per scene** (section 6) for VN polish, now that the
 UI-SFX groundwork (#66) exists to build on. **Proactive outreach itself**
 (10f, the actual headline of section 10) is next in line for a design conversation, not more

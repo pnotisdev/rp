@@ -10,21 +10,32 @@ type Tab = 'connection' | 'appearance' | 'generation' | 'voice' | 'data'
 export function SettingsView() {
   const [tab, setTab] = useState<Tab>('connection')
 
+  const TABS: [Tab, string][] = [
+    ['connection', 'Connection'],
+    ['appearance', 'Appearance'],
+    ['generation', 'Generation'],
+    ['voice', 'Voice'],
+    ['data', 'Data'],
+  ]
+
   return (
-    <div className="mx-auto w-full max-w-2xl flex-1 overflow-y-auto p-6 sm:p-8">
+    <div className="mx-auto w-full max-w-2xl flex-1 overflow-y-auto p-4 sm:p-8">
       <h2 className="mb-5 font-display text-lg text-text">Settings</h2>
-      {/* overflow-x-auto: on a narrow viewport all five tabs don't fit — without this, Voice and
-          Data are simply unreachable rather than just visually tight. */}
-      <div className="mb-10 flex gap-1 overflow-x-auto border-b border-border">
-        {(
-          [
-            ['connection', 'Connection'],
-            ['appearance', 'Appearance'],
-            ['generation', 'Generation'],
-            ['voice', 'Voice'],
-            ['data', 'Data'],
-          ] as [Tab, string][]
-        ).map(([id, label]) => (
+      {/* Mobile: a native select instead of a strip that scrolls tabs off-screen (Voice and Data
+          were previously unreachable without this). Desktop keeps the visible strip. */}
+      <select
+        value={tab}
+        onChange={(e) => setTab(e.target.value as Tab)}
+        className="mb-6 w-full cursor-pointer rounded-xl bg-bg-sunken px-3 py-2.5 text-base text-text outline-none ring-1 ring-transparent focus:ring-accent/40 sm:hidden"
+      >
+        {TABS.map(([id, label]) => (
+          <option key={id} value={id}>
+            {label}
+          </option>
+        ))}
+      </select>
+      <div className="mb-10 hidden gap-1 overflow-x-auto border-b border-border sm:flex">
+        {TABS.map(([id, label]) => (
           <button
             key={id}
             onClick={() => setTab(id)}

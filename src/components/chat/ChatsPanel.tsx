@@ -177,9 +177,11 @@ export function ChatsPanel({
             )
           })}
         </div>
-        {newChatDialog}
       </div>
       {fullChatList(true)}
+      {/* Mounted here, a sibling of both variants — not inside the `hidden md:flex` rail above,
+          which is `display:none` on a phone and would take the dialog down with it. */}
+      {newChatDialog}
       </>
     )
   }
@@ -323,7 +325,8 @@ export function ChatsPanel({
           <p className="px-2 py-4 text-center text-xs text-text-muted">No chats yet.</p>
         )}
       </div>
-      {/* In collapsed mode the rail block above already renders this once — avoid mounting it twice. */}
+      {/* In collapsed mode the fragment above renders this once as a sibling of both variants —
+          don't also mount it here in the `mobileOnly` copy. */}
       {!mobileOnly && newChatDialog}
     </div>
     )

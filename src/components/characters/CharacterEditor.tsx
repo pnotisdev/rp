@@ -561,7 +561,7 @@ export function CharacterEditor({
               emptyHint="No connections yet."
               renderItem={(conn) => (
                 <div className="space-y-1">
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <TextField label="Name" value={conn.name} onChange={(e) => updateSocialConnection(conn.id, { name: e.target.value })} />
                     <TextField
                       label="Relation"
@@ -785,7 +785,7 @@ export function CharacterEditor({
               emptyHint="Every chat starts from a blank slate."
               renderItem={(starter) => (
                 <div className="space-y-1">
-                  <div className="grid grid-cols-[1fr_140px] gap-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_140px]">
                     <TextField label="Label" value={starter.label} onChange={(e) => updateRelationshipStarter(starter.id, { label: e.target.value })} />
                     <NumberField
                       label="Starting warmth"
@@ -825,7 +825,7 @@ export function CharacterEditor({
             description="Nudges the world-clock line fed into the prompt when today's weather matches — never dictates the scene. A kind can be loved or hated, not both."
             surface="bare"
           >
-            <div className="grid grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6">
               <div>
                 <div className="mb-1.5 text-xs font-medium text-text-muted">Loves</div>
                 <div className="flex flex-wrap gap-1.5">
@@ -863,7 +863,7 @@ export function CharacterEditor({
               emptyHint="No schedule — always shows as available."
               renderItem={(entry) => (
                 <div className="space-y-2">
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <SelectField label="Time of day" value={entry.phase} onChange={(e) => updateScheduleEntry(entry.id, { phase: e.target.value as DayPhase })}>
                       {PHASES.map((p) => (
                         <option key={p} value={p}>
@@ -878,7 +878,7 @@ export function CharacterEditor({
                       <option value="traveling">Traveling</option>
                     </SelectField>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <TextField label="Activity" value={entry.activity} onChange={(e) => updateScheduleEntry(entry.id, { activity: e.target.value })} placeholder="Opening the bakery" />
                     <TextField
                       label="Location (optional)"

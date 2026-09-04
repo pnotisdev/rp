@@ -44,8 +44,8 @@ export function Section({
 }: SectionProps) {
   return (
     <section className={className}>
-      <div className="mb-3 flex items-center justify-between gap-4">
-        <div>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <div className="min-w-0">
           <h3 className="text-sm font-semibold text-text">{title}</h3>
           {description && <p className="mt-1 text-xs text-text-muted">{description}</p>}
         </div>
@@ -54,7 +54,7 @@ export function Section({
       {surface === 'bare' ? (
         children
       ) : (
-        <div className={`rounded-xl p-5 ${SURFACE_CLASSES[surface]} ${contentClassName}`}>{children}</div>
+        <div className={`rounded-xl p-4 sm:p-5 ${SURFACE_CLASSES[surface]} ${contentClassName}`}>{children}</div>
       )}
     </section>
   )

@@ -149,7 +149,7 @@ export function Composer({
           }
           disabled={disabled}
           rows={1}
-          className={`w-full resize-none bg-transparent px-1.5 py-1.5 text-sm outline-none ${
+          className={`w-full resize-none bg-transparent px-1.5 py-1.5 text-base outline-none sm:text-sm ${
             vn ? 'text-white placeholder:text-white/45' : 'text-text placeholder:text-text-muted'
           }`}
         />

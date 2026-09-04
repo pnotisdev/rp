@@ -29,7 +29,7 @@ const WIDTH_CLASS: Record<NonNullable<ViewShellProps['width']>, string> = {
  */
 export function ViewShell({ title, description, actions, width = 'normal', children }: ViewShellProps) {
   return (
-    <div className={`mx-auto w-full flex-1 overflow-y-auto p-6 sm:p-8 ${WIDTH_CLASS[width]}`}>
+    <div className={`mx-auto w-full flex-1 overflow-y-auto p-4 sm:p-8 ${WIDTH_CLASS[width]}`}>
       <div className="mb-6 flex items-start justify-between gap-4">
         <div className="min-w-0">
           <h2 className="font-display text-lg text-text">{title}</h2>

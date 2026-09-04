@@ -77,7 +77,8 @@ export function NewChatDialog({
   }
 
   return (
-    <Modal onClose={onClose} title="New chat" size="sm" hideHeaderClose>
+    <Modal onClose={onClose} title="New chat" size="sm" hideHeaderClose scrollable>
+      <div className="flex-1 overflow-y-auto">
         <label className="mb-1 block text-xs text-text-muted">Character</label>
         <select
           value={characterId}
@@ -87,7 +88,7 @@ export function NewChatDialog({
             setStarterId('')
             setParticipantIds((prev) => prev.filter((id) => id !== e.target.value))
           }}
-          className="mb-3 w-full rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40"
+          className="mb-3 w-full rounded-xl bg-bg-sunken px-3 py-2.5 text-base text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40 sm:py-2 sm:text-sm"
         >
           <option value="">Select a character…</option>
           {characters.map((c) => (
@@ -133,13 +134,13 @@ export function NewChatDialog({
               value={personaName}
               onChange={(e) => setPersonaName(e.target.value)}
               placeholder="Your name (optional)"
-              className="mb-2 w-full rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40"
+              className="mb-2 w-full rounded-xl bg-bg-sunken px-3 py-2.5 text-base text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40 sm:py-2 sm:text-sm"
             />
             <input
               value={personaDescription}
               onChange={(e) => setPersonaDescription(e.target.value)}
               placeholder="A line about who you are (optional)"
-              className="w-full rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40"
+              className="w-full rounded-xl bg-bg-sunken px-3 py-2.5 text-base text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40 sm:py-2 sm:text-sm"
             />
             <p className="mt-1.5 text-[11px] text-text-muted">
               {personaName.trim()
@@ -153,7 +154,7 @@ export function NewChatDialog({
             <select
               value={personaId}
               onChange={(e) => setPersonaId(e.target.value)}
-              className="mb-4 w-full rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40"
+              className="mb-4 w-full rounded-xl bg-bg-sunken px-3 py-2.5 text-base text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40 sm:py-2 sm:text-sm"
             >
               <option value="">Default (You)</option>
               {personas.map((p) => (
@@ -171,7 +172,7 @@ export function NewChatDialog({
             <select
               value={starterId}
               onChange={(e) => setStarterId(e.target.value)}
-              className="w-full rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40"
+              className="w-full rounded-xl bg-bg-sunken px-3 py-2.5 text-base text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40 sm:py-2 sm:text-sm"
             >
               <option value="">Blank slate — near strangers, 0 affection</option>
               {starters.map((s) => (
@@ -206,14 +207,15 @@ export function NewChatDialog({
           </div>
         )}
 
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button variant="primary" onClick={create} disabled={!characterId || busy}>
-            {busy ? 'Starting…' : 'Start chat'}
-          </Button>
-        </div>
+      </div>
+      <div className="mt-4 flex shrink-0 justify-end gap-2">
+        <Button variant="ghost" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button variant="primary" onClick={create} disabled={!characterId || busy}>
+          {busy ? 'Starting…' : 'Start chat'}
+        </Button>
+      </div>
     </Modal>
   )
 }

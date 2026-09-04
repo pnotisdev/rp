@@ -40,10 +40,10 @@ export function EditorShell({
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col">
       <header className="shrink-0 border-b border-border bg-bg-elevated">
-        <div className="mx-auto flex w-full max-w-3xl items-center gap-3 px-6 py-3">
+        <div className="mx-auto flex w-full max-w-3xl items-center gap-3 px-4 py-3 sm:px-6">
           <button
             onClick={onBack}
-            className="flex items-center gap-1 rounded-lg py-1 pr-2 text-sm text-text-muted transition-colors hover:text-text"
+            className="flex shrink-0 items-center gap-1 rounded-lg py-1 pr-2 text-sm text-text-muted transition-colors hover:text-text"
           >
             <ChevronLeft size={16} strokeWidth={2} />
             {backLabel}
@@ -58,8 +58,22 @@ export function EditorShell({
         </div>
 
         {tabs && tabs.length > 0 && (
-          <div className="mx-auto w-full max-w-3xl px-6">
-            <div className="flex gap-1 overflow-x-auto">
+          <div className="mx-auto w-full max-w-3xl px-4 sm:px-6">
+            {/* Mobile: a native select is a far better picker than a strip that scrolls a few
+                tabs at a time off-screen with no affordance. Desktop keeps the visible strip. */}
+            <select
+              value={activeTab}
+              onChange={(e) => onTabChange?.(e.target.value)}
+              className="mb-2 mt-1 w-full cursor-pointer rounded-xl bg-bg-sunken px-3 py-2.5 text-base text-text outline-none ring-1 ring-transparent focus:ring-accent/40 sm:hidden"
+            >
+              {tabs.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.label}
+                  {t.badge !== undefined && t.badge > 0 ? ` (${t.badge})` : ''}
+                </option>
+              ))}
+            </select>
+            <div className="hidden gap-1 overflow-x-auto sm:flex">
               {tabs.map((t) => (
                 <button
                   key={t.id}
@@ -88,12 +102,12 @@ export function EditorShell({
       </header>
 
       <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-3xl px-6 py-8">{children}</div>
+        <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6 sm:py-8">{children}</div>
       </div>
 
       {footer && (
         <div className="shrink-0 border-t border-border bg-bg-elevated">
-          <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3 px-6 py-3">{footer}</div>
+          <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3 px-4 py-3 sm:px-6">{footer}</div>
         </div>
       )}
     </div>

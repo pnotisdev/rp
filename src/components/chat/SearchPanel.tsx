@@ -66,7 +66,7 @@ export function SearchPanel({ chatId, messages, onClose, onJumpToMessage, onJump
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search for a word or phrase…"
-          className="mb-3 w-full rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40 placeholder:text-text-muted/55"
+          className="mb-3 w-full rounded-xl bg-bg-sunken px-3 py-2.5 text-base text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40 placeholder:text-text-muted/55 sm:py-2 sm:text-sm"
         />
         <div className="mb-3">
           <SegmentedControl

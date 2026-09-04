@@ -51,7 +51,7 @@ export function CharacterList({
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search characters…"
-          className="w-full max-w-xs rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40 placeholder:text-text-muted/55"
+          className="w-full max-w-xs rounded-xl bg-bg-sunken px-3 py-2.5 text-base text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40 placeholder:text-text-muted/55 sm:py-2 sm:text-sm"
         />
       </div>
 
@@ -75,7 +75,7 @@ export function CharacterList({
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-5 lg:grid-cols-4">
         {visible.map((c) => (
           <button
             key={c.id}

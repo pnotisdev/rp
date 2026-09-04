@@ -13,8 +13,12 @@ export interface ChatToolbarAction {
   disabled?: boolean
   /** Not rendered at all (e.g. an author opted a whole feature out) — distinct from `disabled`. */
   hidden?: boolean
-  /** 'primary' actions stay as icons in the bar; everything else collapses into the overflow menu. */
-  priority?: 'primary' | 'secondary'
+  /**
+   * 'primary' stays an icon in the bar at every width. 'primary-desktop' is an icon on `sm`+ but
+   * folds into the overflow menu on a phone, where bar space is scarce. Anything else (the default)
+   * is always in the overflow menu.
+   */
+  priority?: 'primary' | 'primary-desktop' | 'secondary'
 }
 
 /**
@@ -46,8 +50,12 @@ export function ChatToolbar({ tone, actions }: { tone: 'chrome' | 'glass'; actio
 
   const visible = actions.filter((a) => !a.hidden)
   const primary = visible.filter((a) => a.priority === 'primary')
-  const overflow = visible.filter((a) => a.priority !== 'primary')
-  const overflowActive = overflow.some((a) => a.active)
+  // Icon on desktop, menu row on mobile — rendered in both places, shown/hidden by breakpoint so
+  // no JS media query is needed and the two never disagree about what exists.
+  const primaryDesktop = visible.filter((a) => a.priority === 'primary-desktop')
+  const overflow = visible.filter((a) => a.priority !== 'primary' && a.priority !== 'primary-desktop')
+  const menuItems = [...primaryDesktop, ...overflow]
+  const overflowActive = menuItems.some((a) => a.active)
 
   const glass = tone === 'glass'
   const menuClass = glass
@@ -68,8 +76,20 @@ export function ChatToolbar({ tone, actions }: { tone: 'chrome' | 'glass'; actio
           onClick={a.onClick}
         />
       ))}
-      {overflow.length > 0 && (
-        <div ref={menuRef} className="relative">
+      {primaryDesktop.map((a) => (
+        <IconButton
+          key={a.key}
+          tone={tone}
+          icon={a.icon}
+          title={a.label}
+          active={a.active}
+          disabled={a.disabled}
+          onClick={a.onClick}
+          className="hidden sm:inline-flex"
+        />
+      ))}
+      {menuItems.length > 0 && (
+        <div ref={menuRef} className={`relative ${overflow.length === 0 ? 'sm:hidden' : ''}`}>
           <IconButton
             tone={tone}
             icon={MoreHorizontal}
@@ -81,7 +101,7 @@ export function ChatToolbar({ tone, actions }: { tone: 'chrome' | 'glass'; actio
             <div
               className={`absolute right-0 top-full z-50 mt-1.5 min-w-[15rem] overflow-hidden rounded-xl border py-1 ${menuClass}`}
             >
-              {overflow.map((a) => (
+              {menuItems.map((a) => (
                 <button
                   key={a.key}
                   onClick={() => {
@@ -89,7 +109,9 @@ export function ChatToolbar({ tone, actions }: { tone: 'chrome' | 'glass'; actio
                     a.onClick()
                   }}
                   disabled={a.disabled}
-                  className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors disabled:opacity-40 ${itemHover}`}
+                  className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors disabled:opacity-40 ${itemHover} ${
+                    a.priority === 'primary-desktop' ? 'sm:hidden' : ''
+                  }`}
                 >
                   <a.icon
                     size={15}

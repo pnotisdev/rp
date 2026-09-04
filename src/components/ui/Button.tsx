@@ -14,7 +14,8 @@ export const Button = forwardRef<HTMLButtonElement, ButtonHTMLAttributes<HTMLBut
     return (
       <button
         ref={ref}
-        className={`rounded-xl px-3.5 py-1.5 text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${variantClasses[variant]} ${className}`}
+        // `py-2.5 sm:py-1.5`: a ~40px tap target on touch screens, back to the denser 32px on desktop.
+        className={`rounded-xl px-3.5 py-2.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 sm:py-1.5 ${variantClasses[variant]} ${className}`}
         {...props}
       />
     )

@@ -182,62 +182,64 @@ export function VNStage({
       />
       {showPetals && <SakuraPetals />}
 
-      {/* The toolbar is now just a few primary icons plus a "•••" overflow, so it fits any phone
-          width as one static row — no more horizontal-scroll clipping (which also clipped the
-          overflow dropdown, since a non-visible overflow-x forces overflow-y to auto too). */}
-      <div className="absolute right-4 top-4 z-20 flex h-9 items-center gap-1 rounded-full bg-black/40 pl-1 pr-1 backdrop-blur-sm">
-        {onBack && (
-          <>
-            <button
-              onClick={onBack}
-              title="Back to chats"
-              aria-label="Back to chats"
-              className="flex h-7 w-7 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/15 hover:text-white md:hidden"
-            >
-              <ArrowLeft size={15} strokeWidth={2} />
-            </button>
-            <span className="h-4 w-px bg-white/15 md:hidden" />
-          </>
-        )}
-        {topBarExtra}
-        <span className="h-4 w-px bg-white/15" />
-        <button
-          onClick={() => setShowLog((v) => !v)}
-          title={showLog ? 'Close log' : 'Open log'}
-          aria-label={showLog ? 'Close log' : 'Open log'}
-          className="flex h-7 items-center gap-1.5 rounded-full pl-2 pr-3 text-xs text-white/85 transition-colors hover:bg-white/15 hover:text-white"
-        >
-          {showLog ? <X size={14} strokeWidth={2} /> : <History size={14} strokeWidth={2} />}
-          {showLog ? 'Close' : 'Log'}
-        </button>
-      </div>
-
-      {/* One cohesive HUD card — persona, bond, and the active event as internal sections
-          divided by hairlines, rather than three separate chiclets stacked with gaps. */}
-      <div className="absolute left-4 top-4 z-20 max-w-[65%] overflow-hidden rounded-xl bg-black/40 text-white backdrop-blur-sm">
-        {(personaName || parentChatLink) && (
-          <div className="flex items-center gap-2 px-3 pb-1.5 pt-2 text-[11px] text-white/70">
-            {personaName && <span className="truncate">as {personaName}</span>}
-            {parentChatLink}
+      {/* HUD card and toolbar share one flex row rather than two independent `absolute` overlays —
+          on a phone the two used to collide (the Bond card painting over the back button and the
+          first toolbar icons). The card takes the slack and truncates; the toolbar never shrinks. */}
+      <div className="absolute inset-x-4 top-4 z-20 flex items-start justify-between gap-3">
+        {/* One cohesive HUD card — persona, bond, and the active event as internal sections
+            divided by hairlines, rather than three separate chiclets stacked with gaps. */}
+        <div className="min-w-0 overflow-hidden rounded-xl bg-black/40 text-white backdrop-blur-sm sm:max-w-[65%]">
+          {(personaName || parentChatLink) && (
+            <div className="flex items-center gap-2 px-3 pb-1.5 pt-2 text-[11px] text-white/70">
+              {personaName && <span className="truncate">as {personaName}</span>}
+              {parentChatLink}
+            </div>
+          )}
+          <div className={`px-3 py-2 text-xs ${personaName || parentChatLink ? 'border-t border-white/10' : ''}`}>
+            <div className="mb-1 flex min-w-0 items-center gap-1.5">
+              <Heart size={11} strokeWidth={2.25} className="shrink-0 text-romance" fill="currentColor" fillOpacity={0.4} />
+              <span className="shrink-0 uppercase tracking-wide text-white/70">Bond</span>
+              <span className="truncate font-semibold capitalize text-romance">{formatRelationshipStage(relationshipStage)}</span>
+              <span className="shrink-0 text-white/90">{warmth}</span>
+            </div>
+            <div className="h-1.5 w-28 max-w-full overflow-hidden rounded-full bg-white/20">
+              <div className="h-full rounded-full bg-romance transition-[width] duration-500" style={{ width: `${warmth}%` }} />
+            </div>
           </div>
-        )}
-        <div className={`px-3 py-2 text-xs ${personaName || parentChatLink ? 'border-t border-white/10' : ''}`}>
-          <div className="mb-1 flex items-center gap-1.5">
-            <Heart size={11} strokeWidth={2.25} className="text-romance" fill="currentColor" fillOpacity={0.4} />
-            <span className="uppercase tracking-wide text-white/70">Bond</span>
-            <span className="font-semibold capitalize text-romance">{formatRelationshipStage(relationshipStage)}</span>
-            <span className="text-white/90">{warmth}</span>
-          </div>
-          <div className="h-1.5 w-28 overflow-hidden rounded-full bg-white/20">
-            <div className="h-full rounded-full bg-romance transition-[width] duration-500" style={{ width: `${warmth}%` }} />
-          </div>
+          {chat.activeEvent?.title && (
+            <div className="flex items-center gap-1.5 truncate border-t border-white/10 px-3 py-1.5 text-xs">
+              <span className="shrink-0 uppercase tracking-wide text-white/60">Event</span>
+              <span className="truncate text-white/90">{chat.activeEvent.title}</span>
+            </div>
+          )}
         </div>
-        {chat.activeEvent?.title && (
-          <div className="flex items-center gap-1.5 truncate border-t border-white/10 px-3 py-1.5 text-xs">
-            <span className="uppercase tracking-wide text-white/60">Event</span>
-            <span className="truncate text-white/90">{chat.activeEvent.title}</span>
-          </div>
-        )}
+
+        <div className="flex h-9 shrink-0 items-center gap-1 rounded-full bg-black/40 px-1 backdrop-blur-sm">
+          {onBack && (
+            <>
+              <button
+                onClick={onBack}
+                title="Back to chats"
+                aria-label="Back to chats"
+                className="flex h-7 w-7 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/15 hover:text-white md:hidden"
+              >
+                <ArrowLeft size={15} strokeWidth={2} />
+              </button>
+              <span className="h-4 w-px bg-white/15 md:hidden" />
+            </>
+          )}
+          {topBarExtra}
+          <span className="h-4 w-px bg-white/15" />
+          <button
+            onClick={() => setShowLog((v) => !v)}
+            title={showLog ? 'Close log' : 'Open log'}
+            aria-label={showLog ? 'Close log' : 'Open log'}
+            className="flex h-7 items-center gap-1.5 rounded-full px-2 text-xs text-white/85 transition-colors hover:bg-white/15 hover:text-white sm:pr-3"
+          >
+            {showLog ? <X size={14} strokeWidth={2} /> : <History size={14} strokeWidth={2} />}
+            <span className="hidden sm:inline">{showLog ? 'Close' : 'Log'}</span>
+          </button>
+        </div>
       </div>
 
       {showLog ? (
