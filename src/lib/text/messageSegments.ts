@@ -11,8 +11,39 @@ export interface SfxConfig {
 }
 
 // Non-newline so a stray asterisk/quote used mid-sentence (or not yet closed while streaming)
-// doesn't swallow the rest of the message looking for a distant closing mark.
-const SEGMENT_RE = /(\*[^*\n]+\*|"[^"\n]+")/g
+// doesn't swallow the rest of the message looking for a distant closing mark. `\*{1,3}` on each
+// side so `**bold**` and `***both***` narration read the same as plain `*action*` rather than
+// leaving stray asterisks around an italic run — models drift between `*`, `**`, and `<i>` for the
+// exact same purpose, and a player typing `**word**` expects it to just work.
+const SEGMENT_RE = /(\*{1,3}[^*\n]+\*{1,3}|"[^"\n]+")/g
+
+/**
+ * Normalise the two ways RP text drifts from this app's one convention (`*action*` / `"speech"`):
+ *
+ *  - **HTML** — models (RP finetunes especially) format actions with `<i>…</i>` / `<b>…</b>`, and a
+ *    confused one emits broken salad (`<b><i><i></b>`). Well-formed pairs become asterisks; block
+ *    tags and stray tags are stripped; a bare `<` in prose ("x < y") is left alone.
+ *  - **`**` / `***`** — the same drift with markdown weight. The app renders `*x*` and `**x**`
+ *    identically (`<em>`), so a `**`/`***` run collapses to a single `*`.
+ *
+ * Shared by `cleanModelOutput` (scrubs stored text + prompt history), `sendUserMessage` (the
+ * player's own typed line), and `splitMessageSegments` (a render-time safety net for old messages
+ * and the mid-stream preview). Idempotent.
+ */
+export function normalizeRpMarkup(text: string): string {
+  let out = text
+  if (out.includes('<')) {
+    out = out
+      .replace(/<(i|em)\b[^>]*>([\s\S]*?)<\/\1>/gi, '*$2*')
+      .replace(/<(b|strong)\b[^>]*>([\s\S]*?)<\/\1>/gi, '**$2**')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/?[a-z][a-z0-9]*\b[^>]*>/gi, '')
+  }
+  return out
+    .replace(/\*\*\s*\*\*/g, '') // `****` / `** **` from stripped-tag salad
+    .replace(/\*{2,}([^*\n]+?)\*{2,}/g, '*$1*') // `**bold**` / `***both***` action runs
+    .replace(/\*{2,}/g, '*') // any lone `**` straggler
+}
 
 /**
  * Curated comic/manga onomatopoeia. Deliberately tight: only words that read purely as a *sound*,
@@ -137,18 +168,21 @@ function coalesce(segments: MessageSegment[]): MessageSegment[] {
  * from the onomatopoeia list — built-ins plus any `sfx.extraWords` — becomes an `sfx` segment.
  */
 export function splitMessageSegments(text: string, sfx?: SfxConfig): MessageSegment[] {
+  const normalized = normalizeRpMarkup(text)
   const base: MessageSegment[] = []
   let cursor = 0
-  for (const match of text.matchAll(SEGMENT_RE)) {
+  for (const match of normalized.matchAll(SEGMENT_RE)) {
     const index = match.index
-    if (index > cursor) base.push({ type: 'text', content: text.slice(cursor, index) })
+    if (index > cursor) base.push({ type: 'text', content: normalized.slice(cursor, index) })
     const matched = match[0]
     base.push(
-      matched.startsWith('*') ? { type: 'action', content: matched.slice(1, -1) } : { type: 'quote', content: matched },
+      matched.startsWith('*')
+        ? { type: 'action', content: matched.replace(/^\*+/, '').replace(/\*+$/, '') }
+        : { type: 'quote', content: matched },
     )
     cursor = index + matched.length
   }
-  if (cursor < text.length) base.push({ type: 'text', content: text.slice(cursor) })
+  if (cursor < normalized.length) base.push({ type: 'text', content: normalized.slice(cursor) })
 
   if (sfx?.disabled) return coalesce(base)
   const wordSet = sfxWordSet(sfx?.extraWords)

@@ -48,11 +48,13 @@ import { buildRelationshipDescription } from '@/lib/dating/relationshipDescripti
 import { resolveInstructTemplate } from '@/lib/prompt/instructTemplates'
 import { extractSceneTag, stripSceneTagForDisplay, type SceneTag } from '@/lib/vn/sceneTag'
 import { buildSlopAvoidanceNote, cleanModelOutput, trimToLastSentence } from '@/lib/text/slop'
+import { normalizeRpMarkup } from '@/lib/text/messageSegments'
 import { replyMaxTokens, resolveReplyLength } from '@/lib/characters/voice'
 import { SCENE_MOOD_IDS } from '@/lib/vn/moods'
 import { DEFAULT_EXPRESSION_IDS, DEFAULT_EXPRESSIONS } from '@/lib/vn/expressions'
 import { DEFAULT_BACKGROUND_IDS } from '@/lib/vn/backgrounds'
 import { classifyAttachedImageScene, detectExpressionFromSprites, shortlistExpressions } from '@/lib/vn/sceneVision'
+import { assessRapport } from '@/lib/dating/rapport'
 import { bookAppliesToChat } from '@/lib/worldinfo/scope'
 import { buildFactsLorebook } from '@/lib/worldinfo/facts'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
@@ -380,7 +382,7 @@ export function useChatSession(chatId: string | null) {
       )
   }, [])
   // Fixed order so the strip doesn't reshuffle as tasks finish at different times.
-  const assistActivity = ['relationship', 'choices', 'tasks', 'summary', 'vision']
+  const assistActivity = ['relationship', 'rapport', 'choices', 'tasks', 'summary', 'vision']
     .map((k) => assistTasks[k])
     .filter((label): label is string => !!label)
 
@@ -1366,6 +1368,27 @@ export function useChatSession(chatId: string | null) {
             updateAffectionFromReply(chat.id, relationshipHistory, combined, latestIntent),
           )
         }
+        // 10b live rapport: during a live date, no stat scoring runs, so instead read how the scene
+        // is trending and show that qualitatively. Cheap, stateless — never touches affection/stats.
+        if (inLiveDate && isPrimarySpeaker) {
+          const startedAt = chat.activeEvent?.startedAt ?? 0
+          const rapportTail = [
+            ...messages
+              .filter((m) => m.createdAt >= startedAt && m.text.trim())
+              .slice(-7)
+              .map((m) => ({ id: m.id, role: m.role, name: m.name, text: m.text })),
+            { id: targetMessageId, role: 'char' as const, name: speaker.card.name, text: combined },
+          ]
+          runAssist('rapport', 'Reading the room', async () => {
+            const read = await assessRapport(client, {
+              transcript: rapportTail,
+              charName: character.card.name,
+              userName: persona?.name || 'You',
+              charPersonality: character.card.personality,
+            })
+            if (read) await chatsApi.update(chat.id, { rapport: { ...read, updatedAt: Date.now() } })
+          })
+        }
         if (effectiveAssistFlag(chat.assistOverrides?.autoSuggestChoices, autoSuggestChoices) && isPrimarySpeaker) {
           runAssist('choices', 'Suggesting replies', () => suggestChoicesForMessage(targetMessageId, relationshipHistory))
         }
@@ -1452,7 +1475,10 @@ export function useChatSession(chatId: string | null) {
           text = `*I give ${character?.card.name ?? 'you'} ${gift.name}.* ${text}`
         }
       }
-      const composedText = composeMessageText(text, attachments).trim()
+      // Normalise the player's own markup the same way the model's is on store: `<i>` and `**` both
+      // become `*action*`, so stored text, prompt history, and display all agree. Only the typed
+      // line, never `composeMessageText`'s appended file contents.
+      const composedText = composeMessageText(normalizeRpMarkup(text), attachments).trim()
       const apiImages = collectImageBase64(attachments)
       if (!composedText && apiImages.length === 0) return
       if (!reducedAudio) playSendBlip()
@@ -1711,7 +1737,8 @@ export function useChatSession(chatId: string | null) {
       // which never read it — but for a `kind: 'date'` card its presence is what marks this as a
       // live, scored date (10b) rather than the original lightweight event-card flow, and its
       // value is the cutoff `endDateEvent` uses to gather this date's own transcript.
-      await chatsApi.update(chatId, { activeEvent: { ...event, startedAt: Date.now() } })
+      // Clear any rapport read left over from a previous date so the indicator starts blank.
+      await chatsApi.update(chatId, { activeEvent: { ...event, startedAt: Date.now() }, rapport: null })
     },
     [chatId, createObjective, world],
   )
@@ -1731,8 +1758,9 @@ export function useChatSession(chatId: string | null) {
     const startedAt = event.startedAt
 
     const closeOutEvent = async () => {
-      // `null`, not `undefined` — see the note on the other clearing call site above.
-      await chatsApi.update(chatId, { activeEvent: null })
+      // `null`, not `undefined` — see the note on the other clearing call site above. Rapport is
+      // scene-scoped, so it clears with the date it belonged to.
+      await chatsApi.update(chatId, { activeEvent: null, rapport: null })
       if (activeObjective) await objectivesApi.update(activeObjective.id, { status: 'completed' })
     }
 

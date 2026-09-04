@@ -444,8 +444,9 @@ app.post('/api/chats/:id/fork', (req, res) => {
   const newChatId = newId()
   // `worldInfoState` is transient per-turn sticky/cooldown bookkeeping whose values are absolute
   // turn numbers from the source chat — meaningless in a branch that may start from a much earlier
-  // point, so the fork begins with a clean slate rather than inheriting stale timers.
-  const { id: _id, createdAt: _ca, updatedAt: _ua, title, worldInfoState: _wis, ...rest } = source
+  // point, so the fork begins with a clean slate rather than inheriting stale timers. `rapport` is
+  // a live-date scene read; a fork branches out of that scene, so it starts without one too.
+  const { id: _id, createdAt: _ca, updatedAt: _ua, title, worldInfoState: _wis, rapport: _rap, ...rest } = source
   const forkedChat = chatStore.insert({
     ...rest,
     id: newChatId,

@@ -43,6 +43,40 @@ describe('splitMessageSegments', () => {
     expect(splitMessageSegments('')).toEqual([])
   })
 
+  describe('markup normalisation (models and players drift between *, **, and <i>)', () => {
+    it('treats **bold** narration as an action, with no stray asterisks left over', () => {
+      expect(splitMessageSegments('**She narrows her eyes.** "Fine."')).toEqual([
+        { type: 'action', content: 'She narrows her eyes.' },
+        { type: 'text', content: ' ' },
+        { type: 'quote', content: '"Fine."' },
+      ])
+    })
+
+    it('treats ***both*** the same way', () => {
+      expect(splitMessageSegments('***she whispers***')).toEqual([{ type: 'action', content: 'she whispers' }])
+    })
+
+    it('converts <i>/<em> action tags to action segments', () => {
+      expect(splitMessageSegments('<i>She looks away.</i> "Whatever."')).toEqual([
+        { type: 'action', content: 'She looks away.' },
+        { type: 'text', content: ' ' },
+        { type: 'quote', content: '"Whatever."' },
+      ])
+    })
+
+    it('converts <b> action tags and strips block/salad tags', () => {
+      expect(splitMessageSegments('<b>She freezes.</b>')).toEqual([{ type: 'action', content: 'She freezes.' }])
+      expect(splitMessageSegments('"Who?" <b><i><i></b> she asks.')).toEqual([
+        { type: 'quote', content: '"Who?"' },
+        { type: 'text', content: '  she asks.' },
+      ])
+    })
+
+    it('leaves a bare less-than in prose alone', () => {
+      expect(splitMessageSegments('if x < y then run')).toEqual([{ type: 'text', content: 'if x < y then run' }])
+    })
+  })
+
   describe('sfx bursts', () => {
     it('tags a lone onomatopoeia with trailing punctuation', () => {
       expect(splitMessageSegments('BOOM!')).toEqual([{ type: 'sfx', content: 'BOOM!' }])

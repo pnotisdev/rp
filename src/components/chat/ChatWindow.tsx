@@ -36,6 +36,7 @@ import { VNStage } from './VNStage'
 import { ChoiceList } from './ChoiceList'
 import { QuickReplyBar } from './QuickReplyBar'
 import { IntentChips } from './IntentChips'
+import { LiveRapport } from './LiveRapport'
 import type { MessageIntent } from '@/lib/dating/intent'
 import { GenerationHud } from './GenerationHud'
 import { Composer } from './Composer'
@@ -352,6 +353,15 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
   // intent. Lives inside the composer card (as its `intentSlot`), never as a separate bar.
   const relationshipTrackingActive = chat?.assistOverrides?.autoTrackRelationship ?? autoTrackRelationship
   const showIntentChips = relationshipTrackingActive && !isGenerating && !!character
+  const liveDateActive = chat?.activeEvent?.kind === 'date' && !!chat.activeEvent.startedAt
+  // During a live date the tension stat is frozen (scoring is end-of-scene only), so surface the
+  // Reassure/Apologize intents off the live rapport read instead — those repair beats are exactly
+  // what a scene reading "pulling back" or "on edge" calls for.
+  const intentStats = (() => {
+    const base = getRelationshipStats({ relationshipStats: chat?.relationshipStats })
+    const strained = liveDateActive && (chat?.rapport?.trajectory === 'pulling_back' || chat?.rapport?.trajectory === 'on_edge')
+    return strained ? { ...base, tension: Math.max(base.tension, 15) } : base
+  })()
 
   const sendWithIntent = (text: string, attachments: Parameters<typeof sendUserMessage>[1] = []) => {
     sendUserMessage(text, attachments, armedIntent ? { intent: armedIntent } : undefined)
@@ -377,12 +387,7 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
       onChangeReplyAs={(id) => setReplyAsCharacterId(id === character?.id ? null : id)}
       intentSlot={
         showIntentChips ? (
-          <IntentChips
-            variant={variant}
-            stats={chat ? getRelationshipStats(chat) : {}}
-            armed={armedIntent}
-            onArm={setArmedIntent}
-          />
+          <IntentChips variant={variant} stats={intentStats} armed={armedIntent} onArm={setArmedIntent} />
         ) : undefined
       }
     />
@@ -421,16 +426,25 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
                 )}
               </div>
               <div className="mt-1 flex min-w-0 items-center gap-2 text-[11px] uppercase tracking-wide text-text-muted">
-                <div className="h-1.5 w-24 shrink-0 overflow-hidden rounded-full bg-bg-sunken">
-                  <div
-                    className="h-full rounded-full bg-romance transition-[width] duration-500"
-                    style={{ width: `${warmth}%` }}
-                  />
-                </div>
-                {/* Stage label truncates first on a narrow header; the warmth number never does —
-                    it's the piece that actually changes turn to turn. */}
-                <span className="truncate">{formatRelationshipStage(relationshipStage)}</span>
-                <span className="shrink-0 tabular-nums text-text">{warmth}</span>
+                {liveDateActive && chat.rapport ? (
+                  // During a live date the warmth number is frozen (scoring happens once, at the
+                  // end), so it would only mislead — show the qualitative read of how the scene is
+                  // going instead.
+                  <LiveRapport read={chat.rapport} />
+                ) : (
+                  <>
+                    <div className="h-1.5 w-24 shrink-0 overflow-hidden rounded-full bg-bg-sunken">
+                      <div
+                        className="h-full rounded-full bg-romance transition-[width] duration-500"
+                        style={{ width: `${warmth}%` }}
+                      />
+                    </div>
+                    {/* Stage label truncates first on a narrow header; the warmth number never does —
+                        it's the piece that actually changes turn to turn. */}
+                    <span className="truncate">{formatRelationshipStage(relationshipStage)}</span>
+                    <span className="shrink-0 tabular-nums text-text">{warmth}</span>
+                  </>
+                )}
               </div>
             </div>
           </div>

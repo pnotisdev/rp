@@ -318,6 +318,23 @@ select:focus-visible,
   color: rgb(255 255 255 / 100%);
   font-weight: 600;
 }
+
+/* A user-turn bubble (bubbles chat style, and VN's inline "last message" bubble) fills with the
+   saturated `--c-msg-user`/accent colour, not one of the neutral bg-elevated/bg-sunken surfaces
+   `.prose-rp em`/`.rp-quote`'s default colours (`--c-text-muted`, `--c-text`) were tuned against —
+   on an accent fill those read as low-contrast, barely-legible text (reported live: "I can barely
+   see what I wrote"). Both surfaces already set their base text to `--c-accent-text`, the colour
+   actually authored to contrast with that fill, so shade *that* instead of switching families. */
+.rp-bubble-user em,
+.vn-user-bubble em {
+  color: rgb(var(--c-accent-text) / 72%);
+  font-style: italic;
+}
+.rp-bubble-user .rp-quote,
+.vn-user-bubble .rp-quote {
+  color: rgb(var(--c-accent-text));
+  font-weight: 600;
+}
 /* In the cinematic VN dialogue box a burst gets more theatre: a glow and a quick pop-in as the
    line streams. Chat mode deliberately stays static — it's a scroll-back log, not a scene. */
 .vn-dialogue .rp-sfx {

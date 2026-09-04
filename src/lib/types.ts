@@ -270,6 +270,17 @@ export interface StoredMessage extends ChatMessage {
 /** 10b: how a player meant a tagged line, distinct from what it literally says. Specs (labels, how the judge reads each) live in `src/lib/dating/intent.ts`. */
 export type MessageIntent = 'flirt' | 'tease' | 'open_up' | 'reassure' | 'apologize'
 
+/** 10b's live rapport trajectory — how a date scene is trending. Labels/tone live in `src/lib/dating/rapport.ts`. */
+export type RapportTrajectory = 'lighting_up' | 'warming' | 'at_ease' | 'pulling_back' | 'on_edge'
+
+export interface RapportRead {
+  trajectory: RapportTrajectory
+  /** A short in-world observation from the judge, e.g. "keeps finding reasons to lean in". */
+  note?: string
+  /** When this read was taken, so a stale one from a finished date can be ignored. */
+  updatedAt: number
+}
+
 export interface Chat {
   id: string
   /** The primary character — relationship stats/gifts/gallery/VN sprites stay keyed on this one even when `participants` is set. */
@@ -302,6 +313,8 @@ export interface Chat {
   itemInventory?: Record<string, number>
   unlockedGalleryIds?: string[]
   activeEvent?: DateEventCard
+  /** 10b's live rapport read — how the scene is trending, refreshed each turn *only* while a live date is active, cleared when it ends. Qualitative only; never affects affection or the tracked dimensions. See `src/lib/dating/rapport.ts`. */
+  rapport?: RapportRead
   /** Running long-term memory log covering everything older than summaryUpToTimestamp. */
   summary?: string
   /** Messages with createdAt <= this are represented by `summary`, not sent verbatim. */

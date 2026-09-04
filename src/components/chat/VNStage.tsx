@@ -14,6 +14,7 @@ import {
 } from '@/lib/dating/stage'
 import { MessageLog } from './MessageLog'
 import { SakuraPetals } from './SakuraPetals'
+import { LiveRapport } from './LiveRapport'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import { parseSfxWordList } from '@/lib/text/messageSegments'
 import { sfxConfigFor } from '@/lib/text/sfx'
@@ -151,6 +152,7 @@ export function VNStage({
   const affection = Math.max(0, Math.min(100, chat.affection ?? 0))
   const warmth = computeWarmth(affection, getRelationshipStats(chat))
   const relationshipStage = relationshipStageForWarmth(warmth, relationshipMilestonesFor(world?.relationshipThresholds))
+  const liveDateActive = chat.activeEvent?.kind === 'date' && !!chat.activeEvent.startedAt
   const expression = scene?.expression || 'neutral'
   const spriteUnlocked = affection >= Number(character?.spriteUnlocks?.[expression] ?? 0)
   const spriteUrl = spriteUnlocked
@@ -220,8 +222,13 @@ export function VNStage({
           </div>
           {chat.activeEvent?.title && (
             <div className="flex items-center gap-1.5 truncate border-t border-white/10 px-3 py-1.5 text-xs">
-              <span className="shrink-0 uppercase tracking-wide text-white/60">Event</span>
+              <span className="shrink-0 uppercase tracking-wide text-white/60">{liveDateActive ? 'Date' : 'Event'}</span>
               <span className="truncate text-white/90">{chat.activeEvent.title}</span>
+            </div>
+          )}
+          {liveDateActive && chat.rapport && (
+            <div className="border-t border-white/10 px-3 py-1.5 text-xs">
+              <LiveRapport read={chat.rapport} variant="vn" />
             </div>
           )}
         </div>
@@ -295,8 +302,8 @@ export function VNStage({
 
           {lastUserMsg && (
             <div className="relative z-10 mx-4 mb-2 flex justify-end sm:mx-6">
-              <div className="themed-shadow max-w-[80%] rounded-2xl bg-msg-user px-3.5 py-2 text-sm text-accent-text">
-                {lastUserMsg.text}
+              <div className="vn-user-bubble prose-rp themed-shadow max-w-[80%] whitespace-pre-wrap rounded-2xl bg-msg-user px-3.5 py-2 text-sm text-accent-text">
+                {renderMessageText(lastUserMsg.text, regexScripts)}
               </div>
             </div>
           )}

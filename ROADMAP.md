@@ -1068,11 +1068,44 @@ below:**
       hover (design brief: reserve hard borders); VN mode's swipe/regen/fork/pin controls now
       recede to 30% opacity at rest and return on hover, so a settled scene reads as the art and
       the dialogue rather than a control strip.
-- [ ] **Live feedback during the scene**: a rapport-trajectory indicator ("warming to you," "a
-      bit awkward," "losing interest") and a reactive portrait whose expression shifts in real
-      time, so the player can read the scene without seeing raw numbers. The portrait piece
-      builds on the existing sprite/expression system (section 1's sprite-layering gap and
-      section 8's vision-expression-detection gap are both directly relevant groundwork).
+- [x] **Live rapport indicator** (#110) — `src/lib/dating/rapport.ts`: while a live date runs, a
+      cheap stateless judge (`assessRapport`, ~90 tokens) reads the last few turns and returns one
+      of five trajectory labels (`lighting_up` / `warming` / `at_ease` / `pulling_back` /
+      `on_edge`) plus a short in-world note. It **never** touches affection or the dimensions — it's
+      the qualitative counterpart to end-of-date scoring, so the player can feel the scene trending
+      without a number moving or the outcome being spoiled. Stored on `Chat.rapport`
+      (`{trajectory, note, updatedAt}`), refreshed each turn only during a live date, cleared when
+      the date starts and ends, stripped on fork. `LiveRapport` shows it as a trend-coloured dot +
+      phrase — in the default header it *replaces* the frozen warmth bar/number (which can't move
+      during a date), in the VN Bond HUD it's a new line; the judge's note is the tooltip. Also
+      ties into #108: while rapport reads `pulling_back`/`on_edge`, the Reassure/Apologize intent
+      chips surface even though the tension *stat* is frozen. 8 new tests (407 total). Verified
+      live on Gemma across a full arc: a warm opener read `warming` ("her lecture is losing its
+      bite"); a phone-checking brush-off dropped it to `on_edge` ("the mask has slipped") and
+      surfaced the repair chips; a tagged sincere apology + real interest recovered it to `warming`
+      ("she is letting him stay") — with `affection` sitting at 0 throughout.
+      **Still open here:** the "reactive portrait" half — in VN mode the sprite already shifts per
+      reply via scene tags / §8 vision, so it's partly covered; a portrait in the *default* (non-VN)
+      layout during a date is not built.
+- [x] **Bugfix: `**bold**`/`<i>` action text rendered wrong (worst in VN)** (#111) — user report:
+      the model (and the player, typing) drift between `*action*`, `**action**`, and `<i>action</i>`
+      for the identical thing, and the app only ever handled the first. `**x**` partially matched
+      the old single-asterisk segment regex, leaving stray `*` characters either side of an italic
+      run; `<i>`/`<b>` displayed as raw literal tags. Worst in VN mode specifically because its
+      inline "last user message" bubble skipped `renderMessageText` entirely and printed
+      `message.text` raw. Fix: `normalizeRpMarkup()` (`messageSegments.ts`, folding in #106's
+      `stripHtmlFormatting`) is now the one shared normaliser — HTML pairs and any `**`/`***` run
+      collapse to a single `*action*` — called from three places so store, prompt-history, and
+      display can never disagree: `cleanModelOutput` (the model's own text), `sendUserMessage` (the
+      player's typed line, not the file contents `composeMessageText` appends), and
+      `splitMessageSegments` itself (a render-time safety net for old messages and the mid-stream
+      preview, which the first two never touch). `SEGMENT_RE` also widened to `\*{1,3}` so a
+      not-yet-normalised `**`/`***` run still renders correctly rather than needing the pre-pass to
+      be perfect. Fixed the VN user-bubble bypass to route through `renderMessageText` like every
+      other message surface. 13 new tests (413 total). Verified live: a message typed with
+      `**bold**` and `<i>italic</i>` mixed renders as clean italic action text with no stray
+      asterisks or literal tags, in both chat styles and VN mode; the stored/prompt-history copy is
+      the normalised `*single-asterisk*` form in all cases.
 - [ ] **Real stakes**: each character has a hidden per-date agenda (what they secretly want from
       the evening); reading it well is rewarded. Hostility or crude propositions can make them
       walk out; a vibe that craters gets a quiet early exit instead of the scene grinding on.

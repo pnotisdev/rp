@@ -44,9 +44,14 @@ describe('cleanModelOutput — meta/preamble removal', () => {
     expect(cleanModelOutput('"Whatever," she mutters. *')).toBe('"Whatever," she mutters.')
   })
 
-  it('converts well-formed <i>/<b> action formatting to markdown', () => {
+  it('converts <i>/<b> action formatting to a single-asterisk action', () => {
     expect(cleanModelOutput('<i>She looks up.</i> "What?"')).toBe('*She looks up.* "What?"')
-    expect(cleanModelOutput('<b>No.</b>')).toBe('**No.**')
+    expect(cleanModelOutput('<b>No.</b>')).toBe('*No.*')
+  })
+
+  it('collapses **bold** / ***both*** action runs to a single asterisk', () => {
+    expect(cleanModelOutput('**She narrows her eyes.** "Fine."')).toBe('*She narrows her eyes.* "Fine."')
+    expect(cleanModelOutput('***she whispers***')).toBe('*she whispers*')
   })
 
   it('strips stray tags and broken tag salad', () => {
