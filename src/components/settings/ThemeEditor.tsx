@@ -104,6 +104,7 @@ export function ThemeEditor() {
   const tagsAsFolders = useSettingsStore((s) => s.tagsAsFolders)
   const clickToEdit = useSettingsStore((s) => s.clickToEdit)
   const visualNovelMode = useSettingsStore((s) => s.visualNovelMode)
+  const visionSceneDetection = useSettingsStore((s) => s.visionSceneDetection)
   const toggleFlag = useSettingsStore((s) => s.toggleFlag)
 
   const customCss = useSettingsStore((s) => s.customCss)
@@ -373,6 +374,12 @@ export function ThemeEditor() {
           onChange={() => toggleFlag('visualNovelMode')}
           label="Visual Novel mode"
           description="Full-bleed scene art with a docked dialogue box, in place of the ordinary scrolling chat log"
+        />
+        <Toggle
+          checked={visionSceneDetection}
+          onChange={() => toggleFlag('visionSceneDetection')}
+          label="Vision scene detection"
+          description="After each reply, a vision-capable model looks at the character's actual expression sprites (and any photo you attached) to correct the expression, background and mood. Needs a loaded mmproj and adds a slow image pass per turn — leave off if your model has no vision support."
         />
       </Section>
 

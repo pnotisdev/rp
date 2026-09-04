@@ -4,6 +4,7 @@ import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { charactersApi, instructTemplatesApi, worldsApi } from '@/lib/api/client'
 import type { Character, GalleryEntry, OutreachFrequency, RelationshipStarter, SocialConnection } from '@/lib/characters/cardSpec'
 import { blankCharacterData } from '@/lib/characters/cardSpec'
+import { REPLY_LENGTH_HINTS, REPLY_LENGTH_LABELS, deriveCardReplyBand, type ReplyLength } from '@/lib/characters/voice'
 import { downloadJson, downloadPng, fileToDataUrl, importCharacterFile } from '@/lib/characters/importExport'
 import { buildCharacterPack, downloadCharacterPack, importCharacterPack, parseCharacterPackFile } from '@/lib/characters/pack'
 import { DEFAULT_EXPRESSIONS, slugifyExpressionId, type CustomExpression } from '@/lib/vn/expressions'
@@ -78,6 +79,7 @@ export function CharacterEditor({
   const [voiceId, setVoiceId] = useState(character?.voice?.voiceId ?? '')
   const [sfxWords, setSfxWords] = useState<string[]>(character?.sfxWords ?? [])
   const [instructTemplateId, setInstructTemplateId] = useState(character?.instructTemplateId ?? '')
+  const [replyLength, setReplyLength] = useState<ReplyLength>(character?.replyLength ?? 'auto')
   const [worldId, setWorldId] = useState(character?.worldId ?? '')
   const [occupation, setOccupation] = useState(character?.occupation ?? '')
   const [workplace, setWorkplace] = useState(character?.workplace ?? '')
@@ -113,6 +115,7 @@ export function CharacterEditor({
     setVoiceId(character?.voice?.voiceId ?? '')
     setSfxWords(character?.sfxWords ?? [])
     setInstructTemplateId(character?.instructTemplateId ?? '')
+    setReplyLength(character?.replyLength ?? 'auto')
     setWeatherLoves(character?.weatherPreferences?.loves ?? [])
     setWeatherHates(character?.weatherPreferences?.hates ?? [])
     setSchedule(character?.schedule ?? [])
@@ -184,6 +187,7 @@ export function CharacterEditor({
       voice,
       sfxWords: sfxWords.length ? sfxWords : null,
       instructTemplateId: instructTemplateId || null,
+      replyLength: replyLength !== 'auto' ? replyLength : null,
       weatherPreferences,
       schedule: schedule.length ? schedule : null,
       worldId: worldId || null,
@@ -1007,6 +1011,33 @@ export function CharacterEditor({
                   ))}
                 </optgroup>
               )}
+            </SelectField>
+            <SelectField
+              label="Reply length"
+              hint={
+                replyLength === 'auto'
+                  ? (() => {
+                      const d = deriveCardReplyBand(form)
+                      const from =
+                        d.source === 'examples'
+                          ? 'measured from this card’s example dialogue'
+                          : d.source === 'greeting'
+                            ? 'estimated from the greeting (no example dialogue to measure)'
+                            : 'default — this card has no example dialogue or greeting to measure'
+                      return `${REPLY_LENGTH_HINTS.auto} Currently resolves to "${REPLY_LENGTH_LABELS[d.band]}"${
+                        d.measuredWords ? ` (~${d.measuredWords} words/turn)` : ''
+                      }, ${from}.`
+                    })()
+                  : REPLY_LENGTH_HINTS[replyLength]
+              }
+              value={replyLength}
+              onChange={(e) => setReplyLength(e.target.value as ReplyLength)}
+            >
+              {(['auto', 'brief', 'moderate', 'detailed'] as const).map((v) => (
+                <option key={v} value={v}>
+                  {REPLY_LENGTH_LABELS[v]}
+                </option>
+              ))}
             </SelectField>
           </Section>
 

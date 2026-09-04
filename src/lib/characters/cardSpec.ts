@@ -3,6 +3,7 @@
 // https://github.com/malfoyslastname/character-card-spec-v2
 
 import type { TtsProviderId } from '@/lib/voice/ttsProviders'
+import type { ReplyLength } from '@/lib/characters/voice'
 import type { ScheduleEntry, WeatherPreferences } from '@/lib/world/calendar'
 import { DEFAULT_EXPRESSION_IDS, type CustomExpression } from '@/lib/vn/expressions'
 
@@ -130,6 +131,13 @@ export interface Character {
   sfxWords?: string[]
   /** Per-character instruct-template override (builtin or custom id) — unset falls back to the global Settings → Generation default. */
   instructTemplateId?: string
+  /**
+   * How long this character's replies should run (src/lib/characters/voice.ts). Unset / 'auto'
+   * measures the card's own `mes_example` turn length and both instructs and hard-caps `max_length`
+   * to it, so a terse card stops getting essay-length replies; 'brief'/'moderate'/'detailed' are an
+   * explicit override for a card whose examples are unrepresentative or missing.
+   */
+  replyLength?: ReplyLength
   /** Weather this character loves/hates (src/lib/world/calendar.ts) — nudges the world-moment prompt line, never dictates it. */
   weatherPreferences?: WeatherPreferences
   /** Daily/weekly routine (src/lib/world/calendar.ts) — where they are and what they're doing at a given world day/phase. Only meaningful for a world-bound character, since it reads the world's shared clock. */

@@ -47,10 +47,12 @@ import { itemById } from '@/lib/dating/items'
 import { buildRelationshipDescription } from '@/lib/dating/relationshipDescription'
 import { resolveInstructTemplate } from '@/lib/prompt/instructTemplates'
 import { extractSceneTag, stripSceneTagForDisplay, type SceneTag } from '@/lib/vn/sceneTag'
-import { buildSlopAvoidanceNote, cleanModelOutput } from '@/lib/text/slop'
+import { buildSlopAvoidanceNote, cleanModelOutput, trimToLastSentence } from '@/lib/text/slop'
+import { replyMaxTokens, resolveReplyLength } from '@/lib/characters/voice'
 import { SCENE_MOOD_IDS } from '@/lib/vn/moods'
-import { DEFAULT_EXPRESSION_IDS } from '@/lib/vn/expressions'
+import { DEFAULT_EXPRESSION_IDS, DEFAULT_EXPRESSIONS } from '@/lib/vn/expressions'
 import { DEFAULT_BACKGROUND_IDS } from '@/lib/vn/backgrounds'
+import { classifyAttachedImageScene, detectExpressionFromSprites, shortlistExpressions } from '@/lib/vn/sceneVision'
 import { bookAppliesToChat } from '@/lib/worldinfo/scope'
 import { buildFactsLorebook } from '@/lib/worldinfo/facts'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
@@ -69,6 +71,40 @@ const MAX_AUTO_CONTINUE_ROUNDS = 2
 /** A chat-level override (`Chat.assistOverrides`) wins over the global Settings → Generation default — unset falls back to it, same precedence style as `Character.instructTemplateId`. */
 function effectiveAssistFlag(chatOverride: boolean | undefined, globalDefault: boolean): boolean {
   return chatOverride ?? globalDefault
+}
+
+/**
+ * Loads an image URL and re-encodes it small — the §8 vision scene pass only needs a face-sized
+ * thumbnail to classify an expression, and the stored sprite files are ~1MB PNGs each, which the
+ * multimodal projector chews through slowly and several at a time. ~320px JPEG on a white matte
+ * (sprites are transparent PNGs; JPEG has no alpha) drops that to tens of KB. Returns base64 with
+ * no `data:` prefix, or undefined if the image can't be loaded/drawn.
+ */
+async function downscaleImageToBase64(url: string, maxEdge = 320): Promise<string | undefined> {
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image()
+      el.crossOrigin = 'anonymous'
+      el.onload = () => resolve(el)
+      el.onerror = () => reject(new Error('image load failed'))
+      el.src = url
+    })
+    const scale = Math.min(1, maxEdge / Math.max(img.naturalWidth || maxEdge, img.naturalHeight || maxEdge))
+    const w = Math.max(1, Math.round((img.naturalWidth || maxEdge) * scale))
+    const h = Math.max(1, Math.round((img.naturalHeight || maxEdge) * scale))
+    const canvas = document.createElement('canvas')
+    canvas.width = w
+    canvas.height = h
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return undefined
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, w, h)
+    ctx.drawImage(img, 0, 0, w, h)
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.82)
+    return dataUrl.slice(dataUrl.indexOf(',') + 1) || undefined
+  } catch {
+    return undefined
+  }
 }
 
 /** KoboldCpp's `images` field describes the current context, not per-turn — resend whatever the most recent user turn attached. */
@@ -240,6 +276,7 @@ export function useChatSession(chatId: string | null) {
   const styleGuidanceNote = useSettingsStore((s) => s.styleGuidance)
   const avoidEmDashes = useSettingsStore((s) => s.avoidEmDashes)
   const slowBurnPacing = useSettingsStore((s) => s.slowBurnPacing)
+  const visionSceneDetection = useSettingsStore((s) => s.visionSceneDetection)
   const globalSystemPrompt = useSettingsStore((s) => s.systemPrompt)
   const globalPostHistory = useSettingsStore((s) => s.postHistoryInstructions)
   const promptSections = useSettingsStore((s) => s.promptSections)
@@ -299,6 +336,9 @@ export function useChatSession(chatId: string | null) {
   const abortRef = useRef<AbortController | null>(null)
   const genKeyRef = useRef<string>('')
   const summarizingRef = useRef(false)
+  // Sprite URL -> base64 payload, memoised for the lifetime of the hook so the vision scene-detect
+  // pass (§8) doesn't re-fetch and re-encode the same handful of sprite files on every VN turn.
+  const spriteBase64Ref = useRef<Map<string, string>>(new Map())
   // Who a freshly-sent user message's reply gets generated as — null/primary for every ordinary
   // chat. Only meaningful when `chat.participants` is non-empty (group chats); manual, not
   // AI-directed, by design (see ROADMAP.md's group-chat scope notes).
@@ -340,7 +380,7 @@ export function useChatSession(chatId: string | null) {
       )
   }, [])
   // Fixed order so the strip doesn't reshuffle as tasks finish at different times.
-  const assistActivity = ['relationship', 'choices', 'tasks', 'summary']
+  const assistActivity = ['relationship', 'choices', 'tasks', 'summary', 'vision']
     .map((k) => assistTasks[k])
     .filter((label): label is string => !!label)
 
@@ -455,12 +495,17 @@ export function useChatSession(chatId: string | null) {
       const slopAvoidance = buildSlopAvoidanceNote(
         recentHistory.filter((m) => m.role === 'char' && m.name === speaker.card.name).map((m) => m.text),
       )
+      // How long this speaker's turns should run, in a unit the model can count (sentences), taken
+      // from their `replyLength` override or measured from their own example dialogue. The matching
+      // hard token cap lives in `runGeneration` so brevity survives a model that ignores the line.
+      const replyLengthInstruction = resolveReplyLength(speaker.replyLength, speaker.card).instruction
       const styleGuidance =
         [
           avoidEmDashes ? 'Never use em dashes (the — character) in your writing. Use a comma, period, or parentheses instead.' : '',
           slowBurnPacing
             ? "Pace intimacy like a slow burn. Earn it through many small moments; don't grant it just because it was asked for. If pushed toward more affection, a kiss, or closeness faster than the relationship has earned, react the way your character actually would. Hesitation, deflection, or a flat no are often the right call, especially early on. Don't cave just to be agreeable."
             : '',
+          replyLengthInstruction,
           styleGuidanceNote.trim(),
           slopAvoidance ?? '',
         ]
@@ -972,6 +1017,97 @@ export function useChatSession(chatId: string | null) {
     [messages, suggestChoicesForMessage],
   )
 
+  /**
+   * §8 vision scene detection — a backup for the model's blind `<<scene:>>` self-tag, run only
+   * when Settings → Appearance → "Vision scene detection" is on. Looks at the character's actual
+   * unlocked expression sprites to correct the tagged expression, and at any photo the player
+   * attached this turn to derive a background/mood. Writes the refined `scene` back onto the
+   * just-generated message (active swipe); a no-op when nothing changed or the model declined.
+   * Fire-and-forget like every other post-reply assist — a slow or failed vision pass never
+   * touches the reply that already landed.
+   */
+  const refineSceneWithVision = useCallback(
+    async (messageId: string, speaker: Character, replyText: string, userImages: string[]) => {
+      if (!replyText.trim()) return
+      const spriteMap = speaker.sprites ?? {}
+      const affection = chat?.affection ?? 0
+      const unlockedExpressions = getUnlockedExpressionIds(speaker, affection)
+      const unlockedBackgrounds = getUnlockedBackgroundIds(world, affection)
+
+      const spriteExpressionIds = Object.keys(spriteMap).filter((id) => unlockedExpressions.includes(id))
+      const canDetectExpression = spriteExpressionIds.length >= 2
+      if (!canDetectExpression && userImages.length === 0) return
+
+      const freshMsg = await messagesApi.get(messageId)
+      if (!freshMsg) return
+      const activeSwipe = freshMsg.activeSwipe ?? 0
+      const currentScene: SceneTag = freshMsg.swipeScenes?.[activeSwipe] ?? freshMsg.scene ?? {}
+      const next: SceneTag = { ...currentScene }
+
+      if (canDetectExpression) {
+        const labelById = new Map<string, string>([
+          ...DEFAULT_EXPRESSIONS.map((e) => [e.id, e.label] as const),
+          ...(speaker.customExpressions ?? []).map((c) => [c.id, c.label] as const),
+        ])
+        const candidates = spriteExpressionIds.map((id) => ({ id, label: labelById.get(id) ?? id }))
+
+        // A fully-spritted character has 20+ expressions — far too many images to send the vision
+        // model at once. A cheap text pass narrows it to the few that could plausibly fit the line,
+        // then only those sprites are fetched and shown.
+        const shortlist = await shortlistExpressions(client, {
+          charName: speaker.card.name,
+          replyText,
+          candidates,
+          taggedExpression: currentScene.expression,
+          limit: 6,
+        })
+
+        const cache = spriteBase64Ref.current
+        const sprites = (
+          await Promise.all(
+            shortlist.map(async (id) => {
+              const url = spriteMap[id]
+              if (!url) return null
+              if (!cache.has(url)) {
+                const b64 = await downscaleImageToBase64(url)
+                if (b64) cache.set(url, b64)
+              }
+              const base64 = cache.get(url)
+              return base64 ? { id, label: labelById.get(id) ?? id, base64 } : null
+            }),
+          )
+        ).filter((s): s is { id: string; label: string; base64: string } => !!s)
+
+        const detected = await detectExpressionFromSprites(client, {
+          charName: speaker.card.name,
+          replyText,
+          sprites,
+          taggedExpression: currentScene.expression,
+        })
+        if (detected) next.expression = detected
+      }
+
+      if (userImages.length > 0) {
+        const cls = await classifyAttachedImageScene(client, {
+          images: userImages,
+          backgroundIds: unlockedBackgrounds,
+          moodIds: [...SCENE_MOOD_IDS],
+        })
+        if (cls.background) next.background = cls.background
+        if (cls.mood) next.mood = cls.mood
+      }
+
+      const sanitized = sanitizeSceneTag(next, unlockedExpressions, unlockedBackgrounds)
+      if (JSON.stringify(sanitized ?? null) === JSON.stringify(sanitizeSceneTag(currentScene, unlockedExpressions, unlockedBackgrounds) ?? null)) {
+        return
+      }
+      const swipeScenes = freshMsg.swipeScenes ? [...freshMsg.swipeScenes] : []
+      swipeScenes[activeSwipe] = sanitized
+      await messagesApi.update(messageId, { scene: sanitized, swipeScenes })
+    },
+    [chat?.affection, client, world],
+  )
+
   const runGeneration = useCallback(
     async (
       historyForPrompt: ChatMessage[],
@@ -986,6 +1122,15 @@ export function useChatSession(chatId: string | null) {
       // suggestions are all scoped to the primary's relationship — skip them for a turn a
       // non-primary participant spoke, rather than silently attributing their lines to it.
       const isPrimarySpeaker = speaker.id === character.id
+      // This speaker's reply-length band, turned into a hard `max_length` ceiling for every round
+      // below — so a terse character stays terse even if the model ignores the prose instruction
+      // (`replyLengthInstruction` in `buildCurrentPrompt`). Only ever tightens the user's own
+      // Settings cap, never raises it. `bandCapsBelowUserMax` gates auto-continue: a reply that
+      // stopped because it hit the user's real budget should extend, one that hit this band on
+      // purpose should not.
+      const replyBand = resolveReplyLength(speaker.replyLength, speaker.card).band
+      const effectiveMaxLength = replyMaxTokens(replyBand, sampler.max_length)
+      const bandCapsBelowUserMax = effectiveMaxLength < sampler.max_length
       // `continuing` starts as whatever the caller asked for (a fresh reply, or a manual
       // "Continue" click) but becomes true partway through the loop below once an auto-continue
       // round kicks in — from that point on every remaining round behaves exactly like a manual
@@ -1007,6 +1152,10 @@ export function useChatSession(chatId: string | null) {
       let combined = ''
       let scene: ReturnType<typeof sanitizeSceneTag>
       let wroteAnything = false
+      // Set when the final round stopped because it hit this character's reply-length band cap
+      // (not the user's budget, and not a natural stop) — the reply may end mid-sentence with no
+      // continuation coming, so it gets trimmed back to its last complete sentence after the loop.
+      let cutShortByBandCap = false
 
       try {
         // A reply that used its entire token budget without reaching a natural stop almost
@@ -1053,6 +1202,7 @@ export function useChatSession(chatId: string | null) {
             newText = await client.generateStream(
               {
                 ...sampler,
+                max_length: effectiveMaxLength,
                 stop_sequence: stopSequence,
                 prompt: built.prompt,
                 genkey,
@@ -1078,7 +1228,7 @@ export function useChatSession(chatId: string | null) {
             // Fall back to non-streaming generate (some builds/proxies block SSE).
             console.warn('Streaming generation failed, falling back to non-streaming:', streamErr)
             newText = await client.generate(
-              { ...sampler, stop_sequence: stopSequence, prompt: built.prompt, genkey, images: images.length ? images : undefined },
+              { ...sampler, max_length: effectiveMaxLength, stop_sequence: stopSequence, prompt: built.prompt, genkey, images: images.length ? images : undefined },
               abort.signal,
             )
           }
@@ -1163,8 +1313,14 @@ export function useChatSession(chatId: string | null) {
           // Stopping the generation by hand (or the model genuinely finishing early) both mean
           // "don't keep going" regardless of how close to the token cap it landed.
           const generatedTokens = !abort.signal.aborted && newText.trim() ? await countTokens(newText) : 0
-          const looksTruncated = !abort.signal.aborted && generatedTokens >= sampler.max_length - 1
-          if (!looksTruncated || round === MAX_AUTO_CONTINUE_ROUNDS) break
+          const hitCap = !abort.signal.aborted && generatedTokens >= effectiveMaxLength - 1
+          // Extend only a reply that ran into the user's real token budget, never one this
+          // character's reply-length band deliberately kept short.
+          const looksTruncated = hitCap && !bandCapsBelowUserMax
+          if (!looksTruncated || round === MAX_AUTO_CONTINUE_ROUNDS) {
+            cutShortByBandCap = hitCap && bandCapsBelowUserMax
+            break
+          }
 
           continuing = true
           accumulated = combined
@@ -1172,6 +1328,22 @@ export function useChatSession(chatId: string | null) {
             round === 0
               ? [...historyForPrompt, { id: targetMessageId, role: 'char' as const, name: speaker.card.name, text: combined }]
               : [...currentHistory.slice(0, -1), { ...currentHistory[currentHistory.length - 1], text: combined }]
+        }
+
+        // The reply-length band cap can stop a turn mid-sentence with no auto-continue coming.
+        // Trim it back to the last complete sentence (trimToLastSentence bails itself if that
+        // would lose too much of a single long run-on). Only the display text and active swipe
+        // change; the untouched `rawText` stays as the model produced it.
+        if (cutShortByBandCap && !abort.signal.aborted) {
+          const tidied = trimToLastSentence(combined)
+          if (tidied && tidied !== combined) {
+            combined = tidied
+            const freshMsg = await messagesApi.get(targetMessageId)
+            const swipes = freshMsg?.swipes?.length ? [...freshMsg.swipes] : [combined]
+            const activeSwipe = Math.min(freshMsg?.activeSwipe ?? 0, Math.max(0, swipes.length - 1))
+            swipes[activeSwipe] = combined
+            await messagesApi.update(targetMessageId, { text: combined, swipes, tokenCount: await countTokens(combined) })
+          }
         }
 
         // Post-reply assists. Each is fire-and-forget (never blocks the reply that just landed) but
@@ -1198,6 +1370,9 @@ export function useChatSession(chatId: string | null) {
         }
         if (autoSummarize) {
           runAssist('summary', 'Updating memory', () => updateMemorySummary())
+        }
+        if (visionSceneDetection) {
+          runAssist('vision', 'Reading the scene', () => refineSceneWithVision(targetMessageId, speaker, combined, images))
         }
       } catch (e) {
         toastError(errorMessage(e))
@@ -1227,6 +1402,7 @@ export function useChatSession(chatId: string | null) {
       client,
       countTokens,
       detectAndMarkTasks,
+      refineSceneWithVision,
       resolveSpeaker,
       runAssist,
       sampler,
@@ -1234,6 +1410,7 @@ export function useChatSession(chatId: string | null) {
       template,
       updateAffectionFromReply,
       updateMemorySummary,
+      visionSceneDetection,
     ],
   )
 

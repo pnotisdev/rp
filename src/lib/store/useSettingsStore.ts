@@ -140,6 +140,11 @@ interface SettingsState {
   tagsAsFolders: boolean
   clickToEdit: boolean
   visualNovelMode: boolean
+  /** §8: with a vision-capable model loaded, run a post-reply pass that looks at the character's
+   *  actual expression sprites (and any photo the player attached) to correct the model's blind
+   *  `<<scene:>>` tag. Off by default — it needs an mmproj and adds a slow image generation per
+   *  VN turn; when off, scene tagging behaves exactly as before. */
+  visionSceneDetection: boolean
   setChatStyle: (s: ChatStyle) => void
   setAvatarShape: (s: AvatarShape) => void
   setLayout: (patch: Partial<{
@@ -158,7 +163,8 @@ interface SettingsState {
       | 'showGenerationHud'
       | 'tagsAsFolders'
       | 'clickToEdit'
-      | 'visualNovelMode',
+      | 'visualNovelMode'
+      | 'visionSceneDetection',
   ) => void
 
   // generation
@@ -323,6 +329,7 @@ export const useSettingsStore = create<SettingsState>()(
       tagsAsFolders: true,
       clickToEdit: true,
       visualNovelMode: false,
+      visionSceneDetection: false,
       setChatStyle: (s) => set({ chatStyle: s }),
       setAvatarShape: (s) => set({ avatarShape: s }),
       setLayout: (patch) => set(patch),

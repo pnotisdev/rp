@@ -27,6 +27,7 @@ export interface CharacterPackV1 {
     relationshipStarters?: RelationshipStarter[]
     voice?: Character['voice']
     sfxWords?: string[]
+    replyLength?: Character['replyLength']
     occupation?: string
     workplace?: string
     homeLocation?: string
@@ -104,6 +105,7 @@ export async function buildCharacterPack(character: Character, world?: WorldCard
       relationshipStarters: character.relationshipStarters,
       voice: character.voice,
       sfxWords: character.sfxWords,
+      replyLength: character.replyLength,
       occupation: character.occupation,
       workplace: character.workplace,
       homeLocation: character.homeLocation,
@@ -207,6 +209,7 @@ export async function importCharacterPack(pack: CharacterPackV1): Promise<{ char
     relationshipStarters: pack.character.relationshipStarters,
     voice: pack.character.voice,
     sfxWords: pack.character.sfxWords,
+    replyLength: pack.character.replyLength,
     occupation: pack.character.occupation,
     workplace: pack.character.workplace,
     homeLocation: pack.character.homeLocation,

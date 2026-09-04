@@ -183,6 +183,13 @@ function normalizeOutreach(raw: unknown): { frequency: string } | undefined {
   return typeof frequency === 'string' && OUTREACH_FREQUENCIES.has(frequency) ? { frequency } : undefined
 }
 
+const REPLY_LENGTHS = new Set(['auto', 'brief', 'moderate', 'detailed'])
+
+/** Per-character reply-length override (src/lib/characters/voice.ts). 'auto' and unset both mean "measure the card"; only the three explicit bands are stored. */
+function normalizeReplyLength(raw: unknown): string | undefined {
+  return typeof raw === 'string' && REPLY_LENGTHS.has(raw) && raw !== 'auto' ? raw : undefined
+}
+
 function normalizeRelationshipThresholds(raw: unknown) {
   if (!raw || typeof raw !== 'object') return undefined
   const obj = raw as Record<string, unknown>
@@ -227,6 +234,7 @@ app.post('/api/characters', (req, res) => {
     voice: req.body.voice ?? undefined,
     sfxWords: normalizeStringArray(req.body.sfxWords),
     instructTemplateId: typeof req.body.instructTemplateId === 'string' ? req.body.instructTemplateId : undefined,
+    replyLength: normalizeReplyLength(req.body.replyLength),
     weatherPreferences: req.body.weatherPreferences ?? undefined,
     schedule: Array.isArray(req.body.schedule) ? req.body.schedule : undefined,
     worldId: req.body.worldId || undefined,
@@ -265,6 +273,7 @@ app.put('/api/characters/:id', (req, res) => {
   if ('voice' in req.body) patch.voice = req.body.voice ?? undefined
   if ('sfxWords' in req.body) patch.sfxWords = normalizeStringArray(req.body.sfxWords)
   if ('instructTemplateId' in req.body) patch.instructTemplateId = typeof req.body.instructTemplateId === 'string' ? req.body.instructTemplateId : undefined
+  if ('replyLength' in req.body) patch.replyLength = normalizeReplyLength(req.body.replyLength)
   if ('weatherPreferences' in req.body) patch.weatherPreferences = req.body.weatherPreferences ?? undefined
   if ('schedule' in req.body) patch.schedule = Array.isArray(req.body.schedule) ? req.body.schedule : undefined
   if ('likes' in req.body) patch.likes = normalizeStringArray(req.body.likes)

@@ -568,10 +568,36 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
       confirmed the toggle adds/removes the regex rule, confirmed the composed instruction lands in
       the exact assembled prompt via the Prompt Inspector, and confirmed a real generated reply
       contained zero em dashes with the toggle on.
-- [ ] Vision-based expression detection using already-piped-through images. The groundwork is
-      there — images already flow end-to-end through generation
-      ([useChatSession.ts:391,433,442,574](src/lib/hooks/useChatSession.ts#L391), `builder.ts:13-14`,
-      `api/types.ts:38-39`) — but nothing analyzes them to drive expression/scene tagging.
+- [x] **Vision-based scene detection** (`src/lib/vn/sceneVision.ts`) — the model self-tags every VN
+      reply with a trailing `<<scene:expression=…,background=…,mood=…>>` picked *blind* from a list
+      of ids; a small local model forgets it, emits an invalid id, or picks a poor match often
+      enough to matter, and the reply-length cap (#104) now truncates the tag off entirely on a
+      brief-band turn. With a vision-capable model loaded, a non-blocking post-reply assist
+      (`refineSceneWithVision` in `useChatSession.ts`, gated behind Settings → Appearance →
+      "Vision scene detection", **off by default**) corrects it by looking at the actual images:
+      - **`shortlistExpressions`** — a cheap text pass that narrows a fully-spritted character's
+        20+ expressions down to the ~6 that could plausibly fit the line, so the vision call only
+        has to look at a handful of sprites. Always keeps the model's own tagged guess in the
+        running; falls back to `[taggedGuess, …head of list]` on any unusable output.
+      - **`detectExpressionFromSprites`** — shows the vision model those shortlisted sprites
+        (downscaled to ~320px JPEG in `downscaleImageToBase64` — the stored files are ~1MB PNGs
+        each, far more than a face classification needs and slow through the projector) and asks
+        which face fits. Tolerates a JSON id, a bare id, or — since vision models love to answer
+        with the picture number — a 1-based index mapped back through the attached order. An id
+        match always beats an index read.
+      - **`classifyAttachedImageScene`** — when the player attached a photo to their message,
+        classifies it into an available background id and/or a scene mood, so the stage reflects
+        what was shared. Only runs when an image is actually attached.
+      Both are backups, not replacements: the `<<scene:>>` instruction stays in the prompt, and the
+      pass only overrides the tag when it produces a validated answer. Every returned id is checked
+      against the caller's allowed set (`sanitizeSceneTag`) before it's written back to the
+      message's active swipe. Sprite→base64 conversions are memoised per hook instance.
+      19 `sceneVision.test.ts` cases (370 total), typecheck + build clean. Verified live with
+      Heimdallr-26B + mmproj: on a turn where a flustered Sumire reply lost its tag to the length
+      cap, the vision pass filled `scene.expression = "blush"` end-to-end (shortlist → 6 downscaled
+      sprites → vision → validated → persisted to `scene` + `swipeScenes`); a synthetic beach photo
+      classified to `{background:"beach",mood:"calm"}`; the assist shows in the running-assists
+      strip as "Reading the scene"; a genuinely fresh page load throws zero console errors.
 
 ## 9. Technical quality / security
 - [x] **SQLite backend swapped from `better-sqlite3` to Node's built-in `node:sqlite`**
@@ -3075,22 +3101,47 @@ Done so far (see checked boxes above for detail):
        costs zero prompt tokens the common case. `findRepeatedPhrases` catches the "keeps saying
        the same thing" habit that no sampler `rep_pen` reaches.
      `SLOP_PATTERNS` deliberately excludes anything merely plain, anything frequency-based, and
-     anything a character might plausibly say aloud. 19 new `slop.test.ts` cases (339 total),
-     typecheck + build clean. Structural verification only — koboldcpp was offline; the
-     end-to-end "does a real model's slop actually drop" pass still needs a live model.
-     **Still open:** reply-length-from-card (`src/lib/characters/voice.ts`, written but unwired) —
-     measure a character's own `mes_example` turn length and both instruct and hard-cap
-     `max_length` to it, so a terse card stops getting essay-length replies. Needs a
-     `Character.replyLength` override field + editor control before wiring.
+     anything a character might plausibly say aloud. 19 new `slop.test.ts` cases, typecheck +
+     build clean.
+104. ~~Reply length from the card (`src/lib/characters/voice.ts`)~~ — the "responses shouldn't be
+     an essay, and should fit the character" half of the same user ask. `sampler.max_length` is one
+     number for the whole app, and the system prompt asks for a character's voice "in prose" — so a
+     tsundere whose own example turns are nine words got the same 300-token budget as a verbose
+     narrator and filled it.
+     - **`deriveCardReplyBand`** measures the character's *own* authored turns — the `{{char}}:`
+       lines out of `mes_example` (median, so one long scene-setter doesn't drag the card up a
+       band), falling back to a discounted `first_mes` — and buckets them brief / moderate /
+       detailed.
+     - **`resolveReplyLength(character.replyLength, card)`** turns that, or an explicit override,
+       into an instruction counted in *sentences* (a unit models actually hold to), appended to the
+       existing `styleGuidance` string in `buildCurrentPrompt`. When the band was measured from
+       real examples it also points the model back at them ("match the length and rhythm of this
+       character's example dialogue").
+     - **`replyMaxTokens`** turns the same band into a hard `max_length` ceiling in `runGeneration`,
+       so brevity survives a model that ignores the line. Only ever *lowers* the user's Settings
+       slider, never raises it. When this band cap (not the user's budget) is what stopped a reply,
+       auto-continue is suppressed and `trimToLastSentence` tidies any mid-sentence cutoff.
+     - New `Character.replyLength?: 'auto' | 'brief' | 'moderate' | 'detailed'` (server-validated,
+       `'auto'`/unset both mean "measure the card"), a "Reply length" `SelectField` in the
+       CharacterEditor → Advanced tab with a live hint showing what `auto` currently resolves to,
+       carried in `.rppack.json` and backup.
+     12 new `voice.test.ts` cases (351 total), typecheck + build clean. Verified live with
+     Heimdallr-26B: the editor hint reads "resolves to Brief (~27 words/turn)" for the bundled
+     Sumire card; a fresh chat turn came back 43 words / two sentences + one action beat (a normal
+     `max_length` would have produced a greeting-length paragraph), clean and ending on a complete
+     sentence; server validation accepts a band, rejects garbage, normalizes `'auto'` to unset;
+     relationship scoring still fires. **Still open there:** `buildCurrentPrompt`'s `contextBudget`
+     still reserves the full `sampler.max_length` for output even when the band cap is smaller —
+     harmless (slightly conservative on history), not yet threaded through.
 
 That closes out SillyTavern's full World Info activation engine, plus the last "reasonable next batch," plus sections 10a, 10c, and 10d in full and a first
 slice each of 10b and 10f taken directly afterward since 10's own suggested phase order names them
 as the foundation everything else in that section reads from. What's left, still deliberately
 smaller than the rest of section 10:
-1. Vision-based expression detection (section 8) — the groundwork (images already flow through
-   generation end-to-end) has been sitting unused since before this file existed; worth checking
-   what it takes given a vision-capable model is loaded. Needs an actual vision-capable model
-   loaded in KoboldCpp to build and verify against — blocked until one is running.
+1. ~~Vision-based expression detection (section 8)~~ — shipped as #105: `shortlistExpressions` +
+   `detectExpressionFromSprites` + `classifyAttachedImageScene` (`src/lib/vn/sceneVision.ts`), an
+   opt-in post-reply assist that looks at the character's real sprites (and any attached photo) to
+   correct the model's blind `<<scene:>>` tag. Verified live with Heimdallr-26B + mmproj.
 2. A proper `Scene` entity (location, objective/atmosphere) and turn-policy options beyond fully
    manual (round-robin, an AI "director," @mention) — the group-chat bullet above deliberately
    shipped the smallest useful slice of this rather than the full concept; revisit once manual
