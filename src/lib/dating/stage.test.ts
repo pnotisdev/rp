@@ -7,6 +7,7 @@ import {
   crossedMilestone,
   evaluateRelationshipRisk,
   formatCommitmentStatus,
+  isLiveScene,
   nextCommitmentTier,
   relationshipAtRisk,
   unlockedEndingIds,
@@ -23,6 +24,29 @@ const zeroStats = (overrides: Partial<Record<RelationshipDimension, number>> = {
   curiosity: 50,
   tension: 0,
   ...overrides,
+})
+
+describe('isLiveScene', () => {
+  it('is true for a started date', () => {
+    expect(isLiveScene({ kind: 'date', startedAt: Date.now() })).toBe(true)
+  })
+
+  it('is true for a started hangout', () => {
+    expect(isLiveScene({ kind: 'hangout', startedAt: Date.now() })).toBe(true)
+  })
+
+  it('is false for a date that has not been started yet', () => {
+    expect(isLiveScene({ kind: 'date' })).toBe(false)
+  })
+
+  it('is false for a started gift or milestone card — those never go live', () => {
+    expect(isLiveScene({ kind: 'gift', startedAt: Date.now() })).toBe(false)
+    expect(isLiveScene({ kind: 'milestone', startedAt: Date.now() })).toBe(false)
+  })
+
+  it('is false with no event at all', () => {
+    expect(isLiveScene(undefined)).toBe(false)
+  })
 })
 
 describe('combinedSceneFlags', () => {

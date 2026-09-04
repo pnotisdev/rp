@@ -14,6 +14,7 @@ import {
   assessDateOutcome,
   assessRelationshipMoment,
   detectGalleryUnlocks,
+  draftHiddenAgenda,
   scaleDeltasForDifficulty,
   suggestDateEvent,
 } from '@/lib/dating/relationshipAssist'
@@ -36,6 +37,7 @@ import {
   formatCommitmentStatus,
   formatRelationshipStage,
   getRelationshipStats,
+  isLiveScene,
   nextCommitmentTier,
   RELATIONSHIP_DIMENSIONS,
   relationshipMilestonesFor,
@@ -51,8 +53,8 @@ import { buildSlopAvoidanceNote, cleanModelOutput, trimToLastSentence } from '@/
 import { normalizeRpMarkup } from '@/lib/text/messageSegments'
 import { replyMaxTokens, resolveReplyLength } from '@/lib/characters/voice'
 import { SCENE_MOOD_IDS } from '@/lib/vn/moods'
-import { DEFAULT_EXPRESSION_IDS, DEFAULT_EXPRESSIONS } from '@/lib/vn/expressions'
-import { DEFAULT_BACKGROUND_IDS } from '@/lib/vn/backgrounds'
+import { DEFAULT_EXPRESSIONS } from '@/lib/vn/expressions'
+import { getUnlockedBackgroundIds, getUnlockedExpressionIds } from '@/lib/vn/unlocks'
 import { classifyAttachedImageScene, detectExpressionFromSprites, shortlistExpressions } from '@/lib/vn/sceneVision'
 import { assessRapport } from '@/lib/dating/rapport'
 import { bookAppliesToChat } from '@/lib/worldinfo/scope'
@@ -116,22 +118,6 @@ function latestImages(history: StoredMessage[]): string[] {
     if (images?.length) return images.map((dataUrl) => dataUrl.slice(dataUrl.indexOf(',') + 1))
   }
   return []
-}
-
-function getUnlockedExpressionIds(character: Character, affection: number): string[] {
-  const spriteIds = Object.keys(character.sprites ?? {})
-  if (spriteIds.length === 0) return DEFAULT_EXPRESSION_IDS
-  const unlocks = character.spriteUnlocks ?? {}
-  const unlocked = spriteIds.filter((id) => affection >= Number(unlocks[id] ?? 0))
-  return unlocked.length ? unlocked : ['neutral']
-}
-
-function getUnlockedBackgroundIds(world: WorldCard | undefined, affection: number): string[] {
-  const ids = Object.keys(world?.backgrounds ?? {})
-  if (ids.length === 0) return DEFAULT_BACKGROUND_IDS
-  const unlocks = world?.backgroundUnlocks ?? {}
-  const unlocked = ids.filter((id) => affection >= Number(unlocks[id] ?? 0))
-  return unlocked.length ? unlocked : DEFAULT_BACKGROUND_IDS
 }
 
 /**
@@ -1356,9 +1342,10 @@ export function useChatSession(chatId: string | null) {
         const relationshipHistory = wasOriginallyContinuing
           ? [...historyForPrompt.slice(0, -1), { id: targetMessageId, role: 'char' as const, name: speaker.card.name, text: combined }]
           : [...historyForPrompt, { id: targetMessageId, role: 'char' as const, name: speaker.card.name, text: combined }]
-        // A live, scored date (10b) suppresses the normal per-turn drip-feed — its outcome is
-        // resolved once, at the end, by endDateEvent's own assessDateOutcome pass instead.
-        const inLiveDate = chat.activeEvent?.kind === 'date' && !!chat.activeEvent.startedAt
+        // A live scene (10b: date or its lower-stakes hangout sibling) suppresses the normal
+        // per-turn drip-feed — its outcome is resolved once, at the end, by endDateEvent's own
+        // assessDateOutcome pass instead.
+        const inLiveDate = isLiveScene(chat.activeEvent)
 
         if (effectiveAssistFlag(chat.assistOverrides?.autoTrackRelationship, autoTrackRelationship) && isPrimarySpeaker && !inLiveDate) {
           // Intent from the just-sent message (opts), or from the latest stored user turn on a
@@ -1386,7 +1373,18 @@ export function useChatSession(chatId: string | null) {
               userName: persona?.name || 'You',
               charPersonality: character.card.personality,
             })
-            if (read) await chatsApi.update(chat.id, { rapport: { ...read, updatedAt: Date.now() } })
+            if (!read) return
+            // 10b's "real stakes": a genuine dealbreaker ends the date for real, right now — not a
+            // quiet score-only consequence the player only sees when they get around to ending it
+            // themselves. `endDateEvent` re-checks `activeEvent` itself, so this is safe even if it
+            // races with the player hitting "End date" at the same moment. Hangouts are deliberately
+            // stakes-free (see `DateEventCard.kind` doc), so a walkOut read is never acted on there —
+            // the rapport judge is still asked for one, it's just ignored.
+            if (read.walkOut && chat.activeEvent?.kind === 'date') {
+              await endDateEvent({ walkedOut: true })
+              return
+            }
+            await chatsApi.update(chat.id, { rapport: { ...read, updatedAt: Date.now() } })
           })
         }
         if (effectiveAssistFlag(chat.assistOverrides?.autoSuggestChoices, autoSuggestChoices) && isPrimarySpeaker) {
@@ -1709,20 +1707,21 @@ export function useChatSession(chatId: string | null) {
   }, [character, chat, client, persona?.name, world])
 
   /**
-   * Starting a `kind: 'date'` card spends one of the world's daily actions (10a's "Energy/action
-   * economy") — gift/milestone cards aren't a "spend a chunk of the day doing something" activity
-   * the way a date is, so they're left free. No world assigned to this character means no clock
-   * to spend against, so energy simply doesn't apply (unlimited, same as before this existed).
+   * Starting a `kind: 'date'` or `'hangout'` card spends one of the world's daily actions (10a's
+   * "Energy/action economy") — gift/milestone cards aren't a "spend a chunk of the day doing
+   * something" activity the way a live scene is, so they're left free. No world assigned to this
+   * character means no clock to spend against, so energy simply doesn't apply (unlimited, same as
+   * before this existed).
    */
   const startDateEvent = useCallback(
     async (event: DateEventCard) => {
       if (!chatId || !event.title.trim() || !event.objectiveTitle.trim()) return
-      if (event.kind === 'date' && world) {
+      if ((event.kind === 'date' || event.kind === 'hangout') && world) {
         const freshWorld = await worldsApi.get(world.id)
         const day = freshWorld?.currentDay ?? 0
         const phaseIndex = freshWorld?.currentPhaseIndex ?? 0
         if (getEnergyRemaining(day, phaseIndex) <= 0) {
-          toastError("No energy left today — get some rest before starting another date.")
+          toastError(`No energy left today — get some rest before starting another ${event.kind === 'hangout' ? 'hangout' : 'date'}.`)
           return
         }
         const result = spendEnergy(day, phaseIndex)
@@ -1733,24 +1732,45 @@ export function useChatSession(chatId: string | null) {
         }
       }
       await createObjective(event.objectiveTitle, event.objectiveDescription ?? event.description ?? '', 'ai')
+      // 10b's "real stakes": draft what the character secretly wants from this scene, from their
+      // own card. Best-effort and never blocks starting the date — a card too thin to draft one
+      // from, or a judge call that fails, just leaves it unset.
+      let hiddenAgenda: string | undefined
+      if (event.kind === 'date' && character) {
+        const warmthLabel = formatRelationshipStage(
+          relationshipStageForWarmth(
+            computeWarmth(chat?.affection ?? 0, getRelationshipStats({ relationshipStats: chat?.relationshipStats })),
+            relationshipMilestonesFor(world?.relationshipThresholds),
+          ),
+        )
+        hiddenAgenda =
+          (await draftHiddenAgenda(client, {
+            charName: character.card.name,
+            charPersonality: character.card.personality,
+            charGoals: character.goals,
+            charBoundaries: character.boundaries,
+            eventTitle: event.title,
+            warmthLabel,
+          }).catch(() => null)) ?? undefined
+      }
       // Stamped on every event regardless of kind — harmless metadata for gift/milestone cards,
       // which never read it — but for a `kind: 'date'` card its presence is what marks this as a
       // live, scored date (10b) rather than the original lightweight event-card flow, and its
       // value is the cutoff `endDateEvent` uses to gather this date's own transcript.
       // Clear any rapport read left over from a previous date so the indicator starts blank.
-      await chatsApi.update(chatId, { activeEvent: { ...event, startedAt: Date.now() }, rapport: null })
+      await chatsApi.update(chatId, { activeEvent: { ...event, startedAt: Date.now(), hiddenAgenda }, rapport: null })
     },
-    [chatId, createObjective, world],
+    [character, chat?.affection, chat?.relationshipStats, chatId, client, createObjective, world],
   )
 
   /**
-   * Ends an active `kind: 'date'` event with a single validated judge pass over the whole scene's
-   * transcript (10b's "save-safe end-of-date scoring") rather than the per-turn drip-feed ordinary
-   * chat gets — see `assessDateOutcome`. A date with no messages since it started just closes
-   * quietly, no judge call and no relationship movement: starting a date and never speaking
-   * shouldn't count for or against anything.
+   * Ends an active live scene (`kind: 'date'` or its `'hangout'` sibling) with a single validated
+   * judge pass over the whole scene's transcript (10b's "save-safe end-of-date scoring") rather
+   * than the per-turn drip-feed ordinary chat gets — see `assessDateOutcome`. A scene with no
+   * messages since it started just closes quietly, no judge call and no relationship movement:
+   * starting one and never speaking shouldn't count for or against anything.
    */
-  const endDateEvent = useCallback(async () => {
+  const endDateEvent = useCallback(async (opts?: { walkedOut?: boolean }) => {
     if (!chatId || !character) return
     const freshChat = await chatsApi.get(chatId)
     const event = freshChat?.activeEvent
@@ -1785,6 +1805,9 @@ export function useChatSession(chatId: string | null) {
       knownFacts: activeFacts.map((f) => f.text),
       customFlags: world?.customSceneFlags,
       intents,
+      hiddenAgenda: event.hiddenAgenda,
+      walkedOut: opts?.walkedOut,
+      sceneKind: event.kind === 'hangout' ? 'hangout' : 'date',
     })
     const deltas = scaleDeltasForDifficulty(outcome.deltas, relationshipDifficulty)
     outcome.newFlags.forEach((flag) => existingFlags.add(flag))
@@ -1857,8 +1880,11 @@ export function useChatSession(chatId: string | null) {
       })
       .catch(() => {})
 
-    toastSuccess(outcome.recap)
-    if (coinsEarned > 0) toastSuccess(`Earned ${coinsEarned} coins from the date`)
+    // A walkout is a real, bad outcome — read it back as one (a red toast), not the same
+    // congratulatory tone as an ordinary date ending.
+    if (opts?.walkedOut) toastError(outcome.recap)
+    else toastSuccess(outcome.recap)
+    if (coinsEarned > 0) toastSuccess(`Earned ${coinsEarned} coins from the ${event.kind === 'hangout' ? 'hangout' : 'date'}`)
     announceMilestone({
       charName: character.card.name,
       personaName: persona?.name || 'You',

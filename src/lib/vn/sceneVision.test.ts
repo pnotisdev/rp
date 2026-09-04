@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { KoboldClient } from '@/lib/api/kobold'
-import { classifyAttachedImageScene, detectExpressionFromSprites, shortlistExpressions } from './sceneVision'
+import { classifyAttachedImageScene, detectExpressionFromSprites, detectGreetingScene, shortlistExpressions } from './sceneVision'
 
 /** Minimal stand-in: the two calls sceneVision actually makes on a client. */
 function stubClient(reply: string, spy?: (params: Record<string, unknown>) => void): KoboldClient {
@@ -226,5 +226,79 @@ describe('classifyAttachedImageScene', () => {
       moodIds: [],
     })
     expect(seen).toHaveLength(3)
+  })
+})
+
+describe('detectGreetingScene', () => {
+  const GREETING = 'She is at the usual table, second floor of the library, half behind a book.'
+
+  it('returns validated expression and background', async () => {
+    const got = await detectGreetingScene(stubClient('{"expression":"neutral","background":"classroom"}'), {
+      text: GREETING,
+      expressionIds: ['neutral', 'happy'],
+      backgroundIds: ['classroom', 'cafe'],
+    })
+    expect(got).toEqual({ expression: 'neutral', background: 'classroom' })
+  })
+
+  it('drops values not in the allowed sets', async () => {
+    const got = await detectGreetingScene(stubClient('{"expression":"smug","background":"library"}'), {
+      text: GREETING,
+      expressionIds: ['neutral'],
+      backgroundIds: ['classroom'],
+    })
+    expect(got).toBeNull()
+  })
+
+  it('keeps whichever half validates when the other does not', async () => {
+    const got = await detectGreetingScene(stubClient('{"expression":"neutral","background":"library"}'), {
+      text: GREETING,
+      expressionIds: ['neutral'],
+      backgroundIds: ['classroom'],
+    })
+    expect(got).toEqual({ expression: 'neutral' })
+  })
+
+  it('returns null for empty greeting text and never calls the model', async () => {
+    let called = false
+    const got = await detectGreetingScene(
+      stubClient('{"expression":"neutral"}', () => {
+        called = true
+      }),
+      { text: '   ', expressionIds: ['neutral'], backgroundIds: ['classroom'] },
+    )
+    expect(got).toBeNull()
+    expect(called).toBe(false)
+  })
+
+  it('returns null with no expression or background ids offered and never calls the model', async () => {
+    let called = false
+    const got = await detectGreetingScene(
+      stubClient('{"expression":"neutral"}', () => {
+        called = true
+      }),
+      { text: GREETING, expressionIds: [], backgroundIds: [] },
+    )
+    expect(got).toBeNull()
+    expect(called).toBe(false)
+  })
+
+  it('returns null on unparseable output and on a thrown client error', async () => {
+    expect(
+      await detectGreetingScene(stubClient('just vibes, no json'), {
+        text: GREETING,
+        expressionIds: ['neutral'],
+        backgroundIds: ['classroom'],
+      }),
+    ).toBeNull()
+    const throwing = {
+      generate: async () => {
+        throw new Error('offline')
+      },
+      getEffectiveMaxContext: async () => 4096,
+    } as unknown as KoboldClient
+    expect(
+      await detectGreetingScene(throwing, { text: GREETING, expressionIds: ['neutral'], backgroundIds: ['classroom'] }),
+    ).toBeNull()
   })
 })

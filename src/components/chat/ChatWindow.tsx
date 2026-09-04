@@ -27,6 +27,7 @@ import {
   computeWarmth,
   formatRelationshipStage,
   getRelationshipStats,
+  isLiveScene,
   relationshipMilestonesFor,
   relationshipStageForWarmth,
 } from '@/lib/dating/stage'
@@ -353,8 +354,8 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
   // intent. Lives inside the composer card (as its `intentSlot`), never as a separate bar.
   const relationshipTrackingActive = chat?.assistOverrides?.autoTrackRelationship ?? autoTrackRelationship
   const showIntentChips = relationshipTrackingActive && !isGenerating && !!character
-  const liveDateActive = chat?.activeEvent?.kind === 'date' && !!chat.activeEvent.startedAt
-  // During a live date the tension stat is frozen (scoring is end-of-scene only), so surface the
+  const liveDateActive = isLiveScene(chat?.activeEvent)
+  // During a live scene the tension stat is frozen (scoring is end-of-scene only), so surface the
   // Reassure/Apologize intents off the live rapport read instead — those repair beats are exactly
   // what a scene reading "pulling back" or "on edge" calls for.
   const intentStats = (() => {
@@ -427,10 +428,10 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
               </div>
               <div className="mt-1 flex min-w-0 items-center gap-2 text-[11px] uppercase tracking-wide text-text-muted">
                 {liveDateActive && chat.rapport ? (
-                  // During a live date the warmth number is frozen (scoring happens once, at the
+                  // During a live scene the warmth number is frozen (scoring happens once, at the
                   // end), so it would only mislead — show the qualitative read of how the scene is
                   // going instead.
-                  <LiveRapport read={chat.rapport} />
+                  <LiveRapport read={chat.rapport} label={chat?.activeEvent?.kind === 'hangout' ? 'Live hangout' : 'Live date'} />
                 ) : (
                   <>
                     <div className="h-1.5 w-24 shrink-0 overflow-hidden rounded-full bg-bg-sunken">

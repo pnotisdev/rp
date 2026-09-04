@@ -102,8 +102,9 @@ export async function assessRapport(
     `Recent turns:\n${transcriptText}`,
     `Pick the ONE label that fits how ${params.charName} is trending right now:`,
     RAPPORT_TRAJECTORIES.map((id) => `- ${id}: ${RAPPORT_READS[id].judgeHint}`).join('\n'),
-    'Return ONLY a minified JSON object: {"trajectory":"<one label>","note":"<3-8 word in-world observation>"}.',
-    'Example: {"trajectory":"warming","note":"her lecturing has lost its edge"}',
+    `Also decide "walkOut": true ONLY if ${params.userName}'s latest turn is a genuine dealbreaker a reasonable person would leave over right now — overt hostility, cruelty, or an explicit/crude proposition. false for ordinary friction, awkwardness, a bad joke, or garden-variety "on_edge" tension. This should be rare.`,
+    'Return ONLY a minified JSON object: {"trajectory":"<one label>","note":"<3-8 word in-world observation>","walkOut":true|false}.',
+    'Example: {"trajectory":"warming","note":"her lecturing has lost its edge","walkOut":false}',
     'JSON:',
   ]
     .filter(Boolean)
@@ -129,5 +130,5 @@ export async function assessRapport(
   const obj = (parsed && typeof parsed === 'object' ? parsed : {}) as Record<string, unknown>
   if (!isRapportTrajectory(obj.trajectory)) return null
   const note = typeof obj.note === 'string' && obj.note.trim() ? obj.note.trim().slice(0, 120) : undefined
-  return { trajectory: obj.trajectory, note }
+  return { trajectory: obj.trajectory, note, walkOut: obj.walkOut === true }
 }

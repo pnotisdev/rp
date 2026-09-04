@@ -2,6 +2,7 @@ import type {
   Chat,
   CommitmentStatus,
   CustomSceneFlag,
+  DateEventCard,
   RelationshipDimension,
   RelationshipStage,
   RelationshipWarning,
@@ -9,6 +10,17 @@ import type {
   WorldCard,
 } from '@/lib/types'
 import type { GalleryEntry } from '@/lib/characters/cardSpec'
+
+/**
+ * 10b: which `DateEventCard` kinds are a *live, end-of-scene-scored* scene — per-turn scoring
+ * suppressed, a rapport read shown instead, one judge pass when it ends — versus the original
+ * lightweight event-card flow (`gift`/`milestone`), which never goes "live" at all. The one place
+ * this decision is made, so a scene's live-ness can never drift between the header, the VN HUD, the
+ * event panel, and `useChatSession`'s own generation loop.
+ */
+export function isLiveScene(event: Pick<DateEventCard, 'kind' | 'startedAt'> | undefined): boolean {
+  return !!event?.startedAt && (event.kind === 'date' || event.kind === 'hangout')
+}
 
 /** Default warmth thresholds at which each relationship stage begins, lowest first. */
 export const RELATIONSHIP_MILESTONES: { stage: RelationshipStage; at: number }[] = [

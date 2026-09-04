@@ -43,7 +43,7 @@ describe('assessRapport', () => {
       charName: 'Sumire',
       userName: 'Kai',
     })
-    expect(r).toEqual({ trajectory: 'warming', note: 'keeps stealing glances at you' })
+    expect(r).toEqual({ trajectory: 'warming', note: 'keeps stealing glances at you', walkOut: false })
   })
 
   it('drops an unknown trajectory entirely (null, not a guess)', async () => {
@@ -61,7 +61,25 @@ describe('assessRapport', () => {
       charName: 'Sumire',
       userName: 'Kai',
     })
-    expect(r).toEqual({ trajectory: 'on_edge' })
+    expect(r).toEqual({ trajectory: 'on_edge', note: undefined, walkOut: false })
+  })
+
+  it('reads a genuine walkOut flag', async () => {
+    const r = await assessRapport(stubClient('{"trajectory":"on_edge","note":"grabs her coat","walkOut":true}'), {
+      transcript: TRANSCRIPT,
+      charName: 'Sumire',
+      userName: 'Kai',
+    })
+    expect(r).toEqual({ trajectory: 'on_edge', note: 'grabs her coat', walkOut: true })
+  })
+
+  it('treats anything other than a literal true as no walkout', async () => {
+    const r = await assessRapport(stubClient('{"trajectory":"on_edge","walkOut":"true"}'), {
+      transcript: TRANSCRIPT,
+      charName: 'Sumire',
+      userName: 'Kai',
+    })
+    expect(r?.walkOut).toBe(false)
   })
 
   it('returns null for an empty transcript without calling the model', async () => {

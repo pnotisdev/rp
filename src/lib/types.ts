@@ -209,17 +209,26 @@ export interface DateEventCard {
   objectiveDescription?: string
   backgroundId?: string
   affectionRequirement?: number
-  kind?: 'date' | 'gift' | 'milestone'
+  /** `hangout` is `date`'s lower-stakes sibling (10b) — same live/end-of-scene-scored machinery, deliberately without its stakes: no hidden agenda, no walkout risk, gentle comfort/trust-led growth instead of a real verdict. See `isLiveScene`. */
+  kind?: 'date' | 'gift' | 'milestone' | 'hangout'
   /**
-   * Set the moment a `kind: 'date'` event actually starts — marks it as a *live, scored* date
-   * (10b), not just the original lightweight event-card flow. Its presence (rather than a
-   * separate boolean) does double duty: it's both the "this is a scored live date" flag AND the
-   * cutoff timestamp used to gather the date's own transcript for end-of-date scoring. Stamped on
-   * every new event regardless of kind (harmless metadata for gift/milestone cards, which never
-   * read it), so only `kind === 'date'` actually changes behavior — the original flow is
-   * untouched for anyone not using the new "live date" action.
+   * Set the moment a `kind: 'date'` or `kind: 'hangout'` event actually starts — marks it as a
+   * *live, scored* scene (10b), not just the original lightweight event-card flow. Its presence
+   * (rather than a separate boolean) does double duty: it's both the "this is a live scene" flag
+   * AND the cutoff timestamp used to gather the scene's own transcript for end-of-scene scoring.
+   * Stamped on every new event regardless of kind (harmless metadata for gift/milestone cards,
+   * which never read it) — see `isLiveScene` for the one place that decides which kinds count.
    */
   startedAt?: number
+  /**
+   * 10b's "real stakes" — drafted once when a `kind: 'date'` scene starts (never for a `hangout`,
+   * which deliberately carries no relationship-defining stakes), from the character's own card
+   * (personality/goals/boundaries), never shown to the player. Fed to `assessDateOutcome` at the
+   * end so the recap/deltas reflect whether it was actually read and met, not just whether the
+   * date "went fine" on the surface. Best-effort: a card too thin to draft one from, or a judge
+   * call that fails, just leaves this unset — the date still runs, only without this extra texture.
+   */
+  hiddenAgenda?: string
 }
 
 export interface StoredMessage extends ChatMessage {
@@ -277,6 +286,12 @@ export interface RapportRead {
   trajectory: RapportTrajectory
   /** A short in-world observation from the judge, e.g. "keeps finding reasons to lean in". */
   note?: string
+  /**
+   * 10b's walkout signal — true only for a genuine dealbreaker this turn (overt hostility, a
+   * crude/explicit proposition), never for ordinary friction or a bad joke. `useChatSession`
+   * ends the date for real the moment this comes back true; it is never shown as a raw flag.
+   */
+  walkOut?: boolean
   /** When this read was taken, so a stale one from a finished date can be ignored. */
   updatedAt: number
 }

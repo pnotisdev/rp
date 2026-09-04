@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { charactersApi, personasApi, worldsApi } from '@/lib/api/client'
+import { KoboldClient } from '@/lib/api/kobold'
 import { availableGreetings, createChat } from '@/lib/chat/createChat'
+import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 
@@ -18,6 +20,7 @@ export function NewChatDialog({
   const characters = useApiQuery('characters', () => charactersApi.list(), []) ?? []
   const personas = useApiQuery('personas', () => personasApi.list(), []) ?? []
   const worlds = useApiQuery('worlds', () => worldsApi.list(), []) ?? []
+  const baseUrl = useSettingsStore((s) => s.baseUrl)
   const [characterId, setCharacterId] = useState<string>(initialCharacterId)
   const [personaId, setPersonaId] = useState<string>('')
   const [personaName, setPersonaName] = useState('')
@@ -72,6 +75,7 @@ export function NewChatDialog({
       startingAffection: starter?.startingAffection ?? 0,
       summary: starter?.blurb || undefined,
       greetingIndex: greetingOptions.length > 0 ? greetingIndex : -1,
+      client: new KoboldClient(baseUrl),
     })
     onCreated(chat.id)
   }

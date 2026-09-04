@@ -22,6 +22,7 @@
 
 import type { KoboldClient } from '@/lib/api/kobold'
 import { parseLenientJson } from '@/lib/jsonRepair'
+import type { SceneTag } from '@/lib/vn/sceneTag'
 
 /** `parseLenientJson` throws when a response has no JSON at all — a vision model answering in bare prose is expected here, not exceptional. */
 function tryParseJson(text: string): unknown {
@@ -240,6 +241,62 @@ export async function classifyAttachedImageScene(
   if (typeof obj.background === 'string' && allowedBg.has(obj.background.trim())) result.background = obj.background.trim()
   if (typeof obj.mood === 'string' && allowedMood.has(obj.mood.trim())) result.mood = obj.mood.trim()
   return result
+}
+
+/** Same low-temperature classification params as the vision passes above, minus the image-specific length cap — text-only. */
+const GREETING_SCENE_PARAMS = {
+  ...VISION_PARAMS,
+  max_length: 40,
+  stop_sequence: ['\n\n', '```'],
+}
+
+/**
+ * A brand-new chat's opening line is the character's static `first_mes` — nobody generates it, so
+ * unlike every later reply it never gets the trailing `<<scene:>>` tag (`sceneTag.ts`) that lets VN
+ * mode pick an expression/background. Without this, VN mode's very first screen is always a bare
+ * placeholder gradient, no matter how much real background art a world has, until the model
+ * generates an actual reply. One cheap, best-effort, text-only classification — reading nothing but
+ * the greeting itself — run once at chat creation (`createChat.ts`) gives it the same tag any later
+ * turn would have picked on its own.
+ */
+export async function detectGreetingScene(
+  client: KoboldClient,
+  params: { text: string; expressionIds: string[]; backgroundIds: string[] },
+): Promise<SceneTag | null> {
+  const text = params.text.trim()
+  if (!text) return null
+  const allowedExpr = new Set(params.expressionIds)
+  const allowedBg = new Set(params.backgroundIds)
+  if (allowedExpr.size === 0 && allowedBg.size === 0) return null
+
+  const prompt = [
+    'This is the opening scene of an in-character roleplay:',
+    `"""\n${text.slice(0, 1200)}\n"""`,
+    allowedExpr.size
+      ? `Available expression ids: ${params.expressionIds.join(', ')}. Pick whichever best matches the character's face/mood at the start of this scene.`
+      : '',
+    allowedBg.size
+      ? `Available background ids: ${params.backgroundIds.join(', ')}. Pick the closest reasonable fit for where this scene is set, even if imperfect — e.g. a library is closest to "classroom" or "school-hallway", a car interior to "city-street". Only use "" if the setting is genuinely unclear or nothing on the list is even loosely plausible.`
+      : '',
+    'Return ONLY a minified JSON object: {"expression":"<id or empty>","background":"<id or empty>"}. Use "" for whichever you cannot confidently place.',
+    'JSON:',
+  ]
+    .filter(Boolean)
+    .join('\n')
+
+  let raw: string
+  try {
+    raw = await client.generate({ ...GREETING_SCENE_PARAMS, max_context_length: await client.getEffectiveMaxContext(), prompt })
+  } catch {
+    return null
+  }
+
+  const parsed = tryParseJson(raw)
+  const obj = (parsed && typeof parsed === 'object' ? parsed : {}) as Record<string, unknown>
+  const scene: SceneTag = {}
+  if (typeof obj.expression === 'string' && allowedExpr.has(obj.expression.trim())) scene.expression = obj.expression.trim()
+  if (typeof obj.background === 'string' && allowedBg.has(obj.background.trim())) scene.background = obj.background.trim()
+  return Object.keys(scene).length ? scene : null
 }
 
 /**

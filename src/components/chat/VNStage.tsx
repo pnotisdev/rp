@@ -9,6 +9,7 @@ import {
   computeWarmth,
   formatRelationshipStage,
   getRelationshipStats,
+  isLiveScene,
   relationshipMilestonesFor,
   relationshipStageForWarmth,
 } from '@/lib/dating/stage'
@@ -152,7 +153,8 @@ export function VNStage({
   const affection = Math.max(0, Math.min(100, chat.affection ?? 0))
   const warmth = computeWarmth(affection, getRelationshipStats(chat))
   const relationshipStage = relationshipStageForWarmth(warmth, relationshipMilestonesFor(world?.relationshipThresholds))
-  const liveDateActive = chat.activeEvent?.kind === 'date' && !!chat.activeEvent.startedAt
+  const liveDateActive = isLiveScene(chat.activeEvent)
+  const isHangoutEvent = chat.activeEvent?.kind === 'hangout'
   const expression = scene?.expression || 'neutral'
   const spriteUnlocked = affection >= Number(character?.spriteUnlocks?.[expression] ?? 0)
   const spriteUrl = spriteUnlocked
@@ -222,13 +224,15 @@ export function VNStage({
           </div>
           {chat.activeEvent?.title && (
             <div className="flex items-center gap-1.5 truncate border-t border-white/10 px-3 py-1.5 text-xs">
-              <span className="shrink-0 uppercase tracking-wide text-white/60">{liveDateActive ? 'Date' : 'Event'}</span>
+              <span className="shrink-0 uppercase tracking-wide text-white/60">
+                {liveDateActive ? (isHangoutEvent ? 'Hangout' : 'Date') : 'Event'}
+              </span>
               <span className="truncate text-white/90">{chat.activeEvent.title}</span>
             </div>
           )}
           {liveDateActive && chat.rapport && (
             <div className="border-t border-white/10 px-3 py-1.5 text-xs">
-              <LiveRapport read={chat.rapport} variant="vn" />
+              <LiveRapport read={chat.rapport} variant="vn" label={isHangoutEvent ? 'Live hangout' : 'Live date'} />
             </div>
           )}
         </div>

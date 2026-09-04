@@ -233,25 +233,46 @@ export async function assessDateOutcome(
     customFlags?: CustomSceneFlag[]
     /** 10b: the `MessageIntent`s the player deliberately played across the date, in order. */
     intents?: string[]
+    /** 10b: what the character secretly wanted from this date (`DateEventCard.hiddenAgenda`) — never shown to the player, only used to judge whether it landed. Never set for a hangout. */
+    hiddenAgenda?: string
+    /** 10b: set when the date ended because the rapport judge flagged a walkout mid-scene, not the player choosing to end it — the outcome should read and score as an abrupt, negative exit. Hangouts never walk out, so this is only ever set for a date. */
+    walkedOut?: boolean
+    /** 10b: `'hangout'` is the lower-stakes sibling of `'date'` (see `DateEventCard.kind`) — same judge pass, gentler framing: no verdict-y language, modest deltas, comfort/trust-led growth rather than a graded outcome. Defaults to `'date'`. */
+    sceneKind?: 'date' | 'hangout'
   },
 ): Promise<DateOutcome> {
-  // Cap at the last 24 turns — plenty for a single date scene, and keeps the prompt bounded even
+  const isHangout = params.sceneKind === 'hangout'
+  const sceneNoun = isHangout ? 'hangout' : 'date'
+  // Cap at the last 24 turns — plenty for a single scene, and keeps the prompt bounded even
   // if the player let this run long. Empty messages (still-streaming placeholders) are dropped.
   const turns = params.transcript.filter((m) => m.text.trim()).slice(-24)
   const transcriptText = turns.map((m) => `${m.role === 'user' ? params.userName : params.charName}: ${m.text}`).join('\n')
 
   const prompt = [
-    `You are scoring how an entire date/scene went, in an in-character roleplay: "${params.eventTitle}".`,
+    `You are scoring how an entire ${sceneNoun}/scene went, in an in-character roleplay: "${params.eventTitle}".`,
+    isHangout
+      ? `This is a low-stakes, casual hangout, not a formal date — no dramatic verdict is expected. Keep deltas modest and grounded in genuine warmth, comfort, and trust; reserve anything beyond a small movement for something that actually stood out.`
+      : '',
+    params.walkedOut
+      ? `${params.charName} walked out and ended this early — this is NOT a normal ending. Judge it as a genuinely bad outcome: deltas should be negative on the dimensions this actually hurt, not a token positive bump just because the scene happened.`
+      : '',
     `Current scores (0-100 each): ${DELTA_KEYS.map((k) => `${k}=${params.current[k]}`).join(', ')}.`,
-    `Full transcript of the date:\n${transcriptText || '(nothing was said)'}`,
+    `Full transcript of the ${sceneNoun}:\n${transcriptText || '(nothing was said)'}`,
     `Dimension meanings: ${DELTA_KEYS.map((k) => `${k} = ${DIMENSION_GLOSSARY[k]}`).join('; ')}.`,
     `Known route flags: ${describeFlags(params.customFlags)}.`,
     describeIntentsForDate(params.intents ?? [])?.replace(/\{\{char\}\}/g, params.charName) ?? '',
+    params.hiddenAgenda
+      ? `${params.charName} went into this secretly wanting: ${params.hiddenAgenda} (never told to the other person). Weigh whether the date actually met that, ignored it, or worked against it — but never name "agenda" or break the fourth wall in the recap.`
+      : '',
     params.knownFacts?.length ? `Facts already remembered (don't repeat these): ${params.knownFacts.join('; ')}.` : '',
-    'Return ONLY a minified JSON object: {"deltas":{ one integer -5..5 per dimension key, judged across the WHOLE date, not per line },"newFlags":[ any newly-established flags from the known set, or [] ],"recap":"...","newFacts":[ any new durable facts, or [] ]}.',
-    'Judge the date honestly: a flat, awkward, one-sided, or hurtful date should score low or even negative deltas, not a token positive bump just for happening. A genuinely warm, attentive date should score well across the relevant dimensions.',
-    '"recap" is a short 1-3 sentence in-world summary of how the date felt from {{char}}\'s side, written for the player to read afterward, not a mechanical report.',
-    '"newFacts" is for concrete, durable facts about {{user}} worth recalling much later. Most dates add one or none.',
+    'Return ONLY a minified JSON object: {"deltas":{ one integer -5..5 per dimension key, judged across the WHOLE scene, not per line },"newFlags":[ any newly-established flags from the known set, or [] ],"recap":"...","newFacts":[ any new durable facts, or [] ]}.',
+    isHangout
+      ? 'Judge it honestly but gently: an awkward or flat hangout can score near zero, but this almost never needs to go negative the way a bad date would — it takes a real, deliberate hurt to earn a negative delta here.'
+      : 'Judge the date honestly: a flat, awkward, one-sided, or hurtful date should score low or even negative deltas, not a token positive bump just for happening. A genuinely warm, attentive date should score well across the relevant dimensions.',
+    params.walkedOut
+      ? '"recap" must read as the abrupt, in-world exit it was — a line or two on what made {{char}} leave, not a neutral summary.'
+      : `"recap" is a short 1-3 sentence in-world summary of how the ${sceneNoun} felt from {{char}}'s side, written for the player to read afterward, not a mechanical report.`,
+    '"newFacts" is for concrete, durable facts about {{user}} worth recalling much later. Most scenes add one or none.',
     'Example: {"deltas":{"affection":3,"trust":2,"chemistry":2,"comfort":1,"respect":0,"curiosity":1,"tension":0},"newFlags":["first_date"],"recap":"She lit up talking about her old bakery and kept finding reasons to lean in closer.","newFacts":["Used to run a small bakery before moving here"]}',
     'JSON:',
   ]
@@ -298,7 +319,8 @@ export async function suggestDateEvent(
     `Current affection: ${params.affection}/100`,
     `Available background ids: ${params.availableBackgrounds.join(', ')}`,
     'Return ONLY one minified JSON object:',
-    '{"title":"...","description":"...","objectiveTitle":"...","objectiveDescription":"...","backgroundId":"...","kind":"date|gift|milestone"}',
+    '{"title":"...","description":"...","objectiveTitle":"...","objectiveDescription":"...","backgroundId":"...","kind":"date|hangout|gift|milestone"}',
+    '"date" is a real, romantically-charged date. "hangout" is a lower-stakes, casual get-together — friendly, no romantic stakes riding on it, fitting for earlier affection or a deliberately relaxed scene. Pick whichever actually fits the current relationship and mood.',
     'Make it plausible for the current affection level, with a clear scene objective.',
     'JSON:',
   ]
@@ -320,9 +342,53 @@ export async function suggestDateEvent(
     objectiveTitle,
     objectiveDescription: typeof obj.objectiveDescription === 'string' ? obj.objectiveDescription.trim() : '',
     backgroundId,
-    kind: obj.kind === 'gift' || obj.kind === 'milestone' ? obj.kind : 'date',
+    kind: obj.kind === 'gift' || obj.kind === 'milestone' || obj.kind === 'hangout' ? obj.kind : 'date',
     affectionRequirement: params.affection,
   }
+}
+
+/**
+ * 10b's "real stakes": drafts what a character secretly wants from a date, from their own card —
+ * never shown to the player, only fed back to `assessDateOutcome` at the end. Freeform one-sentence
+ * text rather than JSON (nothing to validate beyond length), so a model that ignores the format
+ * still produces something usable after trimming. Returns null rather than a generic filler when
+ * the card gives the judge nothing to work with or the call fails — a missing agenda is a fine
+ * outcome, a made-up one that contradicts the card is not.
+ */
+export async function draftHiddenAgenda(
+  client: KoboldClient,
+  params: {
+    charName: string
+    charPersonality?: string
+    charGoals?: string[]
+    charBoundaries?: string[]
+    eventTitle: string
+    warmthLabel: string
+  },
+): Promise<string | null> {
+  const prompt = [
+    `You are drafting a private, hidden motivation for ${params.charName} going into a scene: "${params.eventTitle}". This is NEVER shown to the other person — it is only used afterward to judge how the scene actually went for ${params.charName}.`,
+    params.charPersonality ? `${params.charName}'s personality: ${params.charPersonality}` : '',
+    params.charGoals?.length ? `${params.charName}'s goals: ${params.charGoals.join('; ')}` : '',
+    params.charBoundaries?.length ? `${params.charName}'s boundaries: ${params.charBoundaries.join('; ')}` : '',
+    `Where things currently stand between them: ${params.warmthLabel}.`,
+    `What does ${params.charName} secretly want, need, or fear from this specific scene, given who they are? One thing, concrete and specific to their character — not a generic "wants to have a good time".`,
+    'Return ONLY that one sentence, in third person, nothing else. No quotes, no preamble.',
+    // Every other judge call in this file ends on a bare generation cue (`JSON:` etc.) — without
+    // one here, a local model reliably produced nothing rather than guessing where to start.
+    'Sentence:',
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+
+  let text: string
+  try {
+    text = await client.generate({ ...REL_PARAMS, max_length: 60, max_context_length: await client.getEffectiveMaxContext(), prompt })
+  } catch {
+    return null
+  }
+  const trimmed = text.trim().replace(/^["']|["']$/g, '')
+  return trimmed.length > 0 ? trimmed.slice(0, 200) : null
 }
 
 export interface CommitmentAskOutcome {

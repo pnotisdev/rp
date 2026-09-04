@@ -1106,9 +1106,42 @@ below:**
       `**bold**` and `<i>italic</i>` mixed renders as clean italic action text with no stray
       asterisks or literal tags, in both chat styles and VN mode; the stored/prompt-history copy is
       the normalised `*single-asterisk*` form in all cases.
-- [ ] **Real stakes**: each character has a hidden per-date agenda (what they secretly want from
-      the evening); reading it well is rewarded. Hostility or crude propositions can make them
-      walk out; a vibe that craters gets a quiet early exit instead of the scene grinding on.
+- [x] **Real stakes: hidden agendas + walkouts** (#112) — closes out 10b's remaining open item.
+      - **Hidden agenda** — `draftHiddenAgenda` (`relationshipAssist.ts`) runs once in `startDateEvent`,
+        drafting what the character secretly wants/needs/fears from the scene straight from their
+        own card (personality, goals, boundaries) + current warmth. Freeform one sentence, not
+        JSON — nothing to validate beyond length, so a model that ignores the format still produces
+        something usable. Stored on `DateEventCard.hiddenAgenda`, **never surfaced anywhere in the
+        UI**, only read back by `assessDateOutcome` at the end so the recap/deltas reflect whether
+        it was actually met, ignored, or worked against — without ever naming "agenda" in the
+        in-world recap. Best-effort: a thin card or a failed call just leaves it unset, never blocks
+        starting the date.
+      - **Walkouts** — extends the rapport judge that already runs every live-date turn
+        (`RapportRead.walkOut`) rather than adding a second call: `true` only for a genuine
+        dealbreaker *this turn* (overt hostility/cruelty, an explicit/crude proposition), explicitly
+        instructed to be rare so ordinary friction or a bad joke never trips it. When it fires,
+        `runGeneration` calls `endDateEvent({ walkedOut: true })` immediately — the date ends for
+        real, not a quiet score-only consequence the player finds later. `assessDateOutcome` takes a
+        `walkedOut` flag that forces genuinely negative deltas and an in-world "abrupt exit" recap
+        instead of a neutral summary; the closing toast reads as an error (red), not the usual
+        success tone.
+      13 new tests (419 total). **Live-verified in three separate steps** (koboldcpp real-model
+      calls, not mocked): (1) starting a date drafted a genuinely specific, in-character agenda for
+      Sumire tied to her architecture obsession and tsundere avoidance of gratitude; (2) the rapport
+      judge's `walkOut` field reads correctly across escalating live turns — conservative but real:
+      ordinary rudeness/crudeness reads as `on_edge`/`pulling_back` with `walkOut:false`, while
+      genuinely extreme content (explicit degrading propositions, wishing harm on someone's family)
+      reliably triggers `walkOut:true` in isolated repeated calls, confirmed with real sampling
+      variance (not deterministic at temperature 0.3 — expected for a borderline judgment call, not
+      a bug); (3) `assessDateOutcome`'s `walkedOut` framing, tested directly, produced maximum
+      negative deltas across every dimension and an appropriately severe in-world recap ("nothing
+      short of abusive... fleeing in terror"), not a neutral ending summary. Caught and fixed one
+      real bug during this: `draftHiddenAgenda`'s prompt had no trailing generation cue (every other
+      judge in this file ends on a bare cue line like `JSON:`) — without one the model reliably
+      produced nothing at all; added a `Sentence:` cue to match the established pattern.
+      **Known tuning knob:** the walkout bar is deliberately conservative (mildly crude/rude lines
+      correctly do NOT trigger it) — loosen the `walkOut` judge instruction in `rapport.ts` if real
+      play shows it should catch more.
 - [x] **Save-safe end-of-date scoring** — done. Starting a `kind: 'date'` event card (via
       `startDateEvent`) now stamps `DateEventCard.startedAt`, marking it a live, scored date rather
       than the original lightweight event-card flow; the per-turn `updateAffectionFromReply` judge
@@ -1138,10 +1171,40 @@ below:**
       Deliberately deferred, still open below: intent chips, a live rapport indicator/reactive
       portrait, hidden per-date agendas and walkouts, and hangouts as a distinct non-scored mode —
       none of those exist yet, only the scoring mechanism itself.
-- [ ] **Hangouts**: the same live conversation mode with the date apparatus switched off — no
-      turn-by-turn scoring, no walkouts, no relationship-defining stakes. Still ends with an
-      honest read: memories form, and slow-building stats (comfort, trust) grow, on the premise
-      that people fall for each other over ordinary time together, not only on defined "dates."
+- [x] **Hangouts** (#113) — closes out 10b. The same live-scene apparatus as a date
+      (`DateEventCard.kind: 'hangout'`) with the stakes switched off: no hidden agenda drafted, no
+      walkout risk, gentler end-of-scene framing — on the premise that people fall for each other
+      over ordinary time together too, not only on defined "dates." One new `isLiveScene(event)`
+      predicate (`src/lib/dating/stage.ts`) replaces four scattered
+      `kind === 'date' && startedAt`-only checks (`useChatSession.ts`'s `inLiveDate`,
+      `ChatWindow.tsx`/`VNStage.tsx`'s `liveDateActive`, `DateEventPanel.tsx`'s `isLiveDate`) so a
+      hangout's live-ness can never drift out of sync between them.
+      - **Same machinery, gated stakes**: `startDateEvent`'s energy-spend gate now covers both
+        kinds (a hangout is still "spend a chunk of the day" the way a date is); `draftHiddenAgenda`
+        stays date-only (a hangout never gets one); the rapport judge is still asked for `walkOut`
+        every turn during a hangout (one call, same as a date — not worth a second prompt variant)
+        but `runGeneration` only acts on it for `kind === 'date'`, so a hangout can never end itself.
+      - **Gentler judge framing**: `assessDateOutcome` takes a new `sceneKind?: 'date' | 'hangout'`
+        — for a hangout the prompt swaps in "hangout" throughout, adds an explicit low-stakes/no-
+        verdict instruction, and tells the judge a flat or awkward hangout can score near zero but
+        essentially never negative, versus a date's "score it honestly, negative if it earned it."
+      - **Suggestions offer both**: `suggestDateEvent`'s prompt now explains the `date`/`hangout`
+        distinction and lets the model pick whichever fits the current relationship and mood;
+        parsing accepts `'hangout'` alongside the existing three kinds.
+      - **UI reads correctly as a hangout, not a mislabeled date**: `LiveRapport` takes a `label`
+        prop (default `"Live date"`) so the header/VN HUD can pass `"Live hangout"`; `DateEventPanel`
+        shows "Live hangout in progress" / "End hangout" with hangout-specific copy; `VNStage`'s HUD
+        kind line shows `HANGOUT` instead of `DATE`; every energy/coin toast now names the actual
+        scene kind instead of hardcoding "date".
+      10 new tests (429 total): `isLiveScene`'s kind/state combinations, `assessDateOutcome`'s
+      prompt switching on `sceneKind` (and staying silent on hidden-agenda language when there is
+      none), `suggestDateEvent` accepting/offering `'hangout'` and still falling back to `'date'`
+      for an unrecognized kind. Verified live end-to-end on Gemma: suggested a hangout card
+      ("The Forgotten Spire"), started it (energy spent, world day advanced same as a date), header
+      and VN HUD both read "Live hangout" with a real rapport trajectory ("warming to you"), ended
+      it via the "End hangout" action, and the judge pass returned modest positive deltas
+      (`+4 affection` from `5`→`8`) with a warm, non-verdict recap — no walkout language, no hidden-
+      agenda reference, matching the gentler framing by design.
 - [x] **Difficulty setting** — done: a global Gentle / Normal / Harsh setting
       (`useSettingsStore.relationshipDifficulty`, a segmented control under Settings → Generation →
       Relationship tracking, next to the existing auto-track toggle). Implemented as a single flat
@@ -3244,11 +3307,13 @@ smaller than the rest of section 10:
    checked items for the full write-up), including the harder, cross-cutting half of context
    budget tiers left deliberately unattempted for now (still genuinely open, just no longer
    blocking this item).
-5. The rest of 10b — a genuinely live, turn-by-turn date/hangout conversation mode (today's "date"
-   is still an ordinary chat with per-turn scoring switched off and one judge pass at the end, not a
-   separate streamed scene), intent chips, a live rapport indicator/reactive portrait, and hidden
-   per-date agendas and walkouts. All deliberately deferred until the scoring mechanism (and its
-   difficulty knob) had actually shipped and been verified.
+5. ~~Intent chips, live rapport indicator, hidden agendas + walkouts, hangouts~~ — shipped as
+   #108/#110/#112/#113. What's left of 10b: a genuinely live, turn-by-turn date/hangout conversation
+   mode (today's "date"/"hangout" is still an ordinary chat with per-turn scoring switched off and
+   one judge pass at the end, not a separate streamed scene where the character breaks the ice), and
+   a reactive portrait in the *default* (non-VN) layout specifically (VN already has one via scene
+   tags/§8 vision). The streamed-scene piece is tied to the `Scene` entity (item 2 below) — worth
+   sequencing after that rather than building a second "live conversation" concept in parallel.
 
 This list is incremental polish on the app as it exists today. Section 10 (living-world dating
 sim) and section 11 (image-generation backends) are a separate, much larger track — see section

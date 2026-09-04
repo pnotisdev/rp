@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { DateEventCard } from '@/lib/types'
 import { errorMessage, toastError } from '@/lib/store/useToastStore'
+import { isLiveScene } from '@/lib/dating/stage'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 
@@ -17,8 +18,10 @@ interface DateEventPanelProps {
 export function DateEventPanel({ currentEvent, energyRemaining, onClose, onSuggest, onStart, onEnd }: DateEventPanelProps) {
   const [event, setEvent] = useState<DateEventCard | null>(currentEvent ?? null)
   const [busy, setBusy] = useState<string | null>(null)
-  const isLiveDate = currentEvent?.kind === 'date' && !!currentEvent.startedAt
-  const outOfEnergy = event?.kind === 'date' && energyRemaining === 0
+  const isLiveDate = isLiveScene(currentEvent)
+  const isHangout = event?.kind === 'hangout'
+  const spendsEnergy = event?.kind === 'date' || event?.kind === 'hangout'
+  const outOfEnergy = spendsEnergy && energyRemaining === 0
 
   const run = async (label: string, fn: () => Promise<void>) => {
     setBusy(label)
@@ -32,11 +35,16 @@ export function DateEventPanel({ currentEvent, energyRemaining, onClose, onSugge
   }
 
   if (isLiveDate && currentEvent) {
+    const liveIsHangout = currentEvent.kind === 'hangout'
     return (
       <Modal
         onClose={onClose}
-        title="Live date in progress"
-        description="Relationship movement is scored once, honestly, when the date ends — not turn by turn while it's happening. A flat or awkward date won't quietly move things forward."
+        title={liveIsHangout ? 'Live hangout in progress' : 'Live date in progress'}
+        description={
+          liveIsHangout
+            ? "Relationship movement is scored once, gently, when the hangout ends — not turn by turn while it's happening. This is low-stakes: no hidden agenda, no risk of it ending badly."
+            : "Relationship movement is scored once, honestly, when the date ends — not turn by turn while it's happening. A flat or awkward date won't quietly move things forward."
+        }
         size="lg"
       >
           <div className="mb-4 rounded-xl bg-bg-sunken p-4">
@@ -53,7 +61,7 @@ export function DateEventPanel({ currentEvent, energyRemaining, onClose, onSugge
             }
             disabled={busy !== null}
           >
-            {busy === 'end' ? 'Ending…' : 'End date'}
+            {busy === 'end' ? 'Ending…' : liveIsHangout ? 'End hangout' : 'End date'}
           </Button>
       </Modal>
     )
@@ -63,7 +71,9 @@ export function DateEventPanel({ currentEvent, energyRemaining, onClose, onSugge
     <Modal
       onClose={onClose}
       title="Date / Event"
-      description={'Generate a scene event card and start it as the active objective. This also biases VN backgrounds to the event location. Starting a "date" card begins a live, end-of-scene-scored date.'}
+      description={
+        'Generate a scene event card and start it as the active objective. This also biases VN backgrounds to the event location. Starting a "date" or "hangout" card begins a live, end-of-scene-scored scene — a hangout is the lower-stakes version, with no hidden agenda and no risk of it going badly.'
+      }
       size="lg"
     >
         <div className="mb-4 rounded-xl bg-bg-sunken p-4">
@@ -105,10 +115,10 @@ export function DateEventPanel({ currentEvent, energyRemaining, onClose, onSugge
             {busy === 'start' ? 'Starting…' : 'Start this event'}
           </Button>
         </div>
-        {event?.kind === 'date' && energyRemaining !== undefined && (
+        {spendsEnergy && energyRemaining !== undefined && (
           <p className="mt-2 text-[11px] text-text-muted">
             {outOfEnergy
-              ? 'No energy left today — get some rest before starting another date.'
+              ? `No energy left today — get some rest before starting another ${isHangout ? 'hangout' : 'date'}.`
               : `Uses 1 of your ${energyRemaining} remaining actions today.`}
           </p>
         )}
