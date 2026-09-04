@@ -6,6 +6,7 @@ import { messageAnchorId } from '@/lib/scrollToMessage'
 import { renderMessageText } from '@/lib/text/messageText'
 import type { SfxConfig } from '@/lib/text/messageSegments'
 import { confirmDialog } from '@/lib/store/useConfirmStore'
+import { intentSpec } from '@/lib/dating/intent'
 
 function avatarClass(shape: AvatarShape): string {
   switch (shape) {
@@ -219,6 +220,17 @@ export function MessageBubble({
       <Star size={12} strokeWidth={2} fill="currentColor" />
     </span>
   ) : null
+  // 10b: how the player tagged this line's intent. Shown at rest (not hover-only) — it's real
+  // context for how the exchange should read.
+  const intentBadge = (() => {
+    const spec = intentSpec(message.intent)
+    if (!spec) return null
+    return (
+      <span className="rounded-full bg-accent/12 px-1.5 py-px text-[10px] font-medium text-accent" title={spec.hint}>
+        {spec.label}
+      </span>
+    )
+  })()
   const anchorId = messageAnchorId(message.id)
   const highlightClass = isHighlighted ? 'bg-accent/10' : ''
 
@@ -226,7 +238,7 @@ export function MessageBubble({
     return (
       <div id={anchorId} className={`group rounded-lg py-2 transition-colors duration-1000 ${highlightClass}`}>
         <span className={`font-display ${isUser ? 'text-accent' : 'text-text'}`}>{message.name}: </span>
-        {pinBadge}{' '}
+        {pinBadge} {intentBadge}{' '}
         {imageStrip}
         <span className="prose-rp whitespace-pre-wrap break-words text-sm leading-relaxed">
           {editing ? (
@@ -270,6 +282,7 @@ export function MessageBubble({
           </div>
           <div className="flex items-center gap-1.5">
             {pinBadge}
+            {intentBadge}
             {metaHoverable}
           </div>
         </div>
@@ -285,6 +298,7 @@ export function MessageBubble({
         <div className="flex items-center gap-1.5 text-sm font-display text-text">
           {message.name}
           {pinBadge}
+          {intentBadge}
         </div>
         {imageStrip}
         {textBlock}

@@ -8,3 +8,7 @@ dist-ssr
 
 # Your actual character/chat/world data — lives on disk now, not in the browser.
 data/
+
+# Dropped-in SillyTavern preset library for reference / bulk import (Settings → Generation →
+# "Import ST preset"). Not part of the app; keep it out of the tree and out of Vite's watcher.
+presets/

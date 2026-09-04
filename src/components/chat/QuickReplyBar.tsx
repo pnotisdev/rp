@@ -8,8 +8,8 @@ interface QuickReplyBarProps {
 }
 
 const CHIP_CLASSES = {
-  default: 'themed-shadow border-border bg-bg-elevated text-text-muted hover:border-accent hover:text-text',
-  vn: 'border-white/15 bg-white/10 text-white/80 hover:border-white/30 hover:text-white',
+  default: 'bg-bg-elevated text-text-muted hover:bg-accent/10 hover:text-accent',
+  vn: 'bg-white/10 text-white/80 hover:bg-white/20 hover:text-white',
 }
 
 /**
@@ -27,7 +27,7 @@ export function QuickReplyBar({ replies, onPick, variant = 'default' }: QuickRep
           key={reply.id}
           onClick={() => onPick(reply)}
           title={reply.message}
-          className={`rounded-full border py-1.5 px-3.5 text-left text-sm transition-colors ${CHIP_CLASSES[variant]}`}
+          className={`rounded-full py-1.5 px-3.5 text-left text-sm transition-colors ${CHIP_CLASSES[variant]}`}
         >
           {reply.label}
         </button>

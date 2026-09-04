@@ -44,6 +44,20 @@ describe('cleanModelOutput — meta/preamble removal', () => {
     expect(cleanModelOutput('"Whatever," she mutters. *')).toBe('"Whatever," she mutters.')
   })
 
+  it('converts well-formed <i>/<b> action formatting to markdown', () => {
+    expect(cleanModelOutput('<i>She looks up.</i> "What?"')).toBe('*She looks up.* "What?"')
+    expect(cleanModelOutput('<b>No.</b>')).toBe('**No.**')
+  })
+
+  it('strips stray tags and broken tag salad', () => {
+    expect(cleanModelOutput('"Who are you?" <b><i><i></b> she asks.')).toBe('"Who are you?"  she asks.')
+    expect(cleanModelOutput('Text with <p>a block tag</p> in it')).toBe('Text with a block tag in it')
+  })
+
+  it('leaves a bare less-than in prose alone', () => {
+    expect(cleanModelOutput('He muttered that x < y was obvious.')).toBe('He muttered that x < y was obvious.')
+  })
+
   it('is idempotent', () => {
     const raw = 'Sumire: Certainly!\n\n## Scene\n"Hello."\n(OOC: note)'
     const once = cleanModelOutput(raw, { charName: 'Sumire' })

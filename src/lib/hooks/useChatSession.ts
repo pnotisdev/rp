@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { charactersApi, chatFactsApi, chatsApi, instructTemplatesApi, messagesApi, objectivesApi, personasApi, relationshipEventsApi, worldInfoBooksApi, worldsApi } from '@/lib/api/client'
 import { newId } from '@/lib/id'
-import type { AuthorNote, Chat, CommitmentStatus, DateEventCard, ObjectiveTask, RelationshipStage, StoredMessage, WorldCard } from '@/lib/types'
+import type { AuthorNote, Chat, CommitmentStatus, DateEventCard, MessageIntent, ObjectiveTask, RelationshipStage, StoredMessage, WorldCard } from '@/lib/types'
 import { collectImageBase64, composeMessageText, type PendingAttachment } from '@/lib/attachments'
 import { KoboldClient, makeGenKey } from '@/lib/api/kobold'
 import { buildPrompt, estimateTokens, type ChatMessage } from '@/lib/prompt/builder'
@@ -645,7 +645,7 @@ export function useChatSession(chatId: string | null) {
   )
 
   const updateAffectionFromReply = useCallback(
-    async (chatIdForRelationship: string, history: ChatMessage[], latestReply: string) => {
+    async (chatIdForRelationship: string, history: ChatMessage[], latestReply: string, intent?: MessageIntent) => {
       if (!character) return
       const freshChat = await chatsApi.get(chatIdForRelationship)
       if (!freshChat) return
@@ -660,6 +660,7 @@ export function useChatSession(chatId: string | null) {
         current: { affection: currentAffection, ...currentStats },
         knownFacts: activeFacts.map((f) => f.text),
         customFlags: world?.customSceneFlags,
+        intent,
       })
       const deltas = scaleDeltasForDifficulty(rawDeltas, relationshipDifficulty)
       newFlags.forEach((flag) => existingFlags.add(flag))
@@ -1113,7 +1114,7 @@ export function useChatSession(chatId: string | null) {
       historyForPrompt: ChatMessage[],
       targetMessageId: string,
       images: string[] = [],
-      opts?: { continuing?: boolean; speakerId?: string | null },
+      opts?: { continuing?: boolean; speakerId?: string | null; intent?: MessageIntent },
     ) => {
       if (!character || !chat) return
       const { active: speaker } = resolveSpeaker(opts?.speakerId)
@@ -1358,8 +1359,11 @@ export function useChatSession(chatId: string | null) {
         const inLiveDate = chat.activeEvent?.kind === 'date' && !!chat.activeEvent.startedAt
 
         if (effectiveAssistFlag(chat.assistOverrides?.autoTrackRelationship, autoTrackRelationship) && isPrimarySpeaker && !inLiveDate) {
+          // Intent from the just-sent message (opts), or from the latest stored user turn on a
+          // regenerate/swipe where no fresh message was sent.
+          const latestIntent = opts?.intent ?? [...messages].reverse().find((m) => m.role === 'user')?.intent
           runAssist('relationship', 'Updating relationship', () =>
-            updateAffectionFromReply(chat.id, relationshipHistory, combined),
+            updateAffectionFromReply(chat.id, relationshipHistory, combined, latestIntent),
           )
         }
         if (effectiveAssistFlag(chat.assistOverrides?.autoSuggestChoices, autoSuggestChoices) && isPrimarySpeaker) {
@@ -1402,6 +1406,7 @@ export function useChatSession(chatId: string | null) {
       client,
       countTokens,
       detectAndMarkTasks,
+      messages,
       refineSceneWithVision,
       resolveSpeaker,
       runAssist,
@@ -1415,7 +1420,7 @@ export function useChatSession(chatId: string | null) {
   )
 
   const sendUserMessage = useCallback(
-    async (text: string, attachments: PendingAttachment[] = [], opts?: { choice?: ChoiceOption }) => {
+    async (text: string, attachments: PendingAttachment[] = [], opts?: { choice?: ChoiceOption; intent?: MessageIntent }) => {
       if (!chatId || isGenerating) return
       let giftId: string | undefined
       if (opts?.choice?.kind === 'gift' && opts.choice.giftId) {
@@ -1463,6 +1468,7 @@ export function useChatSession(chatId: string | null) {
         name: persona?.name || 'You',
         text: composedText,
         giftId,
+        intent: opts?.intent,
         images: storedImages.length ? storedImages : undefined,
         createdAt: now,
       }
@@ -1491,7 +1497,7 @@ export function useChatSession(chatId: string | null) {
         name: m.name,
         text: m.text,
       }))
-      await runGeneration(historyForPrompt, charMsg.id, apiImages, { speakerId: replyAsCharacterId })
+      await runGeneration(historyForPrompt, charMsg.id, apiImages, { speakerId: replyAsCharacterId, intent: opts?.intent })
     },
     [character, chatId, isGenerating, messages, persona, reducedAudio, replyAsCharacterId, resolveSpeaker, runGeneration, world],
   )
@@ -1730,9 +1736,9 @@ export function useChatSession(chatId: string | null) {
       if (activeObjective) await objectivesApi.update(activeObjective.id, { status: 'completed' })
     }
 
-    const transcript: ChatMessage[] = messages
-      .filter((m) => m.createdAt >= startedAt && m.text.trim())
-      .map((m) => ({ id: m.id, role: m.role, name: m.name, text: m.text }))
+    const dateMessages = messages.filter((m) => m.createdAt >= startedAt && m.text.trim())
+    const transcript: ChatMessage[] = dateMessages.map((m) => ({ id: m.id, role: m.role, name: m.name, text: m.text }))
+    const intents = dateMessages.filter((m) => m.role === 'user' && m.intent).map((m) => m.intent as string)
     if (transcript.length === 0) {
       await closeOutEvent()
       toastSuccess(`${event.title} ended without anything happening.`)
@@ -1750,6 +1756,7 @@ export function useChatSession(chatId: string | null) {
       current: { affection: currentAffection, ...currentStats },
       knownFacts: activeFacts.map((f) => f.text),
       customFlags: world?.customSceneFlags,
+      intents,
     })
     const deltas = scaleDeltasForDifficulty(outcome.deltas, relationshipDifficulty)
     outcome.newFlags.forEach((flag) => existingFlags.add(flag))

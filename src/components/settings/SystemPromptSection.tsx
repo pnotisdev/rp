@@ -1,10 +1,13 @@
 import { useState } from 'react'
-import { Plus, X } from 'lucide-react'
+import { Plus, Upload, X } from 'lucide-react'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import { BUILTIN_SYSTEM_PROMPTS, DEFAULT_SYSTEM_PROMPT } from '@/lib/prompt/systemPrompts'
+import { parseSillyTavernPreset } from '@/lib/prompt/sillyTavernPreset'
 import { Section } from '@/components/ui/Section'
 import { TextAreaField } from '@/components/ui/Field'
 import { Button } from '@/components/ui/Button'
+import { FileButton } from '@/components/ui/FileButton'
+import { toastError, toastInfo, toastSuccess } from '@/lib/store/useToastStore'
 
 /**
  * User control over the instruction block at the top of every generation (rule 2 of the prompt
@@ -58,11 +61,36 @@ export function SystemPromptSection() {
     setSaving(false)
   }
 
+  /** Load a SillyTavern `sysprompt/*.json` preset into the editable fields. */
+  const importPreset = async (files: FileList) => {
+    const file = files[0]
+    try {
+      const parsed = parseSillyTavernPreset(JSON.parse(await file.text()))
+      if (parsed?.kind === 'sysprompt') {
+        setSystemPrompt(parsed.prompt)
+        setPostHistoryInstructions(parsed.postHistory)
+        toastSuccess(`Loaded "${parsed.name}" — edit or save it as a preset below`)
+      } else if (parsed?.kind === 'instruct') {
+        toastInfo('That is an instruct preset — import it in the Instruct template section instead.')
+      } else {
+        toastError(parsed?.kind === 'unsupported' ? `Can't import ${parsed.detail}` : 'Not a SillyTavern system-prompt preset')
+      }
+    } catch {
+      toastError(`${file.name}: not valid JSON`)
+    }
+  }
+
   return (
     <Section
       title="System prompt"
       description="The instruction block at the very top of every generation. A character's own system-prompt override (Character editor -> Advanced) still wins when set; this is the global default for everyone else. Ten built-in variations with different feels, or write your own."
       surface="bare"
+      action={
+        <FileButton onPick={importPreset} accept=".json,application/json" title="Import a SillyTavern sysprompt/*.json preset">
+          <Upload size={13} strokeWidth={2} />
+          Import ST preset
+        </FileButton>
+      }
     >
       <div className="mb-1.5 text-xs font-medium text-text-muted">Preset</div>
       <select

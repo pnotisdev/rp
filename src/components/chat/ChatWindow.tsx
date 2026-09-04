@@ -35,6 +35,8 @@ import { MessageLog } from './MessageLog'
 import { VNStage } from './VNStage'
 import { ChoiceList } from './ChoiceList'
 import { QuickReplyBar } from './QuickReplyBar'
+import { IntentChips } from './IntentChips'
+import type { MessageIntent } from '@/lib/dating/intent'
 import { GenerationHud } from './GenerationHud'
 import { Composer } from './Composer'
 import { ConnectionBadge } from './ConnectionBadge'
@@ -100,6 +102,7 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
   } = useChatSession(chatId)
 
   const globalVisualNovelMode = useSettingsStore((s) => s.visualNovelMode)
+  const autoTrackRelationship = useSettingsStore((s) => s.autoTrackRelationship)
   const quickReplies = useSettingsStore((s) => s.quickReplies)
   const showGenerationHud = useSettingsStore((s) => s.showGenerationHud)
   const regexScripts = useSettingsStore((s) => s.regexScripts)
@@ -119,8 +122,13 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
   const [highlightedId, setHighlightedId] = useState<string | null>(null)
   const highlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [draft, setDraft] = useState('')
+  const [armedIntent, setArmedIntent] = useState<MessageIntent | null>(null)
   const [refreshingChoices, setRefreshingChoices] = useState(false)
   const [exporting, setExporting] = useState(false)
+
+  useEffect(() => {
+    setArmedIntent(null)
+  }, [chatId])
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
@@ -339,6 +347,17 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
       <QuickReplyBar variant={variant} replies={quickReplies} onPick={(reply) => sendUserMessage(reply.message, [])} />
     )
 
+  // 10b intent chips: offered while relationship tracking is on for this chat (its override, else
+  // the global default) — the same condition that decides whether the judge runs and cares about
+  // intent. Lives inside the composer card (as its `intentSlot`), never as a separate bar.
+  const relationshipTrackingActive = chat?.assistOverrides?.autoTrackRelationship ?? autoTrackRelationship
+  const showIntentChips = relationshipTrackingActive && !isGenerating && !!character
+
+  const sendWithIntent = (text: string, attachments: Parameters<typeof sendUserMessage>[1] = []) => {
+    sendUserMessage(text, attachments, armedIntent ? { intent: armedIntent } : undefined)
+    setArmedIntent(null)
+  }
+
   const composerNode = (variant: 'default' | 'vn') => (
     <Composer
       variant={variant}
@@ -347,7 +366,7 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
       disabled={!character}
       isGenerating={isGenerating}
       canContinue={canContinue}
-      onSend={sendUserMessage}
+      onSend={sendWithIntent}
       onAbort={abortGeneration}
       onContinue={continueMessage}
       onImpersonate={impersonate}
@@ -356,6 +375,16 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
       }
       replyAsId={replyAsCharacterId}
       onChangeReplyAs={(id) => setReplyAsCharacterId(id === character?.id ? null : id)}
+      intentSlot={
+        showIntentChips ? (
+          <IntentChips
+            variant={variant}
+            stats={chat ? getRelationshipStats(chat) : {}}
+            armed={armedIntent}
+            onArm={setArmedIntent}
+          />
+        ) : undefined
+      }
     />
   )
 

@@ -15,8 +15,8 @@ interface ChoiceListProps {
 const KIND_ICON: Record<ChoiceOption['kind'], LucideIcon> = { gift: Gift, action: Zap, line: MessageSquare }
 
 const CHIP_CLASSES = {
-  default: 'themed-shadow border-border bg-bg-elevated text-text hover:border-accent hover:bg-accent/10',
-  vn: 'border-white/15 bg-white/10 text-white hover:border-white/30 hover:bg-white/20',
+  default: 'bg-bg-elevated text-text hover:bg-accent/10 hover:text-accent',
+  vn: 'bg-white/10 text-white hover:bg-white/20',
 }
 const KIND_ICON_CLASSES = { default: 'text-accent', vn: 'text-accent' }
 const REFRESH_CLASSES = {
@@ -35,7 +35,7 @@ export function ChoiceList({ choices, onPick, onRefresh, refreshing, variant = '
           <button
             key={choice.id || i}
             onClick={() => onPick(choice)}
-            className={`flex items-center gap-2 rounded-full border py-1.5 pl-3 pr-3.5 text-left text-sm transition-colors ${CHIP_CLASSES[variant]}`}
+            className={`flex items-center gap-2 rounded-full py-1.5 pl-3 pr-3.5 text-left text-sm transition-colors ${CHIP_CLASSES[variant]}`}
           >
             <KindIcon size={13} strokeWidth={2} className={`shrink-0 ${KIND_ICON_CLASSES[variant]}`} />
             {choice.label}

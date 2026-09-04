@@ -305,7 +305,7 @@ export function VNStage({
               floating, margin-all-around card (the previous design) didn't have. Dialogue,
               choices, and the composer all live in this one continuous glass panel, divided by
               hairlines, instead of three separate app-chrome widgets stacked below the scene. */}
-          <div className="relative z-10 flex flex-col border-t border-romance/30 bg-black/65 backdrop-blur-md">
+          <div className="group/vnpanel relative z-10 flex flex-col border-t border-romance/30 bg-black/65 backdrop-blur-md">
             {/* The speaker's nameplate — a solid tab overlapping the panel's top edge, the way a
                 real VN's ADV box tags who's talking, rather than a plain text line sharing the
                 same row as the swipe/regenerate controls. Romance-tinted rather than the generic UI
@@ -314,7 +314,10 @@ export function VNStage({
             <span className="absolute -top-[1.15rem] left-4 rounded-lg bg-romance px-3.5 py-1.5 font-display text-sm font-medium leading-none text-romance-text shadow-md sm:left-6">
               {lastCharMsg?.name ?? character?.card.name}
             </span>
-            <div className="flex items-center justify-end gap-1 px-3 pt-3 sm:px-5">
+            {/* Swipe/regen/fork/pin are utility, not scene — recede to near-invisible at rest and
+                come back on hover or keyboard focus, so a settled scene reads as the art and the
+                dialogue, not a control strip. */}
+            <div className="flex items-center justify-end gap-1 px-3 pt-3 opacity-30 transition-opacity duration-200 focus-within:opacity-100 group-hover/vnpanel:opacity-100 sm:px-5">
               {canSwipe && (
                 <>
                   <span className="flex items-center gap-0.5 text-xs text-white/70">

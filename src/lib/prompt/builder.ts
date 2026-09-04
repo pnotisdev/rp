@@ -220,7 +220,13 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
     exampleBlock,
     authorNoteText && authorNotePosition === 'after_char' ? authorNoteText : '',
   ].filter(Boolean)
-  const fixedText = fixedSections.join('\n\n')
+  // Everything above the chat history — system prompt, character description, persona, examples,
+  // world info — is one block, and for a structured format (ChatML, Gemma, Llama 3, Mistral) it
+  // has to be wrapped in that format's system/opening turn markers or the model reads it as loose
+  // text outside any turn and drops out of its trained chat behaviour. `plain-chat` leaves the
+  // affixes empty, so this is a no-op there.
+  const fixedInner = fixedSections.join('\n\n')
+  const fixedText = fixedInner ? `${template.systemPrefix}${fixedInner}${template.systemSuffix}` : ''
   const fixedTokens = await countTokens(fixedText)
   const authorNoteAtDepthTokens =
     authorNoteText && authorNotePosition === 'at_depth' ? await countTokens(authorNoteText) : 0

@@ -511,6 +511,47 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
       rather than bolting each on piecemeal.
 
 ## 8. Backend/AI
+- [x] **Gemma + Llama 3 instruct templates, and detect a template mismatch** (#106) — the app
+      shipped 5 builtins (plain-chat/alpaca/vicuna/chatml/mistral) with `plain-chat` as the default,
+      and `builder.ts` never applied `systemPrefix`/`systemSuffix` at all — so even picking the right
+      builtin left the whole system+description+persona block floating as loose text outside any
+      turn. User hit this hard with a Gemma-family model (`Heimdallr-26B-A4B`): fed a name-prefixed
+      transcript with no turn markers and (`plain-chat`) no stop sequences, it rambled, broke
+      character, emitted raw `<i>`/`<b>` tags, invented and "resolved" fake instructions, narrated
+      "looking at the prompt…", and never stopped. Fixes: (1) new `gemma` and `llama3` builtins;
+      (2) `builder.ts` now wraps the entire fixed block in `template.systemPrefix`/`systemSuffix`
+      (no-op for `plain-chat`, which leaves them empty); (3) `detectInstructTemplateId()` maps the
+      model's own chat template (KoboldCpp `/props` → `chat_template`, best-effort via new
+      `KoboldClient.getChatTemplate()`) to a builtin id, surfaced by `useConnectionStatus` and shown
+      in Settings → Connection as a one-click "Switch to {name}" nudge whenever it disagrees with the
+      active builtin. 9 new tests (379 total). Verified live: the mismatch banner correctly
+      identified Gemma; switching templates turned the exact broken "Who am I?" reply into a clean,
+      in-character, persona-aware line ("What kind of question is that? We go to the same
+      university. I've seen you in the cafeteria.").
+- [x] **Instruct-template library from SillyTavern presets** (#107) — the user dropped ST's whole
+      preset library into `presets/` and asked for it "implemented neatly". Rather than a 46-entry
+      dropdown:
+      - **Builtins expanded to 12, converted from ST's own sequence definitions**: plain-chat,
+        ChatML, Gemma, Llama 3, Mistral v1–v3, Mistral v7, Command R, DeepSeek, Metharme/Pygmalion,
+        Phi, Alpaca, Vicuna. All structured formats now carry a `{name}: ` speaker prefix and
+        `namesInPrompt: true`, matching ST's default `names_behavior: "force"` — a roleplay model
+        tracks speakers far better with names in the turn, and `cleanModelOutput` strips the echo.
+        `detectInstructTemplateId` gained patterns for the new families.
+      - **Import path for the long tail**: `sillyTavernPreset.ts`'s `parseSillyTavernPreset()`
+        converts an ST `instruct/*.json` to an `InstructTemplate` (handles `wrap`, `{{name}}`
+        sequences, `story_string_prefix`, force-names) or an ST `sysprompt/*.json` to prompt +
+        post-history text; flags context/sampler presets as unsupported with a reason. "Import ST
+        preset" `FileButton`s in the Instruct-template and System-prompt sections (multi-file for
+        instruct) turn any downloaded preset into a custom template / loaded prompt.
+      - **`cleanModelOutput` now also normalises HTML formatting** — models trained on scraped chat
+        data emit `<i>…</i>`/`<b>…</b>` (and, when confused, `<b><i><i></b>` salad) instead of
+        `*asterisks*`; well-formed pairs convert to markdown, the rest is stripped. A bare `<` in
+        prose ("x < y") is left alone.
+      - `presets/` is now gitignored and excluded from Vite's file watcher (it had crashed the dev
+        server with `EBUSY` on a locked file).
+      11 new tests (390 total), typecheck + build clean. Verified live on `Heimdallr-26B-A4B`
+      (Gemma): names-forced Gemma keeps Sumire fully in character across several turns, and a reply
+      the model wrote with `<i>` tags stores as clean `*action*` markdown.
 - [ ] Support additional model backends alongside KoboldCpp-only `KoboldClient`
       ([src/lib/api/kobold.ts](src/lib/api/kobold.ts)) — no generic OpenAI-compatible client
       exists, let alone provider-specific ones. Concretely: Gemini, ChatGPT/OpenAI, Claude, and
@@ -1007,9 +1048,26 @@ below:**
       tracks it as a checklist — it doesn't run a scored, live scene. A date is naturally a
       one-character instance of the `Scene` concept proposed for group chats in section 4 — worth
       building on the same machinery rather than two parallel "live conversation" systems.
-- [ ] **Intent chips**: optional per-message tags (Flirt, Tease, Open Up, plus Reassure and
-      Apologize once there's tension) that signal how a line is meant. They never move a stat
-      directly — they change how the moment is interpreted, and can backfire if misread.
+- [x] **Intent chips** (#108) — `src/lib/dating/intent.ts`: a `MessageIntent`
+      (`flirt`/`tease`/`open_up`/`reassure`/`apologize`) the player can arm; it rides with the next
+      message (`StoredMessage.intent`, carried on fork + backup for free as a row field) then
+      disarms. `IntentChips` shows the base three always and the two friction-repair ones only once
+      `tension >= 12`. It never moves a stat directly — each spec carries a `judgeLine` fed into
+      `assessRelationshipMoment` (per turn) and `assessDateOutcome` (the list across a date),
+      phrased so a well-read, well-timed beat helps and a misjudged one costs ("do not just reward
+      the attempt"). The tag shows on the message bubble at rest in all three chat styles. Gated on
+      the same "relationship tracking active for this chat" condition as the judge itself. 9 new
+      tests (399 total). Verified live on Gemma: arming Tease and poking Sumire about her own
+      subject got a real backfire — she snapped about theological density and "stop calling me
+      that, I'm not a professor" — with the judge moving tension, not just a token positive bump.
+      **UI (#109):** first shipped as its own bar above the composer, which read as misplaced;
+      moved *inside* the composer card as its `intentSlot` — a quiet row above the textarea, split
+      off by a hairline, armed chip in accent — so it reads as part of writing the line. Same pass:
+      `GenerationHud`/`AssistActivityBar` aligned to `max-w-chat` like everything else in that
+      strip; `ChoiceList`/`QuickReplyBar` pills lost their borders+shadows for a plain bg-step +
+      hover (design brief: reserve hard borders); VN mode's swipe/regen/fork/pin controls now
+      recede to 30% opacity at rest and return on hover, so a settled scene reads as the art and
+      the dialogue rather than a control strip.
 - [ ] **Live feedback during the scene**: a rapport-trajectory indicator ("warming to you," "a
       bit awkward," "losing interest") and a reactive portrait whose expression shifts in real
       time, so the player can read the scene without seeing raw numbers. The portrait piece

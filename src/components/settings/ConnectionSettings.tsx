@@ -1,18 +1,30 @@
 import { useState } from 'react'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import { useConnectionStatus } from '@/lib/hooks/useConnectionStatus'
+import { BUILTIN_INSTRUCT_TEMPLATES } from '@/lib/prompt/instructTemplates'
 import { TextField } from '@/components/ui/Field'
 import { Section } from '@/components/ui/Section'
 import { SettingsPage } from '@/components/ui/SettingsPage'
+import { Button } from '@/components/ui/Button'
+import { toastSuccess } from '@/lib/store/useToastStore'
 
 const STATUS_DOT = { online: 'bg-success', offline: 'bg-danger', checking: 'bg-warning' } as const
 const STATUS_LABEL = { online: 'Connected', offline: 'Not reachable', checking: 'Checking…' } as const
+const BUILTIN_IDS = new Set(BUILTIN_INSTRUCT_TEMPLATES.map((t) => t.id))
 
 export function ConnectionSettings() {
   const baseUrl = useSettingsStore((s) => s.baseUrl)
   const setBaseUrl = useSettingsStore((s) => s.setBaseUrl)
+  const instructTemplateId = useSettingsStore((s) => s.instructTemplateId)
+  const setInstructTemplateId = useSettingsStore((s) => s.setInstructTemplateId)
   const [draft, setDraft] = useState(baseUrl)
-  const { status, model, version, maxContext } = useConnectionStatus(baseUrl)
+  const { status, model, version, maxContext, detectedTemplateId } = useConnectionStatus(baseUrl)
+
+  // Only nudge when the model clearly implies a builtin format AND the active template is itself a
+  // builtin we can compare against — a user on a hand-tuned custom template is assumed to know.
+  const detected = detectedTemplateId ? BUILTIN_INSTRUCT_TEMPLATES.find((t) => t.id === detectedTemplateId) : undefined
+  const templateMismatch =
+    detected && BUILTIN_IDS.has(instructTemplateId) && detectedTemplateId !== instructTemplateId ? detected : undefined
 
   return (
     <SettingsPage>
@@ -45,6 +57,31 @@ export function ConnectionSettings() {
             </p>
           )}
         </div>
+
+        {templateMismatch && (
+          <div className="mt-4 rounded-xl bg-warning/10 p-4 text-xs ring-1 ring-warning/30">
+            <p className="text-text">
+              This model's chat template looks like <strong>{templateMismatch.name}</strong>, but the
+              active instruct template is{' '}
+              <strong>
+                {BUILTIN_INSTRUCT_TEMPLATES.find((t) => t.id === instructTemplateId)?.name ?? instructTemplateId}
+              </strong>
+              . A mismatch is the usual cause of a model that rambles, ignores its character, leaks
+              instructions, or never stops.
+            </p>
+            <div className="mt-2.5">
+              <Button
+                variant="primary"
+                onClick={() => {
+                  setInstructTemplateId(templateMismatch.id)
+                  toastSuccess(`Instruct template set to ${templateMismatch.name}`)
+                }}
+              >
+                Switch to {templateMismatch.name}
+              </Button>
+            </div>
+          </div>
+        )}
       </Section>
     </SettingsPage>
   )

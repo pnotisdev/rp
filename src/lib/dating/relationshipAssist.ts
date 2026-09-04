@@ -4,6 +4,7 @@ import type { Character } from '@/lib/characters/cardSpec'
 import type { CustomSceneFlag, DateEventCard, RelationshipDimension, SceneFlag } from '@/lib/types'
 import type { ChatMessage } from '@/lib/prompt/builder'
 import { RELATIONSHIP_DIMENSIONS, SCENE_FLAGS } from '@/lib/dating/stage'
+import { describeIntentForJudge, describeIntentsForDate } from '@/lib/dating/intent'
 
 // max_context_length is deliberately omitted here — every call site fetches the server's actual
 // loaded context via `client.getEffectiveMaxContext()` instead of hardcoding a guess.
@@ -126,6 +127,8 @@ export async function assessRelationshipMoment(
     knownFacts?: string[]
     /** World-authored flags beyond the 4 built-in defaults (see `CustomSceneFlag`) — glossaried and validated exactly like the built-ins. */
     customFlags?: CustomSceneFlag[]
+    /** 10b: how the player tagged their most recent line (`MessageIntent`) — interpretation context, not a direct stat move. */
+    intent?: string
   },
 ): Promise<RelationshipMoment> {
   const prompt = [
@@ -135,6 +138,7 @@ export async function assessRelationshipMoment(
     `Latest reply from ${params.charName}:\n${params.latestReply}`,
     `Dimension meanings: ${DELTA_KEYS.map((k) => `${k} = ${DIMENSION_GLOSSARY[k]}`).join('; ')}.`,
     `Known route flags: ${describeFlags(params.customFlags)}.`,
+    describeIntentForJudge(params.intent)?.replace(/\{\{char\}\}/g, params.charName) ?? '',
     params.knownFacts?.length ? `Facts already remembered (don't repeat these): ${params.knownFacts.join('; ')}.` : '',
     'Return ONLY a minified JSON object: {"deltas":{ one integer -2..2 per dimension key },"newFlags":[ any newly-established flags from the known set, or [] ],"reason":"...","newFacts":[ any new durable facts, or [] ]}.',
     'Only move a dimension if this specific exchange clearly affected it. Leave the rest at 0. Most turns should move only one or two dimensions and add no new flags.',
@@ -227,6 +231,8 @@ export async function assessDateOutcome(
     current: RelationshipDeltas
     knownFacts?: string[]
     customFlags?: CustomSceneFlag[]
+    /** 10b: the `MessageIntent`s the player deliberately played across the date, in order. */
+    intents?: string[]
   },
 ): Promise<DateOutcome> {
   // Cap at the last 24 turns — plenty for a single date scene, and keeps the prompt bounded even
@@ -240,6 +246,7 @@ export async function assessDateOutcome(
     `Full transcript of the date:\n${transcriptText || '(nothing was said)'}`,
     `Dimension meanings: ${DELTA_KEYS.map((k) => `${k} = ${DIMENSION_GLOSSARY[k]}`).join('; ')}.`,
     `Known route flags: ${describeFlags(params.customFlags)}.`,
+    describeIntentsForDate(params.intents ?? [])?.replace(/\{\{char\}\}/g, params.charName) ?? '',
     params.knownFacts?.length ? `Facts already remembered (don't repeat these): ${params.knownFacts.join('; ')}.` : '',
     'Return ONLY a minified JSON object: {"deltas":{ one integer -5..5 per dimension key, judged across the WHOLE date, not per line },"newFlags":[ any newly-established flags from the known set, or [] ],"recap":"...","newFacts":[ any new durable facts, or [] ]}.',
     'Judge the date honestly: a flat, awkward, one-sided, or hurtful date should score low or even negative deltas, not a token positive bump just for happening. A genuinely warm, attentive date should score well across the relevant dimensions.',

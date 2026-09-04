@@ -263,7 +263,12 @@ export interface StoredMessage extends ChatMessage {
   failed?: boolean
   /** Set when the world tick (10f's proactive outreach) generated this message unprompted, rather than as a reply to a player message in the same turn. */
   initiatedBy?: 'character'
+  /** 10b's intent chips — how the player meant this line. User messages only; fed to the relationship judge as interpretation context, never a direct stat move. See `src/lib/dating/intent.ts`. */
+  intent?: MessageIntent
 }
+
+/** 10b: how a player meant a tagged line, distinct from what it literally says. Specs (labels, how the judge reads each) live in `src/lib/dating/intent.ts`. */
+export type MessageIntent = 'flirt' | 'tease' | 'open_up' | 'reassure' | 'apologize'
 
 export interface Chat {
   id: string

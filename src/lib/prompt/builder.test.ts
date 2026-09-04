@@ -31,6 +31,45 @@ function baseInput(overrides: Partial<PromptBuildInput> = {}): PromptBuildInput 
   }
 }
 
+describe('buildPrompt — instruct template affixes', () => {
+  it('wraps the whole fixed block (system + description) in the template system markers', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        template: getInstructTemplate('gemma'),
+        character: character({ name: 'Aria', description: 'A calm archivist.' }),
+        history: [{ id: '1', role: 'user', name: 'You', text: 'Hi.' }],
+      }),
+    )
+    // The description must sit INSIDE an opening user turn, not float as loose text before it.
+    expect(result.prompt).toMatch(/<start_of_turn>user\n[\s\S]*A calm archivist\.[\s\S]*<end_of_turn>/)
+    // History turn and the generation cue use the model turn markers too (names forced, ST-style).
+    expect(result.prompt).toContain('<start_of_turn>user\nYou: Hi.<end_of_turn>')
+    expect(result.prompt.trimEnd().endsWith('<start_of_turn>model\nAria:')).toBe(true)
+  })
+
+  it('plain-chat leaves the fixed block unwrapped (empty affixes)', async () => {
+    const result = await buildPrompt(
+      baseInput({ character: character({ name: 'Aria', description: 'DESC_MARKER' }) }),
+    )
+    expect(result.prompt).not.toContain('<start_of_turn>')
+    expect(result.prompt).not.toContain('<|im_start|>')
+    expect(result.prompt).toContain('DESC_MARKER')
+  })
+
+  it('emits no stray system markers when every fixed section is empty', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        template: getInstructTemplate('chatml'),
+        character: character({ name: 'Aria' }),
+        globalSystemPrompt: '',
+        promptSections: { system: false, description: false, persona: false, examples: false, world: false, summary: false, participants: false },
+        history: [{ id: '1', role: 'user', name: 'You', text: 'Hi.' }],
+      }),
+    )
+    expect(result.prompt).not.toContain('<|im_start|>system')
+  })
+})
+
 describe('buildPrompt — group chat (multiple speaking characters)', () => {
   it('renders each historical turn under its own speaker name, not always the active character', async () => {
     const history: ChatMessage[] = [

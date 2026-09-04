@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { KoboldClient } from '@/lib/api/kobold'
+import { detectInstructTemplateId } from '@/lib/prompt/instructTemplates'
 
 export type ConnectionStatus = 'checking' | 'online' | 'offline'
 
@@ -8,6 +9,8 @@ export function useConnectionStatus(baseUrl: string) {
   const [model, setModel] = useState<string | null>(null)
   const [version, setVersion] = useState<string | null>(null)
   const [maxContext, setMaxContext] = useState<number | null>(null)
+  /** The builtin instruct-template id the loaded model's own chat template implies, or null when it can't be told. */
+  const [detectedTemplateId, setDetectedTemplateId] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -27,12 +30,17 @@ export function useConnectionStatus(baseUrl: string) {
           .getTrueMaxContextLength()
           .then((c) => !cancelled && setMaxContext(c))
           .catch(() => !cancelled && setMaxContext(null))
+        client
+          .getChatTemplate()
+          .then((tpl) => !cancelled && setDetectedTemplateId(detectInstructTemplateId(tpl)))
+          .catch(() => !cancelled && setDetectedTemplateId(null))
       } catch {
         if (!cancelled) {
           setStatus('offline')
           setModel(null)
           setVersion(null)
           setMaxContext(null)
+          setDetectedTemplateId(null)
         }
       }
     }
@@ -45,5 +53,5 @@ export function useConnectionStatus(baseUrl: string) {
     }
   }, [baseUrl])
 
-  return { status, model, version, maxContext }
+  return { status, model, version, maxContext, detectedTemplateId }
 }

@@ -115,6 +115,28 @@ const LEADING_AFFIRMATION_RE =
 /** A markdown heading at the start of a line — RP prose has no headings. */
 const MD_HEADING_RE = /^[ \t]*#{1,6}[ \t]+/gm
 
+/**
+ * Some models (especially RP finetunes trained on scraped forum/chat data) format actions with
+ * `<i>…</i>` and `<b>…</b>` instead of `*asterisks*`, and a confused one emits broken salad like
+ * `<b><i><i></b>`. This app renders markdown, not HTML, so an inline tag is always an artifact.
+ * Well-formed pairs are converted to their markdown equivalent so the emphasis survives; anything
+ * left over (unclosed tags, block tags, the broken salad) is stripped, then empty/oversized
+ * emphasis runs the conversion can create are tidied.
+ */
+function stripHtmlFormatting(text: string): string {
+  if (!text.includes('<')) return text
+  let out = text
+  out = out.replace(/<(i|em)\b[^>]*>([\s\S]*?)<\/\1>/gi, '*$2*')
+  out = out.replace(/<(b|strong)\b[^>]*>([\s\S]*?)<\/\1>/gi, '**$2**')
+  out = out.replace(/<br\s*\/?>/gi, '\n')
+  // Any remaining real HTML tag (`<p>`, `<span …>`, a stray `<i>` with no partner). The
+  // `[a-z]` guard keeps a bare `<` in prose ("if x < y") untouched.
+  out = out.replace(/<\/?[a-z][a-z0-9]*\b[^>]*>/gi, '')
+  // Conversions above can leave `****` (was `<b><i></b>`) or `** **`; collapse those.
+  out = out.replace(/\*\*\s*\*\*/g, '').replace(/\*{4,}/g, '**')
+  return out
+}
+
 /** Three or more blank lines collapse to one blank line. */
 const EXCESS_BLANKS_RE = /\n{3,}/g
 
@@ -196,6 +218,7 @@ export function cleanModelOutput(text: string, opts: CleanModelOutputOptions = {
   }
 
   out = out.replace(LEADING_AFFIRMATION_RE, '')
+  out = stripHtmlFormatting(out)
 
   const kept = out
     .split('\n')

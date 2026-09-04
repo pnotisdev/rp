@@ -69,6 +69,21 @@ export class KoboldClient {
     return r.value
   }
 
+  /**
+   * The loaded model's own chat template (the GGUF's embedded Jinja string), from llama.cpp's
+   * `/props` endpoint that modern KoboldCpp also serves. Used only to warn when the app's active
+   * instruct template doesn't match the model's actual training format. Returns null on any older
+   * build that lacks the endpoint or a model with no embedded template — never an error.
+   */
+  async getChatTemplate(): Promise<string | null> {
+    try {
+      const r = await req<{ chat_template?: string }>(this.baseUrl, '/props')
+      return typeof r.chat_template === 'string' && r.chat_template.trim() ? r.chat_template : null
+    } catch {
+      return null
+    }
+  }
+
   async getTrueMaxContextLength(): Promise<number> {
     const r = await req<{ value: number }>(this.baseUrl, '/api/extra/true_max_context_length')
     return r.value

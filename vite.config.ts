@@ -11,6 +11,11 @@ export default defineConfig({
   },
   server: {
     port: Number(process.env.PORT) || 5173,
+    // `presets/` is a user-dropped SillyTavern preset library (gitignored, reference/import only),
+    // not app source. Vite's file watcher has crashed with EBUSY trying to watch files in it while
+    // an editor or another process held one open — exclude it so a stray lock can't take the dev
+    // server down.
+    watch: { ignored: ['**/presets/**'] },
     // All app data now lives on disk via the local API server (see server/), reached
     // through this proxy so the browser only ever talks to one origin. If this port
     // were ever busy, Vite's default behavior is to silently bind the next free one

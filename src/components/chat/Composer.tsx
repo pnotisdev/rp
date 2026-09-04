@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { ChevronsRight, FileText, Paperclip, Send, Square, Wand2, X } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { readAttachment, type PendingAttachment } from '@/lib/attachments'
@@ -17,6 +17,8 @@ interface ComposerProps {
   replyAsOptions?: { id: string; name: string }[]
   replyAsId?: string | null
   onChangeReplyAs?: (id: string | null) => void
+  /** A row that belongs *to* the message being composed (10b's intent chips) — sits inside the card, above the textarea, so it reads as part of writing the line rather than a separate bar. */
+  intentSlot?: ReactNode
   /** 'vn' strips its own chrome (border/background/margin) to sit bare inside the glass dialogue box it's nested in, and switches text/icon colors for a photo backdrop instead of the app surface. */
   variant?: 'default' | 'vn'
 }
@@ -34,6 +36,7 @@ export function Composer({
   replyAsOptions = [],
   replyAsId,
   onChangeReplyAs,
+  intentSlot,
   variant = 'default',
 }: ComposerProps) {
   const [attachments, setAttachments] = useState<PendingAttachment[]>([])
@@ -96,15 +99,20 @@ export function Composer({
     : 'bg-bg-elevated text-text-muted hover:text-danger'
 
   return (
-    <div className={vn ? 'w-full' : 'border-t border-border bg-bg-elevated p-3'}>
+    <div className={vn ? 'w-full' : 'border-t border-border/50 bg-bg-elevated p-3'}>
       <div
         className={
           vn
             ? 'w-full'
-            : 'mx-auto max-w-chat rounded-2xl bg-bg-sunken p-2.5 ring-1 ring-transparent transition-shadow focus-within:ring-accent/30'
+            : 'mx-auto max-w-chat rounded-2xl bg-bg-sunken p-3 ring-1 ring-transparent transition-shadow focus-within:ring-accent/30'
         }
       >
         {composerError && <p className="mb-2 px-1.5 text-xs text-danger">{composerError}</p>}
+        {intentSlot && (
+          <div className={`mb-2.5 px-1.5 pb-2.5 ${vn ? 'border-b border-white/10' : 'border-b border-border/50'}`}>
+            {intentSlot}
+          </div>
+        )}
         {attachments.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-2 px-1">
             {attachments.map((a, i) => (
