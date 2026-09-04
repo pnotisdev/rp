@@ -4,6 +4,14 @@ import { presetsApi } from '@/lib/api/client'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import type { GenerationParams } from '@/lib/api/types'
 import { BUILTIN_PRESETS } from '@/lib/prompt/builtinPresets'
+import {
+  creativityToParams,
+  focusToParams,
+  paramsToCreativity,
+  paramsToFocus,
+  paramsToRepetition,
+  repetitionToParams,
+} from '@/lib/prompt/samplerSimpleMode'
 import { Slider } from '@/components/ui/Slider'
 import { Toggle } from '@/components/ui/Toggle'
 import { Button } from '@/components/ui/Button'
@@ -16,26 +24,6 @@ import { PromptSectionsSection } from './PromptSectionsSection'
 import { SystemPromptSection } from './SystemPromptSection'
 import { WritingStyleSection } from './WritingStyleSection'
 import { QuickRepliesSection } from './QuickRepliesSection'
-
-// Simple-mode sliders derive several raw params from one intuitive 0-100 value each.
-function creativityToParams(v: number) {
-  return { temperature: Number((0.2 + (v / 100) * 1.6).toFixed(2)) }
-}
-function focusToParams(v: number) {
-  return { top_p: Number((1 - (v / 100) * 0.5).toFixed(2)) }
-}
-function repetitionToParams(v: number) {
-  return { rep_pen: Number((1.0 + (v / 100) * 0.3).toFixed(3)) }
-}
-function paramsToCreativity(t: number) {
-  return Math.round(((t - 0.2) / 1.6) * 100)
-}
-function paramsToFocus(p: number) {
-  return Math.round(((1 - p) / 0.5) * 100)
-}
-function paramsToRepetition(r: number) {
-  return Math.round(((r - 1.0) / 0.3) * 100)
-}
 
 const ADVANCED_FIELDS: { key: string; label: string; step?: number; min?: number; max?: number }[] = [
   { key: 'temperature', label: 'Temperature', step: 0.01, min: 0 },

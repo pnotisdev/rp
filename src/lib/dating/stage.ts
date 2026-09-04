@@ -5,6 +5,7 @@ import type {
   DateEventCard,
   RelationshipDimension,
   RelationshipStage,
+  RelationshipTrack,
   RelationshipWarning,
   SceneFlag,
   WorldCard,
@@ -131,6 +132,68 @@ export function getRelationshipStats(chat: Pick<Chat, 'relationshipStats'>): Rec
   const result = {} as Record<RelationshipDimension, number>
   for (const dim of RELATIONSHIP_DIMENSIONS) result[dim] = clampStat(stats[dim] ?? 0)
   return result
+}
+
+type TrackHost = Pick<
+  Chat,
+  | 'characterId'
+  | 'affection'
+  | 'relationshipStats'
+  | 'relationshipStage'
+  | 'commitmentStatus'
+  | 'relationshipWarning'
+  | 'breakupCount'
+  | 'unlockedGalleryIds'
+  | 'giftsGiven'
+  | 'participantRelationships'
+>
+
+/**
+ * Multi-character relationship tracking's one resolution point: which bag of fields a given
+ * character's relationship state actually lives in. The primary reads their own copy straight off
+ * `Chat`'s top-level fields, unchanged since before this existed; anyone else reads their entry in
+ * `Chat.participantRelationships`, defaulting to a fresh (all-zero) track the first time they're
+ * ever looked at. Every other relationship function (`getRelationshipStats`, `computeWarmth`,
+ * `relationshipStageForWarmth`, `applyRelationshipRisk`, ...) already takes plain values rather
+ * than reading `Chat` directly, so the object this returns slots straight into them with no changes
+ * needed on that side at all.
+ */
+export function getRelationshipTrack(chat: TrackHost, characterId: string): RelationshipTrack {
+  if (characterId === chat.characterId) {
+    return {
+      affection: chat.affection,
+      relationshipStats: chat.relationshipStats,
+      relationshipStage: chat.relationshipStage,
+      commitmentStatus: chat.commitmentStatus,
+      relationshipWarning: chat.relationshipWarning,
+      breakupCount: chat.breakupCount,
+      unlockedGalleryIds: chat.unlockedGalleryIds,
+      giftsGiven: chat.giftsGiven,
+    }
+  }
+  return chat.participantRelationships?.[characterId] ?? {}
+}
+
+/**
+ * The `PUT /api/chats/:id` patch that persists a track update for one character. The server merges
+ * a PUT shallowly (see `server/db.ts`'s `update`) — a nested object in the patch *replaces* the
+ * stored one rather than merging into it — so the non-primary branch always rewrites the *whole*
+ * `participantRelationships` map (every other participant's entry spread in unchanged) rather than
+ * sending just the one character's delta, which would otherwise silently erase everyone else's
+ * tracked state on the very next write.
+ */
+export function patchRelationshipTrack(
+  chat: Pick<Chat, 'characterId' | 'participantRelationships'>,
+  characterId: string,
+  patch: RelationshipTrack,
+): Partial<Chat> {
+  if (characterId === chat.characterId) return patch as Partial<Chat>
+  return {
+    participantRelationships: {
+      ...chat.participantRelationships,
+      [characterId]: { ...chat.participantRelationships?.[characterId], ...patch },
+    },
+  }
 }
 
 /**

@@ -100,6 +100,37 @@ export interface RelationshipEvent {
   deltas: Partial<Record<'affection' | RelationshipDimension, number>>
   newFlags?: SceneFlag[]
   sourceMessageId?: string
+  /** Which character this event belongs to — unset means the chat's primary, the only character this ever applied to before multi-character relationship tracking existed. See `RelationshipTrack`. */
+  characterId?: string
+}
+
+/**
+ * The bundle of relationship state that used to live only as `Chat`'s own top-level fields —
+ * always the primary's, even in a group chat, per that field's own original doc comment. A
+ * non-primary participant needs the exact same shape to be tracked as a real person rather than an
+ * untracked NPC, so this is that shape, extracted once and reused by both: the primary keeps
+ * reading/writing these fields directly off `Chat` (byte-for-byte unchanged, zero migration risk
+ * for every existing single-character chat), while anyone else's copy lives in
+ * `Chat.participantRelationships`, keyed by character id. See `getRelationshipTrack`/
+ * `patchRelationshipTrack` in `stage.ts` — the one place that resolves which bag of fields a given
+ * character reads/writes through, so no other code has to know the difference.
+ *
+ * Deliberately NOT per-character: `sceneFlags` (describes the scene/story, not one relationship),
+ * `giftCoins`/`giftInventory` (a shared wallet and stock, not owed by any one character), and
+ * `ChatFact`s (the durable-memory log stays chat-wide). A live date/hangout (10b) also stays
+ * primary-only for now — `DateEventCard` has no concept of "which participant this date is with."
+ */
+export interface RelationshipTrack {
+  affection?: number
+  relationshipStats?: Partial<Record<RelationshipDimension, number>>
+  relationshipStage?: RelationshipStage
+  commitmentStatus?: CommitmentStatus
+  /** `null` clears a standing warning — same "JSON.stringify drops `undefined` keys" reason `Chat.activeEvent`/`Chat.authorNote` accept it for; a bare `undefined` here would silently fail to overwrite an existing one. */
+  relationshipWarning?: RelationshipWarning | null
+  breakupCount?: number
+  unlockedGalleryIds?: string[]
+  /** Per-gift-id tally of how many of that gift this specific character has received — separate from `Chat.giftInventory`, which is the player's shared, unspent stock. */
+  giftsGiven?: Record<string, number>
 }
 
 /**
@@ -298,10 +329,12 @@ export interface RapportRead {
 
 export interface Chat {
   id: string
-  /** The primary character — relationship stats/gifts/gallery/VN sprites stay keyed on this one even when `participants` is set. */
+  /** The primary character. VN sprite/expression staging still stays keyed on this one (a separate, larger lift — see ROADMAP §1/§4); relationship stats/gifts/gallery no longer do, see `participantRelationships`. */
   characterId: string
   /** Extra characters who can also speak in this chat (group scenes). Unset/empty = today's single-character chat. */
   participants?: string[]
+  /** Multi-character relationship tracking: a non-primary participant's own `RelationshipTrack`, keyed by their character id — the primary's own copy stays on this `Chat`'s own top-level fields (affection/relationshipStats/etc.) unchanged, for backward compatibility with every chat that predates this. Unset/empty for every chat with no participants. See `getRelationshipTrack`/`patchRelationshipTrack` in `stage.ts`. */
+  participantRelationships?: Record<string, RelationshipTrack>
   personaId: string
   title: string
   createdAt: number

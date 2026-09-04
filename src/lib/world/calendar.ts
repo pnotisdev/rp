@@ -162,6 +162,26 @@ export function spendEnergy(day: number, phaseIndex: number): EnergySpendResult 
   return { ...advancePhase(stepped.day, stepped.phaseIndex), slept: true }
 }
 
+/**
+ * Where an action taken *right now* actually happens, as distinct from `spendEnergy`'s own return
+ * value — which, once a day's last action forces a rollover, jumps straight to next morning and
+ * never represents the phase the action itself took place in at all. Spending your last weekday
+ * action from Evening (phase 2) steps to Night (phase 3) with 0 energy left there, so `spendEnergy`
+ * rolls straight on to next morning without ever surfacing Night; spending an already-at-Night
+ * action (weekend's bonus 4th) steps `advancePhase` straight into next-day-morning with no
+ * intermediate value at all — the activity itself happened in the *original* phase, not the one
+ * rolled into. Both cases matter for anything that describes "now" for the activity being started
+ * (10b's live-scene opener grounds its opening line on this, not on the post-spend world state,
+ * which may have already moved on to the next morning by the time that line is generated).
+ */
+export function activityPhase(day: number, phaseIndex: number): { day: number; phaseIndex: number } {
+  const stepped = advancePhase(day, phaseIndex)
+  // advancePhase itself already wrapped the day — phaseIndex was the day's last phase, and that's
+  // where the activity happens, not the next-morning value `stepped` jumped straight to.
+  if (stepped.day !== day) return { day, phaseIndex }
+  return stepped
+}
+
 export interface WeatherPreferences {
   loves?: WeatherKind[]
   hates?: WeatherKind[]

@@ -7,14 +7,16 @@ import {
   crossedMilestone,
   evaluateRelationshipRisk,
   formatCommitmentStatus,
+  getRelationshipTrack,
   isLiveScene,
   nextCommitmentTier,
+  patchRelationshipTrack,
   relationshipAtRisk,
   unlockedEndingIds,
   warningExpired,
 } from '@/lib/dating/stage'
 import type { GalleryEntry } from '@/lib/characters/cardSpec'
-import type { RelationshipDimension } from '@/lib/types'
+import type { Chat, RelationshipDimension } from '@/lib/types'
 
 const zeroStats = (overrides: Partial<Record<RelationshipDimension, number>> = {}): Record<RelationshipDimension, number> => ({
   trust: 50,
@@ -289,5 +291,77 @@ describe('evaluateRelationshipRisk', () => {
     expect(result.commitmentStatus).toBe('none')
     expect(result.breakupCount).toBe(2)
     expect(result.warning).toBeUndefined()
+  })
+})
+
+describe('getRelationshipTrack / patchRelationshipTrack', () => {
+  const baseChat: Chat = {
+    id: 'chat-1',
+    characterId: 'primary',
+    personaId: 'persona-1',
+    title: 'Test',
+    createdAt: 0,
+    updatedAt: 0,
+    affection: 40,
+    relationshipStats: { trust: 60 },
+    relationshipStage: 'warming_up',
+    commitmentStatus: 'dating',
+    breakupCount: 1,
+    unlockedGalleryIds: ['cg-1'],
+    giftsGiven: { rose: 2 },
+  }
+
+  it("reads the primary's track straight off Chat's own top-level fields", () => {
+    expect(getRelationshipTrack(baseChat, 'primary')).toEqual({
+      affection: 40,
+      relationshipStats: { trust: 60 },
+      relationshipStage: 'warming_up',
+      commitmentStatus: 'dating',
+      relationshipWarning: undefined,
+      breakupCount: 1,
+      unlockedGalleryIds: ['cg-1'],
+      giftsGiven: { rose: 2 },
+    })
+  })
+
+  it('reads a fresh (all-unset) track for a participant never tracked before', () => {
+    expect(getRelationshipTrack(baseChat, 'newcomer')).toEqual({})
+  })
+
+  it("reads a participant's own entry once one exists", () => {
+    const chat: Chat = {
+      ...baseChat,
+      participantRelationships: { rival: { affection: 12, giftsGiven: { chocolate: 1 } } },
+    }
+    expect(getRelationshipTrack(chat, 'rival')).toEqual({ affection: 12, giftsGiven: { chocolate: 1 } })
+    // Unaffected by another character's entry existing alongside it.
+    expect(getRelationshipTrack(chat, 'primary').affection).toBe(40)
+  })
+
+  it("patches the primary directly as top-level Chat fields", () => {
+    expect(patchRelationshipTrack(baseChat, 'primary', { affection: 55 })).toEqual({ affection: 55 })
+  })
+
+  it("patches a new participant into an empty participantRelationships map", () => {
+    expect(patchRelationshipTrack(baseChat, 'rival', { affection: 5 })).toEqual({
+      participantRelationships: { rival: { affection: 5 } },
+    })
+  })
+
+  it("merges into a participant's existing entry without touching anyone else's", () => {
+    const chat: Chat = {
+      ...baseChat,
+      participantRelationships: {
+        rival: { affection: 12, breakupCount: 0 },
+        other: { affection: 99 },
+      },
+    }
+    const result = patchRelationshipTrack(chat, 'rival', { affection: 18, relationshipStage: 'acquaintances' })
+    expect(result).toEqual({
+      participantRelationships: {
+        rival: { affection: 18, breakupCount: 0, relationshipStage: 'acquaintances' },
+        other: { affection: 99 },
+      },
+    })
   })
 })

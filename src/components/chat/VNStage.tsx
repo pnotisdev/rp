@@ -5,6 +5,7 @@ import type { Chat, Persona, StoredMessage, WorldCard } from '@/lib/types'
 import { placeholderGradient } from '@/lib/vn/placeholder'
 import { scrollToMessage } from '@/lib/scrollToMessage'
 import { renderMessageText } from '@/lib/text/messageText'
+import { useSpriteCrossfade } from '@/lib/hooks/useSpriteCrossfade'
 import {
   computeWarmth,
   formatRelationshipStage,
@@ -20,34 +21,8 @@ import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import { parseSfxWordList } from '@/lib/text/messageSegments'
 import { sfxConfigFor } from '@/lib/text/sfx'
 
-const SPRITE_FADE_MS = 200
-
 /** Falling petals only make sense for scenes actually outdoors — never indoors (kitchen, office, a bedroom). */
 const OUTDOOR_BACKGROUNDS = new Set(['park', 'forest', 'rooftop', 'city-street', 'beach'])
-
-/**
- * Swaps between expression sprites with a brief dip-to-transparent instead of a hard cut —
- * "outfit/pose layers" (a real layered sprite composition system) is a much bigger, separate
- * effort; this is just the crossfade half of that gap. Respects the app's reducedMotion setting
- * for free, since it crushes all CSS transition durations globally (see globals.css).
- */
-function useSpriteCrossfade(src: string | undefined) {
-  const [displaySrc, setDisplaySrc] = useState(src)
-  const [visible, setVisible] = useState(true)
-
-  useEffect(() => {
-    if (src === displaySrc) return
-    setVisible(false)
-    const t = setTimeout(() => {
-      setDisplaySrc(src)
-      setVisible(true)
-    }, SPRITE_FADE_MS)
-    return () => clearTimeout(t)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [src])
-
-  return { displaySrc, visible }
-}
 
 interface VNStageProps {
   character?: Character
@@ -171,7 +146,7 @@ export function VNStage({
 
   const swipes = lastCharMsg?.swipes ?? []
   const canSwipe = !!lastCharMsg && swipes.length > 0 && !isStreamingThis
-  const { displaySrc: displaySpriteUrl, visible: spriteVisible } = useSpriteCrossfade(spriteUrl)
+  const { displaySrc: displaySpriteUrl, visible: spriteVisible, fadeMs: spriteFadeMs } = useSpriteCrossfade(spriteUrl)
   const personaName = persona?.name
   const reducedMotion = useSettingsStore((s) => s.reducedMotion)
   const regexScripts = useSettingsStore((s) => s.regexScripts)
@@ -299,7 +274,7 @@ export function VNStage({
                 className={`vn-sprite max-h-[85%] max-w-[70%] object-contain drop-shadow-2xl transition-opacity ease-out ${
                   spriteVisible ? 'opacity-100' : 'opacity-0'
                 }`}
-                style={{ transitionDuration: `${SPRITE_FADE_MS}ms` }}
+                style={{ transitionDuration: `${spriteFadeMs}ms` }}
               />
             )}
           </div>

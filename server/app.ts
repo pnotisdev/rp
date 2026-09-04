@@ -300,10 +300,19 @@ app.delete('/api/characters/:id', (req, res) => {
   // A character can also appear as a non-primary group-chat participant — `participants` lives in
   // the JSON blob, not an indexed column, so this can't be a SQL WHERE; it's a full scan (fine on
   // a single-user local table). Drop the dangling id from the array rather than deleting the chat.
+  // Multi-character relationship tracking's own tracked state for this character (if any) is
+  // dropped the same way, from `participantRelationships` — otherwise a re-added character of the
+  // same id later (or a restored backup) would inherit a stale relationship it never actually had.
   for (const chat of chatStore.list()) {
     const participants = chat.participants as string[] | undefined
-    if (!participants?.includes(characterId)) continue
-    chatStore.update(chat.id as string, { participants: participants.filter((id) => id !== characterId) })
+    const participantRelationships = chat.participantRelationships as Record<string, unknown> | undefined
+    const patch: Record<string, unknown> = {}
+    if (participants?.includes(characterId)) patch.participants = participants.filter((id) => id !== characterId)
+    if (participantRelationships && characterId in participantRelationships) {
+      const { [characterId]: _dropped, ...rest } = participantRelationships
+      patch.participantRelationships = rest
+    }
+    if (Object.keys(patch).length > 0) chatStore.update(chat.id as string, patch)
   }
   // Removes the whole per-character folder in one shot — avatar, sprites, and gallery all live
   // under it together (see server/avatars.ts), so nothing can be left orphaned.

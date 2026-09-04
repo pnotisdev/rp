@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   DAYS_PER_YEAR,
+  activityPhase,
   advancePhase,
   describePresence,
   describeWeather,
@@ -166,6 +167,28 @@ describe('spendEnergy', () => {
     }
     expect(state).toEqual({ day: 1, phaseIndex: 0 })
     expect(getEnergyRemaining(state.day, state.phaseIndex)).toBe(3)
+  })
+})
+
+describe('activityPhase', () => {
+  it('matches spendEnergy exactly when nothing forces a rollover', () => {
+    expect(activityPhase(0, 0)).toEqual({ day: 0, phaseIndex: 1 })
+    expect(activityPhase(0, 1)).toEqual({ day: 0, phaseIndex: 2 })
+  })
+
+  it('recovers the Night phase a forced weekday rollover discards', () => {
+    // Same Monday-evening spend as spendEnergy's own test above: spendEnergy(0, 2) jumps straight
+    // to { day: 1, phaseIndex: 0 } with no trace that the activity happened at Night — this is the
+    // one place that phase is recoverable.
+    expect(spendEnergy(0, 2)).toEqual({ day: 1, phaseIndex: 0, slept: true })
+    expect(activityPhase(0, 2)).toEqual({ day: 0, phaseIndex: 3 })
+  })
+
+  it("keeps a weekend's bonus action grounded at Night, not next morning", () => {
+    // spendEnergy(5, 3) also rolls to { day: 6, phaseIndex: 0 } — but here the activity started
+    // *at* Night (phase 3 was the caller's own phase), not a phase advancePhase stepped into.
+    expect(spendEnergy(5, 3)).toEqual({ day: 6, phaseIndex: 0, slept: true })
+    expect(activityPhase(5, 3)).toEqual({ day: 5, phaseIndex: 3 })
   })
 })
 

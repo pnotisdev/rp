@@ -54,7 +54,11 @@ function ChatSurface({
         />
       </div>
       <div className={`${mobileListOpen ? 'hidden' : 'flex'} w-full min-w-0 flex-1 md:flex`}>
-        <ChatWindow chatId={activeChatId} onBack={() => setMobileListOpen(true)} />
+        <ChatWindow
+          chatId={activeChatId}
+          onBack={() => setMobileListOpen(true)}
+          onOpenSettings={() => onNavigate('settings')}
+        />
       </div>
     </>
   )

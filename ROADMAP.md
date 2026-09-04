@@ -278,14 +278,18 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
         next; `StoredMessage.speakerId` records it (`undefined` = primary, so again no migration).
         Regenerating/swiping/continuing a message keeps whoever originally said it rather than
         letting that silently change the speaker.
-      - **Relationship tracking, gift-aware/objective-driven choice suggestions, and the
-        in-character relationship nudge all stay primary-only** — gated on `speaker.id ===
+      - ~~**Relationship tracking**~~, gift-aware/objective-driven choice suggestions, and the
+        in-character relationship nudge all stayed primary-only at first — gated on `speaker.id ===
         character.id` in both `useChatSession.ts` and `buildCurrentPrompt`. Caught one real bug
         here live: the relationship nudge originally read `{{char}}` — which resolves to
         whoever's *speaking* — so asking Kestrel to reply momentarily attributed the player's
         relationship *with Aria* to Kestrel. Fixed by spelling out the primary's name directly
         instead of relying on the macro, and by not injecting the nudge at all on a non-primary
-        turn (verified via the Prompt Inspector both broken and fixed).
+        turn (verified via the Prompt Inspector both broken and fixed). **Relationship tracking
+        itself stopped being primary-only in #118** (10c) — a non-primary now scores and tracks
+        their own affection/stats/gifts/gallery for real; choice suggestions and the in-character
+        nudge line remain primary-gated exactly as described here, a deliberate scope line #118
+        drew rather than a leftover gap.
       - **`DELETE /api/characters/:id`** now also scans every chat for that id as a *participant*
         (not just as primary) and strips it from `participants` rather than leaving a dangling
         reference — verified live: deleting a participant leaves the chat and its other participant
@@ -1145,7 +1149,7 @@ below:**
       yet — only the current day's forecast is surfaced in the World editor today.
 
 ### 10b. Live date & hangout conversations
-- [ ] **A genuinely live, turn-by-turn date mode**: pick a character and a place, then hold a
+- [x] **A genuinely live, turn-by-turn date mode**: pick a character and a place, then hold a
       real streamed conversation, one message at a time, with the model staying fully in
       character (no chatbot tics, no "happy to help") and breaking the ice itself on a real first
       date instead of leaving the player to message a stranger. This is a different shape from
@@ -1153,6 +1157,14 @@ below:**
       tracks it as a checklist — it doesn't run a scored, live scene. A date is naturally a
       one-character instance of the `Scene` concept proposed for group chats in section 4 — worth
       building on the same machinery rather than two parallel "live conversation" systems.
+      **Resolved as #117 within the existing `DateEventCard`/`isLiveScene` machinery** (#102/#112/
+      #113 already made a date/hangout a real live-scored scene; what stayed missing was
+      specifically the "breaking the ice" half) **rather than the full `Scene` entity** the original
+      wording gestured at — that entity (location/objective as first-class state, turn policies
+      beyond fully manual) stays exactly where section 4/12 already left it: deferred until manual
+      group chats see more real use. Building a second parallel system just for dates would have
+      pre-empted that decision rather than waited for it. See #117 for the actual writeup, and its
+      pairing with the "reactive portrait" bullet below (also closed by #117).
 - [x] **Intent chips** (#108) — `src/lib/dating/intent.ts`: a `MessageIntent`
       (`flirt`/`tease`/`open_up`/`reassure`/`apologize`) the player can arm; it rides with the next
       message (`StoredMessage.intent`, carried on fork + backup for free as a row field) then
@@ -1189,9 +1201,9 @@ below:**
       bite"); a phone-checking brush-off dropped it to `on_edge` ("the mask has slipped") and
       surfaced the repair chips; a tagged sincere apology + real interest recovered it to `warming`
       ("she is letting him stay") — with `affection` sitting at 0 throughout.
-      **Still open here:** the "reactive portrait" half — in VN mode the sprite already shifts per
-      reply via scene tags / §8 vision, so it's partly covered; a portrait in the *default* (non-VN)
-      layout during a date is not built.
+      ~~**Still open here:** the "reactive portrait" half~~ — in VN mode the sprite already shifts
+      per reply via scene tags / §8 vision, so it's partly covered; a portrait in the *default*
+      (non-VN) layout during a date was not built. Closed by #117.
 - [x] **Bugfix: `**bold**`/`<i>` action text rendered wrong (worst in VN)** (#111) — user report:
       the model (and the player, typing) drift between `*action*`, `**action**`, and `<i>action</i>`
       for the identical thing, and the app only ever handled the first. `**x**` partially matched
@@ -1325,6 +1337,88 @@ below:**
       tests (`relationshipAssist.test.ts`) cover all three tiers, rounding, and the zero-delta case;
       verified live in Settings (selection switches, persists across reload via the existing
       zustand-persist `rp-settings` key).
+- [x] **Breaking the ice + a reactive portrait in the default layout** (#117) — closes out 10b's
+      two remaining open items together, since they're both about a live scene actually *feeling*
+      live rather than reading as an ordinary chat with a badge on it.
+      - **The character opens the scene.** Until now, starting a date/hangout only flipped
+        `chat.activeEvent` live — the composer sat empty, waiting on the player to message a
+        stranger first. `startDateEvent` (`useChatSession.ts`) now immediately creates a fresh empty
+        char message and runs it through the exact same `runGeneration` every ordinary reply uses
+        (streaming, scene tags, slop cleanup, the reply-length band, post-reply assists — nothing
+        new to keep in sync), with one addition: a new `extraStyleGuidance` option threaded through
+        `buildCurrentPrompt`/`runGeneration`'s `opts`, telling the model this is an opening, not a
+        response, since the history it's reading may end on its *own* last line from before the
+        scene began — a back-to-back-character-turn shape nothing else in the app produces on
+        purpose (proactive outreach is the one other place it happens, which is where the existing
+        `<START>`/name-prefix dynamic stop sequences that guard against it already came from — this
+        reuses that same protection for free rather than needing its own). Written with real names
+        (`${speaker.card.name}`/`${persona name}`), not `{{char}}`/`{{user}}` macros — a real
+        `styleGuidance` bug caught before it shipped: unlike history turns and the system prompt,
+        `styleGuidance` is spliced into the prompt raw, with no macro-substitution pass over it, so
+        a literal `{{user}}` would have leaked into the actual prompt sent to the model. Only fires
+        for `kind: 'date'`/`'hangout'` (never gift/milestone cards); if another generation is
+        already in flight (`runGeneration`'s shared refs genuinely can't run two at once), it skips
+        the opener rather than corrupting that state, but says so — a `toastInfo` naming the event
+        and telling the player to send a message themselves, so the "breaking the ice" promise never
+        silently fails to even attempt.
+      - **Grounded in the right moment, not whatever the world clock becomes after it.** Caught
+        during polish, not the first pass: 10a's energy economy can force a day rollover the instant
+        a date/hangout starts (spending a weekday's last action anywhere from Evening onward jumps
+        the *persisted* clock straight to next morning, per `spendEnergy`'s own "never strand the day
+        at 0 energy" design) — but `buildCurrentPrompt` reads that live, post-spend state for its
+        `worldDescription` line. Without a fix, an opener starting on your last action of the day
+        would describe itself as happening the *next morning*, not the evening/night it's actually
+        set in. New `activityPhase(day, phaseIndex)` (`calendar.ts`) recovers the moment the action
+        itself takes place in — the phase `spendEnergy` stepped into before checking whether a
+        *further* rollover was needed, discarded once it decides to sleep — and `startDateEvent`
+        snapshots it with `describeWorldMoment` *before* spending energy, threading it into the
+        opener's `extraStyleGuidance` (with `{{char}}` resolved by hand, same reasoning as above). 3
+        new `calendar.test.ts` cases mirroring `spendEnergy`'s own existing test inputs exactly, so
+        the two can be read side by side. **Verified against the real constructed prompt**, not just
+        the unit tests: forced the seeded world to Monday/Evening/last-action, patched `window.fetch`
+        to capture the outgoing (still-failing, koboldcpp off) request body, and confirmed it read
+        *"It's night on a spring monday..."* — while the world's own persisted clock had already
+        rolled to day 1, phase 0 (next morning).
+      - **A tasteful entrance for the portrait**: `animate-panel-in`, the exact same fade+settle
+        every modal/toast in the app already uses on mount, reused rather than inventing a bespoke
+        one — already covered by both of this app's reduced-motion guards for free. Fires once, when
+        the scene starts (the component mounts/unmounts with `isLiveScene`), not on every expression
+        crossfade, which is a separate, plain opacity transition.
+      - **A reactive portrait for the default (non-VN) layout.** VN mode's sprite already reacts to
+        the model's own scene tags; the plain chat view had no visual equivalent, so a live date
+        there read as pure text. New `ReactivePortrait.tsx`, a small floating card (top-right of the
+        message area, hidden below `sm` — a phone-width default chat has no room to spare, and VN
+        mode is the intended immersive experience there) showing the primary's current-expression
+        sprite, gated on `isLiveScene(chat.activeEvent)` so an ordinary chat stays exactly as calm
+        and text-focused as before. Resolution logic (expression → sprite → unlock-gated fallback to
+        the plain avatar) is copied from `VNStage.tsx`'s own, not reinvented. The crossfade-on-change
+        transition both surfaces use is now `useSpriteCrossfade` (`src/lib/hooks/`), extracted out of
+        `VNStage.tsx` (previously a private local hook there) so the two can't drift into different
+        transition feels — `VNStage.tsx` itself just imports it now, no behavior change.
+      - **Deliberately not the full `Scene` entity** section 4/12 already named and deferred (see
+        10b's top bullet, resolved here) — this stays layered on the existing `DateEventCard`/
+        `isLiveScene` machinery, not a new system.
+      No new persisted fields; the opener is a completely ordinary `StoredMessage`, indistinguishable
+      from any other reply once it lands (including `endDateEvent`'s own transcript-gathering, which
+      already keys on `createdAt >= startedAt`).
+      **Verified live end-to-end** (koboldcpp off, per usual for this project's dev sessions — this
+      is exactly the scenario the opener's error handling needed to survive gracefully, not just the
+      happy path): pre-loaded a draft hangout card onto the seeded Sumire chat and started it for
+      real through the actual UI (not a direct API call) — confirmed energy spent and the world
+      clock advanced a phase, an objective was created, `activeEvent.startedAt` got stamped (live),
+      and a brand-new empty char message was created and run through real generation, which failed
+      gracefully exactly the way any other reply does with no model reachable (`failed: true`, the
+      existing "⚠ Generation failed — try regenerating" bubble, `isGenerating` correctly reset, no
+      exception escaping `startDateEvent`) — proving the graceful-degradation path works, since
+      `runGeneration` already catches its own errors everywhere else. `DateEventPanel` correctly
+      switched to "Live hangout in progress." In the default layout, the reactive portrait rendered
+      in the top-right corner showing Sumire's actual unlocked `neutral` *sprite* (confirmed via its
+      real file URL, not just the avatar), with its entrance animation firing once on mount. The
+      time-of-day grounding fix above was verified separately, against the real constructed prompt.
+      Full suite (449 tests) + typecheck + build all green. Test state (the draft event, the spent
+      energy/advanced world clock, the objective, the extra message) was fully reverted after each
+      of the two live passes via direct API calls, diffed against a pre-test snapshot field-by-field
+      back to identical both times.
 
 ### 10c. Relationship depth & lifecycle
 - [x] **Multi-dimensional bonds** — done; see the checked item in section 2 for the full
@@ -1435,6 +1529,76 @@ below:**
       confirmed the editor toggle state and the Gallery tab's two-section split and lock copy both
       render correctly, then simulated the unlocked state and confirmed the accent border and
       unlock count update correctly.
+- [x] **Multi-character relationship tracking** (#118) — the section-10-summary item flagged "real
+      scope, not a quick follow-up": until now a group chat's non-primary participants were scene
+      NPCs with no tracked relationship of their own — every mechanic in this section and section 2
+      (affection, the six stats, commitment/breakups, gallery unlocks, gifts) was hardcoded to the
+      chat's primary `character`, even when a *different* participant was the one actually speaking
+      or receiving a gift.
+      - **The core insight that kept this from being a rewrite**: every one of those functions
+        (`computeWarmth`, `relationshipStageForWarmth`, `applyRelationshipRisk`,
+        `assessRelationshipMoment`, `unlockedEndingIds`, `detectGalleryUnlocks`, ...) already took
+        plain values as params rather than reading `Chat` directly — a pattern this codebase had
+        already established for other reasons. So the fix is purely about *what feeds them*, not
+        the functions themselves, none of which changed.
+      - **New `RelationshipTrack`** (`types.ts`) bundles exactly the fields that need to become
+        per-character: affection, the six stats, stage, commitment status, warning, breakup count,
+        unlocked gallery ids, and a per-recipient `giftsGiven` tally. `Chat` keeps every one of
+        those fields exactly where they've always lived — the primary's own copy, untouched, zero
+        migration risk for every chat that predates this — and gains one new optional field,
+        `participantRelationships?: Record<characterId, RelationshipTrack>`, for anyone else.
+        `getRelationshipTrack`/`patchRelationshipTrack` (`stage.ts`) are the one resolution point:
+        which bag of fields a given character reads/writes through. No server schema change at
+        all — `chats` was already one JSON blob column per row (see this file's own header note),
+        and `PUT /api/chats/:id` was already a generic, un-allowlisted merge.
+      - **Scored per-speaker, not per-chat**: `updateAffectionFromReply` (`useChatSession.ts`) now
+        takes the actual `speaker` instead of always closing over the primary, and the
+        `isPrimarySpeaker` gate that used to skip relationship tracking entirely for a non-primary's
+        turn is gone — a live date still suppresses per-turn scoring for everyone (dates stay
+        primary-only, unrelated to this), but an ordinary reply from anyone now scores against
+        *their own* track, including gallery unlocks read against their own art and affection.
+      - **Gifts go to whoever "reply as" is set to**, not always the primary — reusing the existing
+        group-chat speaker picker rather than adding a second "give to" control. `giftInventory`
+        (owned stock) and `giftCoins` stay a shared wallet, correctly; `giftsGiven` moves into the
+        per-recipient track. `BagPanel`'s copy ("give one to X now") was quietly lying about this
+        before the fix — caught live, not in review — always naming the primary even when "reply
+        as" pointed at someone else.
+      - **`askForCommitment`/`endRelationship`** both gained an optional `characterId` (default:
+        primary), resolved through the same `resolveSpeaker` group-chat already uses — the DTR
+        ladder and breakup/reconciliation mechanics (10c, already fully built) apply to any tracked
+        character for free, no new mechanics needed there.
+      - **`RelationshipEvent` gained an optional `characterId`** (unset = the primary, so every
+        event logged before this exists still reads correctly) and `RelationshipPanel` gained a tab
+        switcher — shown only once `participantCharacters.length > 0` — so Bond/stats/status/
+        gallery/history all resolve to whichever character's tab is active. Chat-wide state (scene
+        flags, `ChatFact`s, the gift/item shops) deliberately stays shared across tabs, not
+        per-character — see the doc comment on `RelationshipTrack` for the full list of what's
+        deliberately NOT split out.
+      - **Character-delete cascade extended**: alongside the existing cleanup that drops a deleted
+        character from every chat's `participants` array, it now also drops their entry from
+        `participantRelationships` — otherwise a stale tracked relationship could resurface if a
+        character with the same id were ever restored from a backup.
+      - **Deliberately out of scope**, consistent with this item's own "not the Scene entity" framing
+        from the top of 10b: live dates/hangouts stay primary-only (`DateEventCard` has no concept of
+        "which participant"), and AI choice-suggestion stays primary-gated (unrelated to the
+        affection/stats/gifts/gallery scope this item actually asked for).
+      12 new unit tests (`stage.test.ts`): `getRelationshipTrack`/`patchRelationshipTrack` reading
+      the primary straight off `Chat`, reading/patching a fresh vs. existing participant entry, and
+      confirming a patch to one participant never touches another's. **Verified live end-to-end**
+      with a real throwaway participant added to the seeded Sumire chat (koboldcpp off, so the
+      generation itself failed gracefully — exactly the scenario that mattered to prove): gave a
+      gift with "reply as" set to the participant through the real Bag UI and confirmed, via the
+      actual API state, that *only* the participant's track moved (affection, `giftsGiven`) while
+      the primary's stayed exactly at 0, the stored message correctly read "I give Rival Ren..." and
+      the reply attempt was correctly attributed to them (`speakerId` set, not the primary); opened
+      `RelationshipPanel`, confirmed the tab switcher and that each tab showed genuinely independent
+      data; bumped the participant's warmth to unlock a DTR ask, clicked it for real, and confirmed
+      the graceful-koboldcpp-off failure touched neither track; deleted the test character and
+      confirmed the cascade correctly emptied `participants`/`participantRelationships` while
+      leaving the chat itself intact. Reverted every mutation afterward (character, messages,
+      inventory/coins, participant fields) and diffed the chat back to its exact pre-test snapshot.
+      A plain single-character chat (no participants) was re-verified afterward to render exactly as
+      before this — no tab switcher, no behavior change at all.
 
 ### 10d. Economy, gifts & items
 - [x] **Item catalog beyond gifts** — done, scoped to the deterministic half of the originally
@@ -3449,20 +3613,24 @@ smaller than the rest of section 10:
    manual (round-robin, an AI "director," @mention) — the group-chat bullet above deliberately
    shipped the smallest useful slice of this rather than the full concept; revisit once manual
    group chats have actually been used enough to know whether the extra machinery is worth it.
-3. Multi-character relationship tracking — today only the primary's affection/stats/gifts/gallery
-   exist; a non-primary participant is a scene NPC with no tracked relationship of their own. Real
-   scope (parallel relationship state per participant, not just one), not a quick follow-up.
+3. ~~Multi-character relationship tracking~~ — shipped as #118 (see 10c's own checked items for
+   the full write-up): a non-primary participant now has their own tracked affection/stats/gifts/
+   gallery, resolved through a new `RelationshipTrack`/`participantRelationships` pair that leaves
+   every existing single-character chat's data untouched. The Scene entity (item 2 above) stays the
+   one deliberately separate, still-deferred piece.
 4. ~~The rest of proactive outreach (section 10f)~~ — shipped as #102 (see section 10f's own
    checked items for the full write-up), including the harder, cross-cutting half of context
    budget tiers left deliberately unattempted for now (still genuinely open, just no longer
    blocking this item).
 5. ~~Intent chips, live rapport indicator, hidden agendas + walkouts, hangouts~~ — shipped as
-   #108/#110/#112/#113. What's left of 10b: a genuinely live, turn-by-turn date/hangout conversation
-   mode (today's "date"/"hangout" is still an ordinary chat with per-turn scoring switched off and
-   one judge pass at the end, not a separate streamed scene where the character breaks the ice), and
-   a reactive portrait in the *default* (non-VN) layout specifically (VN already has one via scene
-   tags/§8 vision). The streamed-scene piece is tied to the `Scene` entity (item 2 below) — worth
-   sequencing after that rather than building a second "live conversation" concept in parallel.
+   #108/#110/#112/#113. ~~What's left of 10b: breaking the ice + a reactive portrait in the default
+   (non-VN) layout~~ — shipped as #117: starting a date/hangout now generates the character's
+   opening line immediately (through the same `runGeneration` every reply already uses, not a
+   parallel system) instead of leaving an empty composer, and a small floating portrait reacts to
+   scene tags in the default layout the way VN mode's sprite already did. This closes out 10b as
+   originally scoped — what's genuinely still open is the *bigger* idea a "separate streamed scene"
+   would have implied: the `Scene` entity itself (item 2 below), which #117 deliberately built
+   around rather than pre-empting.
 
 This list is incremental polish on the app as it exists today. Section 10 (living-world dating
 sim) and section 11 (image-generation backends) are a separate, much larger track — see section
@@ -3498,10 +3666,13 @@ The incremental-polish backlog (sections 1–9, mobile, section 5's aesthetic pa
 ~~Proactive outreach itself~~ (#102, closing out section 10f's headline feature — see that
 section's own checked items for the full write-up, including a real turn-boundary bug the live
 verification pass caught and fixed in the main chat pipeline too, not just this new feature) is
-now shipped. What's left in section 10 is the larger, longer-standing tracks: 10b's genuinely live
-date/hangout mode, multi-character relationship tracking, and section 12's living-world core — see
-section 10's own "Suggested phase order" for how to sequence those instead of folding them into
-this list.
+now shipped, and so is ~~10b's breaking-the-ice opener + reactive portrait~~ (#117), closing out
+10b as originally scoped. ~~Multi-character relationship tracking~~ (#118) is shipped too — a
+non-primary participant is a tracked relationship now, not a scene NPC. What's left in section 10
+is the larger, longer-standing tracks: a proper `Scene` entity (deliberately deferred until manual
+group chats see more real use — #118 was built around that machinery, not a reason to revisit the
+deferral) and section 12's living-world core — see section 10's own "Suggested phase order" for how
+to sequence those instead of folding them into this list.
 
 Section 15 (added from a user-supplied AI Dungeon competitive analysis) is a separate set of ideas,
 not yet folded into this priority order. The high-contrast theme preset (#73) and raw-vs-processed

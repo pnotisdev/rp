@@ -10,6 +10,7 @@ import {
   NotebookPen,
   ScrollText,
   Search,
+  SlidersHorizontal,
   Star,
   Target,
   Wrench,
@@ -52,10 +53,21 @@ import { SearchPanel } from './SearchPanel'
 import { PinnedMessagesPanel } from './PinnedMessagesPanel'
 import { BagPanel } from './BagPanel'
 import { DirectorPanel } from './DirectorPanel'
+import { TuningPanel } from './TuningPanel'
+import { ReactivePortrait } from './ReactivePortrait'
 import { getGiftCatalog } from '@/lib/dating/gifts'
 import { getItemCatalog } from '@/lib/dating/items'
 
-export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?: () => void }) {
+export function ChatWindow({
+  chatId,
+  onBack,
+  onOpenSettings,
+}: {
+  chatId: string | null
+  onBack?: () => void
+  /** Deep link from the Quick tuning panel's "Open full Generation settings" — optional so ChatWindow stays usable without a view-switcher in scope. */
+  onOpenSettings?: () => void
+}) {
   const {
     chat,
     character,
@@ -121,6 +133,7 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
   const [showPinned, setShowPinned] = useState(false)
   const [showBag, setShowBag] = useState(false)
   const [showDirector, setShowDirector] = useState(false)
+  const [showTuning, setShowTuning] = useState(false)
   const [highlightedId, setHighlightedId] = useState<string | null>(null)
   const highlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [draft, setDraft] = useState('')
@@ -229,6 +242,16 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
   // as the autoTrackRelationship/autoSuggestChoices overrides below it.
   const visualNovelMode = chat.assistOverrides?.visualNovelMode ?? globalVisualNovelMode
   const pinnedCount = messages.filter((m) => m.pinned).length
+  // 10b's reactive portrait for the default (non-VN) layout — same expression/unlock resolution
+  // VNStage already does for its sprite, so a live scene reads the same character mood regardless
+  // of which layout you're in. Falls back to the plain avatar once unlocked art runs out, same as
+  // VNStage; `undefined` (no avatar either) just means the portrait doesn't render at all.
+  const reactivePortraitExpression = lastCharScene?.expression || 'neutral'
+  const reactivePortraitUnlocked =
+    (chat.affection ?? 0) >= Number(character?.spriteUnlocks?.[reactivePortraitExpression] ?? 0)
+  const reactivePortraitUrl = reactivePortraitUnlocked
+    ? character?.sprites?.[reactivePortraitExpression] || character?.avatarDataUrl
+    : character?.avatarDataUrl
   // Presence reads the world's shared clock, so it's only meaningful for a world-bound character
   // that actually has a schedule authored — most characters have neither, and stay unbadged.
   const presence =
@@ -254,6 +277,14 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
       label: 'Relationship',
       priority: 'primary',
       onClick: () => setShowRelationship(true),
+    },
+    {
+      key: 'tuning',
+      icon: SlidersHorizontal,
+      label: 'Quick tuning — sampler & system prompt',
+      priority: 'primary',
+      active: showTuning,
+      onClick: () => setShowTuning((v) => !v),
     },
     {
       key: 'event',
@@ -395,7 +426,7 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
   )
 
   return (
-    <div className="flex flex-1 flex-col min-w-0">
+    <div className="relative flex flex-1 flex-col min-w-0">
       {!visualNovelMode && (
         <header className="flex items-center justify-between gap-4 border-b border-border bg-bg-elevated px-5 py-3">
           <div className="flex min-w-0 items-center gap-3">
@@ -497,6 +528,7 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
         <RelationshipPanel
           chat={chat}
           character={character}
+          participantCharacters={participantCharacters}
           world={world}
           onClose={() => setShowRelationship(false)}
           onBuyGift={buyGift}
@@ -536,7 +568,10 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
           giftInventory={chat.giftInventory ?? {}}
           itemCatalog={getItemCatalog(world)}
           itemInventory={chat.itemInventory ?? {}}
-          characterName={character.card.name}
+          // Multi-character relationship tracking: a gift now actually goes to whoever "reply as"
+          // is set to, not always the primary — this copy needs to say so, or "give to Sumire" would
+          // lie about a gift that's about to land on a different character's own track.
+          characterName={(replyAsCharacterId && participantCharacters.find((c) => c.id === replyAsCharacterId)?.card.name) || character.card.name}
           onClose={() => setShowBag(false)}
           onGive={(gift) => {
             sendUserMessage('', [], {
@@ -554,6 +589,20 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
       {showDirector && (
         <DirectorPanel chat={chat} character={character} world={world} onClose={() => setShowDirector(false)} />
       )}
+
+      <TuningPanel
+        open={showTuning}
+        onClose={() => setShowTuning(false)}
+        character={character}
+        onOpenSettings={
+          onOpenSettings
+            ? () => {
+                setShowTuning(false)
+                onOpenSettings()
+              }
+            : undefined
+        }
+      />
 
       {visualNovelMode ? (
         <VNStage
@@ -587,23 +636,31 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
         />
       ) : (
         <>
-          <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-6">
-            <MessageLog
-              messages={messages}
-              character={character}
-              persona={persona}
-              participantCharacters={participantCharacters}
-              generatingMessageId={generatingMessageId}
-              streamingText={streamingText}
-              highlightedMessageId={highlightedId}
-              onEdit={editMessage}
-              onDelete={deleteMessage}
-              onRewind={rewindToMessage}
-              onRegenerate={regenerate}
-              onSwipe={swipe}
-              onFork={forkChat}
-              onTogglePin={togglePinMessage}
-            />
+          <div className="relative min-h-0 flex-1">
+            <div ref={scrollRef} className="h-full overflow-y-auto px-6 py-6">
+              <MessageLog
+                messages={messages}
+                character={character}
+                persona={persona}
+                participantCharacters={participantCharacters}
+                generatingMessageId={generatingMessageId}
+                streamingText={streamingText}
+                highlightedMessageId={highlightedId}
+                onEdit={editMessage}
+                onDelete={deleteMessage}
+                onRewind={rewindToMessage}
+                onRegenerate={regenerate}
+                onSwipe={swipe}
+                onFork={forkChat}
+                onTogglePin={togglePinMessage}
+              />
+            </div>
+            {/* Live scenes only (10b) — an ordinary chat stays exactly as calm/text-focused as
+                before; this is the visual cue that's missing specifically while a date/hangout
+                is actually happening, not a permanent addition to the default layout. */}
+            {liveDateActive && character && (
+              <ReactivePortrait spriteUrl={reactivePortraitUrl} alt={character.card.name} />
+            )}
           </div>
           {choiceListNode('default') || quickReplyNode('default')}
           {showGenerationHud && <GenerationHud stats={genStats} />}

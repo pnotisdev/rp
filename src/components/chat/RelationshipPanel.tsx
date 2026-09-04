@@ -14,6 +14,7 @@ import {
   formatRelationshipStage,
   combinedSceneFlags,
   getRelationshipStats,
+  getRelationshipTrack,
   nextCommitmentTier,
   relationshipMilestonesFor,
   relationshipStageForWarmth,
@@ -40,12 +41,14 @@ const DIMENSION_LABELS: Record<(typeof ALL_STAT_KEYS)[number], string> = {
 interface RelationshipPanelProps {
   chat: Chat
   character?: Character
+  /** Extra characters able to speak in this chat (group scenes) — multi-character relationship tracking's own tab switcher, below. Empty for today's ordinary single-character chats. */
+  participantCharacters?: Character[]
   world?: WorldCard
   onClose: () => void
   onBuyGift: (giftId: string) => Promise<void>
   onBuyItem: (itemId: string) => Promise<void>
-  onAskCommitment: (tier: Exclude<CommitmentStatus, 'none'>) => Promise<void>
-  onEndRelationship: () => Promise<void>
+  onAskCommitment: (tier: Exclude<CommitmentStatus, 'none'>, characterId?: string) => Promise<void>
+  onEndRelationship: (characterId?: string) => Promise<void>
 }
 
 function upcomingGallery(gallery: GalleryEntry[], unlocked: Set<string>, affection: number, flags: Set<string>) {
@@ -69,11 +72,30 @@ function formatDeltas(deltas: Partial<Record<string, number>>): string {
     .join(', ')
 }
 
-export function RelationshipPanel({ chat, character, world, onClose, onBuyGift, onBuyItem, onAskCommitment, onEndRelationship }: RelationshipPanelProps) {
-  const affection = Math.max(0, Math.min(100, chat.affection ?? 0))
-  const stats = getRelationshipStats(chat)
+export function RelationshipPanel({
+  chat,
+  character,
+  participantCharacters = [],
+  world,
+  onClose,
+  onBuyGift,
+  onBuyItem,
+  onAskCommitment,
+  onEndRelationship,
+}: RelationshipPanelProps) {
+  // Multi-character relationship tracking: everyone this chat actually tracks a relationship for —
+  // the primary plus any participant — with a tab switcher below when there's more than one. Falls
+  // back to the primary the moment a picked participant leaves the roster (edited mid-chat) rather
+  // than silently rendering an empty panel.
+  const trackedCharacters = character ? [character, ...participantCharacters] : participantCharacters
+  const [viewingId, setViewingId] = useState(character?.id ?? '')
+  const viewingCharacter = trackedCharacters.find((c) => c.id === viewingId) ?? character
+
+  const track = viewingCharacter ? getRelationshipTrack(chat, viewingCharacter.id) : {}
+  const affection = Math.max(0, Math.min(100, track.affection ?? 0))
+  const stats = getRelationshipStats(track)
   const warmth = computeWarmth(affection, stats)
-  const unlocked = new Set(chat.unlockedGalleryIds ?? [])
+  const unlocked = new Set(track.unlockedGalleryIds ?? [])
   const flags = new Set(chat.sceneFlags ?? [])
   const inventory = chat.giftInventory ?? {}
   const itemInventory = chat.itemInventory ?? {}
@@ -82,20 +104,20 @@ export function RelationshipPanel({ chat, character, world, onClose, onBuyGift, 
   const relationshipStage = relationshipStageForWarmth(warmth, milestones)
   const giftCatalog = getGiftCatalog(world)
   const itemCatalog = getItemCatalog(world)
-  const gallery = character?.gallery ?? []
+  const gallery = viewingCharacter?.gallery ?? []
   const upcoming = upcomingGallery(gallery, unlocked, affection, flags)
   const knownFlags = combinedSceneFlags(world?.customSceneFlags)
-  const commitmentStatus = chat.commitmentStatus ?? 'none'
+  const commitmentStatus = track.commitmentStatus ?? 'none'
   const nextTier = nextCommitmentTier(commitmentStatus)
   const eligibleForNextTier = nextTier ? canAskForCommitment(nextTier, warmth, milestones) : false
   const [asking, setAsking] = useState(false)
   const [ending, setEnding] = useState(false)
 
   const handleAsk = async () => {
-    if (!nextTier) return
+    if (!nextTier || !viewingCharacter) return
     setAsking(true)
     try {
-      await onAskCommitment(nextTier)
+      await onAskCommitment(nextTier, viewingCharacter.id)
     } finally {
       setAsking(false)
     }
@@ -103,15 +125,15 @@ export function RelationshipPanel({ chat, character, world, onClose, onBuyGift, 
 
   const handleEnd = async () => {
     const ok = await confirmDialog({
-      title: `End things with ${character?.card.name ?? 'them'}?`,
+      title: `End things with ${viewingCharacter?.card.name ?? 'them'}?`,
       body: 'This can be reconciled later, but it leaves a lasting mark on the relationship.',
       confirmLabel: 'End the relationship',
       tone: 'danger',
     })
-    if (!ok) return
+    if (!ok || !viewingCharacter) return
     setEnding(true)
     try {
-      await onEndRelationship()
+      await onEndRelationship(viewingCharacter.id)
     } finally {
       setEnding(false)
     }
@@ -128,7 +150,11 @@ export function RelationshipPanel({ chat, character, world, onClose, onBuyGift, 
     await chatsApi.update(chat.id, { assistOverrides: next })
   }
 
-  const events = useApiQuery('relationship-events', () => relationshipEventsApi.listByChat(chat.id), [chat.id]) ?? []
+  const allEvents = useApiQuery('relationship-events', () => relationshipEventsApi.listByChat(chat.id), [chat.id]) ?? []
+  // `characterId` is unset on every event logged before multi-character tracking existed — those
+  // all belonged to the primary, so treat a missing id as a match for whichever character IS the
+  // primary rather than only ever matching an explicit id.
+  const events = allEvents.filter((e) => (e.characterId ?? chat.characterId) === viewingCharacter?.id)
   const facts = useApiQuery('chat-facts', () => chatFactsApi.listByChat(chat.id), [chat.id]) ?? []
   const activeFacts = facts.filter((f) => f.active)
   const [newFactText, setNewFactText] = useState('')
@@ -144,7 +170,7 @@ export function RelationshipPanel({ chat, character, world, onClose, onBuyGift, 
     await chatFactsApi.update(id, { active: false })
   }
 
-  const nextSpriteUnlock = Object.entries(character?.spriteUnlocks ?? {})
+  const nextSpriteUnlock = Object.entries(viewingCharacter?.spriteUnlocks ?? {})
     .filter(([, n]) => Number(n) > affection)
     .sort((a, b) => Number(a[1]) - Number(b[1]))[0]
   const nextBackgroundUnlock = Object.entries(world?.backgroundUnlocks ?? {})
@@ -153,9 +179,25 @@ export function RelationshipPanel({ chat, character, world, onClose, onBuyGift, 
 
   return (
     <Modal onClose={onClose} title="Relationship" size="3xl" scrollable>
+        {trackedCharacters.length > 1 && (
+          <div className="mb-4 flex flex-wrap gap-1.5 rounded-xl bg-bg-sunken p-1.5">
+            {trackedCharacters.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => setViewingId(c.id)}
+                className={`flex-1 rounded-lg px-3 py-2 text-sm capitalize transition-colors ${
+                  viewingCharacter?.id === c.id ? 'bg-bg-elevated text-text themed-shadow' : 'text-text-muted hover:text-text'
+                }`}
+              >
+                {c.card.name}
+              </button>
+            ))}
+          </div>
+        )}
+
         <div className="mb-4 rounded-xl bg-bg-sunken p-4">
           <div className="mb-1 flex items-center justify-between text-xs text-text-muted">
-            <span>Bond with {character?.card.name ?? 'Character'}</span>
+            <span>Bond with {viewingCharacter?.card.name ?? 'Character'}</span>
             <span className="capitalize">
               {formatRelationshipStage(relationshipStage)} • {warmth} warmth
             </span>
@@ -209,9 +251,9 @@ export function RelationshipPanel({ chat, character, world, onClose, onBuyGift, 
           <div>
             <div className="text-xs text-text-muted">Status</div>
             <div className="text-sm capitalize text-text">{formatCommitmentStatus(commitmentStatus)}</div>
-            {chat.breakupCount ? (
+            {track.breakupCount ? (
               <div className="mt-0.5 text-[11px] text-text-muted">
-                Broken up before ({chat.breakupCount}×) — trust, comfort, and chemistry still carry that scar.
+                Broken up before ({track.breakupCount}×) — trust, comfort, and chemistry still carry that scar.
               </div>
             ) : null}
           </div>
@@ -234,11 +276,11 @@ export function RelationshipPanel({ chat, character, world, onClose, onBuyGift, 
           </div>
         </div>
 
-        {chat.relationshipWarning && (
+        {track.relationshipWarning && (
           <div className="mb-4 rounded-xl border border-danger/40 bg-danger/10 p-4">
             <div className="text-sm font-semibold text-danger">On the rocks</div>
             <p className="mt-1 text-xs text-text-muted">
-              {chat.relationshipWarning.reason.charAt(0).toUpperCase() + chat.relationshipWarning.reason.slice(1)} — if this
+              {track.relationshipWarning.reason.charAt(0).toUpperCase() + track.relationshipWarning.reason.slice(1)} — if this
               isn't resolved soon, the relationship will break on its own.
             </p>
           </div>
@@ -345,7 +387,9 @@ export function RelationshipPanel({ chat, character, world, onClose, onBuyGift, 
             </div>
           </Section>
 
-          <Section title={`What ${character?.card.name ?? 'they'} remembers`} surface="sunken" className="md:col-span-2">
+          {/* Chat-wide, not per-character — a durable fact ("allergic to cats") isn't owed to
+              whichever tab happens to be selected, so this stays the same across the switcher above. */}
+          <Section title="What's remembered in this chat" surface="sunken" className="md:col-span-2">
             <div className="mb-3 flex flex-wrap gap-2">
               {activeFacts.map((f) => (
                 <button
