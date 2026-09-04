@@ -1085,8 +1085,9 @@ below:**
       the judge call itself needs a live model, koboldcpp is off in dev) a failed attempt fails
       gracefully via a toast, leaves the status untouched, and re-enables the button for a retry.
 - [x] **Milestones (banner + keepsake memory)** — done, two of this item's four parts (a
-      next-morning text needs the proactive-outreach machinery in 10f, which doesn't exist yet;
-      the social-circle ripple needs group/social features, also not built — both stay open). The
+      next-morning text needs the proactive-outreach machinery in 10f — that machinery exists now
+      (#102), so this is unblocked, just not itself built yet; the social-circle ripple needs
+      group/social features, also not built — both stay open). The
       banner already existed (a toast on stage-up); new here is that crossing into a higher warmth
       band now also records a `ChatFact` "keepsake memory" (e.g. `You and Aria's relationship
       recently deepened to "getting close."`), so the model actually knows the relationship
@@ -1179,7 +1180,8 @@ below:**
       "Give" button, reusing the exact same `sendUserMessage(..., { choice })` gift-choice path a
       suggested choice already used, so nothing about how giving affects the relationship changes.
       "Given in person on a date" now has a real manual path; "sent by text" stays explicitly out
-      of scope — it needs the proactive-outreach/texting machinery from 10f, which doesn't exist.
+      of scope — it needs the proactive-outreach/texting machinery from 10f, which now exists
+      (#102), but wiring a gift into it specifically is still a separate, un-built piece.
       Verified live end-to-end with koboldcpp running for real: bought a gift, gave it from the
       Bag, and confirmed a genuine model reply and relationship-event log entry both landed
       correctly from the manual give action, the same as an AI-suggested one would.
@@ -1382,20 +1384,83 @@ below:**
       the runtime-snapshot work rather than be tackled in isolation — verifying it doesn't quietly
       degrade generation quality needs actual live generation to check against, not just token
       counts, so it stays open rather than being rushed through blind.
-- [ ] **Proactive outreach**: characters that can initiate contact — a text, unprompted — driven
-      by their schedule, mood-of-day, and relationship state, instead of the app only ever
-      replying to a message the player sent first. This is the single biggest architectural
-      departure from today's request/response chat loop and probably the right thing to prototype
-      first, since schedules/memory/mood all exist to feed it. Concretely, this needs a "world
-      tick": on some cadence (or on app open, catching up since last visit), advance time, check
-      each character's schedule/mood/pending memories (an unfulfilled promise, a missed date) for
-      anything that would prompt them to reach out, then queue the message rather than generating
-      it live in response to the player.
-- [ ] **Restraint as part of characterization**: outreach frequency and style should be an
-      authored trait, not a global timer — how often a character initiates, what triggers it (missed
-      the player, has news, hasn't heard from them in a while), and how it feels about double-
-      texting are all things two different characters should answer differently. A character that
-      never proactively reaches out is a valid, intentional choice, not a bug.
+- [x] **Proactive outreach** — the headline feature of section 10, shipped as a deliberately
+      narrow first slice (one-shot check-in texts, primary non-group chats only) rather than the
+      full four-way vision (missed dates, unfulfilled promises, social-circle ripples) this bullet
+      originally sketched. Two design forks, both resolved with the user before writing code:
+      **delivery** — injected directly into the character's existing chat as an ordinary message
+      (`StoredMessage.initiatedBy: 'character'`), surfaced by a small unread badge on that chat's
+      `ChatsPanel` entry (sibling to the existing presence dot) — no new inbox view, matching this
+      project's minimal-UI taste over adding a new nav surface; **trigger** — real wall-clock time
+      since the last message in that chat, NOT the in-fiction world day/phase clock (which stays
+      exactly as manually-advanced via Sleep as it always has been, untouched by this feature) — a
+      character's *current* schedule/mood still flavors eligibility and content, it just isn't the
+      timer. Eligibility itself is pure, deterministic code (`evaluateOutreach()`,
+      `src/lib/dating/outreach.ts`), matching the established judge-call principle that plain code
+      decides game state and the model only writes dialogue: gates on frequency/group-chat/no-prior-
+      message/a live `activeEvent`, a frequency-scaled real-silence threshold (rare 48h/normal
+      20h/eager 8h), a cooldown floor so rapidly reopening the app doesn't re-roll, the character's
+      live schedule status (skipped if `'sleeping'`), then a `seededFraction`-seeded roll — seeded
+      by an **hour-bucket of real elapsed silence**, not the frozen world day/phase, since seeding
+      off the fictional clock would make a character permanently eligible or permanently not for as
+      long as the player leaves that clock alone. A coarse reason (`'silence'|'schedule'|'warmth'`)
+      falls out of which condition dominated and becomes a natural-language nudge in the generation
+      prompt. The tick itself (`useOutreachTick.ts`) runs once per app session from `App.tsx`
+      (guarded against StrictMode's dev double-invoke) — there's no polling/cron infrastructure
+      anywhere in this codebase and this doesn't add one, so a character won't text while the app
+      is closed, only once enough real time has passed *and* the app is reopened. Iterates
+      candidate chats sequentially, not in parallel, matching this codebase's existing avoidance of
+      concurrent generation calls against a local single-GPU KoboldCpp server. A real, easy-to-miss
+      bug caught and fixed along the way: `PUT /api/chats/:id` unconditionally bumped `updatedAt`,
+      so a chat where the tick rolled and decided *not* to text would still jump to the top of
+      `ChatsPanel` (sorted by `updatedAt DESC`) with nothing new in it — fixed with a `skipTouch`
+      passthrough flag so the tick's bookkeeping-only write (`lastOutreachCheckedAt`) doesn't
+      reorder the list. `buildGiftTasteNote`/`buildRelationshipDescription` were extracted verbatim
+      out of `useChatSession.ts` into a new `src/lib/dating/relationshipDescription.ts` so the
+      headless tick and the live chat hook can share them without duplication. 24 new tests
+      (`outreach.test.ts`) cover every eligibility gate, per-frequency thresholds, the skip-vs-
+      rolled distinction that decides whether `lastOutreachCheckedAt` gets written, reason
+      categorization, and (see below) the defensive output-truncation regression. Verified live
+      end-to-end with koboldcpp running for real, including two real bugs the live pass itself
+      caught (see the write-up right below this one): the eligibility/generation/persistence loop,
+      the unread badge appearing and correctly *not* appearing when the tick fires on the
+      already-open chat (checked via `activeChatId` read fresh at insert time, not captured at
+      tick-start), and confirmed a `'never'`/unset character (the default — this is opt-in, not
+      retroactive) shows zero behavior change.
+- [x] **Restraint as part of characterization** — shipped alongside outreach above rather than as a
+      separate pass, since the two are inseparable in practice: `Character.outreach?: {frequency:
+      'never'|'rare'|'normal'|'eager'}`, unset behaving as `'never'` so shipping this doesn't
+      retroactively change any already-scheduled character's behavior. Authored via a new
+      "Outreach" section in `CharacterEditor`'s `worldsim` tab, right after Schedule. A character
+      that never proactively reaches out is exactly what an unset/`'never'` character already does
+      — no separate flag needed for that case.
+- [x] **Bug found and fixed during outreach's live verification, affecting the MAIN chat pipeline
+      too, not just this new feature**: a real local model (Heimdallr-26B via koboldcpp), when
+      uncertain about turn boundaries, would sometimes imitate the SillyTavern `<START>`/
+      `{{user}}:`/`{{char}}:` example-dialogue delimiter convention from a character card's own
+      `mes_example` field (included verbatim in every prompt via `exampleBlock`) instead of
+      stopping after one turn — producing a reply that trailed off into a fabricated persona-voiced
+      "turn". Caught live twice: once from outreach's own generation (which structurally invites
+      this more, since it deliberately puts two consecutive character turns back to back with no
+      intervening player line, a pattern with little precedent in most cards' examples), and
+      independently in the user's own live session on an ordinary reply to an image message,
+      proving this was a latent bug in `useChatSession.ts`'s normal turn generation all along, not
+      something outreach introduced. Root cause: `plain-chat` (this app's default instruct
+      template) ships with an empty `stopSequences: []`, relying entirely on the model
+      pattern-matching stop points from alternating turns already in the visible history — a
+      pattern outreach breaks by design, and one this particular model doesn't always hold to even
+      in the ordinary case. Fixed in both places with the same technique: a couple of dynamic,
+      always-safe stop sequences (`<START>`, `\n{{persona name}}:`, `\n{{character name}}:`) merged
+      into every generation call regardless of template, since no legitimate single-turn reply ever
+      needs to emit a literal `<START>` or restate either speaker's name-prefix mid-message.
+      Outreach additionally gets a defensive backstop, `truncateAtStrayTurnMarker()`
+      (`outreach.ts`), which cuts the returned text at the first stray marker even if a stop
+      sequence doesn't catch it cleanly — the same "never trust raw model output" principle
+      `relationshipAssist.ts`'s judge calls already apply to structured JSON, just applied to free
+      text here. 8 new regression tests for the truncation helper. Verified live by regenerating
+      the exact broken message from the user's real session (clean output, referencing the actual
+      prior conversation correctly) and by a completely organic follow-up turn the user sent
+      mid-session, unprompted by any test setup, which also came back clean.
 
 **Suggested phase order** for this whole section, since it's too large for one pass — updated now
 that the 7-dimension/warmth rework (originally step 4, deferred until after 10b) landed early: (1)
@@ -2971,6 +3036,22 @@ Done so far (see checked boxes above for detail):
      0×0 border box, not the visible pixels). The 7px protrusion sits inside the 12px avatar gap;
      `flat`/`document` styles are untouched. Verified live: computed border colours match each
      bubble, geometry clears the avatar, no `.rp-bubble` nodes in the other two styles.
+102. ~~Proactive outreach (section 10f, the headline of section 10)~~ — the two design forks the
+     roadmap had flagged repeatedly (how an unprompted message reaches the player; what actually
+     drives the timing) resolved with the user first: injected into the existing chat + an unread
+     badge, driven by real wall-clock silence rather than the manually-advanced in-fiction clock.
+     `evaluateOutreach()`/`generateOutreachMessage()` (new `src/lib/dating/outreach.ts`),
+     `useOutreachTick()` (new, called once from `App.tsx`), a new opt-in `Character.outreach`
+     field + `CharacterEditor` section, `Chat.lastOutreachCheckedAt`/`hasUnreadOutreach`,
+     `StoredMessage.initiatedBy`, a `ChatsPanel` unread badge. Along the way, fixed a real
+     `PUT /api/chats/:id` bug (an outreach "no" would still reorder the chat list) and — the bigger
+     find — a `<START>`/fake-turn generation bug that turned out to affect the MAIN chat pipeline
+     too, not just this new feature (see section 10f's own checked items for the full write-up on
+     both). 24 new tests, typecheck + full suite green. Verified live end-to-end with koboldcpp
+     running for real: the full outreach loop (eligibility → generation → persistence → badge,
+     including correctly NOT badging an already-open chat), and the turn-boundary fix confirmed
+     against both a regenerate of a real broken message from the user's own session and a
+     completely organic follow-up message they sent mid-verification.
 
 That closes out SillyTavern's full World Info activation engine, plus the last "reasonable next batch," plus sections 10a, 10c, and 10d in full and a first
 slice each of 10b and 10f taken directly afterward since 10's own suggested phase order names them
@@ -2987,15 +3068,10 @@ smaller than the rest of section 10:
 3. Multi-character relationship tracking — today only the primary's affection/stats/gifts/gallery
    exist; a non-primary participant is a scene NPC with no tracked relationship of their own. Real
    scope (parallel relationship state per participant, not just one), not a quick follow-up.
-4. The rest of proactive outreach (section 10f) — the koboldcpp-independent groundwork
-   (runtime-state-snapshot's memory-capping piece, a first slice of context-budget-tiers) is now
-   done (#72); what's left is the actual "world tick" + unprompted-message queue + authored
-   restraint, plus the harder, cross-cutting half of context budget tiers. Schedules was already
-   the deterministic prerequisite; the roadmap's own words for outreach itself still apply — "the
-   single biggest architectural departure from today's request/response chat loop" — and it
-   deserves a real design conversation (how an unprompted message even reaches the player — a
-   notification? an inbox view? — is still completely open) before any code, not a continuation of
-   this incremental batch.
+4. ~~The rest of proactive outreach (section 10f)~~ — shipped as #102 (see section 10f's own
+   checked items for the full write-up), including the harder, cross-cutting half of context
+   budget tiers left deliberately unattempted for now (still genuinely open, just no longer
+   blocking this item).
 5. The rest of 10b — a genuinely live, turn-by-turn date/hangout conversation mode (today's "date"
    is still an ordinary chat with per-turn scoring switched off and one judge pass at the end, not a
    separate streamed scene), intent chips, a live rapport indicator/reactive portrait, and hidden
@@ -3033,12 +3109,13 @@ vocabulary~~ (#99), ~~background music per world/scene mood~~ (#100), ~~speech-b
 closing out section 5 entirely).
 
 The incremental-polish backlog (sections 1–9, mobile, section 5's aesthetic pass) is now empty.
-Everything left needs either a design decision or is a larger track:
-**Proactive outreach itself** (10f, the actual headline of section 10) is next
-in line for a design conversation, not more unattended coding — specifically, how an unprompted
-message even reaches the player (a notification? a separate inbox view? injected straight into the
-chat as if they just texted?) is still an open question only the user can answer, and koboldcpp being
-on or off doesn't change that.
+~~Proactive outreach itself~~ (#102, closing out section 10f's headline feature — see that
+section's own checked items for the full write-up, including a real turn-boundary bug the live
+verification pass caught and fixed in the main chat pipeline too, not just this new feature) is
+now shipped. What's left in section 10 is the larger, longer-standing tracks: 10b's genuinely live
+date/hangout mode, multi-character relationship tracking, and section 12's living-world core — see
+section 10's own "Suggested phase order" for how to sequence those instead of folding them into
+this list.
 
 Section 15 (added from a user-supplied AI Dungeon competitive analysis) is a separate set of ideas,
 not yet folded into this priority order. The high-contrast theme preset (#73) and raw-vs-processed

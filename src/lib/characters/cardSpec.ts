@@ -152,9 +152,14 @@ export interface Character {
   frequentedLocations?: string[]
   /** Content/feature flag (10e): excludes this character from the date/event system entirely — the "reaching for a boundary" case a numeric affection gate can't express, since it's an authorial opt-out rather than something that unlocks with more warmth. */
   dateModeOptOut?: boolean
+  /** How often this character might text the player first, unprompted (10f's proactive outreach) — an authored trait, not a global timer. Unset behaves as 'never' so shipping this doesn't retroactively change any already-scheduled character's behavior. */
+  outreach?: { frequency: OutreachFrequency }
   createdAt: number
   updatedAt: number
 }
+
+/** 10f: how readily a character initiates unprompted contact. A character that never reaches out is a valid, intentional choice, not a missing feature. */
+export type OutreachFrequency = 'never' | 'rare' | 'normal' | 'eager'
 
 export interface SocialConnection {
   id: string

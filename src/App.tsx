@@ -18,6 +18,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { chatsApi } from '@/lib/api/client'
 import { useApplyTheme } from '@/lib/hooks/useApplyTheme'
+import { useOutreachTick } from '@/lib/hooks/useOutreachTick'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 
 /** The chat tab: the full-screen Welcome screen on a fresh install, otherwise the panel + window. */
@@ -61,6 +62,7 @@ function ChatSurface({
 
 export default function App() {
   useApplyTheme()
+  useOutreachTick()
   const [view, setView] = useState<ViewId>('chat')
   const activeChatId = useSettingsStore((s) => s.activeChatId)
   const setActiveChatId = useSettingsStore((s) => s.setActiveChatId)

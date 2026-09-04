@@ -261,6 +261,8 @@ export interface StoredMessage extends ChatMessage {
    * renders a "Generation failed" indicator itself, driven by this flag, not by message text.
    */
   failed?: boolean
+  /** Set when the world tick (10f's proactive outreach) generated this message unprompted, rather than as a reply to a player message in the same turn. */
+  initiatedBy?: 'character'
 }
 
 export interface Chat {
@@ -320,6 +322,10 @@ export interface Chat {
      *  editable afterward from `RelationshipPanel`. */
     visualNovelMode?: boolean
   }
+  /** 10f's proactive outreach: real-time bookkeeping for the world tick, written every time it evaluates this chat regardless of outcome — prevents re-rolling on every app reopen. Independent of the in-fiction world clock. */
+  lastOutreachCheckedAt?: number
+  /** True once the world tick has inserted an unprompted message the player hasn't opened this chat to see yet. Cleared when the chat is opened. */
+  hasUnreadOutreach?: boolean
 }
 
 export interface WorldInfoBook {

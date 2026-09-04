@@ -44,6 +44,7 @@ import {
 } from '@/lib/dating/stage'
 import { defaultGiftInventory, getGiftCatalog, giftById, giftImpactBase } from '@/lib/dating/gifts'
 import { itemById } from '@/lib/dating/items'
+import { buildRelationshipDescription } from '@/lib/dating/relationshipDescription'
 import { resolveInstructTemplate } from '@/lib/prompt/instructTemplates'
 import { extractSceneTag, stripSceneTagForDisplay, type SceneTag } from '@/lib/vn/sceneTag'
 import { SCENE_MOOD_IDS } from '@/lib/vn/moods'
@@ -184,62 +185,6 @@ function applyRelationshipRisk(opts: {
  * section, so the model already has the character's tastes in context the moment `*I give X gift*`
  * shows up in the same turn's user message — no new plumbing needed to detect "a gift was just given."
  */
-function buildGiftTasteNote(character: Character): string | undefined {
-  const { giftLikes, giftDislikes, loveLanguage } = character
-  const parts: string[] = []
-  if (loveLanguage?.trim()) parts.push(`feels most loved through ${loveLanguage.trim()}`)
-  if (giftLikes?.length) parts.push(`tends to genuinely love gifts like ${giftLikes.join(', ')}`)
-  if (giftDislikes?.length) parts.push(`isn't really moved by gifts like ${giftDislikes.join(', ')}`)
-  if (parts.length === 0) return undefined
-  return `${character.card.name} ${parts.join('; ')}. React to any gift given accordingly, in character, without reciting this as a checklist.`
-}
-
-
-function buildRelationshipDescription(
-  chat: Pick<Chat, 'affection' | 'relationshipStats' | 'commitmentStatus' | 'relationshipWarning' | 'breakupCount'>,
-  world: WorldCard | undefined,
-  character: Character,
-): string | undefined {
-  if (chat.affection === undefined) return undefined
-  const primaryName = character.card.name
-  const stats = getRelationshipStats(chat)
-  const stage = relationshipStageForWarmth(computeWarmth(chat.affection, stats), relationshipMilestonesFor(world?.relationshipThresholds))
-  const notes: string[] = []
-  if (stats.trust >= 70) notes.push('a deep mutual trust has built up')
-  if (stats.chemistry >= 70) notes.push('there is a strong romantic spark')
-  if (stats.tension >= 60) notes.push('real unresolved tension between them')
-  if (stats.comfort <= 20 && stage !== 'near_strangers') notes.push('things still feel a little unsettled between them')
-  const giftTasteNote = buildGiftTasteNote(character)
-  // Only stated when there's an actual explicit status (10c's DTR ladder) — an unset/'none'
-  // commitment is the ordinary default for most chats and isn't worth a line every single turn.
-  const commitmentNote =
-    chat.commitmentStatus && chat.commitmentStatus !== 'none'
-      ? `{{user}} and ${primaryName} are officially ${formatCommitmentStatus(chat.commitmentStatus)}.`
-      : undefined
-  // 10c's "Breakups & reconciliation" — a standing warning is the model's cue to actually play the
-  // strain, not just have the numbers move; a past breakup colors things even once patched up.
-  const warningNote = chat.relationshipWarning
-    ? `The relationship is genuinely on the rocks right now (${chat.relationshipWarning.reason}). Let that show; don't just narrate past it.`
-    : undefined
-  const breakupNote =
-    chat.breakupCount && chat.breakupCount > 0
-      ? `${primaryName} and {{user}} have broken up before. Some caution or guardedness is earned here, whether or not that's fully behind them now.`
-      : undefined
-  // `primaryName` is spelled out rather than left as a `{{char}}` macro — this stays about the
-  // scene's primary/relationship-tracked character even in a group chat, where `{{char}}` would
-  // otherwise resolve to whoever's currently speaking instead (see resolveSpeaker/buildCurrentPrompt).
-  return [
-    `Relationship: {{user}} and ${primaryName} are at the "${formatRelationshipStage(stage)}" stage${notes.length ? `: ${notes.join('; ')}` : ''}.`,
-    '(Let this colour tone, warmth, and what feels earned right now. Never state a number, "affection", or "stage" out loud.)',
-    commitmentNote,
-    warningNote,
-    breakupNote,
-    giftTasteNote,
-  ]
-    .filter(Boolean)
-    .join('\n')
-}
-
 function sanitizeSceneTag(
   scene: SceneTag | undefined,
   unlockedExpressions: string[],
@@ -360,6 +305,17 @@ export function useChatSession(chatId: string | null) {
   useEffect(() => {
     setReplyAsCharacterId(null)
   }, [chatId])
+
+  // 10f's proactive outreach: opening a chat that has an unread unprompted message clears its
+  // ChatsPanel badge. Reads `chat.hasUnreadOutreach` from the live query rather than chatId alone,
+  // so a tick that sets the flag while this exact chat is already open still gets cleared once the
+  // query re-fetches (the tick itself also checks activeChatId to avoid setting it in that case,
+  // but this is the belt to that belt-and-suspenders).
+  useEffect(() => {
+    if (chat?.id && chat.hasUnreadOutreach) {
+      chatsApi.update(chat.id, { hasUnreadOutreach: false }).catch(() => {})
+    }
+  }, [chat?.id, chat?.hasUnreadOutreach])
 
   // Background "assist" work kicked off after a reply lands — memory summary, objective checks,
   // relationship scoring, choice suggestions. Each is its own model call, and on a local
@@ -1066,8 +1022,19 @@ export function useChatSession(chatId: string | null) {
 
           // The template's own turn-boundary tokens (e.g. ChatML's <|im_end|>) must reach
           // the sampler or the model has no signal to stop at its own turn — merged with
-          // whatever the user additionally set in Settings, not replacing it.
-          const stopSequence = [...new Set([...template.stopSequences, ...(sampler.stop_sequence ?? [])])]
+          // whatever the user additionally set in Settings, not replacing it. Also merged with a
+          // couple of dynamic, always-safe stops: many imported character cards' `mes_example`
+          // uses SillyTavern's own `<START>` / `{{user}}:` / `{{char}}:` example-dialogue
+          // delimiters (verbatim in the prompt via `exampleBlock`), and a model that's uncertain
+          // about turn boundaries can fall back to imitating that pattern instead of stopping
+          // after its own single turn — seen live, producing a reply that trails off into a
+          // fabricated `<START>`/persona-name-prefixed "next" turn. No legitimate single-turn
+          // reply needs to emit a literal `<START>` or restate the persona's or its own
+          // name-prefix mid-message, so stopping there is safe for every template, not just ones
+          // that already define their own stop sequences.
+          const personaName = persona?.name || 'You'
+          const dynamicStops = ['<START>', `\n${personaName}:`, `\n${speaker.card.name}:`]
+          const stopSequence = [...new Set([...template.stopSequences, ...(sampler.stop_sequence ?? []), ...dynamicStops])]
 
           const genStartedAt = performance.now()
           let firstTokenAt: number | null = null

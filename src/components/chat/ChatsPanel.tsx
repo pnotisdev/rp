@@ -238,6 +238,12 @@ export function ChatsPanel({
                       }`}
                     />
                   )}
+                  {chat.hasUnreadOutreach && (
+                    <span
+                      title={`${character?.card.name ?? 'They'} texted you first`}
+                      className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-bg-elevated bg-accent"
+                    />
+                  )}
                 </div>
                 <div className="min-w-0 flex-1">
                   {isRenaming ? (

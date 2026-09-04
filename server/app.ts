@@ -174,6 +174,15 @@ function normalizeSocialConnections(raw: unknown): { id: string; name: string; r
   return entries.length > 0 ? entries : undefined
 }
 
+const OUTREACH_FREQUENCIES = new Set(['never', 'rare', 'normal', 'eager'])
+
+/** 10f's authored outreach trait — rejects an unrecognized frequency (e.g. from a hand-edited backup) rather than letting it silently fall through as `undefined` in a threshold lookup, which would make an unrecognized character permanently eligible. */
+function normalizeOutreach(raw: unknown): { frequency: string } | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const frequency = (raw as Record<string, unknown>).frequency
+  return typeof frequency === 'string' && OUTREACH_FREQUENCIES.has(frequency) ? { frequency } : undefined
+}
+
 function normalizeRelationshipThresholds(raw: unknown) {
   if (!raw || typeof raw !== 'object') return undefined
   const obj = raw as Record<string, unknown>
@@ -230,6 +239,7 @@ app.post('/api/characters', (req, res) => {
     homeLocation: typeof req.body.homeLocation === 'string' ? req.body.homeLocation : undefined,
     frequentedLocations: normalizeStringArray(req.body.frequentedLocations),
     dateModeOptOut: req.body.dateModeOptOut === true,
+    outreach: normalizeOutreach(req.body.outreach),
     createdAt: now,
     updatedAt: now,
   })
@@ -266,6 +276,7 @@ app.put('/api/characters/:id', (req, res) => {
   if ('homeLocation' in req.body) patch.homeLocation = typeof req.body.homeLocation === 'string' ? req.body.homeLocation : undefined
   if ('frequentedLocations' in req.body) patch.frequentedLocations = normalizeStringArray(req.body.frequentedLocations)
   if ('dateModeOptOut' in req.body) patch.dateModeOptOut = req.body.dateModeOptOut === true
+  if ('outreach' in req.body) patch.outreach = normalizeOutreach(req.body.outreach)
   const updated = characterStore.update(id, patch)
   res.json(updated)
 })
@@ -390,8 +401,14 @@ app.post('/api/chats', (req, res) => {
 })
 
 app.put('/api/chats/:id', (req, res) => {
-  const { characterId: _c, id: _id, createdAt: _ca, ...patch } = req.body
-  const updated = chatStore.update(req.params.id, { ...patch, updatedAt: Date.now() })
+  // skipTouch: 10f's outreach tick writes lastOutreachCheckedAt on every chat it evaluates,
+  // whether or not a message actually landed — without this, that bookkeeping-only write would
+  // bump updatedAt and reorder ChatsPanel (sorted by updatedAt DESC) for a chat nothing happened in.
+  const { characterId: _c, id: _id, createdAt: _ca, skipTouch, ...patch } = req.body
+  const updated = chatStore.update(req.params.id, {
+    ...patch,
+    ...(skipTouch ? {} : { updatedAt: Date.now() }),
+  })
   if (!updated) return notFound(res)
   res.json(updated)
 })

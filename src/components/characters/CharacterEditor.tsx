@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { ImagePlus, Plus, Sparkles, X } from 'lucide-react'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { charactersApi, instructTemplatesApi, worldsApi } from '@/lib/api/client'
-import type { Character, GalleryEntry, RelationshipStarter, SocialConnection } from '@/lib/characters/cardSpec'
+import type { Character, GalleryEntry, OutreachFrequency, RelationshipStarter, SocialConnection } from '@/lib/characters/cardSpec'
 import { blankCharacterData } from '@/lib/characters/cardSpec'
 import { downloadJson, downloadPng, fileToDataUrl, importCharacterFile } from '@/lib/characters/importExport'
 import { buildCharacterPack, downloadCharacterPack, importCharacterPack, parseCharacterPackFile } from '@/lib/characters/pack'
@@ -88,6 +88,7 @@ export function CharacterEditor({
   const [boundaries, setBoundaries] = useState<string[]>(character?.boundaries ?? [])
   const [socialConnections, setSocialConnections] = useState<SocialConnection[]>(character?.socialConnections ?? [])
   const [dateModeOptOut, setDateModeOptOut] = useState(character?.dateModeOptOut ?? false)
+  const [outreachFrequency, setOutreachFrequency] = useState<OutreachFrequency>(character?.outreach?.frequency ?? 'never')
   const [showGenerate, setShowGenerate] = useState(false)
   const [showTemplates, setShowTemplates] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -125,6 +126,7 @@ export function CharacterEditor({
     setBoundaries(character?.boundaries ?? [])
     setSocialConnections(character?.socialConnections ?? [])
     setDateModeOptOut(character?.dateModeOptOut ?? false)
+    setOutreachFrequency(character?.outreach?.frequency ?? 'never')
   }, [character?.id])
 
   const set = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) =>
@@ -194,6 +196,7 @@ export function CharacterEditor({
       boundaries: boundaries.length ? boundaries : null,
       socialConnections: socialConnections.length ? socialConnections : null,
       dateModeOptOut,
+      outreach: outreachFrequency !== 'never' ? { frequency: outreachFrequency } : null,
     }
     try {
       if (character) {
@@ -918,6 +921,23 @@ export function CharacterEditor({
                 </div>
               )}
             />
+          </Section>
+
+          <Section
+            title="Outreach"
+            description="How often this character might text you first, unprompted, based on how long it's been and how things are going. Off by default — a character that never reaches out is a valid, intentional choice, not a missing feature."
+            surface="bare"
+          >
+            <SelectField
+              label="Frequency"
+              value={outreachFrequency}
+              onChange={(e) => setOutreachFrequency(e.target.value as OutreachFrequency)}
+            >
+              <option value="never">Off — never texts first</option>
+              <option value="rare">Rare</option>
+              <option value="normal">Normal</option>
+              <option value="eager">Eager</option>
+            </SelectField>
           </Section>
         </div>
       )}

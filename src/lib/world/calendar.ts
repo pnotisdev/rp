@@ -81,7 +81,7 @@ export function describeWeather(kind: WeatherKind): string {
 }
 
 /** A tiny deterministic hash -> [0,1) generator, so the same seed always produces the same pick. */
-function seededFraction(seed: string): number {
+export function seededFraction(seed: string): number {
   let h = 2166136261
   for (let i = 0; i < seed.length; i++) {
     h ^= seed.charCodeAt(i)
