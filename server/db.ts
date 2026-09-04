@@ -14,6 +14,14 @@ fs.mkdirSync(avatarsDir, { recursive: true })
 // (STATUS_ACCESS_VIOLATION) on some Windows/Node combinations, this one included. Being built
 // into Node itself instead of a separately-downloaded .node binary avoids that whole class of bug.
 export const db = new DatabaseSync(path.join(dataDir, 'rp.db'))
+// Must be the very first statement on this connection, before anything else touches the file.
+// `tsx watch` restarting this process on every source save can start the new process before
+// Windows has fully released the previous one's lock on rp.db — without this, that shows up as an
+// immediate, uncaught `Error: database is locked` crash on the very next pragma below, sometimes
+// leaving the server down until something manually kills the stuck old process. This tells SQLite
+// to retry quietly for up to 5s instead of failing the instant it meets a lock that's already about
+// to clear on its own — the standard fix for exactly this transient-contention class of "locked".
+db.exec('PRAGMA busy_timeout = 5000')
 db.exec('PRAGMA journal_mode = WAL')
 db.exec('PRAGMA foreign_keys = ON')
 

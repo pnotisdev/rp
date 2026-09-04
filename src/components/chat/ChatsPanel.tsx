@@ -11,6 +11,7 @@ import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import { errorMessage, toastError } from '@/lib/store/useToastStore'
 import { confirmDialog } from '@/lib/store/useConfirmStore'
 import { NewChatDialog } from './NewChatDialog'
+import { TrashPanel } from './TrashPanel'
 import { Button } from '@/components/ui/Button'
 
 export function ChatsPanel({
@@ -24,6 +25,8 @@ export function ChatsPanel({
   const characters = useApiQuery('characters', () => charactersApi.list(), []) ?? []
   const worlds = useApiQuery('worlds', () => worldsApi.list(), []) ?? []
   const [showNew, setShowNew] = useState(false)
+  const [showTrash, setShowTrash] = useState(false)
+  const trashCount = useApiQuery('chats', () => chatsApi.trash(), [])?.length ?? 0
   const collapsed = useSettingsStore((s) => s.chatsPanelCollapsed)
   const setCollapsed = useSettingsStore((s) => s.setChatsPanelCollapsed)
   const baseUrl = useSettingsStore((s) => s.baseUrl)
@@ -104,7 +107,7 @@ export function ChatsPanel({
     setMenuForId(null)
     const ok = await confirmDialog({
       title: `Delete "${chat.title}"?`,
-      body: "This removes the whole conversation and can't be undone.",
+      body: 'Moves it to the trash — recoverable there for 30 days, or you can delete it for good right away.',
       confirmLabel: 'Delete chat',
       tone: 'danger',
     })
@@ -333,9 +336,23 @@ export function ChatsPanel({
           <p className="px-2 py-4 text-center text-xs text-text-muted">No chats yet.</p>
         )}
       </div>
+      <button
+        onClick={() => setShowTrash(true)}
+        className="mx-2 mb-3 flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-xs text-text-muted transition-colors hover:bg-bg-sunken hover:text-text"
+      >
+        <Trash2 size={13} strokeWidth={2} className="shrink-0" />
+        Trash
+        {trashCount > 0 && <span className="ml-auto text-[11px] tabular-nums">{trashCount}</span>}
+      </button>
       {/* In collapsed mode the fragment above renders this once as a sibling of both variants —
           don't also mount it here in the `mobileOnly` copy. */}
       {!mobileOnly && newChatDialog}
+      {/* No separate outer-sibling copy the way `newChatDialog` has, so unlike that one this
+          renders straight from whichever `fullChatList` call is actually active — collapsed mode
+          only ever mounts one of the two (see the branch above), never both at once. */}
+      {showTrash && (
+        <TrashPanel onClose={() => setShowTrash(false)} onRestored={(id) => { setShowTrash(false); onSelect(id) }} />
+      )}
     </div>
     )
   }

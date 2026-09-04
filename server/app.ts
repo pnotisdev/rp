@@ -292,14 +292,11 @@ app.put('/api/characters/:id', (req, res) => {
 
 app.delete('/api/characters/:id', (req, res) => {
   const characterId = req.params.id
+  // The character itself is gone for good here (card, avatar, sprites all get unlinked below), so
+  // there's no useful "trash" state for a chat that can no longer even render — straight to
+  // `purgeChat` rather than the soft-delete `DELETE /api/chats/:id` goes through.
   const chats = chatStore.list({ where: 'characterId = ?', params: [characterId] })
-  for (const chat of chats) {
-    for (const msg of messageStore.list({ where: 'chatId = ?', params: [chat.id] })) messageStore.remove(msg.id as string)
-    for (const o of objectiveStore.list({ where: 'chatId = ?', params: [chat.id] })) objectiveStore.remove(o.id as string)
-    for (const e of relationshipEventStore.list({ where: 'chatId = ?', params: [chat.id] })) relationshipEventStore.remove(e.id as string)
-    for (const f of chatFactStore.list({ where: 'chatId = ?', params: [chat.id] })) chatFactStore.remove(f.id as string)
-    chatStore.remove(chat.id as string)
-  }
+  for (const chat of chats) purgeChat(chat.id as string)
   // A character can also appear as a non-primary group-chat participant — `participants` lives in
   // the JSON blob, not an indexed column, so this can't be a SQL WHERE; it's a full scan (fine on
   // a single-user local table). Drop the dangling id from the array rather than deleting the chat.
@@ -370,8 +367,54 @@ app.delete('/api/personas/:id', (req, res) => {
 
 // ---- Chats ----
 
+// How long a deleted chat sits recoverable before it's purged for real — see `purgeExpiredTrash`,
+// called once at server startup (index.ts). `deletedAt` lives in the JSON blob (see `Chat.deletedAt`
+// in types.ts), not an indexed column, so both this sweep and the two list routes below filter in
+// JS rather than SQL — completely fine at the scale a single local user's chat list actually reaches.
+const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000 // 30 days
+
+/**
+ * The actual, permanent, cascading delete — deletes messages/objectives/relationship
+ * events/facts, un-parents any chat forked from this one, then the chat row itself. Used by the
+ * purge route and the retention sweep; `DELETE /api/chats/:id` itself no longer calls this
+ * directly (see below) — it soft-deletes instead.
+ */
+function purgeChat(chatId: string): void {
+  for (const msg of messageStore.list({ where: 'chatId = ?', params: [chatId] })) messageStore.remove(msg.id as string)
+  for (const o of objectiveStore.list({ where: 'chatId = ?', params: [chatId] })) objectiveStore.remove(o.id as string)
+  for (const e of relationshipEventStore.list({ where: 'chatId = ?', params: [chatId] })) relationshipEventStore.remove(e.id as string)
+  for (const f of chatFactStore.list({ where: 'chatId = ?', params: [chatId] })) chatFactStore.remove(f.id as string)
+  // Any chat forked FROM this one points back via parentChatId — not an indexed column (it lives
+  // in the JSON blob, like `participants` above), so a full scan. Left dangling, the header's
+  // "⑂ original chat" link would navigate to a chat that no longer exists (a 404 fetch) with no
+  // indication why.
+  for (const chat of chatStore.list()) {
+    if (chat.parentChatId !== chatId) continue
+    chatStore.update(chat.id as string, { parentChatId: undefined, forkedFromMessageId: undefined })
+  }
+  chatStore.remove(chatId)
+}
+
+/** Called once at server startup — purges anything that's been sitting in the trash past `TRASH_RETENTION_MS`. */
+export function purgeExpiredTrash(): void {
+  const cutoff = Date.now() - TRASH_RETENTION_MS
+  const expired = chatStore.list().filter((c) => typeof c.deletedAt === 'number' && c.deletedAt < cutoff)
+  for (const chat of expired) purgeChat(chat.id as string)
+  if (expired.length) console.log(`[rp-server] purged ${expired.length} chat(s) past the ${TRASH_RETENTION_MS / 86400000}-day trash retention window`)
+}
+
 app.get('/api/chats', (_req, res) => {
-  res.json(chatStore.list({ orderBy: 'updatedAt DESC' }))
+  res.json(chatStore.list({ orderBy: 'updatedAt DESC' }).filter((c) => !c.deletedAt))
+})
+
+// Registered before `/api/chats/:id` — a literal path loses to a same-prefix `:id` route if it
+// comes after (Express matches "trash" as an id otherwise), same gotcha as `/api/messages/search`.
+app.get('/api/chats/trash', (_req, res) => {
+  const trashed = chatStore
+    .list()
+    .filter((c) => typeof c.deletedAt === 'number')
+    .sort((a, b) => (b.deletedAt as number) - (a.deletedAt as number))
+  res.json(trashed)
 })
 
 app.get('/api/chats/:id', (req, res) => {
@@ -489,21 +532,29 @@ app.post('/api/chats/:id/fork', (req, res) => {
   res.status(201).json(forkedChat)
 })
 
+// Soft delete: the chat drops out of the normal list (see the filter above) but nothing about it
+// is actually touched, so a mistaken delete — a misclick, or an agent testing something and
+// clearing up after itself, is what actually prompted this — is always recoverable via
+// `POST /:id/restore` until it's purged (`DELETE /:id/purge`, or the retention sweep).
 app.delete('/api/chats/:id', (req, res) => {
+  const updated = chatStore.update(req.params.id, { deletedAt: Date.now() })
+  if (!updated) return notFound(res)
+  res.json(updated)
+})
+
+app.post('/api/chats/:id/restore', (req, res) => {
+  const updated = chatStore.update(req.params.id, { deletedAt: null, updatedAt: Date.now() })
+  if (!updated) return notFound(res)
+  res.json(updated)
+})
+
+// The real, permanent delete — everything `DELETE /:id` used to do immediately. Reachable from the
+// trash view once a chat is already there, so this is always a deliberate second step, not the
+// only way to remove a chat at all.
+app.delete('/api/chats/:id/purge', (req, res) => {
   const chatId = req.params.id
-  for (const msg of messageStore.list({ where: 'chatId = ?', params: [chatId] })) messageStore.remove(msg.id as string)
-  for (const o of objectiveStore.list({ where: 'chatId = ?', params: [chatId] })) objectiveStore.remove(o.id as string)
-  for (const e of relationshipEventStore.list({ where: 'chatId = ?', params: [chatId] })) relationshipEventStore.remove(e.id as string)
-  for (const f of chatFactStore.list({ where: 'chatId = ?', params: [chatId] })) chatFactStore.remove(f.id as string)
-  // Any chat forked FROM this one points back via parentChatId — not an indexed column (it lives
-  // in the JSON blob, like `participants` above), so a full scan. Left dangling, the header's
-  // "⑂ original chat" link would navigate to a chat that no longer exists (a 404 fetch) with no
-  // indication why.
-  for (const chat of chatStore.list()) {
-    if (chat.parentChatId !== chatId) continue
-    chatStore.update(chat.id as string, { parentChatId: undefined, forkedFromMessageId: undefined })
-  }
-  chatStore.remove(chatId)
+  if (!chatStore.get(chatId)) return notFound(res)
+  purgeChat(chatId)
   res.status(204).end()
 })
 

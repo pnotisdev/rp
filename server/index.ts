@@ -1,8 +1,9 @@
-import { app } from './app.ts'
+import { app, purgeExpiredTrash } from './app.ts'
 import { checkpointDb, dataDir } from './db.ts'
 import { runSeedIfNeeded } from './seed.ts'
 
 runSeedIfNeeded()
+purgeExpiredTrash()
 
 const port = Number(process.env.API_PORT) || 3001
 

@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
-import { MessageCircle, Sparkles, Upload, Wand2 } from 'lucide-react'
+import { MessageCircle, Sparkles, Trash2, Upload, Wand2 } from 'lucide-react'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
-import { charactersApi } from '@/lib/api/client'
+import { charactersApi, chatsApi } from '@/lib/api/client'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import { useConnectionStatus } from '@/lib/hooks/useConnectionStatus'
 import type { ViewId } from '@/components/layout/Sidebar'
 import { Button } from '@/components/ui/Button'
 import { NewChatDialog } from './NewChatDialog'
+import { TrashPanel } from './TrashPanel'
 
 // The seeded starter character (server/seedContent.ts) — featured on the welcome screen when it
 // still exists, so a fresh install is one click from a running conversation.
@@ -49,6 +50,11 @@ export function WelcomeView({
   const [probeHit, setProbeHit] = useState<{ url: string; model: string } | null>(null)
   const probedFor = useRef<string | null>(null)
   const [showNewChat, setShowNewChat] = useState(false)
+  const [showTrash, setShowTrash] = useState(false)
+  // This screen only shows at all once `chats.length === 0` — the one place a deleted chat's
+  // recoverability actually matters is right here: deleting your only/last chat bounces you to
+  // this exact screen, so without this link the trash it landed in would be unreachable.
+  const trashCount = useApiQuery('chats', () => chatsApi.trash(), [])?.length ?? 0
 
   const seed = characters.find((c) => c.id === SEED_CHARACTER_ID)
   const featured = seed ?? characters[0]
@@ -204,6 +210,16 @@ export function WelcomeView({
             </>
           )}
         </div>
+
+        {trashCount > 0 && (
+          <button
+            onClick={() => setShowTrash(true)}
+            className="mt-4 flex items-center gap-1.5 text-xs text-text-muted hover:text-text"
+          >
+            <Trash2 size={12} strokeWidth={2} />
+            {trashCount === 1 ? '1 deleted chat in the trash' : `${trashCount} deleted chats in the trash`}
+          </button>
+        )}
       </div>
 
       {showNewChat && featured && (
@@ -215,6 +231,9 @@ export function WelcomeView({
             onStarted(id)
           }}
         />
+      )}
+      {showTrash && (
+        <TrashPanel onClose={() => setShowTrash(false)} onRestored={(id) => { setShowTrash(false); onStarted(id) }} />
       )}
     </div>
   )

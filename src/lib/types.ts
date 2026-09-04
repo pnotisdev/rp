@@ -359,6 +359,14 @@ export interface Chat {
   lastOutreachCheckedAt?: number
   /** True once the world tick has inserted an unprompted message the player hasn't opened this chat to see yet. Cleared when the chat is opened. */
   hasUnreadOutreach?: boolean
+  /**
+   * Set the moment a chat is deleted from the normal chat list — a soft delete, not the end of it.
+   * `GET /api/chats` excludes anything with this set; `GET /api/chats/trash` returns only chats
+   * with this set, newest-deleted first. A trashed chat purges for real (see `purgeChat` in
+   * `server/app.ts`) either on request or automatically once it's sat here past the retention
+   * window — see `TRASH_RETENTION_MS`. Restoring just clears this field back to unset.
+   */
+  deletedAt?: number
 }
 
 export interface WorldInfoBook {

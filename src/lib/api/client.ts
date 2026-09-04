@@ -106,9 +106,26 @@ export const charactersApi = {
 export const personasApi = makeResource<Persona>('personas', '/personas')
 export const chatsApi = {
   ...makeResource<Chat>('chats', '/chats'),
-  // Cascades server-side (deletes the chat's messages and objectives too).
+  // Soft delete — the chat moves to the trash (`trash`/`restore`/`purge` below) rather than being
+  // destroyed immediately. Nothing about it is actually touched, so this is always reversible
+  // until it's purged.
   async remove(id: string): Promise<void> {
     await request<void>('DELETE', `/chats/${id}`)
+    invalidate('chats')
+  },
+  /** Chats currently in the trash, most recently deleted first. */
+  async trash(): Promise<Chat[]> {
+    return request<Chat[]>('GET', '/chats/trash')
+  },
+  /** Moves a trashed chat back into the normal chat list. */
+  async restore(id: string): Promise<Chat> {
+    const result = await request<Chat>('POST', `/chats/${id}/restore`)
+    invalidate('chats')
+    return result
+  },
+  /** Permanently deletes a chat and everything that cascades from it (messages, objectives, relationship history) — cannot be undone. */
+  async purge(id: string): Promise<void> {
+    await request<void>('DELETE', `/chats/${id}/purge`)
     invalidate('chats')
     invalidate('messages')
     invalidate('objectives')

@@ -31,6 +31,27 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
       `useChatSession.ts`.
 - [x] Scene backgrounds: `World.backgrounds`/`backgroundUnlocks`, selectable by the model via the
       same scene tag, gated by affection.
+- [x] **Bugfix: a brand-new chat's VN screen had no expression/background at all** (#114) —
+      user-reported: opened a fresh chat in VN mode and got a bare placeholder gradient even though
+      the world had real art uploaded for every location. Root cause: the scene tag above is
+      something the *model* appends to a *generated* reply — a chat's very first message is the
+      character's static `first_mes`, which nobody generates, so it never gets one. Fixed with
+      `detectGreetingScene` (`src/lib/vn/sceneVision.ts`): a one-shot, best-effort, text-only
+      classification pass (temperature 0.1, ~40 tokens) run once at chat creation
+      (`createChat.ts`), reading only the rendered greeting text against the same unlocked
+      expression/background ids the live scene tag would offer — factored out as
+      `getUnlockedExpressionIds`/`getUnlockedBackgroundIds` (`src/lib/vn/unlocks.ts`) so the two
+      paths can never offer different ids for the same character/affection. Gated on there being
+      actual custom art to choose from (a character with sprites, or a world with real background
+      images) so a plain install never pays for a wasted model call. 13 new tests (442 total: 6 for
+      `detectGreetingScene`, 7 for the newly-extracted `unlocks.ts`).
+      Verified live on Gemma end-to-end: a fresh chat came back
+      `{"expression":"embarrassed","background":"classroom"}` for a library-set greeting after the
+      prompt was tuned to prefer the closest approximate match over declining — the first pass only
+      picked an expression and left background empty, which held up as the model correctly playing
+      it safe rather than a bug, but a nudge toward "closest is better than none" got it picking
+      confidently on the very next fresh chat. VN mode's first screen now shows real art immediately
+      instead of only after the first real reply lands.
 - [x] Sprite transitions: `vn-sprite` idle animation in `globals.css`, respects `reducedMotion`.
 - [x] Name-plate + dialogue box styled to match VN layout with character accent color.
 - [x] Sprite crossfade: `VNStage.tsx` now dips to transparent and back instead of hard-swapping
@@ -2190,7 +2211,7 @@ SillyTavern docs/releases, RisuAI (CCv3, CBS/trigger system, regex scripts), Agn
         widening `ChatsPanel`'s `onSelect` to accept `null`, matching `ChatSurface`'s own prop
         shape in `App.tsx`) — otherwise the app would keep pointing at a chat that no longer
         exists (`ChatWindow` degrades gracefully to its empty state, but the sidebar would show
-        nothing selected forever).
+        nothing selected forever). **Since made recoverable — see the trash entry (#115) below.**
       **Verified live end-to-end**, deliberately against disposable test data rather than the
       real seeded Sumire chats (created a throwaway "TestBot" character + chat via the actual
       `NewChatDialog` UI, not a shortcut): renamed it and confirmed the new title via a fresh
@@ -2205,6 +2226,50 @@ SillyTavern docs/releases, RisuAI (CCv3, CBS/trigger system, regex scripts), Agn
       surface (its own UI for creating/assigning tags, not a quick addition to this row menu), and
       AI Dungeon's Adventure-model framing (title/tags/settings as one coherent per-chat settings
       object) is a bigger reference shape worth its own pass once tags exist to hang it on.
+- [x] **Deleted chats are recoverable — a real trash, not just a confirm dialog** (#115). Prompted
+      by an actual incident: verifying #114 above involved creating and deleting several throwaway
+      test chats, and a dev-server crash (see the two hardening fixes below) during that same
+      session left the timeline genuinely unclear enough that a chat with real content couldn't be
+      confidently ruled out as collateral. It turned out to be an empty one, but "was that the right
+      one?" should never be a question a hard, cascading, un-undoable delete can even raise.
+      - **Soft delete, not gone** — `DELETE /api/chats/:id` now sets `Chat.deletedAt` instead of
+        cascading immediately; `GET /api/chats` filters trashed chats out, `GET /api/chats/trash`
+        (registered before `/api/chats/:id` — same literal-vs-`:id` ordering rule as
+        `/api/messages/search`) returns only them, newest-deleted first. `POST /:id/restore` clears
+        the field. The actual cascading delete (messages, objectives, relationship events, facts,
+        un-parenting any fork) is now `purgeChat()`, one function reused by the new
+        `DELETE /:id/purge` route, a 30-day retention sweep run once at server startup
+        (`purgeExpiredTrash`), and character deletion's own chat cascade (previously its own copy of
+        the same four loops, now the one shared implementation).
+      - **`TrashPanel.tsx`** — restore or "delete forever" (its own confirmation, `confirmDialog`)
+        per row. Reachable from `ChatsPanel`'s sidebar footer, and — this is the part the incident
+        actually exposed — from `WelcomeView` too: that screen takes over full-bleed with no sidebar
+        at all once `chats.length === 0`, exactly the state deleting your only/last chat leaves you
+        in, so without a link there too the trash it just went into would've been unreachable from
+        the one place it would matter most. Both show a small "N in the trash" affordance only when
+        the trash is non-empty; unlike this codebase's other stakes-free per-chat mechanics, this
+        one is deliberately not framed narratively (no VN copy, this is a data-safety page).
+      - **Two independent dev-environment hardening fixes**, found live while chasing what actually
+        happened during the incident, not the feature itself: (1) `vite.config.ts`'s
+        `presets/`-folder watch-exclusion (already noted as "resolved" once before) still crashed
+        with `EBUSY` on Windows — the bare glob wasn't reliably matching backslash paths, fixed by
+        adding the resolved absolute path alongside it. (2) A separate, previously-undiagnosed
+        `Error: database is locked` on `PRAGMA journal_mode = WAL` at `server/db.ts`'s startup —
+        `tsx watch` restarting the server on every source save can beat Windows to fully releasing
+        the previous process's file lock, and losing that race crashed the process outright with no
+        auto-recovery. Fixed with `PRAGMA busy_timeout = 5000` as the connection's very first
+        statement (SQLite's own built-in "retry quietly instead of failing instantly" mechanism,
+        the standard fix for exactly this transient-contention shape of "locked"). Reproduced
+        directly — three server-file saves fired within 300ms of each other reliably crashed the
+        server before this fix and reliably didn't after.
+      No new client-side tests (server routes; this codebase's established pattern is live
+      verification for those, not a server-side test harness). **Verified live end-to-end**: soft-
+      deleted a throwaway chat through the real UI, confirmed the updated confirm-dialog copy,
+      confirmed it vanished from the main list and `WelcomeView`'s "N in the trash" link appeared;
+      restored it through `TrashPanel` and landed straight back in the conversation; deleted it
+      again and purged it for real, confirmed via direct API calls that it's gone from both the
+      active list and the trash. Separately stress-tested the SQLite fix with three rapid
+      server-file saves, which crashed reliably before and came up clean every time after.
 - [x] **Generation HUD** — tokens/sec, time-to-first-token, and a context-fill gauge during and
       after generation, distinct from `showTokenCounts`' per-message-after-the-fact count. New
       `GenerationStats` (`useChatSession.ts`) and `GenerationHud.tsx`, gated behind a
