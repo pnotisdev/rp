@@ -126,6 +126,14 @@ interface SettingsState {
   shadowStrength: number
   reducedMotion: boolean
   reducedAudio: boolean
+  /** Style standalone comic sound words ("BOOM!", "knock knock") as manga-style bursts in messages. */
+  sfxBursts: boolean
+  /** Extra sound-effect words applied to every character, on top of the built-in list — comma / newline separated. Per-character additions live on `Character.sfxWords`. */
+  sfxWords: string
+  setSfxWords: (v: string) => void
+  /** Background-music volume, 0..1. 0 (default) = off; music never plays and never asks the browser to unlock audio until this is raised. Per-world tracks live on `WorldCard.music`. */
+  bgmVolume: number
+  setBgmVolume: (v: number) => void
   showTimestamps: boolean
   showTokenCounts: boolean
   showGenerationHud: boolean
@@ -144,6 +152,7 @@ interface SettingsState {
     key:
       | 'reducedMotion'
       | 'reducedAudio'
+      | 'sfxBursts'
       | 'showTimestamps'
       | 'showTokenCounts'
       | 'showGenerationHud'
@@ -303,6 +312,11 @@ export const useSettingsStore = create<SettingsState>()(
       shadowStrength: 1,
       reducedMotion: false,
       reducedAudio: false,
+      sfxBursts: true,
+      sfxWords: '',
+      setSfxWords: (v) => set({ sfxWords: v }),
+      bgmVolume: 0,
+      setBgmVolume: (v) => set({ bgmVolume: Math.max(0, Math.min(1, v)) }),
       showTimestamps: true,
       showTokenCounts: false,
       showGenerationHud: true,

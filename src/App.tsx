@@ -4,6 +4,7 @@ import { CommandPalette } from '@/components/layout/CommandPalette'
 import { KeyboardShortcutsSheet } from '@/components/layout/KeyboardShortcutsSheet'
 import { ChatsPanel } from '@/components/chat/ChatsPanel'
 import { ChatWindow } from '@/components/chat/ChatWindow'
+import { GlobalBgm } from '@/components/chat/GlobalBgm'
 import { WelcomeView } from '@/components/chat/WelcomeView'
 import { CompanionView } from '@/components/companion/CompanionView'
 import { CharactersView } from '@/components/characters/CharactersView'
@@ -120,6 +121,9 @@ export default function App() {
         {view === 'gallery' && <GalleryView />}
         {view === 'settings' && <SettingsView />}
       </div>
+      {/* App-level so a world's music keeps playing across view switches. Companion mode runs its
+          own player against its own separately-chosen chat, so it's excluded here. */}
+      {view !== 'companion' && <GlobalBgm />}
       <ToastViewport />
       <ConfirmDialog />
       {showPalette && (

@@ -93,6 +93,11 @@ export function ThemeEditor() {
 
   const reducedMotion = useSettingsStore((s) => s.reducedMotion)
   const reducedAudio = useSettingsStore((s) => s.reducedAudio)
+  const sfxBursts = useSettingsStore((s) => s.sfxBursts)
+  const sfxWords = useSettingsStore((s) => s.sfxWords)
+  const setSfxWords = useSettingsStore((s) => s.setSfxWords)
+  const bgmVolume = useSettingsStore((s) => s.bgmVolume)
+  const setBgmVolume = useSettingsStore((s) => s.setBgmVolume)
   const showTimestamps = useSettingsStore((s) => s.showTimestamps)
   const showTokenCounts = useSettingsStore((s) => s.showTokenCounts)
   const showGenerationHud = useSettingsStore((s) => s.showGenerationHud)
@@ -368,6 +373,46 @@ export function ThemeEditor() {
           onChange={() => toggleFlag('visualNovelMode')}
           label="Visual Novel mode"
           description="Full-bleed scene art with a docked dialogue box, in place of the ordinary scrolling chat log"
+        />
+      </Section>
+
+      <Section
+        title="Sound-effect bursts"
+        description="Styles a standalone comic sound word in a message — “BOOM!”, “knock knock”, “KA-CHUNK” — as a manga-style burst. Never touches sound words inside spoken dialogue."
+        surface="bare"
+      >
+        <Toggle
+          checked={sfxBursts}
+          onChange={() => toggleFlag('sfxBursts')}
+          label="Style sound effects"
+        />
+        {sfxBursts && (
+          <div className="mt-3">
+            <TextAreaField
+              label="Extra sound words"
+              rows={2}
+              value={sfxWords}
+              onChange={(e) => setSfxWords(e.target.value)}
+              placeholder="thwip, glomp, fwump"
+              hint="Applied to every character, on top of the built-in list. Comma or space separated. For a single character's own vocalisations (a catgirl's “nya”, an imouto's tics), use the field in that character's Visual novel tab instead."
+            />
+          </div>
+        )}
+      </Section>
+
+      <Section
+        title="Background music"
+        description="Plays a world's uploaded scene tracks (World editor → Scenes → Background music) in Visual Novel and Companion mode, crossfading as the scene's mood changes. Ducks while a spoken line plays. Off at zero."
+        surface="bare"
+      >
+        <Slider
+          label="Music volume"
+          min={0}
+          max={1}
+          step={0.05}
+          value={bgmVolume}
+          onChange={setBgmVolume}
+          formatValue={(v) => (v === 0 ? 'Off' : `${Math.round(v * 100)}%`)}
         />
       </Section>
 

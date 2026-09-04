@@ -76,6 +76,7 @@ export function CharacterEditor({
   const [schedule, setSchedule] = useState<ScheduleEntry[]>(character?.schedule ?? [])
   const [voiceProvider, setVoiceProvider] = useState<TtsProviderId | ''>(character?.voice?.provider ?? '')
   const [voiceId, setVoiceId] = useState(character?.voice?.voiceId ?? '')
+  const [sfxWords, setSfxWords] = useState<string[]>(character?.sfxWords ?? [])
   const [instructTemplateId, setInstructTemplateId] = useState(character?.instructTemplateId ?? '')
   const [worldId, setWorldId] = useState(character?.worldId ?? '')
   const [occupation, setOccupation] = useState(character?.occupation ?? '')
@@ -109,6 +110,7 @@ export function CharacterEditor({
     setRelationshipStarters(character?.relationshipStarters ?? [])
     setVoiceProvider(character?.voice?.provider ?? '')
     setVoiceId(character?.voice?.voiceId ?? '')
+    setSfxWords(character?.sfxWords ?? [])
     setInstructTemplateId(character?.instructTemplateId ?? '')
     setWeatherLoves(character?.weatherPreferences?.loves ?? [])
     setWeatherHates(character?.weatherPreferences?.hates ?? [])
@@ -178,6 +180,7 @@ export function CharacterEditor({
       gallery,
       relationshipStarters,
       voice,
+      sfxWords: sfxWords.length ? sfxWords : null,
       instructTemplateId: instructTemplateId || null,
       weatherPreferences,
       schedule: schedule.length ? schedule : null,
@@ -584,6 +587,7 @@ export function CharacterEditor({
       )}
 
       {tab === 'vn' && (
+        <div className="space-y-10">
         <Section
           title="Expressions"
           description="Art per expression so Visual Novel mode shows the right one as the model tags each reply's mood. Blank falls back to the avatar. The small number is the warmth needed to unlock it."
@@ -655,6 +659,21 @@ export function CharacterEditor({
             </Button>
           </div>
         </Section>
+
+        <Section
+          title="Sound effects"
+          description="This character's own comic sound words, on top of the built-in list and any global ones — a catgirl's “nya, nyaa, mrrp”, an imouto's tics. They get the manga-style burst styling in her messages. Display-only; the model never sees this. Turn the whole feature on/off in Settings → Appearance."
+          surface="bare"
+        >
+          <TextField
+            label="Extra sound words"
+            hint="Comma separated. Punctuation and length variants are handled automatically (“nya” also matches “Nyaa~”)."
+            value={sfxWords.join(', ')}
+            onChange={(e) => setSfxWords(e.target.value.split(',').map((v) => v.trim()).filter(Boolean))}
+            placeholder="nya, nyaa, mrrp, purr"
+          />
+        </Section>
+        </div>
       )}
 
       {tab === 'dating' && (

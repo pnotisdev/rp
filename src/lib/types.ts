@@ -352,6 +352,8 @@ export interface WorldCard {
   backgrounds?: Record<string, string>
   /** Minimum affection required before a tagged background can be selected/displayed. */
   backgroundUnlocks?: Record<string, number>
+  /** Background-music track URLs keyed by scene mood id (src/lib/vn/moods.ts), plus a `default` key played when no mood-specific track applies. VN mode only. */
+  music?: Record<string, string>
   /** Overrides the default gift catalog for characters living here. Empty/unset falls back to the built-in default catalog. */
   gifts?: GiftItem[]
   /** Per-world item catalog (10d) — no built-in default catalog the way gifts have one, since items are optional; empty/unset just means no items exist yet. */

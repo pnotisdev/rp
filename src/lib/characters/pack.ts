@@ -26,6 +26,7 @@ export interface CharacterPackV1 {
     gallery?: GalleryEntry[]
     relationshipStarters?: RelationshipStarter[]
     voice?: Character['voice']
+    sfxWords?: string[]
     occupation?: string
     workplace?: string
     homeLocation?: string
@@ -45,6 +46,7 @@ export interface CharacterPackV1 {
     avatarDataUrl?: string
     backgrounds?: Record<string, string>
     backgroundUnlocks?: Record<string, number>
+    music?: Record<string, string>
     gifts?: GiftItem[]
     items?: ItemDef[]
     customSceneFlags?: CustomSceneFlag[]
@@ -101,6 +103,7 @@ export async function buildCharacterPack(character: Character, world?: WorldCard
       gallery: gallery.length ? gallery : undefined,
       relationshipStarters: character.relationshipStarters,
       voice: character.voice,
+      sfxWords: character.sfxWords,
       occupation: character.occupation,
       workplace: character.workplace,
       homeLocation: character.homeLocation,
@@ -114,9 +117,10 @@ export async function buildCharacterPack(character: Character, world?: WorldCard
   }
 
   if (world) {
-    const [worldAvatarDataUrl, backgrounds] = await Promise.all([
+    const [worldAvatarDataUrl, backgrounds, music] = await Promise.all([
       urlToDataUrl(world.avatarDataUrl),
       mapToDataUrls(world.backgrounds),
+      mapToDataUrls(world.music),
     ])
     pack.world = {
       name: world.name,
@@ -127,6 +131,7 @@ export async function buildCharacterPack(character: Character, world?: WorldCard
       avatarDataUrl: worldAvatarDataUrl,
       backgrounds,
       backgroundUnlocks: world.backgroundUnlocks,
+      music,
       gifts: world.gifts,
       items: world.items,
       customSceneFlags: world.customSceneFlags,
@@ -179,6 +184,7 @@ export async function importCharacterPack(pack: CharacterPackV1): Promise<{ char
       avatarDataUrl: pack.world.avatarDataUrl,
       backgrounds: pack.world.backgrounds,
       backgroundUnlocks: pack.world.backgroundUnlocks,
+      music: pack.world.music,
       gifts: pack.world.gifts,
       items: pack.world.items,
       customSceneFlags: pack.world.customSceneFlags,
@@ -200,6 +206,7 @@ export async function importCharacterPack(pack: CharacterPackV1): Promise<{ char
     gallery: pack.character.gallery,
     relationshipStarters: pack.character.relationshipStarters,
     voice: pack.character.voice,
+    sfxWords: pack.character.sfxWords,
     occupation: pack.character.occupation,
     workplace: pack.character.workplace,
     homeLocation: pack.character.homeLocation,

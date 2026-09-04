@@ -4,6 +4,7 @@ import type { StoredMessage } from '@/lib/types'
 import { useSettingsStore, type AvatarShape } from '@/lib/store/useSettingsStore'
 import { messageAnchorId } from '@/lib/scrollToMessage'
 import { renderMessageText } from '@/lib/text/messageText'
+import type { SfxConfig } from '@/lib/text/messageSegments'
 import { confirmDialog } from '@/lib/store/useConfirmStore'
 
 function avatarClass(shape: AvatarShape): string {
@@ -35,6 +36,8 @@ interface MessageBubbleProps {
   streamingText?: string
   /** Briefly highlighted after being scrolled to from a search result or the pinned-messages panel. */
   isHighlighted?: boolean
+  /** SFX-burst policy for this message's speaker (global toggle + their `sfxWords`). */
+  sfx?: SfxConfig
   onEdit: (text: string) => void
   onDelete: () => void
   onRewind: () => void
@@ -50,6 +53,7 @@ export function MessageBubble({
   isStreaming,
   streamingText,
   isHighlighted,
+  sfx,
   onEdit,
   onDelete,
   onRewind,
@@ -119,7 +123,7 @@ export function MessageBubble({
           Generation failed — try regenerating below.
         </span>
       ) : (
-        renderMessageText(displayText, regexScripts)
+        renderMessageText(displayText, regexScripts, sfx)
       )}
       {isStreaming && <span className="cursor-blink font-mono">▋</span>}
     </div>
@@ -235,7 +239,7 @@ export function MessageBubble({
                   Generation failed — try regenerating below.
                 </span>
               ) : (
-                renderMessageText(displayText, regexScripts)
+                renderMessageText(displayText, regexScripts, sfx)
               )}
               {isStreaming && <span className="cursor-blink font-mono">▋</span>}
             </>

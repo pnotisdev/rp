@@ -126,6 +126,8 @@ export interface Character {
   relationshipStarters?: RelationshipStarter[]
   /** Per-character TTS override — unset fields fall back to the global Settings → Voice config. */
   voice?: { provider?: TtsProviderId; voiceId?: string }
+  /** Extra comic sound-effect words this character's messages get the manga-style "burst" styling on, beyond the built-in list — e.g. "nya", "mrrp" for a catgirl, or an imouto's own vocalisations. Display-only; never sent to the model. */
+  sfxWords?: string[]
   /** Per-character instruct-template override (builtin or custom id) — unset falls back to the global Settings → Generation default. */
   instructTemplateId?: string
   /** Weather this character loves/hates (src/lib/world/calendar.ts) — nudges the world-moment prompt line, never dictates it. */

@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Globe, ImagePlus } from 'lucide-react'
+import { Globe, ImagePlus, Music, X } from 'lucide-react'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { worldsApi } from '@/lib/api/client'
 import type { CustomSceneFlag, GiftItem, GiftRarity, ItemDef, ItemEffect, RelationshipDimension, WorldCard } from '@/lib/types'
 import { fileToDataUrl } from '@/lib/characters/importExport'
 import { DEFAULT_BACKGROUNDS } from '@/lib/vn/backgrounds'
+import { BGM_DEFAULT_KEY, SCENE_MOODS } from '@/lib/vn/moods'
 import { combinedSceneFlags, formatRelationshipStage, RELATIONSHIP_MILESTONES } from '@/lib/dating/stage'
 import { advancePhase, getCalendarInfo, getEnergyRemaining, getMaxEnergyForDay, getWeather, describeWeather, PHASES } from '@/lib/world/calendar'
 import { WORLD_TEMPLATES, getWorldTemplate, hiddenWorldTabs, type WorldTemplateId } from '@/lib/world/worldTemplates'
@@ -172,6 +173,7 @@ function WorldEditor({
   const [avatarDataUrl, setAvatarDataUrl] = useState(base.avatarDataUrl)
   const [backgrounds, setBackgrounds] = useState<Record<string, string>>(base.backgrounds ?? {})
   const [backgroundUnlocks, setBackgroundUnlocks] = useState<Record<string, number>>(base.backgroundUnlocks ?? {})
+  const [music, setMusic] = useState<Record<string, string>>(base.music ?? {})
   const [gifts, setGifts] = useState<GiftItem[]>(base.gifts ?? [])
   const [items, setItems] = useState<ItemDef[]>(base.items ?? [])
   const [customSceneFlags, setCustomSceneFlags] = useState<CustomSceneFlag[]>(base.customSceneFlags ?? [])
@@ -195,6 +197,7 @@ function WorldEditor({
       avatarDataUrl,
       backgrounds,
       backgroundUnlocks,
+      music,
       gifts,
       items,
       customSceneFlags,
@@ -272,6 +275,16 @@ function WorldEditor({
     const dataUrl = await fileToDataUrl(file)
     setBackgrounds((b) => ({ ...b, [tagId]: dataUrl }))
   }
+  const handleMusicPick = async (key: string, file: File) => {
+    const dataUrl = await fileToDataUrl(file)
+    setMusic((m) => ({ ...m, [key]: dataUrl }))
+  }
+  const removeMusic = (key: string) =>
+    setMusic((m) => {
+      const next = { ...m }
+      delete next[key]
+      return next
+    })
   const removeBackground = (tagId: string) => {
     setBackgrounds((b) => {
       const next = { ...b }
@@ -425,6 +438,7 @@ function WorldEditor({
       )}
 
       {tab === 'scenes' && (
+        <div className="space-y-10">
         <Section
           title="Scene backgrounds"
           description="Art per location for Visual Novel mode. The model tags each reply's setting; anything left blank falls back to a placeholder gradient."
@@ -482,6 +496,53 @@ function WorldEditor({
             ))}
           </div>
         </Section>
+
+        <Section
+          title="Background music"
+          description="One looping track per scene mood, for Visual Novel mode. The model tags each reply's mood; the matching track crossfades in. “Default” plays whenever nothing more specific applies — set at least that one. Turn playback on with the volume slider in Settings → Appearance."
+          surface="bare"
+        >
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {[{ id: BGM_DEFAULT_KEY, label: 'Default', hint: 'The fallback loop — plays when no mood-specific track is set or tagged' }, ...SCENE_MOODS].map(
+              (slot) => (
+                <div
+                  key={slot.id}
+                  className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 ${
+                    music[slot.id] ? 'border-accent/40 bg-accent/5' : 'border-dashed border-border'
+                  }`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 text-sm text-text">
+                      {music[slot.id] ? <Music size={13} strokeWidth={2} className="shrink-0 text-accent" /> : null}
+                      {slot.label}
+                    </div>
+                    <p className="truncate text-[11px] text-text-muted">{slot.hint}</p>
+                  </div>
+                  <label className="shrink-0 cursor-pointer rounded-lg bg-bg-sunken px-2.5 py-1.5 text-xs text-text-muted transition-colors hover:text-text">
+                    {music[slot.id] ? 'Replace' : 'Upload'}
+                    <input
+                      type="file"
+                      accept="audio/*"
+                      className="hidden"
+                      onChange={(e) => e.target.files?.[0] && handleMusicPick(slot.id, e.target.files[0])}
+                    />
+                  </label>
+                  {music[slot.id] && (
+                    <button
+                      type="button"
+                      onClick={() => removeMusic(slot.id)}
+                      aria-label={`Remove ${slot.label} music`}
+                      className="shrink-0 text-text-muted hover:text-danger"
+                    >
+                      <X size={14} strokeWidth={2} />
+                    </button>
+                  )}
+                </div>
+              ),
+            )}
+          </div>
+        </Section>
+        </div>
       )}
 
       {tab === 'dating' && (

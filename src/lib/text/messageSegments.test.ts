@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { splitMessageSegments } from '@/lib/text/messageSegments'
+import { parseSfxWordList, splitMessageSegments } from '@/lib/text/messageSegments'
 
 describe('splitMessageSegments', () => {
   it('returns a single text segment for plain text', () => {
@@ -41,5 +41,107 @@ describe('splitMessageSegments', () => {
 
   it('returns no segments for an empty string', () => {
     expect(splitMessageSegments('')).toEqual([])
+  })
+
+  describe('sfx bursts', () => {
+    it('tags a lone onomatopoeia with trailing punctuation', () => {
+      expect(splitMessageSegments('BOOM!')).toEqual([{ type: 'sfx', content: 'BOOM!' }])
+    })
+
+    it('tags a standalone sound word between two sentences, keeping the surrounding text', () => {
+      expect(splitMessageSegments('She turned the key. CLICK. The lock gave way.')).toEqual([
+        { type: 'text', content: 'She turned the key. ' },
+        { type: 'sfx', content: 'CLICK' },
+        { type: 'text', content: '. The lock gave way.' },
+      ])
+    })
+
+    it('tags a repeated lowercase sound that is the whole action segment', () => {
+      expect(splitMessageSegments('*knock knock*')).toEqual([{ type: 'sfx', content: 'knock knock' }])
+    })
+
+    it('tags a burst set off by dashes inside an action segment', () => {
+      expect(splitMessageSegments('*she froze — THUMP — the lid slammed shut*')).toEqual([
+        { type: 'action', content: 'she froze — ' },
+        { type: 'sfx', content: 'THUMP' },
+        { type: 'action', content: ' — the lid slammed shut' },
+      ])
+    })
+
+    it('matches an elongated spelling', () => {
+      expect(splitMessageSegments('KABOOOOM!')).toEqual([{ type: 'sfx', content: 'KABOOOOM!' }])
+    })
+
+    it('does not tag a shouted non-sound word', () => {
+      expect(splitMessageSegments('I told him to STOP.')).toEqual([
+        { type: 'text', content: 'I told him to STOP.' },
+      ])
+    })
+
+    it('does not tag a sound word used as a verb mid-sentence', () => {
+      expect(splitMessageSegments('The door slams shut behind her.')).toEqual([
+        { type: 'text', content: 'The door slams shut behind her.' },
+      ])
+    })
+
+    it('leaves a "BOOM!" that is spoken dialogue inside quotes alone', () => {
+      expect(splitMessageSegments('"BOOM!" she shouted, throwing her arms wide.')).toEqual([
+        { type: 'quote', content: '"BOOM!"' },
+        { type: 'text', content: ' she shouted, throwing her arms wide.' },
+      ])
+    })
+
+    it('does not change output shape for a message with no sound effects', () => {
+      expect(splitMessageSegments('*grins* "Nice to meet you." She waves.')).toEqual([
+        { type: 'action', content: 'grins' },
+        { type: 'text', content: ' ' },
+        { type: 'quote', content: '"Nice to meet you."' },
+        { type: 'text', content: ' She waves.' },
+      ])
+    })
+
+    it('skips SFX detection entirely when disabled', () => {
+      expect(splitMessageSegments('The gate slammed. BANG! *she flinched*', { disabled: true })).toEqual([
+        { type: 'text', content: 'The gate slammed. BANG! ' },
+        { type: 'action', content: 'she flinched' },
+      ])
+    })
+
+    it('tags a character-specific sound word passed via extraWords', () => {
+      expect(splitMessageSegments('*She tilts her head.* Nyaa~', { extraWords: ['nya'] })).toEqual([
+        { type: 'action', content: 'She tilts her head.' },
+        { type: 'text', content: ' ' },
+        { type: 'sfx', content: 'Nyaa~' },
+      ])
+    })
+
+    it('still recognizes built-in sounds when extraWords is provided', () => {
+      expect(splitMessageSegments('BOOM. mrrp?', { extraWords: ['mrrp'] })).toEqual([
+        { type: 'sfx', content: 'BOOM' },
+        { type: 'text', content: '. ' },
+        { type: 'sfx', content: 'mrrp?' },
+      ])
+    })
+
+    it('does not tag an extra word that was not configured for this speaker', () => {
+      expect(splitMessageSegments('*She tilts her head.* Nyaa~')).toEqual([
+        { type: 'action', content: 'She tilts her head.' },
+        { type: 'text', content: ' Nyaa~' },
+      ])
+    })
+  })
+})
+
+describe('parseSfxWordList', () => {
+  it('splits on commas, whitespace and newlines and drops punctuation', () => {
+    expect(parseSfxWordList('nya, nyaa~\n mrrp   purr!')).toEqual(['nya', 'nyaa', 'mrrp', 'purr'])
+  })
+
+  it('drops fragments shorter than two letters', () => {
+    expect(parseSfxWordList('a, of, nya, x')).toEqual(['of', 'nya'])
+  })
+
+  it('returns an empty list for blank input', () => {
+    expect(parseSfxWordList('   ')).toEqual([])
   })
 })

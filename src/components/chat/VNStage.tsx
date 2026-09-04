@@ -15,6 +15,8 @@ import {
 import { MessageLog } from './MessageLog'
 import { SakuraPetals } from './SakuraPetals'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
+import { parseSfxWordList } from '@/lib/text/messageSegments'
+import { sfxConfigFor } from '@/lib/text/sfx'
 
 const SPRITE_FADE_MS = 200
 
@@ -169,6 +171,16 @@ export function VNStage({
   const personaName = persona?.name
   const reducedMotion = useSettingsStore((s) => s.reducedMotion)
   const regexScripts = useSettingsStore((s) => s.regexScripts)
+  const sfxEnabled = useSettingsStore((s) => s.sfxBursts)
+  const sfxWordsSetting = useSettingsStore((s) => s.sfxWords)
+  const dialogueSfx = lastCharMsg
+    ? sfxConfigFor(lastCharMsg, {
+        enabled: sfxEnabled,
+        globalWords: parseSfxWordList(sfxWordsSetting),
+        primary: character,
+        participants: participantCharacters,
+      })
+    : undefined
   const showPetals = !reducedMotion && !!sceneBackground && OUTDOOR_BACKGROUNDS.has(sceneBackground)
 
   return (
@@ -368,7 +380,7 @@ export function VNStage({
                 className="vn-dialogue whitespace-pre-wrap text-[15px] leading-relaxed text-white/95"
                 style={{ textShadow: '0 1px 3px rgb(0 0 0 / 0.5)' }}
               >
-                {renderMessageText(displayText, regexScripts)}
+                {renderMessageText(displayText, regexScripts, dialogueSfx)}
                 {isStreamingThis && <span className="cursor-blink font-mono">▋</span>}
               </p>
             </div>

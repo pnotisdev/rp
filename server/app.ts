@@ -18,7 +18,7 @@ import {
   worldStore,
   avatarsDir,
 } from './db.ts'
-import { removeAvatar, resolveAvatar, resolveAvatarMap } from './avatars.ts'
+import { removeAvatar, resolveAvatar, resolveAvatarMap, resolveWorldMusicMap } from './avatars.ts'
 
 export const app = express()
 // A character save can carry many sprite images at once now (10d's bulk expression upload) —
@@ -216,6 +216,7 @@ app.post('/api/characters', (req, res) => {
     gallery,
     relationshipStarters: req.body.relationshipStarters ?? [],
     voice: req.body.voice ?? undefined,
+    sfxWords: normalizeStringArray(req.body.sfxWords),
     instructTemplateId: typeof req.body.instructTemplateId === 'string' ? req.body.instructTemplateId : undefined,
     weatherPreferences: req.body.weatherPreferences ?? undefined,
     schedule: Array.isArray(req.body.schedule) ? req.body.schedule : undefined,
@@ -252,6 +253,7 @@ app.put('/api/characters/:id', (req, res) => {
   if ('gallery' in req.body) patch.gallery = normalizeGalleryEntries(id, req.body.gallery)
   if ('relationshipStarters' in req.body) patch.relationshipStarters = req.body.relationshipStarters ?? []
   if ('voice' in req.body) patch.voice = req.body.voice ?? undefined
+  if ('sfxWords' in req.body) patch.sfxWords = normalizeStringArray(req.body.sfxWords)
   if ('instructTemplateId' in req.body) patch.instructTemplateId = typeof req.body.instructTemplateId === 'string' ? req.body.instructTemplateId : undefined
   if ('weatherPreferences' in req.body) patch.weatherPreferences = req.body.weatherPreferences ?? undefined
   if ('schedule' in req.body) patch.schedule = Array.isArray(req.body.schedule) ? req.body.schedule : undefined
@@ -648,6 +650,7 @@ app.post('/api/worlds', (req, res) => {
   const id = newId()
   const avatarDataUrl = resolveAvatar('worlds', id, req.body.avatarDataUrl)
   const backgrounds = resolveAvatarMap('worlds', 'backgrounds', id, req.body.backgrounds)
+  const music = resolveWorldMusicMap(id, req.body.music)
   const customSceneFlags = normalizeCustomSceneFlags(req.body.customSceneFlags)
   const allowedFlags = new Set([...DEFAULT_SCENE_FLAGS, ...customSceneFlags.map((f) => f.id)])
   const created = worldStore.insert({
@@ -660,6 +663,7 @@ app.post('/api/worlds', (req, res) => {
     avatarDataUrl,
     backgrounds,
     backgroundUnlocks: req.body.backgroundUnlocks ?? {},
+    music,
     gifts: normalizeGiftItems(req.body.gifts),
     items: normalizeItemDefs(req.body.items, allowedFlags),
     customSceneFlags,
@@ -677,6 +681,7 @@ app.put('/api/worlds/:id', (req, res) => {
   const patch: Record<string, unknown> = { ...req.body, updatedAt: Date.now() }
   if ('avatarDataUrl' in req.body) patch.avatarDataUrl = resolveAvatar('worlds', id, req.body.avatarDataUrl)
   if ('backgrounds' in req.body) patch.backgrounds = resolveAvatarMap('worlds', 'backgrounds', id, req.body.backgrounds)
+  if ('music' in req.body) patch.music = resolveWorldMusicMap(id, req.body.music)
   if ('backgroundUnlocks' in req.body) patch.backgroundUnlocks = req.body.backgroundUnlocks ?? {}
   if ('gifts' in req.body) patch.gifts = normalizeGiftItems(req.body.gifts)
   if ('customSceneFlags' in req.body) patch.customSceneFlags = normalizeCustomSceneFlags(req.body.customSceneFlags)

@@ -10,6 +10,8 @@ import { extractCompleteSentences } from '@/lib/voice/sentenceChunker'
 import { toSpeakableText } from '@/lib/voice/speakableText'
 import { Spinner } from '@/components/ui/Spinner'
 import { Button } from '@/components/ui/Button'
+import { BgmPlayer } from '@/components/chat/BgmPlayer'
+import { useAudioDuckStore } from '@/lib/store/useAudioDuckStore'
 
 type Phase = 'idle' | 'listening' | 'transcribing' | 'thinking' | 'speaking' | 'error'
 
@@ -34,11 +36,18 @@ export function CompanionView() {
   const ttsRegion = useSettingsStore((s) => s.ttsRegion)
   const ttsVoice = useSettingsStore((s) => s.ttsVoice)
 
-  const { character, persona, messages, isGenerating, streamingText, sendUserMessage, abortGeneration } =
+  const { character, persona, world, messages, isGenerating, streamingText, sendUserMessage, abortGeneration } =
     useChatSession(chatId)
 
   const [phase, setPhase] = useState<Phase>('idle')
   const [error, setError] = useState<string | null>(null)
+
+  // Duck the background music (if any) while a spoken line is playing.
+  const setAudioDucked = useAudioDuckStore((s) => s.setDucked)
+  useEffect(() => {
+    setAudioDucked(phase === 'speaking')
+    return () => setAudioDucked(false)
+  }, [phase, setAudioDucked])
 
   const vadRef = useRef<VadRecording | null>(null)
   const wasGeneratingRef = useRef(false)
@@ -247,6 +256,7 @@ export function CompanionView() {
 
   return (
     <div className="relative flex flex-1 flex-col items-center justify-center gap-6 p-8">
+      <BgmPlayer world={world} />
       <button
         onClick={switchChat}
         className="absolute left-8 top-8 font-mono text-xs text-text-muted hover:text-text"

@@ -1,7 +1,7 @@
 import { urlToDataUrl } from '@/lib/characters/pack'
 import type { Character } from '@/lib/characters/cardSpec'
 import type { Chat, Persona, RegexScript, StoredMessage } from '@/lib/types'
-import { splitMessageSegments } from '@/lib/text/messageSegments'
+import { splitMessageSegments, type SfxConfig } from '@/lib/text/messageSegments'
 import { applyRegexScripts } from '@/lib/text/regexScripts'
 
 function escapeHtml(text: string): string {
@@ -13,12 +13,13 @@ function escapeHtml(text: string): string {
     .replace(/'/g, '&#39;')
 }
 
-/** Same action/quote emphasis convention as the live chat UI (`renderMessageText`), built from the same parser, with the same display-target regex scripts applied. */
-function messageTextHtml(text: string, regexScripts?: RegexScript[]): string {
-  return splitMessageSegments(applyRegexScripts(text, regexScripts, 'display'))
+/** Same action/quote/sfx convention as the live chat UI (`renderMessageText`), built from the same parser, with the same display-target regex scripts applied. */
+function messageTextHtml(text: string, regexScripts?: RegexScript[], sfx?: SfxConfig): string {
+  return splitMessageSegments(applyRegexScripts(text, regexScripts, 'display'), sfx)
     .map((seg) => {
       if (seg.type === 'action') return `<em>${escapeHtml(seg.content)}</em>`
       if (seg.type === 'quote') return `<span class="quote">${escapeHtml(seg.content)}</span>`
+      if (seg.type === 'sfx') return `<span class="sfx">${escapeHtml(seg.content)}</span>`
       return escapeHtml(seg.content)
     })
     .join('')
@@ -42,8 +43,10 @@ export async function buildChatTranscriptHtml(opts: {
   persona?: Persona
   messages: StoredMessage[]
   regexScripts?: RegexScript[]
+  /** SFX-burst policy — the global toggle plus the primary character's `sfxWords` (the export flattens speaker identity, so participant-specific vocab isn't threaded here). */
+  sfx?: SfxConfig
 }): Promise<string> {
-  const { chat, character, persona, messages, regexScripts } = opts
+  const { chat, character, persona, messages, regexScripts, sfx } = opts
   const characterName = character?.card.name ?? 'Character'
   const personaName = persona?.name ?? 'You'
   const [characterAvatar, personaAvatar] = await Promise.all([
@@ -66,7 +69,7 @@ export async function buildChatTranscriptHtml(opts: {
         <div class="bubble">
           <div class="meta"><span class="name">${escapeHtml(name)}</span><span class="time">${escapeHtml(time)}</span></div>
           ${imagesBlock}
-          <div class="text">${messageTextHtml(m.text, regexScripts)}</div>
+          <div class="text">${messageTextHtml(m.text, regexScripts, sfx)}</div>
         </div>
       </div>`
     })
@@ -105,6 +108,10 @@ export async function buildChatTranscriptHtml(opts: {
   .text { white-space: pre-wrap; word-break: break-word; }
   .text em { color: #8b8d98; font-style: italic; }
   .text .quote { color: #f2f2f4; font-weight: 600; }
+  .text .sfx {
+    font-weight: 700; font-size: 1.12em; letter-spacing: 0.06em;
+    color: #f6a5c0; font-style: normal;
+  }
   .attachments { margin-bottom: 0.4rem; }
   .attachment { max-width: 160px; max-height: 160px; border-radius: 8px; margin: 0 4px 4px 0; object-fit: cover; }
   footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #2a2b31; color: #8b8d98; font-size: 0.7rem; }

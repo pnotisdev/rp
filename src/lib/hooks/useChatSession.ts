@@ -46,6 +46,7 @@ import { defaultGiftInventory, getGiftCatalog, giftById, giftImpactBase } from '
 import { itemById } from '@/lib/dating/items'
 import { resolveInstructTemplate } from '@/lib/prompt/instructTemplates'
 import { extractSceneTag, stripSceneTagForDisplay, type SceneTag } from '@/lib/vn/sceneTag'
+import { SCENE_MOOD_IDS } from '@/lib/vn/moods'
 import { DEFAULT_EXPRESSION_IDS } from '@/lib/vn/expressions'
 import { DEFAULT_BACKGROUND_IDS } from '@/lib/vn/backgrounds'
 import { bookAppliesToChat } from '@/lib/worldinfo/scope'
@@ -248,6 +249,8 @@ function sanitizeSceneTag(
   const cleaned: SceneTag = {}
   if (scene.expression && unlockedExpressions.includes(scene.expression)) cleaned.expression = scene.expression
   if (scene.background && unlockedBackgrounds.includes(scene.background)) cleaned.background = scene.background
+  // Mood isn't unlock-gated (music isn't affection-locked), just checked against the known set.
+  if (scene.mood && SCENE_MOOD_IDS.includes(scene.mood)) cleaned.mood = scene.mood
   return Object.keys(cleaned).length > 0 ? cleaned : undefined
 }
 
@@ -531,6 +534,9 @@ export function useChatSession(chatId: string | null) {
           // separate, larger lift (VNStage is built entirely around one character's sprite state).
           expressionIds: getUnlockedExpressionIds(character, affection),
           backgroundIds: getUnlockedBackgroundIds(world, affection),
+          // Only ask for a mood tag when this world actually has music to drive with it — no point
+          // spending prompt tokens on a signal the app would then ignore.
+          moodIds: world?.music && Object.keys(world.music).length > 0 ? SCENE_MOOD_IDS : undefined,
         },
         affection,
         participants: roster.length

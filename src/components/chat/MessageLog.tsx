@@ -1,6 +1,10 @@
+import { useMemo } from 'react'
 import type { StoredMessage } from '@/lib/types'
 import type { Character } from '@/lib/characters/cardSpec'
 import type { Persona } from '@/lib/types'
+import { useSettingsStore } from '@/lib/store/useSettingsStore'
+import { parseSfxWordList } from '@/lib/text/messageSegments'
+import { sfxConfigFor } from '@/lib/text/sfx'
 import { MessageBubble } from './MessageBubble'
 
 interface MessageLogProps {
@@ -39,6 +43,10 @@ export function MessageLog({
   onFork,
   onTogglePin,
 }: MessageLogProps) {
+  const sfxEnabled = useSettingsStore((s) => s.sfxBursts)
+  const sfxWords = useSettingsStore((s) => s.sfxWords)
+  const globalSfxWords = useMemo(() => parseSfxWordList(sfxWords), [sfxWords])
+
   const avatarFor = (m: StoredMessage): string | undefined => {
     if (m.role !== 'char') return persona?.avatarDataUrl
     if (!m.speakerId) return character?.avatarDataUrl
@@ -52,6 +60,12 @@ export function MessageLog({
           key={m.id}
           message={m}
           avatarDataUrl={avatarFor(m)}
+          sfx={sfxConfigFor(m, {
+            enabled: sfxEnabled,
+            globalWords: globalSfxWords,
+            primary: character,
+            participants: participantCharacters,
+          })}
           isStreaming={generatingMessageId === m.id}
           streamingText={streamingText}
           isHighlighted={highlightedMessageId === m.id}

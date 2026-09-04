@@ -293,6 +293,21 @@ select:focus-visible,
   margin-top: 0.6em;
 }
 
+/* Manga-style sound-effect bursts — a standalone onomatopoeia clause ("BOOM", "knock knock")
+   the message parser tagged as `sfx`. A restrained typographic treatment (display face, heavier
+   weight, tracked-out caps feel) rather than the huge rotated lettering of a real comic panel,
+   which would wreck line layout in a chat bubble. */
+.rp-sfx {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-style: normal;
+  font-size: 1.12em;
+  letter-spacing: 0.06em;
+}
+.prose-rp .rp-sfx {
+  color: rgb(var(--c-accent));
+}
+
 /* VNStage's dialogue box sits on a background image with fixed white text, not the themed
    surface `.prose-rp` assumes — same action/quote emphasis convention, its own contrast-safe colors. */
 .vn-dialogue em {
@@ -302,4 +317,20 @@ select:focus-visible,
 .vn-dialogue .rp-quote {
   color: rgb(255 255 255 / 100%);
   font-weight: 600;
+}
+/* In the cinematic VN dialogue box a burst gets more theatre: a glow and a quick pop-in as the
+   line streams. Chat mode deliberately stays static — it's a scroll-back log, not a scene. */
+.vn-dialogue .rp-sfx {
+  color: rgb(255 255 255);
+  display: inline-block;
+  text-shadow: 0 0 14px rgb(var(--c-romance) / 0.6), 0 1px 3px rgb(0 0 0 / 0.6);
+  animation: sfx-pop var(--motion-duration, 150ms) ease-out;
+}
+@keyframes sfx-pop {
+  from { transform: scale(0.7) rotate(-3deg); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+:root.reduced-motion .vn-dialogue .rp-sfx { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  .vn-dialogue .rp-sfx { animation: none; }
 }

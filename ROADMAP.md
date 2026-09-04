@@ -364,8 +364,42 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
       across newlines, empty string); verified live end-to-end (a message with both action and
       quote segments, computed styles confirmed distinct in both the default chat style and VN
       mode, test data cleaned up).
-- [ ] Manga-style SFX text bursts / speech-bubble tails as a further decorative treatment beyond
-      the italic/emphasis styling above — a separate, more elaborate effort.
+- [x] **Manga-style SFX text bursts** — done (#98). A standalone onomatopoeia clause ("BOOM!",
+      "knock knock", "KA-CHUNK") is now a fourth segment type from the same `splitMessageSegments()`
+      parser, so every surface that already rendered `*action*`/`"quote"` (all three chat styles,
+      the VN dialogue box, the VN backlog, the HTML transcript export) picks it up with no extra
+      wiring. Detection is a second pass over the plain/action segments only — never inside
+      `"quotes"`, where a "BOOM!" is something a character *said* — that tags a clause standing on
+      its own between sentence punctuation/dashes/newlines when it's nothing but words from a
+      curated ~90-entry onomatopoeia list. The list is deliberately tight: shouted non-sounds
+      ("STOP", "NO", "HELP") and inflected verb forms ("the door SLAMS shut") are left out by
+      design, and elongated spellings ("KABOOOOM") collapse to a dictionary hit. Styling is
+      restrained — display face, heavier weight, tracked-out, accent-coloured — not the huge rotated
+      lettering of a real panel, which would wreck line layout in a chat bubble; the one place it
+      gets theatre is the VN dialogue box (`.vn-dialogue .rp-sfx`: white with a rose glow and a
+      150ms `sfx-pop` scale-in, both dropped under reduced-motion). Chat mode stays static — it's a
+      scroll-back log, not a scene. 9 new parser tests (lone burst, mid-sentence burst keeping its
+      surrounding text, repeated lowercase as a whole action segment, dash-delimited burst,
+      elongated spelling, a shouted non-sound left alone, a verb form left alone, a spoken "BOOM!"
+      in quotes left alone, and no-op output-shape parity for a message with no SFX). Verified live:
+      "BANG!"/"THUD"/"KA-CHUNK"/"WHIRR"/"THUMP" all render as bursts with the right computed styles
+      in chat and VN, reduced-motion disables the VN animation, and a normal message with no sound
+      words is byte-identical to before. The **speech-bubble-tails** half of the original item stays
+      open — it only makes sense in the `bubbles` chat style and is pure decoration.
+      **Made opt-in and per-character customizable (#99)** after the first cut shipped always-on
+      with a hardcoded list. `splitMessageSegments(text, sfx?)` now takes an `SfxConfig`
+      (`{ disabled?, extraWords? }`): a global **Settings → Appearance → "Sound-effect bursts"**
+      toggle (default on) plus a global "Extra sound words" field, and a per-character
+      `Character.sfxWords` list on the Visual novel tab — so a catgirl adds "nya, nyaa, mrrp" and an
+      imouto her own tics, styled only in *her* messages. `sfxConfigFor(msg, …)` (pure, in
+      `src/lib/text/sfx.ts`, 6 tests) resolves the speaker: a group-chat participant's `speakerId`
+      wins over the primary, user messages get the global list only, a persona has no vocabulary.
+      Extra words are punctuation/casing/elongation-normalised the same way built-ins are ("nya"
+      also catches "Nyaa~"). Carried by `.rppack.json`; server-validated with `normalizeStringArray`.
+      13 new tests (281 total). Verified live end-to-end: toggle off removes all bursts while the
+      raw text stays, a global word lights up in every character's messages, a per-character word
+      lights up only for that character (checked against the real modules with the seeded Sumire),
+      and the character-editor field round-trips through the API.
 - [x] Subtle ambient particle/gradient effects (e.g. optional falling sakura petals layer) behind
       `VNStage` — currently a static background image only. See changelog #50.
 - [x] **Polish `WorldsView`/`CharacterList` portrait grids with hover glow/parallax** — a shared
@@ -384,12 +418,37 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
       the actually-hovered card and absent on others, in both grids.
 
 ## 6. Audio/ambience
-- [ ] Background music per world/scene, ducking during TTS playback in `CompanionView`. All
-      existing audio code is TTS/STT/VAD only (`src/lib/voice/{ttsProviders,stt,vad}.ts`) — there is
-      no BGM concept anywhere. Worth keying off more than just the world/location once it exists —
-      a track (or crossfade) per scene mood (romantic, tense, festival, rain) reads as a much more
-      finished VN than one static per-world loop, and mood/scene-flag data already exists to drive
-      it (`Chat.sceneFlags`, `SceneTag`).
+- [x] **Background music per world/scene mood** — done (#100). Mood-keyed rather than
+      location-keyed, as the item wanted: `SceneTag` gained an optional `mood` (9 built-ins in
+      `src/lib/vn/moods.ts` — tender, romantic, cheerful, playful, lively, calm, dreamy, tense,
+      somber), the model tags each VN reply with one *only when the world has music* (no prompt-token
+      cost otherwise — `sceneOptions.moodIds` is passed conditionally, `buildSceneInstruction`
+      appends the `mood=ID` field and list). `WorldCard.music: Record<string,string>` holds one
+      looping track URL per mood plus a `default`; `resolveBgmTrack()` (`src/lib/audio/bgm.ts`, 7
+      tests) picks tagged-mood → location-implied-mood fallback → `default` → silence, so it works
+      with KoboldCpp off (no mood tags ever emitted → always the `default` loop, the item's own
+      "one static per-world loop" baseline).
+      - **Player** (`BgmPlayer.tsx`): a hidden pair of looping `<audio>` elements that crossfade
+        (1.4s) on any track change, driven by a wall-clock `setInterval` rather than `rAF` (which a
+        background tab pauses outright, freezing a fade half-done — found live). Fully idempotent so
+        React StrictMode's double-invoke and mid-fade prop changes just re-converge.
+      - **Placement**: `GlobalBgm` mounts once in `App.tsx` above the view switch, resolving the
+        world straight from `activeChatId` and the scene from `useBgmSceneStore` (published by
+        `ChatWindow`) — so a track keeps playing while you dip into Settings to adjust the volume.
+        Companion mode runs its own instance against its own separately-chosen chat.
+      - **Volume / ducking**: `bgmVolume` slider in Settings → Appearance, **default 0** — nothing
+        plays or even asks the browser to unlock audio until it's raised (which is itself the
+        unlocking gesture). `useAudioDuckStore` drops it to ~22% while Companion mode's TTS speaks.
+      - **Storage**: `resolveWorldMusicMap()` (`server/avatars.ts`, a generalised `resolveMediaMap`)
+        writes uploads to `data/avatars/worlds/<id>/music/<mood>.<ext>` (MP3/OGG/WAV/WebM/AAC/M4A,
+        25MB cap, unreferenced files pruned) — so the recursive backup walk and per-world folder
+        delete cover it for free. Carried by `.rppack.json`. Upload slots (one per mood + Default)
+        in the World editor → Scenes tab.
+      Verified live end-to-end with a generated test tone: upload → file on disk → served with the
+      right mime; `default` loop plays on chat open; a message tagged `mood=tender` crossfades to
+      `tender.wav`; volume slider glides and persists music across a view switch to Settings;
+      duck drops the level; zero fades out and pauses both elements; the whole feature is inert
+      with `bgmVolume` at its default 0. 296 tests, typecheck, build green.
 - [x] **Optional UI SFX (message-send blip, notification chime) with a `reducedAudio` setting** —
       done. `src/lib/audio/sfx.ts` synthesizes both sounds with WebAudio (short sine-tone envelopes
       via `OscillatorNode`/`GainNode`) rather than shipping audio files — nothing to source/license,
@@ -2878,6 +2937,30 @@ Done so far (see checked boxes above for detail):
     curated actions with date/objective in the ••• menu, `NewChatDialog` opens and fits; desktop
     regression confirms all five toolbar icons return, the Log label returns, `Button` is 32px
     again. 259 tests green, typecheck + build clean.
+98. ~~Manga-style SFX text bursts~~ — a fourth `sfx` segment type from `splitMessageSegments()`,
+    tagging a standalone onomatopoeia clause from a curated ~90-word list; every surface that
+    already styled `*action*`/`"quote"` gets it for free. Restrained typographic treatment in chat
+    (display face, accent colour), a rose glow + `sfx-pop` scale-in in the VN dialogue box only,
+    both reduced-motion aware. Never fires inside `"quotes"` (spoken) or on shouted non-sounds
+    ("STOP") or inflected verbs ("SLAMS shut"). 9 new parser tests (268 total); verified live in
+    chat and VN. Speech-bubble tails (the other half of section 5's original item) stay open.
+99. ~~SFX bursts: opt-in + per-character vocabulary~~ — reworked #98 after user feedback that it
+    shouldn't be always-on or hardcoded. `splitMessageSegments(text, sfx?)` takes an `SfxConfig`;
+    a global toggle + "Extra sound words" field (Settings → Appearance) and a per-character
+    `Character.sfxWords` list (Visual novel tab) — a catgirl's "nya", an imouto's tics, styled only
+    in her own messages. `sfxConfigFor()` (pure, `src/lib/text/sfx.ts`, tested) does speaker
+    resolution for group chats and user messages. Pack-carried, server-validated. 13 new tests
+    (281 total). Verified live end-to-end.
+100. ~~Background music per world/scene mood~~ (section 6) — `SceneTag.mood` (9 built-ins,
+     `src/lib/vn/moods.ts`), `WorldCard.music` (mood-keyed track URLs + `default`),
+     `resolveBgmTrack()` with a tagged-mood → location-fallback → default → silence chain that works
+     with KoboldCpp off. `BgmPlayer` is a hidden dual-`<audio>` crossfader on a wall-clock timer
+     (rAF is paused in a background tab); `GlobalBgm` mounts it once in `App.tsx` above the view
+     switch so music survives a trip to Settings. `bgmVolume` slider (Settings → Appearance,
+     **default 0** — inert until raised), `useAudioDuckStore` ducks it during Companion TTS. Audio
+     uploads stored as files under `data/avatars/worlds/<id>/music/` (`resolveWorldMusicMap`,
+     backup/pack-covered); upload slots in the World editor → Scenes tab. 15 new tests (296 total).
+     Verified live end-to-end with a generated tone.
 
 That closes out SillyTavern's full World Info activation engine, plus the last "reasonable next batch," plus sections 10a, 10c, and 10d in full and a first
 slice each of 10b and 10f taken directly afterward since 10's own suggested phase order names them
@@ -2935,18 +3018,18 @@ world templates in full), ~~mobile/responsive re-audit (no new bugs) + instruct-
 part (c)~~ (#77, closing out the prompt/context template manager in full), ~~World Info `delay`~~
 (#95, SillyTavern's full activation engine now covered), ~~mobile ergonomics pass over editors +
 settings + shared controls~~ (#96), ~~mobile toolbar curation + touch targets + a `NewChatDialog`
-collapsed-panel bug~~ (#97).
+collapsed-panel bug~~ (#97), ~~manga-style SFX text bursts~~ (#98), ~~SFX opt-in + per-character
+vocabulary~~ (#99), ~~background music per world/scene mood~~ (#100).
 
-Still unblocked and worth doing next, roughly in order: **mobile/responsive is now done** as far as
-is worthwhile for a KoboldCpp-local app (#71 → #77 → #96 → #97) — no screen overflows, every dialog
-opens and fits, toolbars are curated, inputs don't trigger iOS zoom. Revisit only if a hosted-API
-backend (section 8) ever makes phone use a real scenario. **Manga-style SFX
-bursts** (section 5) or **background music per scene** (section 6) for VN polish, now that the
-UI-SFX groundwork (#66) exists to build on. **Proactive outreach itself**
-(10f, the actual headline of section 10) is next in line for a design conversation, not more
-unattended coding — specifically, how an unprompted message even reaches the player (a
-notification? a separate inbox view? injected straight into the chat as if they just texted?) is
-still an open question only the user can answer, and koboldcpp being on or off doesn't change that.
+Still unblocked and worth doing next, roughly in order: mobile/responsive is done as far as is
+worthwhile for a KoboldCpp-local app (#71 → #77 → #96 → #97); manga SFX bursts shipped and reworked
+to be opt-in + per-character (#98, #99); background music per scene mood shipped (#100).
+**Speech-bubble tails** (the rest of section 5) is small but only meaningful in the
+`bubbles` chat style. **Proactive outreach itself** (10f, the actual headline of section 10) is next
+in line for a design conversation, not more unattended coding — specifically, how an unprompted
+message even reaches the player (a notification? a separate inbox view? injected straight into the
+chat as if they just texted?) is still an open question only the user can answer, and koboldcpp being
+on or off doesn't change that.
 
 Section 15 (added from a user-supplied AI Dungeon competitive analysis) is a separate set of ideas,
 not yet folded into this priority order. The high-contrast theme preset (#73) and raw-vs-processed

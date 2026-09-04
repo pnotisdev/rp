@@ -46,6 +46,23 @@ function decodeImageDataUrl(dataUrl: string): { ext: string; buffer: Buffer } {
 export type AvatarEntityKind = 'characters' | 'personas' | 'worlds'
 export type AvatarMapSubKind = 'sprites' | 'gallery' | 'backgrounds'
 
+const AUDIO_EXT_BY_MIME: Record<string, string> = {
+  'audio/mpeg': 'mp3',
+  'audio/mp3': 'mp3',
+  'audio/ogg': 'ogg',
+  'audio/opus': 'opus',
+  'audio/wav': 'wav',
+  'audio/x-wav': 'wav',
+  'audio/webm': 'webm',
+  'audio/aac': 'aac',
+  'audio/mp4': 'm4a',
+  'audio/x-m4a': 'm4a',
+}
+
+// A looping BGM track is legitimately larger than any image — a few minutes of compressed audio.
+// Still bounded so one bad upload can't wedge the request or fill the disk unnoticed.
+const MAX_AUDIO_BYTES = 25 * 1024 * 1024
+
 /**
  * Everything belonging to one character or world — its portrait, every sprite/expression, every
  * gallery CG or background — lives under one folder for that entity
@@ -145,6 +162,38 @@ export function resolveAvatarMap(
   id: string,
   map: unknown,
 ): Record<string, string> | undefined {
+  return resolveMediaMap(kind, subKind, id, map, decodeImageDataUrl)
+}
+
+/**
+ * Same tagged-set handling as `resolveAvatarMap`, but for audio — the per-mood background-music
+ * tracks on `WorldCard.music`. Lives under `data/avatars/worlds/<id>/music/<key>.<ext>` so the
+ * existing recursive backup walk and per-world folder delete cover it for free.
+ */
+export function resolveWorldMusicMap(id: string, map: unknown): Record<string, string> | undefined {
+  return resolveMediaMap('worlds', 'music', id, map, decodeAudioDataUrl)
+}
+
+function decodeAudioDataUrl(dataUrl: string): { ext: string; buffer: Buffer } {
+  const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/s)
+  if (!match) throw new Error('Malformed audio data URL.')
+  const [, mime, base64] = match
+  const ext = AUDIO_EXT_BY_MIME[mime.toLowerCase()]
+  if (!ext) throw new Error(`Unsupported audio type "${mime}" — expected MP3, OGG, WAV, WebM, AAC, or M4A.`)
+  const max = Math.floor(MAX_AUDIO_BYTES / (1024 * 1024))
+  if (Math.floor((base64.length * 3) / 4) > MAX_AUDIO_BYTES) throw new Error(`Audio is too large (max ${max}MB).`)
+  const buffer = Buffer.from(base64, 'base64')
+  if (buffer.length > MAX_AUDIO_BYTES) throw new Error(`Audio is too large (max ${max}MB).`)
+  return { ext, buffer }
+}
+
+function resolveMediaMap(
+  kind: AvatarEntityKind,
+  subKind: string,
+  id: string,
+  map: unknown,
+  decode: (dataUrl: string) => { ext: string; buffer: Buffer },
+): Record<string, string> | undefined {
   if (!UUID_RE.test(id)) throw new Error('Invalid id')
   if (!map || typeof map !== 'object') return undefined
   const result: Record<string, string> = {}
@@ -158,7 +207,7 @@ export function resolveAvatarMap(
     let ext: string
     let buffer: Buffer
     try {
-      ;({ ext, buffer } = decodeImageDataUrl(value))
+      ;({ ext, buffer } = decode(value))
     } catch (e) {
       throw new Error(`"${key}": ${e instanceof Error ? e.message : String(e)}`)
     }

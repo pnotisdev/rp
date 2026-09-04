@@ -19,6 +19,8 @@ import { IconButton } from '@/components/ui/IconButton'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import { scrollToMessage } from '@/lib/scrollToMessage'
 import { buildChatTranscriptHtml, chatTranscriptFilename, downloadChatTranscript } from '@/lib/export/chatTranscript'
+import { parseSfxWordList } from '@/lib/text/messageSegments'
+import { useBgmSceneStore } from '@/lib/store/useBgmSceneStore'
 import { errorMessage, toastError } from '@/lib/store/useToastStore'
 import { getCurrentActivity, getEnergyRemaining, presenceLabel } from '@/lib/world/calendar'
 import {
@@ -101,6 +103,8 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
   const quickReplies = useSettingsStore((s) => s.quickReplies)
   const showGenerationHud = useSettingsStore((s) => s.showGenerationHud)
   const regexScripts = useSettingsStore((s) => s.regexScripts)
+  const sfxBursts = useSettingsStore((s) => s.sfxBursts)
+  const sfxWords = useSettingsStore((s) => s.sfxWords)
   const setActiveChatId = useSettingsStore((s) => s.setActiveChatId)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [showInspector, setShowInspector] = useState(false)
@@ -121,6 +125,15 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
   }, [messages.length, streamingText])
+
+  // Publish the scene the last character reply landed on, for the app-level music player
+  // (GlobalBgm) — it sits above the view switch so a world's track keeps playing into Settings.
+  const setBgmScene = useBgmSceneStore((s) => s.setScene)
+  const lastChar = [...messages].reverse().find((m) => m.role === 'char')
+  const lastCharScene = lastChar?.swipeScenes?.[lastChar.activeSwipe ?? 0] ?? lastChar?.scene
+  useEffect(() => {
+    setBgmScene(lastCharScene)
+  }, [lastCharScene?.mood, lastCharScene?.background, setBgmScene])
 
   useEffect(() => {
     setDraft('')
@@ -174,7 +187,16 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
     if (!chat || exporting) return
     setExporting(true)
     try {
-      const html = await buildChatTranscriptHtml({ chat, character, persona, messages, regexScripts })
+      const html = await buildChatTranscriptHtml({
+        chat,
+        character,
+        persona,
+        messages,
+        regexScripts,
+        sfx: !sfxBursts
+          ? { disabled: true }
+          : { extraWords: [...parseSfxWordList(sfxWords), ...(character?.sfxWords ?? [])] },
+      })
       downloadChatTranscript(html, chatTranscriptFilename(chat.title))
     } catch (e) {
       toastError(errorMessage(e))
@@ -208,6 +230,7 @@ export function ChatWindow({ chatId, onBack }: { chatId: string | null; onBack?:
   // never drifts out of sync if some future code path updates affection/relationshipStats without
   // separately recomputing the cached stage.
   const relationshipStage = relationshipStageForWarmth(warmth, relationshipMilestonesFor(world?.relationshipThresholds))
+
 
   // Built once, rendered twice: as the ordinary header's toolbar (tone="chrome") in normal mode,
   // and folded into VNStage's own floating overlay (tone="glass") in VN mode — same actions, same
