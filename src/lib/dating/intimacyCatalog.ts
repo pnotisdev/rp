@@ -189,6 +189,39 @@ function topLabels(items: IntimacyUnlockable[], category: IntimacyCategory): str
  * user who's left explicit content off) pays nothing for this. Callers should pass `unlocked` from
  * `getUnlockedIntimacyOptions` with `ownedToyIds` set, so an unbought toy is never mentioned here.
  */
+/**
+ * Whether a category is explicit-tier content, gated behind an `'explicit'` rating. `kissing_spot`
+ * is romantic rather than explicit and has never been behind that dial (`intimacyGuidance`'s own
+ * `fade_to_black` case allows scenes up through kissing), so it stays available at every level.
+ */
+export function isExplicitCategory(category: IntimacyCategory): boolean {
+  return category !== 'kissing_spot'
+}
+
+/**
+ * Which categories the player may deliberately *choose* from the Relationship panel at a given
+ * rating. The panel used to render all four regardless of the setting, so a chat set to
+ * `fade_to_black` still handed the player buttons that send an explicit action line as their own
+ * message — the dial held on the prompt and not on the UI.
+ *
+ * Deliberately NOT the same rule as `intimacyOptionsGuidance` below, which withholds explicit
+ * categories from the *prompt* at every level except `'explicit'`. The two answer different
+ * questions: that one is "what may the model volunteer unprompted", this one is "what may the
+ * player explicitly ask for". Only a rating that actually asks for *less* — `fade_to_black` or
+ * `suggestive` — takes the choice away.
+ *
+ * `'default'` therefore keeps everything, and that is load-bearing rather than an oversight:
+ * `intimacyGuidance`'s own contract is that `'default'` is "the exact behavior every chat already
+ * had before this setting existed, so nobody's existing output changes unless they deliberately
+ * pick a level". Hiding these from someone who never opened the setting would break exactly that
+ * promise, and silently remove actions they already had.
+ */
+export function allowedIntimacyCategories(level: IntimacyDetailLevel): IntimacyCategory[] {
+  const all: IntimacyCategory[] = ['kissing_spot', 'position', 'toy', 'activity']
+  const asksForLess = level === 'fade_to_black' || level === 'suggestive'
+  return asksForLess ? all.filter((c) => !isExplicitCategory(c)) : all
+}
+
 export function intimacyOptionsGuidance(unlocked: IntimacyUnlockable[], intimacyLevel: IntimacyDetailLevel): string {
   const explicitUnlocked = intimacyLevel === 'explicit'
   const parts: string[] = []

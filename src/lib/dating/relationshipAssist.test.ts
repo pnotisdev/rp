@@ -451,3 +451,79 @@ describe('suggestDateEvent', () => {
     expect(sentPrompt).toContain('not officially together')
   })
 })
+
+describe('assessRelationshipMoment — aftercare', () => {
+  const HISTORY: ChatMessage[] = [
+    { id: '1', role: 'user', name: 'Kai', text: 'Morning.' },
+    { id: '2', role: 'char', name: 'Sumire', text: 'You stayed.' },
+  ]
+  const base = {
+    history: HISTORY,
+    latestReply: 'You stayed.',
+    charName: 'Sumire',
+    userName: 'Kai',
+    current: deltas({}),
+  }
+  const REPLY = '{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"aftercareVerdict":"tender"}'
+
+  it('never mentions aftercare on an ordinary turn', async () => {
+    let sent = ''
+    const moment = await assessRelationshipMoment(stubClient(REPLY, (p) => { sent = p.prompt as string }), base)
+    expect(sent).not.toContain('aftercareVerdict')
+    expect(sent).not.toContain('were intimate a few turns ago')
+    // ...and a verdict volunteered anyway is ignored, since no window is open to apply it to.
+    expect(moment.aftercareVerdict).toBeUndefined()
+  })
+
+  it('asks for a verdict, with its rubric, only when the window is closing', async () => {
+    let sent = ''
+    const moment = await assessRelationshipMoment(stubClient(REPLY, (p) => { sent = p.prompt as string }), {
+      ...base,
+      aftercareTurns: HISTORY,
+    })
+    expect(sent).toContain('aftercareVerdict')
+    expect(sent).toContain('tender, awkward, cold')
+    expect(sent).toContain("Judge Kai's behaviour, not Sumire's")
+    expect(moment.aftercareVerdict).toBe('tender')
+  })
+
+  it('rides along in the same call as task detection rather than replacing it', async () => {
+    let sent = ''
+    const moment = await assessRelationshipMoment(
+      stubClient(
+        '{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"completedTaskIndices":[0],"aftercareVerdict":"cold"}',
+        (p) => { sent = p.prompt as string },
+      ),
+      { ...base, aftercareTurns: HISTORY, pendingTasks: ['Ask about her mother'] },
+    )
+    expect(sent).toContain('completedTaskIndices')
+    expect(sent).toContain('aftercareVerdict')
+    expect(moment.completedTaskIndices).toEqual([0])
+    expect(moment.aftercareVerdict).toBe('cold')
+  })
+
+  it('rejects a verdict outside the vocabulary', async () => {
+    const moment = await assessRelationshipMoment(
+      stubClient(
+        '{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"aftercareVerdict":"lukewarm"}',
+      ),
+      { ...base, aftercareTurns: HISTORY },
+    )
+    // The caller reads undefined as "awkward" and closes the window regardless, rather than
+    // leaving the aftermath running forever waiting for a usable answer.
+    expect(moment.aftercareVerdict).toBeUndefined()
+  })
+
+  it('includes the window transcript so the verdict judges the aftermath, not just the last line', async () => {
+    let sent = ''
+    await assessRelationshipMoment(stubClient(REPLY, (p) => { sent = p.prompt as string }), {
+      ...base,
+      aftercareTurns: [
+        { id: 'a', role: 'user', name: 'Kai', text: 'I have to run.' },
+        { id: 'b', role: 'char', name: 'Sumire', text: 'Oh. Right.' },
+      ],
+    })
+    expect(sent).toContain('I have to run.')
+    expect(sent).toContain('Oh. Right.')
+  })
+})

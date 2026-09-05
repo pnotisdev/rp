@@ -99,3 +99,31 @@ export function characterIntentGuidance(charName: string, intent?: string): stri
   if (!intent) return ''
   return `${charName} is privately holding onto something right now: ${intent}. It can quietly shape what they say or do, but they don't have to act on it or announce it this exact turn.`
 }
+
+/**
+ * A `styleGuidance` line for the window right after an intimate scene (`dating/aftercare.ts`).
+ *
+ * The one piece of character state here that the app sets deterministically rather than reading
+ * back from the judge: the other three fields above are inferred from what happened, but "they
+ * were just intimate" is something the app *knows*, because the player initiated it through a
+ * real action. So it doesn't need guessing, and shouldn't be left to a model that may simply not
+ * carry the weight of it into the next scene on its own.
+ *
+ * Splits at the first turn deliberately. The immediate beat and the hours afterwards are different
+ * registers — one is the room itself, the other is the day carrying on with something changed in
+ * it — and collapsing them into one line produced a character stuck endlessly in the first minute.
+ * Names no physical detail whatsoever: this steers *emotional* aftermath, and the content dial
+ * (`intimacyGuidance`) remains the only thing that governs explicitness.
+ */
+export function afterglowGuidance(
+  charName: string,
+  userName: string,
+  turnsSince: number,
+  sourceLabel?: string,
+): string {
+  const because = sourceLabel ? ` (after ${sourceLabel})` : ''
+  if (turnsSince <= 0) {
+    return `${charName} and ${userName} have just been intimate${because}. This is the moment immediately after: ${charName} is more open and more exposed than usual, and whatever they do now — reaching for ${userName}, retreating, deflecting with a joke, needing to be told something — should come from who they actually are, not from a generic tenderness. Being this uncovered is not automatically comfortable for them.`
+  }
+  return `${charName} and ${userName} were intimate a short while ago${because}. It hasn't stopped mattering: it can still sit under ordinary conversation as ease, self-consciousness, a need for reassurance, or a wish not to discuss it. Let it colour how ${charName} reads ${userName}'s attention right now — especially its absence — without narrating the scene again.`
+}

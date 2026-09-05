@@ -6,6 +6,9 @@ import type { WorldTemplateId } from '@/lib/world/worldTemplates'
 import type { CustomBackground } from '@/lib/vn/backgrounds'
 import type { CharacterMood, CharacterNeed } from '@/lib/prompt/mindGuidance'
 import type { IntimacyUnlockable } from '@/lib/dating/intimacyCatalog'
+import type { Afterglow } from '@/lib/dating/aftercare'
+import type { Trigger } from '@/lib/world/triggers'
+import type { IntimacyDetailLevel } from '@/lib/store/useSettingsStore'
 
 export interface Persona {
   id: string
@@ -134,6 +137,14 @@ export interface RelationshipTrack {
   unlockedGalleryIds?: string[]
   /** Per-gift-id tally of how many of that gift this specific character has received — separate from `Chat.giftInventory`, which is the player's shared, unspent stock. */
   giftsGiven?: Record<string, number>
+  /**
+   * The open post-intimacy window, if any (`dating/aftercare.ts`). Set when an explicit intimacy
+   * action or the "first time together" milestone happens, read back as prompt guidance for the
+   * next few turns, and cleared the moment its outcome is judged and applied. `null` clears it —
+   * `JSON.stringify` drops undefined-valued keys, the same trap `relationshipWarning` above
+   * documents.
+   */
+  afterglow?: Afterglow | null
   /**
    * The "Character Mind" scoped slice — a transient emotional read, an underlying need, and a
    * private intention, all deliberately separate from the warmth-driving fields above (a character
@@ -417,6 +428,10 @@ export interface Chat {
   currentNeed?: CharacterNeed
   characterIntent?: string
   firstIntimateSceneAt?: number
+  /** The primary's own copy of `RelationshipTrack.afterglow` — see that field, and `getRelationshipTrack`. */
+  afterglow?: Afterglow | null
+  /** Ids of one-shot world triggers this chat has already fired (`world/triggers.ts`). Per chat, not per world, so two chats in the same world progress through it independently and a fork inherits the parent's history. */
+  firedTriggerIds?: string[]
   activeEvent?: DateEventCard
   /** 10b's live rapport read — how the scene is trending, refreshed each turn *only* while a live date is active, cleared when it ends. Qualitative only; never affects affection or the tracked dimensions. See `src/lib/dating/rapport.ts`. */
   rapport?: RapportRead
@@ -501,6 +516,20 @@ export interface WorldCard {
   items?: ItemDef[]
   /** World-authored additions to the built-in intimacy catalog (kissing spots/positions/toys/activities) beyond the ~30 defaults — additive, same pattern as `customBackgrounds`. See `intimacyCatalog.ts`. */
   customIntimacyOptions?: IntimacyUnlockable[]
+  /**
+   * This world's own content rating, overriding the global Settings value for every chat in it —
+   * one dial can't serve a wholesome world and an explicit one at the same time. Unset means
+   * "inherit the global setting", which is deliberately distinct from explicitly choosing
+   * `'default'` (that pins this world to sending no instruction at all). See
+   * `resolveIntimacyLevel` in `prompt/intimacyGuidance.ts` for why it overrides rather than clamps.
+   *
+   * `null` is accepted on the wire to mean "clear it back to inherit" — `JSON.stringify` drops an
+   * `undefined`-valued key, so sending undefined would leave an existing rating untouched. Same
+   * convention as `Chat.activeEvent`/`Chat.authorNote`; it is never `null` once read back.
+   */
+  intimacyLevel?: IntimacyDetailLevel | null
+  /** Author-defined "when X, then Y" rules (`world/triggers.ts`) — the one place a world can hang behaviour off the signals the app already produces. */
+  triggers?: Trigger[]
   /** Overrides the default warmth thresholds for characters living here. Unset stages fall back to the default. */
   relationshipThresholds?: Partial<Record<Exclude<RelationshipStage, 'near_strangers'>, number>>
   /** World-authored scene flags beyond the 4 built-in defaults — see `CustomSceneFlag`. */

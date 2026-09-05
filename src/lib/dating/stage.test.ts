@@ -17,7 +17,7 @@ import {
   warningExpired,
 } from '@/lib/dating/stage'
 import type { GalleryEntry } from '@/lib/characters/cardSpec'
-import type { Chat, RelationshipDimension } from '@/lib/types'
+import type { Chat, RelationshipDimension, RelationshipTrack } from '@/lib/types'
 
 const zeroStats = (overrides: Partial<Record<RelationshipDimension, number>> = {}): Record<RelationshipDimension, number> => ({
   trust: 50,
@@ -341,6 +341,38 @@ describe('getRelationshipTrack / patchRelationshipTrack', () => {
       unlockedGalleryIds: ['cg-1'],
       giftsGiven: { rose: 2 },
     })
+  })
+
+  // A structural guard, not just a case. `getRelationshipTrack` builds the primary's track by
+  // hand-listing fields rather than spreading, so a field added to `RelationshipTrack` and mirrored
+  // onto `Chat` can be persisted correctly and still be invisible to every reader — which is
+  // exactly what happened to `afterglow`: it saved fine, and the prompt guidance and the
+  // Relationship panel both silently saw nothing, with the whole feature inert and every test
+  // still green.
+  //
+  // Typing the fixture as `Required<RelationshipTrack>` is what makes this a guard: adding a field
+  // to that type now breaks *compilation* here until the fixture covers it, and then breaks this
+  // assertion until `getRelationshipTrack` actually returns it.
+  it("surfaces every field of the primary's track, so a newly added one cannot go missing", () => {
+    const fullTrack: Required<RelationshipTrack> = {
+      affection: 40,
+      relationshipStats: { trust: 60 },
+      relationshipStage: 'warming_up',
+      commitmentStatus: 'dating',
+      relationshipWarning: { startedAt: 5, reason: 'tension' },
+      breakupCount: 1,
+      unlockedGalleryIds: ['cg-1'],
+      giftsGiven: { rose: 2 },
+      afterglow: { startedAtTurn: 3, sourceLabel: 'their first time together' },
+      mood: 'content',
+      currentNeed: 'stability',
+      characterIntent: 'wants to surprise him',
+      firstIntimateSceneAt: 12345,
+    }
+    // `Chat` stores `relationshipWarning` as `T | undefined` while the track accepts `T | null`
+    // (null being the wire signal for "clear it"), so the spread needs the narrowing.
+    const chat: Chat = { ...baseChat, ...fullTrack, relationshipWarning: fullTrack.relationshipWarning ?? undefined }
+    expect(getRelationshipTrack(chat, 'primary')).toEqual(fullTrack)
   })
 
   it('reads a fresh (all-unset) track for a participant never tracked before', () => {

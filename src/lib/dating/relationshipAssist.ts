@@ -5,6 +5,7 @@ import type { CommitmentStatus, CustomSceneFlag, DateEventCard, RelationshipDime
 import type { ChatMessage } from '@/lib/prompt/builder'
 import { formatCommitmentStatus, RELATIONSHIP_DIMENSIONS, SCENE_FLAGS } from '@/lib/dating/stage'
 import { describeIntentForJudge, describeIntentsForDate } from '@/lib/dating/intent'
+import { AFTERCARE_VERDICTS, isAftercareVerdict, type AftercareVerdict } from '@/lib/dating/aftercare'
 import { MOOD_VOCAB, NEED_VOCAB, type CharacterMood, type CharacterNeed } from '@/lib/prompt/mindGuidance'
 
 // max_context_length is deliberately omitted here — every call site fetches the server's actual
@@ -131,6 +132,13 @@ export interface RelationshipMoment {
    * Always `[]` when `pendingTasks` wasn't passed (nothing was asked, so nothing to report).
    */
   completedTaskIndices: number[]
+  /**
+   * The post-intimacy window's verdict (`dating/aftercare.ts`), only ever present on the turn the
+   * caller actually asked for one by passing `aftercareTurns`. Undefined otherwise — including
+   * when it was asked for and the model returned nothing usable, which the caller treats as
+   * `'awkward'` rather than as a reason to skip closing the window.
+   */
+  aftercareVerdict?: AftercareVerdict
   /** The "Character Mind" scoped slice — see `prompt/mindGuidance.ts`'s doc comment. Undefined means no clear shift this turn, not "neutral"; all three are sticky rather than reset every turn nothing moved them. */
   mood?: CharacterMood
   currentNeed?: CharacterNeed
@@ -166,6 +174,12 @@ export async function assessRelationshipMoment(
     intent?: string
     /** Pending objective task descriptions, in the caller's index order — only passed when task-detection is also due this turn. Omitted/empty means "don't ask", not "nothing completed". */
     pendingTasks?: string[]
+    /**
+     * Transcript of the post-intimacy window, passed only on the turn it closes — the same
+     * ride-along trick `pendingTasks` uses, so judging it costs no extra model call. Omitted means
+     * "don't ask", which is every ordinary turn.
+     */
+    aftercareTurns?: ChatMessage[]
     /** The character's mood/need/intention going into this exchange (before it), so the classifier can judge whether any genuinely shifted rather than guessing blind. See `prompt/mindGuidance.ts`. */
     currentMood?: CharacterMood
     currentNeed?: CharacterNeed
@@ -173,6 +187,7 @@ export async function assessRelationshipMoment(
   },
 ): Promise<RelationshipMoment> {
   const hasTasks = !!params.pendingTasks?.length
+  const hasAftercare = !!params.aftercareTurns?.length
   const prompt = [
     'You are scoring relationship momentum, tracking high-level romance route flags, noting durable facts worth remembering long-term, AND (separately) reading the character\'s own current emotional state, an underlying need, and private intentions, in an in-character roleplay.',
     `Current scores (0-100 each): ${DELTA_KEYS.map((k) => `${k}=${params.current[k]}`).join(', ')}.`,
@@ -183,14 +198,20 @@ export async function assessRelationshipMoment(
     describeIntentForJudge(params.intent)?.replace(/\{\{char\}\}/g, params.charName) ?? '',
     params.knownFacts?.length ? `Facts already remembered (don't repeat these): ${params.knownFacts.join('; ')}.` : '',
     hasTasks ? `Pending objective tasks:\n${params.pendingTasks!.map((t, i) => `${i}: ${t}`).join('\n')}` : '',
+    hasAftercare
+      ? `Separately: ${params.charName} and ${params.userName} were intimate a few turns ago, and you are also judging how the time SINCE went for ${params.charName} — the aftermath, not the act. Everything said since:\n${recentText(params.aftercareTurns!, params.charName, params.userName, 24)}`
+      : '',
     `${params.charName}'s mood going into this exchange: ${params.currentMood ?? 'not yet read'}. Their underlying need lately: ${params.currentNeed ?? 'not yet read'}. Their private intention going in: ${params.currentIntent ?? 'none noted'}.`,
-    `Return ONLY a minified JSON object: {"deltas":{ one integer -2..2 per dimension key },"newFlags":[ any newly-established flags from the known set, or [] ],"reason":"...","newFacts":[ any new durable facts, or [] ]${hasTasks ? ',"completedTaskIndices":[ pending task index numbers this exchange clearly and unambiguously accomplished, or [] ]' : ''},"mood":"one of [${MOOD_VOCAB.join(', ')}], only if this exchange gives a clear enough read to state one — omit entirely otherwise","currentNeed":"one of [${NEED_VOCAB.join(', ')}], only if this stretch of the story clearly shows this need going unmet — omit entirely otherwise, and don't change it lightly","characterIntent":"a short (under 12 words) private thing ${params.charName} now wants, only if something concrete and new became clear this exchange — omit entirely otherwise"}.`,
+    `Return ONLY a minified JSON object: {"deltas":{ one integer -2..2 per dimension key },"newFlags":[ any newly-established flags from the known set, or [] ],"reason":"...","newFacts":[ any new durable facts, or [] ]${hasTasks ? ',"completedTaskIndices":[ pending task index numbers this exchange clearly and unambiguously accomplished, or [] ]' : ''}${hasAftercare ? `,"aftercareVerdict":"exactly one of [${AFTERCARE_VERDICTS.join(', ')}]"` : ''},"mood":"one of [${MOOD_VOCAB.join(', ')}], only if this exchange gives a clear enough read to state one — omit entirely otherwise","currentNeed":"one of [${NEED_VOCAB.join(', ')}], only if this stretch of the story clearly shows this need going unmet — omit entirely otherwise, and don't change it lightly","characterIntent":"a short (under 12 words) private thing ${params.charName} now wants, only if something concrete and new became clear this exchange — omit entirely otherwise"}.`,
     'Only move a dimension if this specific exchange clearly affected it. Leave the rest at 0. Most turns should move only one or two dimensions and add no new flags.',
     '"reason" is a short (under 12 words) in-world one-liner naming what just happened, e.g. "Complimented her cooking unprompted". Give one only if at least one dimension moved or a flag was added, otherwise "".',
     '"newFacts" is for concrete, durable facts about {{user}} worth recalling much later: a name, a stated preference, a piece of backstory, a promise made. Not every line of dialogue. Most turns should add none. Each fact as one short standalone sentence, e.g. "Prefers tea over coffee" or "Promised to visit again next weekend".',
     `"mood" is ${params.charName}'s own transient emotional state right now, independent of the relationship dimensions above — a close, trusted relationship can still have an "annoyed" or "exhausted" day. Omit it on most turns; only state one when this exchange actually gave a clear signal, and don't just repeat the current mood back for no reason.`,
     `"currentNeed" is steadier than mood — a psychological undercurrent this stretch of the story hasn't been meeting (e.g. "reassurance" after being flaky, "recognition" after going unnoticed, "solitude" after being crowded). Omit it almost every turn; it shouldn't flip as readily as mood does, and should only be set or changed on a genuinely clear, sustained signal, not one line of dialogue.`,
     `"characterIntent" is a private thing ${params.charName} wants that the player hasn't necessarily been told — a small hidden agenda that can quietly color future turns (wanting reassurance, wanting space, planning a surprise, wanting an apology first). Omit it on almost every turn; once set it should usually stay omitted (meaning "no change") for a while rather than being reset every exchange.`,
+    hasAftercare
+      ? `"aftercareVerdict" judges only how ${params.userName} treated ${params.charName} in the turns since they were intimate. "tender" = stayed present and warm, gave reassurance or closeness, took ${params.charName} seriously. "cold" = pulled away, went distant or dismissive, changed the subject, or acted as if it had not happened. "awkward" = anything in between, including a fumbled or self-conscious aftermath that was still well meant. Judge ${params.userName}'s behaviour, not ${params.charName}'s, and not whether the intimacy itself went well. Most aftermaths are "awkward" — reserve "cold" for a real, visible withdrawal, not merely for a quiet stretch.`
+      : '',
     hasTasks
       ? 'Be conservative about "completedTaskIndices": only include a task index if this exchange plainly and unambiguously accomplished it, not if it merely became more likely. Use [] if none did.'
       : '',
@@ -224,11 +245,15 @@ export async function assessRelationshipMoment(
     hasTasks && Array.isArray(obj.completedTaskIndices)
       ? obj.completedTaskIndices.filter((i): i is number => typeof i === 'number' && Number.isInteger(i) && i >= 0 && i < pendingCount)
       : []
+  // Only trusted when it was actually asked for: a model that volunteers the field unprompted is
+  // guessing about a window that isn't open, and honouring that would apply a real stat swing for
+  // an event that never happened.
+  const aftercareVerdict = hasAftercare && isAftercareVerdict(obj.aftercareVerdict) ? obj.aftercareVerdict : undefined
   const mood = MOOD_VOCAB.includes(obj.mood as CharacterMood) ? (obj.mood as CharacterMood) : undefined
   const currentNeed = NEED_VOCAB.includes(obj.currentNeed as CharacterNeed) ? (obj.currentNeed as CharacterNeed) : undefined
   const characterIntent =
     typeof obj.characterIntent === 'string' && obj.characterIntent.trim() ? obj.characterIntent.trim().slice(0, 160) : undefined
-  return { deltas, newFlags, reason, newFacts, completedTaskIndices, mood, currentNeed, characterIntent }
+  return { deltas, newFlags, reason, newFacts, completedTaskIndices, aftercareVerdict, mood, currentNeed, characterIntent }
 }
 
 /**

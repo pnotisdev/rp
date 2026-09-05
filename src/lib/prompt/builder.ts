@@ -98,7 +98,7 @@ export interface PromptBuildInput {
   /** User-defined find/replace rules applied (prompt target) to each history turn's text before it's rendered into the prompt. */
   regexScripts?: RegexScript[]
   /** Expression/background ids the model may tag this reply with (Visual Novel mode) — omitted entirely when empty. */
-  sceneOptions?: { expressionIds: string[]; backgroundIds: string[]; moodIds?: string[] }
+  sceneOptions?: { expressionIds: string[]; backgroundIds: string[]; moodIds?: string[]; outfitIds?: string[]; currentOutfitId?: string }
   /** Current relationship score for unlock-gated lore entries. */
   affection?: number
   /** Per-entry sticky/cooldown state from the previous turn (`Chat.worldInfoState`). Omit to disable sticky/cooldown entirely (old callers). */

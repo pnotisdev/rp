@@ -59,6 +59,8 @@ import { ReactivePortrait } from './ReactivePortrait'
 import { ScenePanel } from './ScenePanel'
 import { nextRoundRobinSpeaker, rosterFrom } from '@/lib/chat/scene'
 import { resolveExpressionSprite } from '@/lib/vn/expressions'
+import { currentOutfitFrom } from '@/lib/vn/outfits'
+import { countCharReplies } from '@/lib/dating/aftercare'
 import { getGiftCatalog } from '@/lib/dating/gifts'
 import { getItemCatalog } from '@/lib/dating/items'
 
@@ -266,6 +268,9 @@ export function ChatWindow({
     character?.avatarDataUrl,
     reactivePortraitExpression,
     chat.affection ?? 0,
+    // Same sticky-outfit read VNStage uses, so the two surfaces can never show the character in
+    // different clothes at the same moment.
+    currentOutfitFrom(messages),
   )
   // Presence reads the world's shared clock, so it's only meaningful for a world-bound character
   // that actually has a schedule authored — most characters have neither, and stay unbadged.
@@ -590,8 +595,9 @@ export function ChatWindow({
           onInitiateFirstTime={initiateFirstTime}
           onEndRelationship={endRelationship}
           onNavigateToWorld={onNavigateToWorld}
-          onSendAction={(text) => {
-            sendUserMessage(text, [])
+          charReplyCount={countCharReplies(messages)}
+          onSendAction={(text, intimacyOptionId) => {
+            sendUserMessage(text, [], { intimacyOptionId })
             setShowRelationship(false)
           }}
         />

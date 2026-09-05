@@ -20,13 +20,16 @@ import {
   relationshipMilestonesFor,
   relationshipStageForWarmth,
 } from '@/lib/dating/stage'
-import { composeIntimacyActionText, getUnlockedIntimacyOptions, nextLockedInCategory, type IntimacyCategory, type IntimacyUnlockable } from '@/lib/dating/intimacyCatalog'
+import { allowedIntimacyCategories, composeIntimacyActionText, getUnlockedIntimacyOptions, nextLockedInCategory, type IntimacyCategory, type IntimacyUnlockable } from '@/lib/dating/intimacyCatalog'
+import { resolveIntimacyLevel } from '@/lib/prompt/intimacyGuidance'
+import { AFTERGLOW_TURNS, afterglowTurnsSince } from '@/lib/dating/aftercare'
 import type { CommitmentStatus } from '@/lib/types'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { Section } from '@/components/ui/Section'
 import { SelectField } from '@/components/ui/Field'
 import { confirmDialog } from '@/lib/store/useConfirmStore'
+import { useSettingsStore } from '@/lib/store/useSettingsStore'
 
 const ALL_STAT_KEYS =['affection', 'trust', 'chemistry', 'comfort', 'respect', 'curiosity', 'tension'] as const
 
@@ -66,7 +69,10 @@ interface RelationshipPanelProps {
   /** The "Customize in World editor" link, when this character has a bound world — jumps straight to its "Dating sim" tab rather than just the world's overview. Absent when there's nowhere to route to (no view-switcher in scope). */
   onNavigateToWorld?: (worldId: string, tab?: string) => void
   /** Clicking an unlocked (and, for toys, owned) intimacy action — sends `composeIntimacyActionText`'s result as the player's own message, same mechanism Quick Replies already use. */
-  onSendAction: (text: string) => void
+  /** `intimacyOptionId` lets the caller react to *which* action this was — an explicit-tier one switches the character's outfit (`intimateOutfitFor`). */
+  onSendAction: (text: string, intimacyOptionId?: string) => void
+  /** How many replies the character has given, the unit the aftercare window is counted in (`dating/aftercare.ts`). */
+  charReplyCount: number
 }
 
 function upcomingGallery(gallery: GalleryEntry[], unlocked: Set<string>, affection: number, flags: Set<string>) {
@@ -118,6 +124,7 @@ export function RelationshipPanel({
   onEndRelationship,
   onNavigateToWorld,
   onSendAction,
+  charReplyCount,
 }: RelationshipPanelProps) {
   // Multi-character relationship tracking: everyone this chat actually tracks a relationship for —
   // the primary plus any participant — with a tab switcher below when there's more than one. Falls
@@ -157,10 +164,21 @@ export function RelationshipPanel({
   // (`useChatSession.ts`), which passes `ownedToyIds` to filter those out before the model ever
   // sees them.
   const intimacyUnlocked = getUnlockedIntimacyOptions(warmth, commitmentStatus, world)
+  // The content rating governs this panel too, not just the prompt. Before this, a chat set to
+  // fade-to-black still rendered position/toy/activity as clickable buttons that send an explicit
+  // action line as the player's own message — the dial held on one surface and not the other.
+  // The world's own rating wins over the global setting (`resolveIntimacyLevel`).
+  const globalIntimacyLevel = useSettingsStore((st) => st.intimacyLevel)
+  // How much of the post-intimacy window is left, or null when none is open (`dating/aftercare.ts`).
+  const afterglowSince = afterglowTurnsSince(track.afterglow ?? undefined, charReplyCount)
+  const afterglowRemaining =
+    afterglowSince !== null && afterglowSince < AFTERGLOW_TURNS ? AFTERGLOW_TURNS - afterglowSince : null
+  const effectiveIntimacyLevel = resolveIntimacyLevel(world?.intimacyLevel, globalIntimacyLevel)
+  const allowedCategories = allowedIntimacyCategories(effectiveIntimacyLevel)
   const canTakeFirstTime = canInitiateFirstTime(warmth, commitmentStatus)
 
   const handleUseIntimacyOption = (option: IntimacyUnlockable) => {
-    onSendAction(composeIntimacyActionText(option, viewingCharacter?.card.name ?? 'them'))
+    onSendAction(composeIntimacyActionText(option, viewingCharacter?.card.name ?? 'them'), option.id)
     onClose()
   }
 
@@ -306,6 +324,15 @@ export function RelationshipPanel({
             {' — '}a passing read, separate from the bond above.
           </p>
         )}
+        {afterglowRemaining !== null && (
+          // Deliberately says what's true without saying what to do: the whole point of the window
+          // is that it scores what the player does with it, and printing "be warm to them" would
+          // turn a read of the character into a checklist.
+          <p className="mt-2 border-t border-bg-elevated pt-2 text-xs italic text-romance">
+            Still in the hours after being intimate — {afterglowRemaining} more{' '}
+            {afterglowRemaining === 1 ? 'reply' : 'replies'} before it settles into how it felt.
+          </p>
+        )}
       </div>
 
       {track.relationshipWarning && (
@@ -413,7 +440,7 @@ export function RelationshipPanel({
             surface="sunken"
           >
             <div className="space-y-3">
-              {INTIMACY_CATEGORIES.map(({ id, label }) => {
+              {INTIMACY_CATEGORIES.filter((c) => allowedCategories.includes(c.id)).map(({ id, label }) => {
                 const items = intimacyUnlocked.filter((i) => i.category === id)
                 const next = nextLockedInCategory(id, warmth, commitmentStatus, world)
                 return (

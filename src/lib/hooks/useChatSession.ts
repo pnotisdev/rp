@@ -30,6 +30,7 @@ import {
   getWeather,
   spendEnergy,
 } from '@/lib/world/calendar'
+import { evaluateTriggers } from '@/lib/world/triggers'
 import {
   applyBreakupScar,
   clampAffection,
@@ -55,7 +56,7 @@ import { nextRoundRobinSpeaker, parseMention, pickDirectorSpeaker, rosterFrom } 
 import { itemById } from '@/lib/dating/items'
 import { buildRelationshipDescription } from '@/lib/dating/relationshipDescription'
 import { getInstructTemplate, resolveInstructTemplate } from '@/lib/prompt/instructTemplates'
-import { intimacyGuidance } from '@/lib/prompt/intimacyGuidance'
+import { intimacyGuidance, resolveIntimacyLevel } from '@/lib/prompt/intimacyGuidance'
 import { chatCompletionSamplerToRequest } from '@/lib/api/chatCompletionSampler'
 import { extractSceneTag, stripSceneTagForDisplay, type SceneTag } from '@/lib/vn/sceneTag'
 import { withIndefiniteArticle } from '@/lib/text/article'
@@ -65,10 +66,22 @@ import { replyMaxTokens, resolveReplyLength } from '@/lib/characters/voice'
 import { SCENE_MOOD_IDS } from '@/lib/vn/moods'
 import { DEFAULT_EXPRESSIONS } from '@/lib/vn/expressions'
 import { getUnlockedBackgroundIds, getUnlockedExpressionIds } from '@/lib/vn/unlocks'
+import { currentOutfitFrom, intimateOutfitFor, selectableOutfitIds, spriteKey } from '@/lib/vn/outfits'
+import {
+  AFTERGLOW_TURNS,
+  aftercareDeltas,
+  aftercareNeed,
+  aftercareReason,
+  aftercareToast,
+  countCharReplies,
+  isAfterglowActive,
+  isAfterglowComplete,
+  afterglowTurnsSince,
+} from '@/lib/dating/aftercare'
 import { backgroundLabel } from '@/lib/vn/backgrounds'
 import { countStaticSceneTurns, sceneProgressionNudge } from '@/lib/prompt/sceneProgression'
-import { getUnlockedIntimacyOptions, intimacyItemById, intimacyOptionsGuidance } from '@/lib/dating/intimacyCatalog'
-import { characterIntentGuidance, moodGuidance, needGuidance } from '@/lib/prompt/mindGuidance'
+import { getUnlockedIntimacyOptions, intimacyItemById, intimacyOptionsGuidance, isExplicitCategory } from '@/lib/dating/intimacyCatalog'
+import { afterglowGuidance, characterIntentGuidance, moodGuidance, needGuidance } from '@/lib/prompt/mindGuidance'
 import { classifyAttachedImageScene, detectExpressionFromSprites, shortlistExpressions } from '@/lib/vn/sceneVision'
 import { assessRapport } from '@/lib/dating/rapport'
 import { bookAppliesToChat } from '@/lib/worldinfo/scope'
@@ -228,6 +241,8 @@ function sanitizeSceneTag(
   scene: SceneTag | undefined,
   unlockedExpressions: string[],
   unlockedBackgrounds: string[],
+  /** The outfit ids the model was actually offered this turn (`selectableOutfitIds`). Omitted for a character with no outfit art, where an `outfit=` tag can only be invention. */
+  selectableOutfits?: string[],
 ): SceneTag | undefined {
   if (!scene) return undefined
   const cleaned: SceneTag = {}
@@ -235,6 +250,11 @@ function sanitizeSceneTag(
   if (scene.background && unlockedBackgrounds.includes(scene.background)) cleaned.background = scene.background
   // Mood isn't unlock-gated (music isn't affection-locked), just checked against the known set.
   if (scene.mood && SCENE_MOOD_IDS.includes(scene.mood)) cleaned.mood = scene.mood
+  // Dropped rather than coerced to base: an unset outfit means "no change" downstream, so a bad
+  // tag leaves the character in whatever they were already wearing instead of yanking them back
+  // to base art mid-scene. A locked or `manualOnly` outfit never appears in `selectableOutfits`,
+  // so this is the same gate the prompt menu used, re-applied to what came back.
+  if (scene.outfit && selectableOutfits?.includes(scene.outfit)) cleaned.outfit = scene.outfit
   return Object.keys(cleaned).length > 0 ? cleaned : undefined
 }
 
@@ -279,7 +299,7 @@ export function useChatSession(chatId: string | null) {
   const styleGuidanceNote = useSettingsStore((s) => s.styleGuidance)
   const avoidEmDashes = useSettingsStore((s) => s.avoidEmDashes)
   const slowBurnPacing = useSettingsStore((s) => s.slowBurnPacing)
-  const intimacyLevel = useSettingsStore((s) => s.intimacyLevel)
+  const globalIntimacyLevel = useSettingsStore((s) => s.intimacyLevel)
   const visionSceneDetection = useSettingsStore((s) => s.visionSceneDetection)
   const globalSystemPrompt = useSettingsStore((s) => s.systemPrompt)
   const globalPostHistory = useSettingsStore((s) => s.postHistoryInstructions)
@@ -542,6 +562,8 @@ export function useChatSession(chatId: string | null) {
       // A toy only ever reaches the model once actually bought (`Chat.toyInventory`) — warmth/
       // commitment alone just gate *eligibility to buy*, see `intimacyCatalog.ts`.
       const ownedToyIds = new Set(Object.keys(freshChat.toyInventory ?? {}))
+      // A world's own content rating wins over the global Settings dial — see `resolveIntimacyLevel`.
+      const intimacyLevel = resolveIntimacyLevel(world?.intimacyLevel, globalIntimacyLevel)
       const intimacyOptions = intimacyOptionsGuidance(
         getUnlockedIntimacyOptions(speakerWarmth, speakerTrack.commitmentStatus ?? 'none', world, ownedToyIds),
         intimacyLevel,
@@ -549,6 +571,14 @@ export function useChatSession(chatId: string | null) {
 
       // "Character Mind" scoped slice — a transient mood, an underlying need, and a private
       // intention, all deliberately separate from the relationship track above. See `prompt/mindGuidance.ts`.
+      // The aftermath of an intimate scene, for as long as the window is open (`aftercare.ts`).
+      // Unlike mood/need/intent below it, this is app-known rather than judge-inferred — the
+      // player initiated the scene through a real action, so there is nothing to guess at.
+      const afterglowSince = afterglowTurnsSince(speakerTrack.afterglow ?? undefined, countCharReplies(messages))
+      const afterglowLine =
+        afterglowSince !== null && isAfterglowActive(speakerTrack.afterglow ?? undefined, countCharReplies(messages))
+          ? afterglowGuidance(speaker.card.name, persona?.name || 'You', afterglowSince, speakerTrack.afterglow?.sourceLabel)
+          : ''
       const moodLine = moodGuidance(speaker.card.name, persona?.name || 'You', speakerTrack.mood)
       const needLine = needGuidance(speaker.card.name, speakerTrack.currentNeed)
       const intentLine = characterIntentGuidance(speaker.card.name, speakerTrack.characterIntent)
@@ -594,6 +624,7 @@ export function useChatSession(chatId: string | null) {
             : '',
           intimacyGuidance(intimacyLevel),
           intimacyOptions,
+          afterglowLine,
           moodLine,
           needLine,
           intentLine,
@@ -640,6 +671,11 @@ export function useChatSession(chatId: string | null) {
           // Only ask for a mood tag when this world actually has music to drive with it — no point
           // spending prompt tokens on a signal the app would then ignore.
           moodIds: world?.music && Object.keys(world.music).length > 0 ? SCENE_MOOD_IDS : undefined,
+          // Wardrobe (`outfits.ts`), on the same "only ask for what the app can actually use"
+          // rule as mood above: a character with no outfit art gets a single-entry list, which
+          // `buildSceneInstruction` treats as no choice and omits from the tag entirely.
+          outfitIds: selectableOutfitIds(character.outfits, character.sprites, affection, new Set(freshChat.sceneFlags ?? [])),
+          currentOutfitId: currentOutfitFrom(messages),
         },
         affection,
         participants: roster.length
@@ -656,6 +692,12 @@ export function useChatSession(chatId: string | null) {
       character,
       chat,
       countTokens,
+      // Was missing before the world-level override existed, so changing the content rating in
+      // Settings left this callback closed over the previous value until some other dependency
+      // happened to change. Self-corrected almost immediately in practice (`messages`/`chat` move
+      // constantly), but it meant the one setting where being a turn late actually matters was the
+      // one not listed.
+      globalIntimacyLevel,
       globalPostHistory,
       globalSystemPrompt,
       messages,
@@ -780,7 +822,16 @@ export function useChatSession(chatId: string | null) {
       const currentAffection = track.affection ?? 0
       const currentStats = getRelationshipStats(track)
       const existingFlags = new Set((freshChat.sceneFlags ?? []) as SceneFlag[])
-      const { deltas: rawDeltas, newFlags, reason, newFacts, completedTaskIndices, mood, currentNeed, characterIntent } = await assessRelationshipMoment(client, {
+      // The aftercare window closes on the first turn past its length (`aftercare.ts`). The
+      // transcript of the window rides along inside the judge call that was already going to run
+      // this turn, so a verdict costs no extra model round-trip — the same trick objective-task
+      // detection uses. `history` is this turn's own prompt history, so slicing it gives exactly
+      // the turns since the scene without a second fetch.
+      const openAfterglow = track.afterglow ?? undefined
+      const charRepliesNow = countCharReplies(messages)
+      const aftercareDue = isAfterglowComplete(openAfterglow, charRepliesNow)
+      const aftercareWindow = aftercareDue ? history.slice(-(AFTERGLOW_TURNS * 2 + 2)) : undefined
+      const { deltas: rawDeltas, newFlags, reason, newFacts, completedTaskIndices, aftercareVerdict, mood, currentNeed, characterIntent } = await assessRelationshipMoment(client, {
         history,
         latestReply,
         charName: speaker.card.name,
@@ -793,8 +844,23 @@ export function useChatSession(chatId: string | null) {
         currentMood: track.mood,
         currentNeed: track.currentNeed,
         currentIntent: track.characterIntent,
+        aftercareTurns: aftercareWindow,
       })
-      const deltas = scaleDeltasForDifficulty(rawDeltas, relationshipDifficulty)
+      // A due window always closes, even if the model declined to name a verdict — leaving it open
+      // would keep the aftermath guidance running forever. An unusable answer is read as the
+      // middle outcome rather than as "ask again next turn".
+      const resolvedAftercare = aftercareDue ? (aftercareVerdict ?? 'awkward') : undefined
+      const deltas = scaleDeltasForDifficulty(
+        resolvedAftercare
+          ? (Object.fromEntries(
+              (['affection', ...RELATIONSHIP_DIMENSIONS] as const).map((k) => [
+                k,
+                rawDeltas[k] + aftercareDeltas(resolvedAftercare)[k],
+              ]),
+            ) as typeof rawDeltas)
+          : rawDeltas,
+        relationshipDifficulty,
+      )
       newFlags.forEach((flag) => existingFlags.add(flag))
       if (newFacts.length > 0) {
         const sourceMessageId = history[history.length - 1]?.id
@@ -838,6 +904,34 @@ export function useChatSession(chatId: string | null) {
       // character — so they only ever accrue from the primary's own conversation, same as before
       // this pass; a non-primary's turn still scores their own affection/stats/gallery for real.
       const nextCoins = isPrimary ? Math.max(0, (freshChat.giftCoins ?? 0) + 2) : (freshChat.giftCoins ?? 0)
+      // Author-defined world rules (`world/triggers.ts`), evaluated against the state this turn
+      // just produced rather than the state it started from — a trigger keyed on "trust >= 70"
+      // should fire on the turn trust actually reaches 70, not one turn later. Only for the
+      // primary's own track: a world rule describes the player's relationship with the character
+      // whose world it is, and firing one per participant would multiply every authored beat.
+      const triggerResult = isPrimary
+        ? evaluateTriggers(
+            world?.triggers,
+            {
+              affection,
+              warmth,
+              stats: nextStats,
+              flags: existingFlags,
+              commitmentStatus: risk.commitmentStatus,
+              day: world?.currentDay,
+            },
+            freshChat.firedTriggerIds ?? [],
+          )
+        : undefined
+      if (triggerResult) {
+        for (const action of triggerResult.actions) {
+          if (action.kind === 'set_flag') existingFlags.add(action.flag)
+          else if (action.kind === 'remember') {
+            chatFactsApi.create({ chatId: chatIdForRelationship, text: action.text }).catch(() => {})
+          } else if (action.kind === 'notify') toastInfo(action.text)
+        }
+      }
+
       const noStatChange = Object.values(deltas).every((d) => d === 0)
       const noRiskChange = !risk.warnedJustNow && !risk.brokeUpJustNow && !risk.clearedJustNow
       const noMindChange =
@@ -848,6 +942,12 @@ export function useChatSession(chatId: string | null) {
         noStatChange &&
         noRiskChange &&
         noMindChange &&
+        // A resolved window must always be written, even if its verdict happened to score flat —
+        // otherwise `afterglow` stays set and the aftermath guidance runs forever.
+        !resolvedAftercare &&
+        // Same for a fired trigger: its flag and its spent id both need persisting even on a turn
+        // that scored no relationship movement at all.
+        !triggerResult?.fired.length &&
         newFlags.length === 0 &&
         unlockedSet.size === (track.unlockedGalleryIds ?? []).length &&
         nextCoins === (freshChat.giftCoins ?? 0)
@@ -857,6 +957,7 @@ export function useChatSession(chatId: string | null) {
         return completedTaskIndices
       }
       await chatsApi.update(chatIdForRelationship, {
+        ...(triggerResult?.fired.length ? { firedTriggerIds: triggerResult.firedIds } : {}),
         ...patchRelationshipTrack(freshChat, speaker.id, {
           affection,
           relationshipStats: nextStats,
@@ -866,12 +967,39 @@ export function useChatSession(chatId: string | null) {
           breakupCount: risk.breakupCount,
           unlockedGalleryIds: [...unlockedSet],
           mood: mood ?? track.mood,
-          currentNeed: currentNeed ?? track.currentNeed,
+          // A `cold` aftermath leaves an unmet need behind (`aftercareNeed`), so the consequence
+          // keeps colouring the character past the window instead of stopping dead with it. The
+          // judge's own read for this turn still wins when it has one — it's the fresher signal,
+          // and it may already have noticed something better than "reassurance".
+          currentNeed: currentNeed ?? (resolvedAftercare ? aftercareNeed(resolvedAftercare) : undefined) ?? track.currentNeed,
           characterIntent: characterIntent ?? track.characterIntent,
+          // `null`, not `undefined` — `JSON.stringify` drops undefined-valued keys, so an
+          // undefined here would silently leave the window open. Same trap `relationshipWarning`
+          // one field up already documents.
+          afterglow: resolvedAftercare ? null : (track.afterglow ?? null),
         }),
         sceneFlags: [...existingFlags],
         giftCoins: nextCoins,
       })
+      if (resolvedAftercare) {
+        const changed = Object.fromEntries(
+          Object.entries(aftercareDeltas(resolvedAftercare)).filter(([, v]) => v !== 0),
+        )
+        relationshipEventsApi
+          .create({
+            chatId: chatIdForRelationship,
+            characterId: speaker.id,
+            reason: aftercareReason(resolvedAftercare),
+            deltas: changed,
+            sourceMessageId: history[history.length - 1]?.id,
+          })
+          .catch(() => {})
+        const note = aftercareToast(speaker.card.name, resolvedAftercare)
+        if (note) {
+          if (resolvedAftercare === 'cold') toastInfo(note)
+          else toastSuccess(note, { chime: true })
+        }
+      }
       // Append-only history alongside the overwritten running totals above — answers "why is
       // trust 62 now" instead of only ever showing the current number. Only log when a dimension
       // or flag genuinely moved; gallery/coin bookkeeping alone isn't relationship movement.
@@ -1166,6 +1294,12 @@ export function useChatSession(chatId: string | null) {
         relationshipWarning: risk.relationshipWarning ?? null,
         breakupCount: risk.breakupCount,
         firstIntimateSceneAt: outcome.decision === 'accept' ? (track.firstIntimateSceneAt ?? Date.now()) : track.firstIntimateSceneAt,
+        // Only an accepted first time opens an aftercare window — a deflected or backfired ask has
+        // no aftermath to judge, and scoring one would punish the player twice for the same no.
+        afterglow:
+          outcome.decision === 'accept'
+            ? { startedAtTurn: countCharReplies(messages), sourceLabel: 'their first time together' }
+            : (track.afterglow ?? null),
       }))
 
       const changedDeltas = Object.fromEntries(Object.entries(deltas).filter(([, v]) => v !== 0))
@@ -1347,6 +1481,11 @@ export function useChatSession(chatId: string | null) {
       const affection = chat?.affection ?? 0
       const unlockedExpressions = getUnlockedExpressionIds(speaker, affection)
       const unlockedBackgrounds = getUnlockedBackgroundIds(world, affection)
+      // Needed here purely so re-sanitizing the *existing* tag below can't strip an outfit the
+      // reply already established — without it, a vision refine would quietly undress the
+      // character, since `sanitizeSceneTag` drops an outfit it wasn't told is selectable.
+      const selectableOutfits = selectableOutfitIds(speaker.outfits, spriteMap, affection, new Set(chat?.sceneFlags ?? []))
+      const currentOutfit = currentOutfitFrom(messages)
 
       const spriteExpressionIds = Object.keys(spriteMap).filter((id) => unlockedExpressions.includes(id))
       const canDetectExpression = spriteExpressionIds.length >= 2
@@ -1380,7 +1519,11 @@ export function useChatSession(chatId: string | null) {
         const sprites = (
           await Promise.all(
             shortlist.map(async (id) => {
-              const url = spriteMap[id]
+              // Show the vision model the outfit that's actually on screen, falling back to base
+              // art for an expression this outfit doesn't have — it's judging which expression the
+              // line reads as, and comparing against art the player isn't looking at just makes
+              // that call harder.
+              const url = spriteMap[spriteKey(currentOutfit, id)] ?? spriteMap[id]
               if (!url) return null
               if (!cache.has(url)) {
                 const b64 = await downscaleImageToBase64(url)
@@ -1411,8 +1554,11 @@ export function useChatSession(chatId: string | null) {
         if (cls.mood) next.mood = cls.mood
       }
 
-      const sanitized = sanitizeSceneTag(next, unlockedExpressions, unlockedBackgrounds)
-      if (JSON.stringify(sanitized ?? null) === JSON.stringify(sanitizeSceneTag(currentScene, unlockedExpressions, unlockedBackgrounds) ?? null)) {
+      const sanitized = sanitizeSceneTag(next, unlockedExpressions, unlockedBackgrounds, selectableOutfits)
+      if (
+        JSON.stringify(sanitized ?? null) ===
+        JSON.stringify(sanitizeSceneTag(currentScene, unlockedExpressions, unlockedBackgrounds, selectableOutfits) ?? null)
+      ) {
         return
       }
       const swipeScenes = freshMsg.swipeScenes ? [...freshMsg.swipeScenes] : []
@@ -1612,6 +1758,12 @@ export function useChatSession(chatId: string | null) {
           const combinedRaw = (accumulated + newText).trimEnd()
           const unlockedExpressions = getUnlockedExpressionIds(character, chat.affection ?? 0)
           const unlockedBackgrounds = getUnlockedBackgroundIds(world, chat.affection ?? 0)
+          const selectableOutfits = selectableOutfitIds(
+            character.outfits,
+            character.sprites,
+            chat.affection ?? 0,
+            new Set(chat.sceneFlags ?? []),
+          )
           const { text: extractedText, scene: parsedScene } = extractSceneTag(combinedRaw)
           // Deterministic scrub before this reply is stored: it fixes both what's displayed and
           // what's fed back into every later prompt (a tell left in history is one the model
@@ -1619,7 +1771,7 @@ export function useChatSession(chatId: string | null) {
           // already-cleaned text is harmless. `combinedRaw` keeps the untouched original for the
           // Prompt Inspector's raw/processed toggle.
           combined = cleanModelOutput(extractedText, { charName: speaker.card.name, personaName: persona?.name || 'You' })
-          scene = sanitizeSceneTag(parsedScene, unlockedExpressions, unlockedBackgrounds)
+          scene = sanitizeSceneTag(parsedScene, unlockedExpressions, unlockedBackgrounds, selectableOutfits)
           // A reply that's nothing but a recognized `<<scene:>>` tag (or otherwise scrubs down to
           // nothing), or that's just the immediately-preceding message parroted back (bare, or with
           // a stray speaker label glued on — see `isVerbatimEcho`), is a real generation failure,
@@ -1854,7 +2006,11 @@ export function useChatSession(chatId: string | null) {
   )
 
   const sendUserMessage = useCallback(
-    async (text: string, attachments: PendingAttachment[] = [], opts?: { choice?: ChoiceOption; intent?: MessageIntent }) => {
+    async (
+      text: string,
+      attachments: PendingAttachment[] = [],
+      opts?: { choice?: ChoiceOption; intent?: MessageIntent; intimacyOptionId?: string },
+    ) => {
       if (!chatId || !beginGeneration()) return
       try {
         // Read fresh rather than trusting the hook's own (possibly one-render-stale) `chat` — both
@@ -1912,6 +2068,31 @@ export function useChatSession(chatId: string | null) {
         // Stored as full data: URLs (renderable as-is); the API only ever sees the base64 payload.
         const storedImages = attachments.filter((a) => a.kind === 'image').map((a) => a.dataUrl)
 
+        // An explicit-tier intimacy action (a position/toy/activity from the Relationship panel,
+        // never a kissing spot) puts the character into their designated intimate outfit — decided
+        // here rather than left to the model, since this is a discrete, deliberate, player-initiated
+        // act, and the outfit it implies is usually `manualOnly` precisely so the model can't pick
+        // it on its own. Stamped onto the player's own message so it takes effect from this moment
+        // (see `currentOutfitFrom`), not only once the reply agrees. One-way by design: the story
+        // tags its own way back out.
+        const usedIntimacyOption = opts?.intimacyOptionId ? intimacyItemById(opts.intimacyOptionId, world) : undefined
+        const startsIntimateScene = !!usedIntimacyOption && isExplicitCategory(usedIntimacyOption.category) && !!giftTarget
+        const intimateOutfit =
+          startsIntimateScene && giftTarget
+            ? intimateOutfitFor(giftTarget.outfits, giftTarget.sprites, getRelationshipTrack(freshChat, giftTarget.id).affection ?? 0, new Set(freshChat.sceneFlags ?? []))
+            : undefined
+        // Opens the aftercare window (`dating/aftercare.ts`) on the same signal that changes the
+        // outfit: the app knows an intimate scene is starting because the player deliberately
+        // started one, so neither needs inferring from the prose. Re-opening while one is already
+        // live just restarts the clock, which is the right reading of a second scene.
+        if (startsIntimateScene && giftTarget) {
+          await chatsApi.update(chatId, {
+            ...patchRelationshipTrack(freshChat, giftTarget.id, {
+              afterglow: { startedAtTurn: countCharReplies(messages), sourceLabel: usedIntimacyOption!.label },
+            }),
+          })
+        }
+
         const now = Date.now()
         const userMsg: StoredMessage = {
           id: newId(),
@@ -1921,6 +2102,7 @@ export function useChatSession(chatId: string | null) {
           text: composedText,
           giftId,
           intent: opts?.intent,
+          scene: intimateOutfit ? { outfit: intimateOutfit } : undefined,
           images: storedImages.length ? storedImages : undefined,
           createdAt: now,
         }

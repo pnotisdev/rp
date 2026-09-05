@@ -3,6 +3,7 @@ import { fileToDataUrl } from './importExport'
 import type { Character, CharacterCardData, GalleryEntry, Lorebook, RelationshipStarter, SocialConnection } from './cardSpec'
 import type { CustomSceneFlag, GiftItem, ItemDef, WorldCard } from '@/lib/types'
 import type { CustomExpression } from '@/lib/vn/expressions'
+import type { Outfit } from '@/lib/vn/outfits'
 import type { CustomBackground } from '@/lib/vn/backgrounds'
 import type { ScheduleEntry, WeatherPreferences } from '@/lib/world/calendar'
 
@@ -17,6 +18,8 @@ export interface CharacterPackV1 {
     avatarDataUrl?: string
     sprites?: Record<string, string>
     spriteUnlocks?: Record<string, number>
+    /** Wardrobe states (`src/lib/vn/outfits.ts`). Without these the composite sprite keys above would survive an export but have no outfit left to belong to. */
+    outfits?: Outfit[]
     customExpressions?: CustomExpression[]
     giftPreferences?: Record<string, number>
     giftLikes?: string[]
@@ -96,6 +99,7 @@ export async function buildCharacterPack(character: Character, world?: WorldCard
       avatarDataUrl,
       sprites,
       spriteUnlocks: character.spriteUnlocks,
+      outfits: character.outfits,
       customExpressions: character.customExpressions,
       giftPreferences: character.giftPreferences,
       giftLikes: character.giftLikes,
@@ -202,6 +206,7 @@ export async function importCharacterPack(pack: CharacterPackV1): Promise<{ char
     avatarDataUrl: pack.character.avatarDataUrl,
     sprites: pack.character.sprites,
     spriteUnlocks: pack.character.spriteUnlocks,
+    outfits: pack.character.outfits,
     customExpressions: pack.character.customExpressions,
     giftPreferences: pack.character.giftPreferences,
     giftLikes: pack.character.giftLikes,

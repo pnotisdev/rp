@@ -3,6 +3,13 @@ export interface SceneTag {
   background?: string
   /** Ambient scene mood (src/lib/vn/moods.ts) — selects the background-music track in VN mode. */
   mood?: string
+  /**
+   * Which wardrobe state the character is in (src/lib/vn/outfits.ts). Only ever offered when the
+   * character actually has unlocked outfit art, so an ordinary character's tag is unchanged.
+   * Unset means "no change" rather than "base outfit" — the reader carries the last one forward,
+   * since a model that simply doesn't repeat the field shouldn't undress anyone.
+   */
+  outfit?: string
 }
 
 const TAG_PREFIX = '<<scene:'
@@ -35,6 +42,7 @@ export function extractSceneTag(raw: string): { text: string; scene?: SceneTag }
     if (key === 'expression' && value) scene.expression = value
     if (key === 'background' && value) scene.background = value
     if (key === 'mood' && value) scene.mood = value
+    if (key === 'outfit' && value) scene.outfit = value
   }
   return { text: raw.replace(TAG_RE, '').trim(), scene: Object.keys(scene).length ? scene : undefined }
 }
@@ -55,18 +63,30 @@ export function buildSceneInstruction(options?: {
   backgroundIds: string[]
   /** Passed only when the world actually has music — no point spending prompt tokens on a mood the app will ignore. */
   moodIds?: string[]
+  /**
+   * Passed only when this character has more than one selectable wardrobe state — a character with
+   * only base art gets the exact instruction it always got, with no outfit field and no extra
+   * tokens. See `selectableOutfitIds` in `outfits.ts` for what qualifies.
+   */
+  outfitIds?: string[]
+  /** What the character is wearing right now, so the model knows what it would be *changing from*. */
+  currentOutfitId?: string
 }): string {
   if (!options || (options.expressionIds.length === 0 && options.backgroundIds.length === 0)) return ''
   const wantsMood = !!options.moodIds && options.moodIds.length > 0
-  const format = wantsMood
-    ? '<<scene:expression=ID,background=ID,mood=ID>>'
-    : '<<scene:expression=ID,background=ID>>'
+  // One id is no choice at all (it's always just the base outfit), so it isn't worth a field.
+  const wantsOutfit = !!options.outfitIds && options.outfitIds.length > 1
+  const format = `<<scene:expression=ID,background=ID${wantsMood ? ',mood=ID' : ''}${wantsOutfit ? ',outfit=ID' : ''}>>`
   return [
     'After writing your in-character reply, end it with exactly one new line in this exact format. This line is metadata only: never mention or explain it in the dialogue.',
     format,
     options.expressionIds.length ? `Valid expression IDs: ${options.expressionIds.join(', ')}` : '',
     options.backgroundIds.length ? `Valid background IDs: ${options.backgroundIds.join(', ')}` : '',
     wantsMood ? `Valid mood IDs: ${options.moodIds!.join(', ')}` : '',
+    wantsOutfit ? `Valid outfit IDs: ${options.outfitIds!.join(', ')}` : '',
+    wantsOutfit
+      ? `The character is currently wearing "${options.currentOutfitId || 'base'}". Only use a different outfit ID when the story has actually changed what they are wearing — they got changed, arrived somewhere needing different clothes, undressed. Otherwise repeat the current one. Never change an outfit just because the mood shifted.`
+      : '',
     wantsMood
       ? "Pick whichever IDs best match the character's emotion, the current setting, and the overall feeling of the scene."
       : "Pick whichever IDs best match the character's emotion and the current setting.",

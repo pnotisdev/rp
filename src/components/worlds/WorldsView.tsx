@@ -12,6 +12,9 @@ import { advancePhase, getCalendarInfo, getEnergyRemaining, getMaxEnergyForDay, 
 import { WORLD_TEMPLATES, getWorldTemplate, hiddenWorldTabs, type WorldTemplateId } from '@/lib/world/worldTemplates'
 import { newId } from '@/lib/id'
 import { NumberField, SelectField, TextAreaField, TextField } from '@/components/ui/Field'
+import type { IntimacyDetailLevel } from '@/lib/store/useSettingsStore'
+import { TriggerActionRows, TriggerConditionRows } from '@/components/worlds/TriggerRows'
+import { describeAction, describeCondition, slugifyTriggerId, type Trigger } from '@/lib/world/triggers'
 import { Button } from '@/components/ui/Button'
 import { Chip } from '@/components/ui/Chip'
 import { Section } from '@/components/ui/Section'
@@ -197,10 +200,34 @@ function WorldEditor({
   const [intimacyOptions, setIntimacyOptions] = useState<IntimacyUnlockable[]>(base.customIntimacyOptions ?? [])
   const [customSceneFlags, setCustomSceneFlags] = useState<CustomSceneFlag[]>(base.customSceneFlags ?? [])
   const [thresholds, setThresholds] = useState(base.relationshipThresholds ?? {})
+  /** `undefined` = inherit the global Settings value; a set value overrides it for every chat in this world. */
+  const [intimacyLevel, setIntimacyLevel] = useState<IntimacyDetailLevel | undefined>(base.intimacyLevel ?? undefined)
+  const [triggers, setTriggers] = useState<Trigger[]>(base.triggers ?? [])
+  const [newTriggerLabel, setNewTriggerLabel] = useState('')
   const [currentDay, setCurrentDay] = useState(base.currentDay ?? 0)
   const [currentPhaseIndex, setCurrentPhaseIndex] = useState(base.currentPhaseIndex ?? 0)
   const [advancing, setAdvancing] = useState(false)
   const [saving, setSaving] = useState(false)
+
+  const addTrigger = () => {
+    const label = newTriggerLabel.trim()
+    if (!label) return
+    setTriggers((list) => [
+      ...list,
+      {
+        // The id is what "already fired" is remembered by, so it is minted once and never
+        // regenerated from the label — renaming a trigger must not make it fire again.
+        id: slugifyTriggerId(label, list.map((t) => t.id)),
+        label,
+        when: [{ kind: 'stat_at_least', stat: 'affection', value: 50 }],
+        then: [{ kind: 'notify', text: '' }],
+      },
+    ])
+    setNewTriggerLabel('')
+  }
+
+  const updateTrigger = (id: string, patch: Partial<Trigger>) =>
+    setTriggers((list) => list.map((t) => (t.id === id ? { ...t, ...patch } : t)))
 
   const save = async () => {
     setSaving(true)
@@ -223,6 +250,11 @@ function WorldEditor({
       customIntimacyOptions: intimacyOptions,
       customSceneFlags,
       relationshipThresholds: thresholds,
+      // `null`, not `undefined`, for "inherit the global setting" — `JSON.stringify` drops an
+      // undefined-valued key, so the server would never see the field and an existing rating
+      // would survive being cleared. Same reason `Chat.activeEvent`/`authorNote` use null.
+      intimacyLevel: intimacyLevel ?? null,
+      triggers,
     }
     try {
       if (world) await worldsApi.update(world.id, payload)
@@ -635,6 +667,33 @@ function WorldEditor({
           </Section>
 
           <Section
+            title="Content rating"
+            description="How explicit intimate scenes get written for characters living here, and which intimate actions the Relationship panel offers. Overrides the global Settings value — so a wholesome world and an explicit one can sit side by side without touching Settings between chats."
+            surface="bare"
+          >
+            <SelectField
+              label="Rating"
+              value={intimacyLevel ?? 'inherit'}
+              onChange={(e) => setIntimacyLevel(e.target.value === 'inherit' ? undefined : (e.target.value as IntimacyDetailLevel))}
+            >
+              <option value="inherit">Use the global setting</option>
+              <option value="default">No instruction either way</option>
+              <option value="fade_to_black">Fade to black</option>
+              <option value="suggestive">Suggestive</option>
+              <option value="explicit">Explicit</option>
+            </SelectField>
+            <p className="mt-2 text-xs text-text-muted">
+              {intimacyLevel === undefined
+                ? 'Follows whatever Settings → Generation is set to, changing with it.'
+                : intimacyLevel === 'default'
+                  ? 'Pinned: this world sends no instruction either way, even if the global setting changes. Every intimate action stays available in the Relationship panel.'
+                  : intimacyLevel === 'explicit'
+                    ? 'Positions, toys, and other explicit beats become available in the Relationship panel once warmth earns them.'
+                    : 'The model is asked to keep intimate scenes at this register, and only kissing spots are offered in the Relationship panel.'}
+            </p>
+          </Section>
+
+          <Section
             title="Gift catalog"
             description="Overrides the default gift shop for characters living here. Leave empty to use the built-in catalog."
             surface="bare"
@@ -855,6 +914,87 @@ function WorldEditor({
                 </div>
               )}
             />
+          </Section>
+
+          <Section
+            title="Rules"
+            description="When every condition holds, the actions run once. The app already produces all of these signals — this is what lets you hang an authored beat off one without writing code."
+            surface="bare"
+          >
+            {triggers.length === 0 && (
+              <p className="mb-3 text-xs text-text-muted">
+                No rules yet. For example: when <em>trust ≥ 70</em> and the <em>confession</em> flag is set → remember
+                "She has told him about her father" — which then rides into every later prompt.
+              </p>
+            )}
+            <div className="space-y-3">
+              {triggers.map((t) => (
+                <div key={t.id} className="rounded-xl bg-bg-sunken p-3">
+                  <div className="mb-2 flex flex-wrap items-center gap-2">
+                    <input
+                      value={t.label}
+                      onChange={(e) => updateTrigger(t.id, { label: e.target.value })}
+                      aria-label="Rule name"
+                      className="flex-1 rounded-lg bg-bg px-2.5 py-1.5 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40"
+                    />
+                    <label className="flex items-center gap-1.5 text-[11px] text-text-muted" title="Off by default: a repeatable rule that sets a flag or writes a memory would otherwise do it on every single turn.">
+                      <input
+                        type="checkbox"
+                        checked={!!t.repeatable}
+                        onChange={(e) => updateTrigger(t.id, { repeatable: e.target.checked })}
+                        className="accent-accent"
+                      />
+                      Repeatable
+                    </label>
+                    <label className="flex items-center gap-1.5 text-[11px] text-text-muted">
+                      <input
+                        type="checkbox"
+                        checked={t.enabled !== false}
+                        onChange={(e) => updateTrigger(t.id, { enabled: e.target.checked })}
+                        className="accent-accent"
+                      />
+                      On
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setTriggers((list) => list.filter((x) => x.id !== t.id))}
+                      aria-label={`Delete rule ${t.label}`}
+                      className="text-text-muted transition-colors hover:text-danger"
+                    >
+                      <X size={13} strokeWidth={2.5} />
+                    </button>
+                  </div>
+
+                  <TriggerConditionRows
+                    conditions={t.when}
+                    knownFlags={combinedSceneFlags(customSceneFlags)}
+                    onChange={(when) => updateTrigger(t.id, { when })}
+                  />
+                  <TriggerActionRows
+                    actions={t.then}
+                    knownFlags={combinedSceneFlags(customSceneFlags)}
+                    onChange={(then) => updateTrigger(t.id, { then })}
+                  />
+
+                  <p className="mt-2 text-[11px] text-text-muted">
+                    When {t.when.map(describeCondition).join(' and ') || '(nothing)'} → {t.then.map(describeAction).join(', ') || '(nothing)'}
+                  </p>
+                </div>
+              ))}
+            </div>
+            <div className="mt-3 flex items-center gap-2">
+              <input
+                value={newTriggerLabel}
+                onChange={(e) => setNewTriggerLabel(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && addTrigger()}
+                placeholder="New rule — e.g. She opens up about her father"
+                className="flex-1 rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40"
+              />
+              <Button onClick={addTrigger} disabled={!newTriggerLabel.trim()} className="flex items-center gap-1.5">
+                <Plus size={14} strokeWidth={2} />
+                Add
+              </Button>
+            </div>
           </Section>
         </div>
       )}

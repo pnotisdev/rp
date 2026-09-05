@@ -1,4 +1,5 @@
 import { slugifyId } from '@/lib/text/slugify'
+import { BASE_OUTFIT_ID, spriteKey } from '@/lib/vn/outfits'
 
 export interface ExpressionOption {
   id: string
@@ -85,14 +86,36 @@ export function resolveExpressionSprite(
   avatarDataUrl: string | undefined,
   expression: string,
   affection: number,
+  /**
+   * Which wardrobe state to draw (`outfits.ts`). Omitted or `BASE_OUTFIT_ID` reproduces the exact
+   * pre-outfit behavior, byte for byte — every existing character and both call sites that don't
+   * pass one keep resolving precisely as before.
+   */
+  outfitId?: string,
 ): string | undefined {
-  const isAvailable = (id: string): boolean => !!sprites?.[id] && affection >= Number(spriteUnlocks?.[id] ?? 0)
+  const isAvailable = (key: string): boolean => !!sprites?.[key] && affection >= Number(spriteUnlocks?.[key] ?? 0)
 
-  if (isAvailable(expression)) return sprites![expression]
-  for (const fallback of EXPRESSION_FALLBACKS[expression] ?? []) {
-    if (isAvailable(fallback)) return sprites![fallback]
+  /** The full exact -> same-family -> neutral walk, within one outfit. */
+  const withinOutfit = (outfit: string | undefined): string | undefined => {
+    const key = (id: string) => spriteKey(outfit, id)
+    if (isAvailable(key(expression))) return sprites![key(expression)]
+    for (const fallback of EXPRESSION_FALLBACKS[expression] ?? []) {
+      if (isAvailable(key(fallback))) return sprites![key(fallback)]
+    }
+    if (expression !== 'neutral' && isAvailable(key('neutral'))) return sprites![key('neutral')]
+    return undefined
   }
-  if (expression !== 'neutral' && isAvailable('neutral')) return sprites!['neutral']
+
+  const inOutfit = withinOutfit(outfitId)
+  if (inOutfit) return inOutfit
+  // A partially-drawn outfit degrades to the *base* art rather than straight to the avatar: an
+  // author who only drew `swimsuit--neutral` and `swimsuit--blush` should still get real art for
+  // "angry", not a blank portrait. Wrong clothes for one beat beats no character at all — and the
+  // same-outfit walk above already tried that outfit's own neutral first, which covers most of it.
+  if (outfitId && outfitId !== BASE_OUTFIT_ID) {
+    const inBase = withinOutfit(BASE_OUTFIT_ID)
+    if (inBase) return inBase
+  }
   return avatarDataUrl
 }
 

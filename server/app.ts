@@ -81,6 +81,124 @@ function normalizeCustomExpressions(raw: unknown) {
   return entries.length ? entries : undefined
 }
 
+/**
+ * A character's wardrobe states (`src/lib/vn/outfits.ts`). Same shape/validation approach as
+ * `normalizeCustomExpressions` above, plus the gates. `id` is checked against the same character
+ * class the sprite-key validator uses, because it becomes half of a `<outfitId>--<expression>`
+ * sprite key and therefore half of a filename — a client that skipped `slugifyOutfitId` must not
+ * be able to smuggle a path separator through here. `base` is reserved (it means "the unprefixed
+ * sprite keys"), so an outfit claiming it would shadow the character's original art.
+ */
+function normalizeOutfits(raw: unknown) {
+  if (!Array.isArray(raw)) return undefined
+  const entries = raw
+    .filter((e): e is Record<string, unknown> => !!e && typeof e === 'object')
+    .map((e) => ({
+      id: typeof e.id === 'string' ? e.id.trim().toLowerCase() : '',
+      label: typeof e.label === 'string' && e.label.trim() ? e.label.trim() : 'Outfit',
+      unlockAffection: Number.isFinite(Number(e.unlockAffection))
+        ? Math.max(0, Math.min(100, Math.round(Number(e.unlockAffection))))
+        : undefined,
+      requiredFlags: normalizeStringArray(e.requiredFlags),
+      manualOnly: e.manualOnly === true,
+      intimate: e.intimate === true,
+    }))
+    .filter((e) => /^[a-z0-9][a-z0-9-]{0,39}$/.test(e.id) && e.id !== 'base' && !e.id.includes('--'))
+  // A duplicate id would make two outfits fight over the same sprite keys.
+  const seen = new Set<string>()
+  const unique = entries.filter((e) => (seen.has(e.id) ? false : (seen.add(e.id), true)))
+  return unique.length ? unique : undefined
+}
+
+/**
+ * A world's own content rating (`WorldCard.intimacyLevel`). Validated rather than passed through
+ * because it steers what the model is told to write: an unrecognised value must fall back to
+ * "inherit the global setting", never be forwarded as an unknown string.
+ */
+function normalizeIntimacyLevel(raw: unknown) {
+  return raw === 'default' || raw === 'fade_to_black' || raw === 'suggestive' || raw === 'explicit' ? raw : undefined
+}
+
+/**
+ * "Inherit the global setting" has to travel as an explicit `null`, never `undefined`:
+ * `JSON.stringify` drops undefined-valued keys entirely, so the field would simply be absent from
+ * the request body, the `'intimacyLevel' in req.body` guard below would be false, and clearing a
+ * world's rating would silently leave the old one in place. Same trap `Chat.activeEvent` and
+ * `Chat.authorNote` already document. Caught live: setting a world to explicit, then choosing
+ * "Use the global setting", left it explicit.
+ */
+function normalizeClearableIntimacyLevel(raw: unknown) {
+  return raw === null ? undefined : normalizeIntimacyLevel(raw)
+}
+
+/**
+ * A world's author-defined triggers (`src/lib/world/triggers.ts`). Validated structurally rather
+ * than passed through, because a trigger's actions write real state (scene flags, durable
+ * memories) — a malformed rule from a hand-edited or imported world must be dropped here, not
+ * discovered mid-turn. Unknown condition/action kinds are dropped rather than kept: `conditionHolds`
+ * refuses to fire on one anyway, so storing it would only leave an invisible dead rule behind.
+ */
+function normalizeTriggers(raw: unknown) {
+  if (!Array.isArray(raw)) return undefined
+  const STATS = new Set(['affection', 'warmth', 'trust', 'chemistry', 'comfort', 'respect', 'curiosity', 'tension'])
+  const COMMITMENTS = new Set(['none', 'dating', 'exclusive', 'living_together', 'married'])
+  const num = (v: unknown, lo: number, hi: number) =>
+    Number.isFinite(Number(v)) ? Math.max(lo, Math.min(hi, Math.round(Number(v)))) : null
+  const str = (v: unknown, max = 300) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null)
+
+  const condition = (c: unknown) => {
+    if (!c || typeof c !== 'object') return null
+    const o = c as Record<string, unknown>
+    if ((o.kind === 'stat_at_least' || o.kind === 'stat_below') && STATS.has(String(o.stat))) {
+      const value = num(o.value, 0, 100)
+      return value === null ? null : { kind: o.kind, stat: o.stat, value }
+    }
+    if (o.kind === 'flag_set') {
+      const flag = str(o.flag, 60)
+      return flag ? { kind: 'flag_set', flag } : null
+    }
+    if (o.kind === 'commitment_at_least' && COMMITMENTS.has(String(o.status))) {
+      return { kind: 'commitment_at_least', status: o.status }
+    }
+    if (o.kind === 'day_at_least') {
+      const day = num(o.day, 0, 100000)
+      return day === null ? null : { kind: 'day_at_least', day }
+    }
+    return null
+  }
+
+  const action = (a: unknown) => {
+    if (!a || typeof a !== 'object') return null
+    const o = a as Record<string, unknown>
+    if (o.kind === 'set_flag') {
+      const flag = str(o.flag, 60)
+      return flag ? { kind: 'set_flag', flag } : null
+    }
+    if (o.kind === 'remember' || o.kind === 'notify') {
+      const text = str(o.text, 300)
+      return text ? { kind: o.kind, text } : null
+    }
+    return null
+  }
+
+  const seen = new Set<string>()
+  const entries = raw
+    .filter((t): t is Record<string, unknown> => !!t && typeof t === 'object')
+    .map((t) => ({
+      id: typeof t.id === 'string' ? t.id.trim() : '',
+      label: str(t.label, 80) ?? 'Trigger',
+      enabled: t.enabled !== false,
+      repeatable: t.repeatable === true,
+      when: Array.isArray(t.when) ? t.when.map(condition).filter(Boolean) : [],
+      then: Array.isArray(t.then) ? t.then.map(action).filter(Boolean) : [],
+    }))
+    // A rule with no surviving conditions could never fire, and one with no surviving actions would
+    // fire and do nothing — either way it is a broken rule, not a disabled one, so it is dropped.
+    .filter((t) => !!t.id && t.when.length > 0 && t.then.length > 0)
+    .filter((t) => (seen.has(t.id) ? false : (seen.add(t.id), true)))
+  return entries.length ? entries : undefined
+}
+
 /** A world's own scene locations beyond the 12 built-in defaults — same shape/validation as `normalizeCustomExpressions` above. */
 function normalizeCustomBackgrounds(raw: unknown) {
   if (!Array.isArray(raw)) return undefined
@@ -279,6 +397,7 @@ app.post('/api/characters', (req, res) => {
     avatarDataUrl,
     sprites,
     spriteUnlocks: req.body.spriteUnlocks ?? {},
+    outfits: normalizeOutfits(req.body.outfits),
     customExpressions: normalizeCustomExpressions(req.body.customExpressions),
     giftPreferences: req.body.giftPreferences ?? {},
     giftLikes: normalizeStringArray(req.body.giftLikes),
@@ -318,6 +437,7 @@ app.put('/api/characters/:id', (req, res) => {
   if ('avatarDataUrl' in req.body) patch.avatarDataUrl = resolveAvatar('characters', id, req.body.avatarDataUrl)
   if ('sprites' in req.body) patch.sprites = resolveAvatarMap('characters', 'sprites', id, req.body.sprites)
   if ('spriteUnlocks' in req.body) patch.spriteUnlocks = req.body.spriteUnlocks ?? {}
+  if ('outfits' in req.body) patch.outfits = normalizeOutfits(req.body.outfits)
   if ('customExpressions' in req.body) patch.customExpressions = normalizeCustomExpressions(req.body.customExpressions)
   if ('giftPreferences' in req.body) patch.giftPreferences = req.body.giftPreferences ?? {}
   if ('giftLikes' in req.body) patch.giftLikes = normalizeStringArray(req.body.giftLikes)
@@ -811,6 +931,12 @@ app.post('/api/worlds', (req, res) => {
     customSceneFlags,
     customBackgrounds: normalizeCustomBackgrounds(req.body.customBackgrounds),
     relationshipThresholds: normalizeRelationshipThresholds(req.body.relationshipThresholds),
+    intimacyLevel: normalizeIntimacyLevel(req.body.intimacyLevel),
+    triggers: normalizeTriggers(req.body.triggers),
+    // Not previously listed here, so a world created with authored intimacy options in the same
+    // request silently lost them (the PUT handler's `{...req.body}` spread meant a follow-up save
+    // restored them, which is why the UI never surfaced it).
+    customIntimacyOptions: Array.isArray(req.body.customIntimacyOptions) ? req.body.customIntimacyOptions : undefined,
     createdAt: now,
     updatedAt: now,
   })
@@ -828,6 +954,8 @@ app.put('/api/worlds/:id', (req, res) => {
   if ('backgroundUnlocks' in req.body) patch.backgroundUnlocks = req.body.backgroundUnlocks ?? {}
   if ('gifts' in req.body) patch.gifts = normalizeGiftItems(req.body.gifts)
   if ('customSceneFlags' in req.body) patch.customSceneFlags = normalizeCustomSceneFlags(req.body.customSceneFlags)
+  if ('intimacyLevel' in req.body) patch.intimacyLevel = normalizeClearableIntimacyLevel(req.body.intimacyLevel)
+  if ('triggers' in req.body) patch.triggers = normalizeTriggers(req.body.triggers)
   if ('customBackgrounds' in req.body) patch.customBackgrounds = normalizeCustomBackgrounds(req.body.customBackgrounds)
   if ('items' in req.body) {
     // Validate against whichever custom flags are actually in effect after this same request —

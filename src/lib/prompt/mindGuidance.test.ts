@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { characterIntentGuidance, MOOD_VOCAB, moodGuidance, NEED_VOCAB, needGuidance } from './mindGuidance'
+import { afterglowGuidance, characterIntentGuidance, MOOD_VOCAB, moodGuidance, NEED_VOCAB, needGuidance } from './mindGuidance'
 
 describe('moodGuidance', () => {
   it('says nothing with no mood set', () => {
@@ -65,5 +65,41 @@ describe('characterIntentGuidance', () => {
 
   it('never emits a {{char}}/{{user}} macro', () => {
     expect(characterIntentGuidance('Sumire', 'wants space tonight')).not.toContain('{{')
+  })
+})
+
+describe('afterglowGuidance', () => {
+  it('uses a different register for the immediate beat than for the hours after', () => {
+    const immediate = afterglowGuidance('Sumire', 'Kai', 0)
+    const later = afterglowGuidance('Sumire', 'Kai', 2)
+    expect(immediate).not.toBe(later)
+    expect(immediate).toContain('immediately after')
+    expect(later).toContain('a short while ago')
+  })
+
+  it('interpolates real names, since styleGuidance is never macro-substituted', () => {
+    const out = afterglowGuidance('Sumire', 'Kai', 1)
+    expect(out).toContain('Sumire')
+    expect(out).toContain('Kai')
+    expect(out).not.toContain('{{char}}')
+    expect(out).not.toContain('{{user}}')
+  })
+
+  it('weaves in the source label when there is one, and reads fine without', () => {
+    expect(afterglowGuidance('Sumire', 'Kai', 0, 'their first time together')).toContain('their first time together')
+    expect(afterglowGuidance('Sumire', 'Kai', 0)).not.toContain('(after')
+  })
+
+  it("steers emotional aftermath only - explicitness stays the content dial's job", () => {
+    for (const turns of [0, 1, 3]) {
+      const out = afterglowGuidance('Sumire', 'Kai', turns).toLowerCase()
+      for (const word of ['naked', 'undress', 'body', 'sex', 'explicit']) {
+        expect(out).not.toContain(word)
+      }
+    }
+  })
+
+  it('treats a negative turn count as the immediate beat rather than producing nothing', () => {
+    expect(afterglowGuidance('Sumire', 'Kai', -1)).toBe(afterglowGuidance('Sumire', 'Kai', 0))
   })
 })

@@ -147,7 +147,11 @@ export function removeAvatar(kind: AvatarEntityKind, id: string): void {
 // Keys here are fixed expression/background ids (src/lib/vn/expressions.ts, backgrounds.ts) or a
 // gallery entry's own id, chosen from a dropdown or generated locally — never freeform user text —
 // still validated since they end up in a filename.
-const SAFE_KEY_RE = /^[a-z0-9][a-z0-9-]{0,40}$/i
+// Length only bounds the filename; what actually prevents traversal is the character class, which
+// admits no `/`, `\`, or `.` and so cannot express `..` or any path segment. Raised from 40 to 90
+// for outfit sprites (`src/lib/vn/outfits.ts`), whose keys are a composite `<outfitId>--<expression>`
+// — two ids that are each independently capped at 40 by `slugifyId`, so 82 is the real worst case.
+const SAFE_KEY_RE = /^[a-z0-9][a-z0-9-]{0,89}$/i
 
 /**
  * Same idea as resolveAvatar, but for a whole tagged set of images at once — one sprite per

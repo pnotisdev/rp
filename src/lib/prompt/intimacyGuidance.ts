@@ -12,6 +12,34 @@ import type { IntimacyDetailLevel } from '@/lib/store/useSettingsStore'
  * before this setting existed, so nobody's existing output changes unless they deliberately pick a
  * level in either direction — towards less explicit, or more.
  */
+/**
+ * The content rating actually in force for a chat: the world's own, when it has set one, else the
+ * global Settings value.
+ *
+ * `intimacyLevel` was a single global switch, which is wrong the moment someone runs more than one
+ * world — a wholesome slice-of-life world and an explicit one can't share one dial, and flipping
+ * it in Settings between chats is both tedious and easy to forget in the direction that matters.
+ * A world is the right scope: it's already where the gift catalog, intimacy catalog, scene flags,
+ * and relationship thresholds are authored.
+ *
+ * An override, not a ceiling. Clamping to the stricter of the two reads safer but breaks the
+ * actual use case: with the global left at its `'default'` (which sends no instruction at all,
+ * and is what a user who never opened the setting has), an explicit world could never be explicit.
+ * The world is the more specific, more deliberate statement of what it is, so it wins outright in
+ * both directions — a `fade_to_black` world stays fade-to-black under a global `explicit`.
+ *
+ * `undefined` on the world means "inherit", which is deliberately distinct from the world
+ * explicitly choosing `'default'` — the latter pins this world to sending no instruction even if
+ * the global setting later changes.
+ */
+export function resolveIntimacyLevel(
+  /** `null` and `undefined` both mean "inherit" — see `WorldCard.intimacyLevel` for why the wire format needs the former. */
+  worldLevel: IntimacyDetailLevel | null | undefined,
+  globalLevel: IntimacyDetailLevel,
+): IntimacyDetailLevel {
+  return worldLevel ?? globalLevel
+}
+
 export function intimacyGuidance(level: IntimacyDetailLevel): string {
   switch (level) {
     case 'fade_to_black':

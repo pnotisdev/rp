@@ -8,6 +8,8 @@ import { REPLY_LENGTH_HINTS, REPLY_LENGTH_LABELS, deriveCardReplyBand, type Repl
 import { downloadJson, downloadPng, fileToDataUrl, importCharacterFile } from '@/lib/characters/importExport'
 import { buildCharacterPack, downloadCharacterPack, importCharacterPack, parseCharacterPackFile } from '@/lib/characters/pack'
 import { DEFAULT_EXPRESSIONS, slugifyExpressionId, type CustomExpression } from '@/lib/vn/expressions'
+import { BASE_OUTFIT_ID, expressionIdsForOutfit, outfitCoverage, slugifyOutfitId, spriteKey, type Outfit } from '@/lib/vn/outfits'
+import { combinedSceneFlags } from '@/lib/dating/stage'
 import { newId } from '@/lib/id'
 import { NumberField, SelectField, TextAreaField, TextField } from '@/components/ui/Field'
 import { Button } from '@/components/ui/Button'
@@ -66,6 +68,10 @@ export function CharacterEditor({
   const [spriteUnlocks, setSpriteUnlocks] = useState<Record<string, number>>(character?.spriteUnlocks ?? {})
   const [customExpressions, setCustomExpressions] = useState<CustomExpression[]>(character?.customExpressions ?? [])
   const [newExpressionLabel, setNewExpressionLabel] = useState('')
+  const [outfits, setOutfits] = useState<Outfit[]>(character?.outfits ?? [])
+  /** Which wardrobe state the sprite grid below is currently editing. Purely editor-local — never saved. */
+  const [activeOutfit, setActiveOutfit] = useState<string>(BASE_OUTFIT_ID)
+  const [newOutfitLabel, setNewOutfitLabel] = useState('')
   const [showExpressionSetDialog, setShowExpressionSetDialog] = useState(false)
   const [giftPreferences, setGiftPreferences] = useState<Record<string, number>>(character?.giftPreferences ?? {})
   const [giftLikes, setGiftLikes] = useState<string[]>(character?.giftLikes ?? [])
@@ -108,6 +114,9 @@ export function CharacterEditor({
     setSpriteUnlocks(character?.spriteUnlocks ?? {})
     setCustomExpressions(character?.customExpressions ?? [])
     setNewExpressionLabel('')
+    setOutfits(character?.outfits ?? [])
+    setActiveOutfit(BASE_OUTFIT_ID)
+    setNewOutfitLabel('')
     setGiftPreferences(character?.giftPreferences ?? {})
     setGiftLikes(character?.giftLikes ?? [])
     setGiftDislikes(character?.giftDislikes ?? [])
@@ -180,6 +189,7 @@ export function CharacterEditor({
       avatarDataUrl,
       sprites,
       spriteUnlocks,
+      outfits,
       customExpressions: customExpressions.length ? customExpressions : null,
       giftPreferences,
       giftLikes: giftLikes.length ? giftLikes : null,
@@ -245,9 +255,16 @@ export function CharacterEditor({
     setAvatarDataUrl(await fileToDataUrl(file))
   }
 
+  /**
+   * Every sprite operation below goes through this rather than the bare expression id: art is
+   * stored per outfit (`outfits.ts`), and the base outfit's key is the bare id — so an ordinary
+   * character with no outfits reads and writes exactly the keys it always did.
+   */
+  const keyFor = (expressionId: string) => spriteKey(activeOutfit, expressionId)
+
   const handleSpritePick = async (expressionId: string, file: File) => {
     const dataUrl = await fileToDataUrl(file)
-    setSprites((s) => ({ ...s, [expressionId]: dataUrl }))
+    setSprites((s) => ({ ...s, [keyFor(expressionId)]: dataUrl }))
   }
 
   /**
@@ -262,32 +279,29 @@ export function CharacterEditor({
     for (const file of Array.from(files)) {
       const baseName = file.name.replace(/\.[^.]+$/, '').toLowerCase().trim()
       if (knownIds.has(baseName)) {
-        updates[baseName] = await fileToDataUrl(file)
+        updates[keyFor(baseName)] = await fileToDataUrl(file)
         matched.push(baseName)
       } else {
         unmatched.push(file.name)
       }
     }
     if (Object.keys(updates).length > 0) setSprites((s) => ({ ...s, ...updates }))
-    if (matched.length > 0) toastSuccess(`Matched ${matched.length} expression${matched.length === 1 ? '' : 's'}: ${matched.join(', ')}`)
+    if (matched.length > 0) toastSuccess(`Matched ${matched.length} expression${matched.length === 1 ? '' : 's'} into ${activeOutfitLabel}: ${matched.join(', ')}`)
     if (unmatched.length > 0) toastError(`No matching expression for: ${unmatched.join(', ')} — rename to match an expression id, or add a custom expression with that id first.`)
   }
 
-  const removeSprite = (expressionId: string) => {
-    setSprites((s) => {
-      const next = { ...s }
-      delete next[expressionId]
-      return next
-    })
-    setSpriteUnlocks((s) => {
-      const next = { ...s }
-      delete next[expressionId]
-      return next
-    })
+  /** Drops one expression's art in the outfit currently being edited. */
+  const removeSprite = (expressionId: string) => removeSpriteKeys([keyFor(expressionId)])
+
+  const removeSpriteKeys = (keys: string[]) => {
+    const doomed = new Set(keys)
+    const without = <T,>(map: Record<string, T>) => Object.fromEntries(Object.entries(map).filter(([k]) => !doomed.has(k)))
+    setSprites((s) => without(s))
+    setSpriteUnlocks((s) => without(s))
   }
 
   const setSpriteUnlock = (expressionId: string, minAffection: number) =>
-    setSpriteUnlocks((s) => ({ ...s, [expressionId]: Math.max(0, Math.min(100, minAffection)) }))
+    setSpriteUnlocks((s) => ({ ...s, [keyFor(expressionId)]: Math.max(0, Math.min(100, minAffection)) }))
 
   const addCustomExpression = () => {
     const label = newExpressionLabel.trim()
@@ -299,7 +313,29 @@ export function CharacterEditor({
 
   const removeCustomExpression = (expressionId: string) => {
     setCustomExpressions((list) => list.filter((e) => e.id !== expressionId))
-    removeSprite(expressionId)
+    // The slot is gone from every outfit, not just the one on screen — otherwise its art in the
+    // other outfits would be orphaned, with no grid cell left to reach or delete it from.
+    removeSpriteKeys([BASE_OUTFIT_ID, ...outfits.map((o) => o.id)].map((o) => spriteKey(o, expressionId)))
+  }
+
+  const activeOutfitLabel = outfits.find((o) => o.id === activeOutfit)?.label ?? 'Base'
+
+  const addOutfit = () => {
+    const label = newOutfitLabel.trim()
+    if (!label) return
+    const id = slugifyOutfitId(label, outfits.map((o) => o.id))
+    setOutfits((list) => [...list, { id, label }])
+    setNewOutfitLabel('')
+    setActiveOutfit(id)
+  }
+
+  const updateOutfit = (id: string, patch: Partial<Outfit>) =>
+    setOutfits((list) => list.map((o) => (o.id === id ? { ...o, ...patch } : o)))
+
+  const removeOutfit = (id: string) => {
+    setOutfits((list) => list.filter((o) => o.id !== id))
+    removeSpriteKeys(expressionIdsForOutfit(sprites, id).map((e) => spriteKey(id, e)))
+    if (activeOutfit === id) setActiveOutfit(BASE_OUTFIT_ID)
   }
 
   const setGiftPreference = (giftId: string, score: number) =>
@@ -612,6 +648,135 @@ export function CharacterEditor({
           description="Art per expression so Visual Novel mode shows the right one as the model tags each reply's mood. Blank falls back to the avatar. The small number is the warmth needed to unlock it."
           surface="bare"
         >
+          {/* Outfits (`outfits.ts`): a second axis on this grid. The grid below always edits ONE
+              outfit at a time — switching chips swaps which art the same 21 slots are showing,
+              rather than making the page 21×N cells long. "Base" is the character's original art
+              and always exists; it's what a partially-drawn outfit falls back to at render time. */}
+          <div className="mb-4 rounded-xl bg-bg-sunken/60 p-3">
+            <div className="mb-2 flex flex-wrap items-center gap-1.5">
+              <span className="mr-1 text-[11px] font-medium text-text-muted">Outfit</span>
+              {[{ id: BASE_OUTFIT_ID, label: 'Base' }, ...outfits].map((o) => {
+                const cov = outfitCoverage(sprites, o.id, allExpressions.map((e) => e.id))
+                const active = activeOutfit === o.id
+                return (
+                  <button
+                    key={o.id}
+                    type="button"
+                    onClick={() => setActiveOutfit(o.id)}
+                    aria-pressed={active}
+                    title={`${cov.drawn} of ${cov.total} expressions drawn`}
+                    className={`rounded-full px-2.5 py-1 text-[11px] leading-none transition-colors ${
+                      active ? 'bg-accent text-accent-text' : 'text-text-muted hover:bg-bg-elevated hover:text-text'
+                    }`}
+                  >
+                    {o.label}
+                    <span className={active ? 'ml-1 opacity-70' : 'ml-1 opacity-50'}>{cov.drawn}</span>
+                  </button>
+                )
+              })}
+              <input
+                value={newOutfitLabel}
+                onChange={(e) => setNewOutfitLabel(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && addOutfit()}
+                placeholder="New outfit — e.g. Swimsuit"
+                aria-label="New outfit name"
+                className="ml-1 w-44 rounded-full bg-bg px-2.5 py-1 text-[11px] text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40"
+              />
+              <Button onClick={addOutfit} disabled={!newOutfitLabel.trim()} variant="ghost" className="!px-2 !py-1 !text-[11px]">
+                <Plus size={12} strokeWidth={2} />
+              </Button>
+            </div>
+
+            {activeOutfit === BASE_OUTFIT_ID ? (
+              <p className="text-[11px] text-text-muted">
+                The character's default art. Add an outfit to give them a second look the model can switch to mid-scene —
+                any expression you don't draw for it falls back to this one.
+              </p>
+            ) : (
+              (() => {
+                const outfit = outfits.find((o) => o.id === activeOutfit)
+                if (!outfit) return null
+                const knownFlags = combinedSceneFlags(editingWorld?.customSceneFlags)
+                return (
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                    <label className="flex items-center gap-1.5 text-[11px] text-text-muted">
+                      Name
+                      <input
+                        value={outfit.label}
+                        onChange={(e) => updateOutfit(outfit.id, { label: e.target.value })}
+                        className="w-32 rounded-md bg-bg px-2 py-1 text-[11px] text-text outline-none"
+                      />
+                    </label>
+                    <label className="flex items-center gap-1.5 text-[11px] text-text-muted">
+                      Unlocks at warmth
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        value={Number(outfit.unlockAffection ?? 0)}
+                        onChange={(e) => updateOutfit(outfit.id, { unlockAffection: Number(e.target.value) || 0 })}
+                        className="w-12 rounded-md bg-bg px-1 py-1 text-center text-[11px] text-text outline-none"
+                      />
+                    </label>
+                    <label className="flex items-center gap-1.5 text-[11px] text-text-muted" title="The model is never offered this outfit — it only appears if the story unlocks it another way. For a state you don't want picked just because a reply read as suggestive.">
+                      <input
+                        type="checkbox"
+                        checked={!!outfit.manualOnly}
+                        onChange={(e) => updateOutfit(outfit.id, { manualOnly: e.target.checked })}
+                        className="accent-accent"
+                      />
+                      Never chosen by the model
+                    </label>
+                    <label className="flex items-center gap-1.5 text-[11px] text-text-muted" title="Using an explicit action from the Relationship panel (a position, toy, or activity — not a kissing spot) switches to this outfit automatically. The story tags its own way back out afterwards.">
+                      <input
+                        type="checkbox"
+                        checked={!!outfit.intimate}
+                        onChange={(e) => updateOutfit(outfit.id, { intimate: e.target.checked })}
+                        className="accent-accent"
+                      />
+                      Used for intimate scenes
+                    </label>
+                    {knownFlags.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1">
+                        <span className="text-[11px] text-text-muted">Also needs</span>
+                        {knownFlags.map((f) => {
+                          const on = (outfit.requiredFlags ?? []).includes(f.id)
+                          return (
+                            <button
+                              key={f.id}
+                              type="button"
+                              aria-pressed={on}
+                              onClick={() =>
+                                updateOutfit(outfit.id, {
+                                  requiredFlags: on
+                                    ? (outfit.requiredFlags ?? []).filter((x) => x !== f.id)
+                                    : [...(outfit.requiredFlags ?? []), f.id],
+                                })
+                              }
+                              className={`rounded-full px-2 py-0.5 text-[10px] leading-none transition-colors ${
+                                on ? 'bg-accent/20 text-accent ring-1 ring-accent/40' : 'text-text-muted hover:bg-bg-elevated'
+                              }`}
+                            >
+                              {f.label}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => removeOutfit(outfit.id)}
+                      className="ml-auto flex items-center gap-1 text-[11px] text-text-muted hover:text-danger"
+                    >
+                      <X size={11} strokeWidth={2.5} />
+                      Delete outfit
+                    </button>
+                  </div>
+                )
+              })()
+            )}
+          </div>
+
           <div className="mb-4 flex flex-wrap items-center gap-2">
             <FileButton onPick={handleBulkSpritePick} accept="image/png,image/jpeg,image/webp" multiple>
               <Plus size={14} strokeWidth={2} />
@@ -628,8 +793,8 @@ export function CharacterEditor({
             {allExpressions.map((exp) => (
               <div key={exp.id} className="group relative flex flex-col items-center gap-1">
                 <label className="portrait-frame relative flex h-20 w-full cursor-pointer items-center justify-center overflow-hidden rounded-xl border border-dashed border-border bg-bg-sunken">
-                  {sprites[exp.id] ? (
-                    <img src={sprites[exp.id]} alt="" className="h-full w-full object-cover" />
+                  {sprites[keyFor(exp.id)] ? (
+                    <img src={sprites[keyFor(exp.id)]} alt="" className="h-full w-full object-cover" />
                   ) : exp.emoji ? (
                     <span className="text-xl opacity-60">{exp.emoji}</span>
                   ) : (
@@ -648,7 +813,7 @@ export function CharacterEditor({
                     type="number"
                     min={0}
                     max={100}
-                    value={Number(spriteUnlocks[exp.id] ?? 0)}
+                    value={Number(spriteUnlocks[keyFor(exp.id)] ?? 0)}
                     onChange={(e) => setSpriteUnlock(exp.id, Number(e.target.value) || 0)}
                     className="w-9 rounded-md bg-bg-sunken px-1 py-0.5 text-center text-[11px] text-text outline-none"
                     aria-label={`Unlock warmth for ${exp.label}`}
@@ -657,11 +822,11 @@ export function CharacterEditor({
                 <div className="absolute -bottom-1 -right-1 hidden group-hover:block">
                   <GenerateImageButton
                     label={`Generate ${exp.label} with AI`}
-                    initialPrompt={form.description ? `portrait of ${form.name || 'a character'}, ${form.description}, ${exp.label.toLowerCase()} expression`.slice(0, 300) : ''}
-                    onGenerated={(dataUrl) => setSprites((s) => ({ ...s, [exp.id]: dataUrl }))}
+                    initialPrompt={form.description ? `portrait of ${form.name || 'a character'}, ${form.description}, ${exp.label.toLowerCase()} expression${activeOutfit === BASE_OUTFIT_ID ? '' : `, wearing ${activeOutfitLabel.toLowerCase()}`}`.slice(0, 300) : ''}
+                    onGenerated={(dataUrl) => setSprites((s) => ({ ...s, [keyFor(exp.id)]: dataUrl }))}
                   />
                 </div>
-                {(exp.custom || sprites[exp.id]) && (
+                {(exp.custom || sprites[keyFor(exp.id)]) && (
                   <button
                     type="button"
                     onClick={() => (exp.custom ? removeCustomExpression(exp.id) : removeSprite(exp.id))}

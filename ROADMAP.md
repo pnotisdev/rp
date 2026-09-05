@@ -15,6 +15,69 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
       out) before starting a chat.
 
 ## 1. Visual Novel presentation layer
+- [x] **Outfits — a second axis on the sprite grid.** `Character.sprites` was a flat
+      `expressionId -> url` map, so a story could go anywhere narratively while the sprite stayed
+      in the same clothes. This was the one item on the NSFW/VN wishlist that was *structurally*
+      blocked rather than merely unpolished (the intimate expressions — `sultry`, `aroused`,
+      `yearning` — already existed, as did the intimacy catalog and the explicitness setting; what
+      didn't exist was any way for what the player *sees* to change).
+      **Explicitly not image compositing.** "Layered sprites" usually means stacking transparent
+      body/clothing PNGs at authored offsets — that needs art authored as layers, which is not what
+      card packs in this ecosystem ship, and it would make every existing character
+      unrepresentable. An outfit here is a complete alternate sprite, the thing VN packs already
+      distribute, selected by a second id.
+      - **Storage, with zero migration**: composite keys inside the existing `sprites` map. The
+        base outfit keeps the bare expression id (`blush`) — byte-for-byte what every character
+        already stores, so every existing card is already a valid one-outfit character with no
+        backfill. A named outfit prefixes its id (`swimsuit--blush`). `--` is unambiguous by
+        construction, not by luck: every id on both sides comes from either `DEFAULT_EXPRESSION_IDS`
+        or `slugifyId`, and `slugifyId` collapses runs of non-alphanumerics to a *single* hyphen —
+        so no id can contain `--`, and splitting on the first occurrence is exact even when both
+        halves contain single hyphens (`school-uniform--half-smile`). Staying inside `sprites` also
+        means `resolveAvatarMap`, `pruneUnreferencedFiles` (so deleting an outfit deletes its art),
+        backup/restore, and character-delete all work untouched — a nested map would have needed
+        all four changed, and a per-outfit subdirectory would have put an author-supplied id into a
+        filesystem path, the exact shape `SAFE_KEY_RE` exists to prevent.
+      - **Resolution degrades outfit -> base -> avatar** (`resolveExpressionSprite`, now
+        outfit-aware): exact expression in the outfit, then the outfit's own `EXPRESSION_FALLBACKS`
+        chain, then the outfit's neutral, then the whole same walk in base art. An author who drew
+        only two swimsuit expressions still gets a real character for the other nineteen — wrong
+        clothes for one beat beats no character at all. Omitting the argument reproduces the
+        pre-outfit behavior exactly, which is covered by its own regression test.
+      - **Selection follows the app's "model proposes, app disposes" rule.** The scene tag gained
+        `outfit=ID`, offered only when there's more than one selectable outfit — a character with
+        only base art gets the exact instruction it always got, with no extra prompt tokens.
+        `selectableOutfitIds` withholds anything locked (affection), flag-gated, `manualOnly`, or
+        artless, and `sanitizeSceneTag` re-applies that same gate to what comes back. An invalid
+        outfit tag is *dropped* rather than coerced to base, because outfits are sticky: an absent
+        tag means "unchanged", so a bad tag leaves the character dressed as they were instead of
+        yanking them back to base mid-scene. `currentOutfitFrom` scans back for the last explicit
+        tag, so a model that simply stops repeating the field can never undress anyone.
+      - **`manualOnly`** exists specifically so an undressed state can be real art sitting on disk
+        that the model is never offered — entered deliberately, not because a reply read as
+        suggestive.
+      - Editor: the sprite grid now edits one outfit at a time behind a chip row (with per-outfit
+        coverage counts), rather than becoming 21xN cells long. Per-outfit warmth gate, required
+        scene flags, rename, "never chosen by the model", and delete. Deleting a custom expression
+        now clears it from *every* outfit, not just the visible one — otherwise its art elsewhere
+        would be orphaned with no cell left to reach it from. `.rppack` export/import carries
+        `outfits`, without which the composite keys would survive an export with no outfit to
+        belong to.
+      - Server: `normalizeOutfits` validates ids against the same character class used for sprite
+        keys (an outfit id becomes half a filename), rejects the reserved `base`, rejects ids
+        containing the separator, and dedupes. `SAFE_KEY_RE`'s length cap went 40 -> 90 to fit a
+        composite key; the character class — which is what actually prevents traversal, admitting
+        no `/`, `\`, or `.` — is unchanged.
+      **Live-verified end to end against the real database, including hostile input**: a
+      round-tripped character kept its valid outfits and composite sprite keys, wrote each to its
+      own correctly-scoped file, and dropped every attack in the same payload — a `../../` sprite
+      key, a `../../etc/passwd` outfit id, an outfit claiming the reserved `base`, one containing
+      `--`, and a duplicate id. Resolution was then re-checked against that persisted record: the
+      per-key unlock gate held at 59 vs 60 warmth, a missing outfit expression fell to the outfit's
+      own neutral, base resolution was unchanged, and the selectable set correctly went
+      `[base]` -> `[base]` -> `[base, swimsuit]` across the affection and scene-flag gates while
+      never offering the `manualOnly` outfit. Test character and its files deleted afterwards; the
+      existing character was left untouched (21 sprites, no outfits, no composite keys).
 - [x] VN dialogue mode: full-bleed scene with background, sprite, and bottom dialogue box
       (`VNStage.tsx`), with a backlog toggle.
 - [x] Character sprites & expressions: `Character.sprites`/`spriteUnlocks` per expression id,
@@ -98,6 +161,155 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
       now survives intact, removed it, saved again, confirmed the gallery is back to empty.
 
 ## 2. Dating-sim mechanics
+- [x] **World rules: an author-facing "when X, then Y" layer.** The app already *produced* every
+      signal an author would want to react to — the seven relationship dimensions, scene flags, the
+      commitment ladder, the world clock — and there was no way to hang behaviour off any of them
+      without editing code. A world author could write lore, gifts and thresholds, but not "once
+      she trusts him enough, she'll have told him about her father."
+      - **Deliberately not a scripting language.** RisuAI's CBS and AI Dungeon's scenario scripts
+        both go that way and both pay for it in sandboxing, debuggability, and a syntax nobody can
+        read six months later. This is a closed set of conditions over state the app already
+        computes, and a closed set of actions that route into systems that already exist — a rule
+        cannot do anything the app could not already do, it only decides *when*.
+      - **Conditions**: a stat at least / below a threshold (any dimension, plus `affection` and
+        derived `warmth`), a scene flag being set, the commitment ladder at or above a rung, and
+        the world clock past a given day. All must hold; an empty condition list never fires rather
+        than firing constantly.
+      - **Actions**: `remember` (writes a durable `ChatFact`, which then rides into every later
+        prompt through the existing "Remembered facts" lorebook — the one action that changes what
+        the model knows), `set_flag` (so gallery entries, outfits and other rules can all gate on
+        an authored beat), and `notify`.
+      - **One-shot by default**, remembered per *chat* rather than per world (`Chat.firedTriggerIds`)
+        so two chats in the same world progress through it independently and a fork inherits
+        exactly what its parent had fired. A one-shot cannot re-fire when a stat dips below its
+        threshold and comes back. `repeatable` is opt-in, because a repeatable rule that sets a
+        flag or writes a memory would otherwise do it on every single turn.
+      - Evaluated after the per-turn relationship update, against the state that turn just
+        *produced* rather than the state it started from — a rule keyed on "trust >= 70" fires on
+        the turn trust actually reaches 70, not one turn later. Primary character only: a world
+        rule describes the player's relationship with the character whose world it is, and firing
+        one per participant would multiply every authored beat. Nothing here calls a model, and
+        nothing here can fail a turn.
+      - Unknown condition/action kinds (data from a newer build, or hand-edited) never hold and are
+        dropped on save — silently firing an author's rule on a condition this build cannot
+        evaluate would be worse than not firing it.
+      **Live-verified against the real database, including hostile input**: a save carrying one
+      valid rule plus eight malformed ones kept exactly the valid rule and dropped every other —
+      empty conditions, empty actions, an unknown stat, an unknown condition kind, an unknown
+      action kind, a duplicate id, and a blank id — while correctly *clamping* rather than
+      rejecting an out-of-range threshold (999 -> 100). The editor then rendered both survivors
+      with their per-kind forms and plain-English summary lines ("When trust >= 70 and flag
+      \"confession\" -> remember ..., set flag \"promise\"").
+- [x] **Aftercare now echoes past its own window.** A `cold` verdict leaves `currentNeed:
+      'reassurance'` behind, so a bad aftermath keeps colouring the character afterwards through
+      machinery that already exists (`prompt/mindGuidance.ts` already injects the need every turn
+      and already decays it only when the judge reads a genuine change) rather than through a
+      second bespoke timer. The judge's own read for the turn still wins when it has one — it is
+      the fresher signal. Only `cold` leaves a need: "they were looked after" is not an unmet need,
+      and inventing a positive one would put words in the judge's mouth about a character who has
+      nothing to want.
+- [x] **Regression guard for the whole `getRelationshipTrack` bug class.** That function builds the
+      primary's track by hand-listing fields rather than spreading, so a field added to
+      `RelationshipTrack` can be persisted correctly and still be invisible to every reader — which
+      is exactly what happened to `afterglow`, leaving a whole feature inert with every test green.
+      The fixture is now typed `Required<RelationshipTrack>`, so adding a field to that type breaks
+      *compilation* of the test until the fixture covers it, and then breaks the assertion until
+      `getRelationshipTrack` actually returns it. Verified by reintroducing the original bug and
+      watching the test fail naming the missing field, then restoring the fix.
+- [x] **Aftercare: the hours after an intimate scene now count.** Intimacy was the one beat the
+      simulation dropped the moment it ended — the scene got written, a couple of stats moved on
+      the turn itself, and the next morning read like any other turn. The hours *after* are where a
+      relationship actually gets made or quietly damaged, and they are the part a dating sim can
+      model without writing a word of the content itself.
+      - **The window** (`src/lib/dating/aftercare.ts`) opens on the two signals the app already
+        *knows* rather than has to infer: an explicit intimacy action from the Relationship panel
+        (the same signal that drives the outfit switch), and an accepted "first time together". A
+        deflected or backfired ask opens nothing — there is no aftermath to judge, and scoring one
+        would punish the player twice for the same no.
+      - **Counted in the character's own replies**, not raw messages (which grow at a different
+        rate depending on how much the player types) and not world-clock time (which one action can
+        advance by a whole day, closing the window instantly). A window whose start ends up *ahead*
+        of the conversation — exactly what a rewind or a fork-from-earlier produces — reads as no
+        window at all rather than as "0 turns in", so an aftermath can't be reopened for a scene
+        that no longer exists in this timeline.
+      - **During it**, `afterglowGuidance` writes the character as someone in the aftermath, in two
+        registers: the immediate beat, and the hours afterwards carrying on with something changed
+        in them. Deliberately the one piece of character state the app sets itself rather than
+        reading back from the judge — the player initiated the scene through a real action, so
+        there is nothing to guess at. It names no physical detail at all: this steers *emotional*
+        aftermath, and the content rating stays the only thing governing explicitness (a test
+        asserts that).
+      - **At the end**, one verdict — `tender` / `awkward` / `cold` — judged over the whole window
+        and applied deterministically. It costs **no extra model call**: the ask rides along inside
+        the per-turn judge that was already going to run, exactly the way objective-task detection
+        already does. Deltas are sized between the two existing scales on purpose: louder than a
+        single ordinary turn (±2) because it is a verdict on several, quieter than a whole date
+        (±5) because it is a coda. `cold` is the sharpest and the only one that adds tension;
+        `awkward` is near-neutral, because fumbling the moment is not a betrayal and most real
+        aftermaths land there. A due window always closes even when the model returns nothing
+        usable (read as `awkward`), so the aftermath guidance can never run forever.
+      - Logged to the relationship history with its own reason line, so a later "why did trust drop
+        4" has an answer, and surfaced in the Relationship panel while open — phrased to say what is
+        true without saying what to do, since the whole point is that it scores what the player
+        chooses.
+      **A real bug the live check caught, which unit tests could not have**: `getRelationshipTrack`
+      enumerates the primary character's fields explicitly rather than spreading them, so
+      `afterglow` was persisted correctly and then invisible to *every* reader — the panel and,
+      more importantly, the prompt guidance itself. The whole feature would have shipped inert for
+      the primary character (i.e. for almost every chat) while every test still passed. Fixed by
+      adding it to both `TrackHost` and the primary branch, then re-verified in the browser: the
+      panel correctly showed "2 more replies" for a window opened 2 replies earlier in a real
+      79-reply chat, and the boundary was checked against that same chat at 0/2/3 turns in (active),
+      4 and 8 turns in (complete), and a start ahead of the conversation (inert).
+- [x] **Per-world content rating, and one dial that finally governs both surfaces.**
+      `intimacyLevel` was a single global switch, which stops working the moment someone runs more
+      than one world — a wholesome slice-of-life world and an explicit one cannot share one dial,
+      and flipping it in Settings between chats is both tedious and easy to forget in the direction
+      that matters. `WorldCard.intimacyLevel` now overrides it per world (Worlds -> Dating sim ->
+      Content rating); a world is the right scope, since gifts, the intimacy catalog, scene flags,
+      and relationship thresholds are all already authored there.
+      - **An override, not a ceiling.** Clamping to the stricter of the two reads safer but breaks
+        the actual case: the global default is `'default'`, which is what anyone who never opened
+        the setting has, so under clamping an explicit world could never be explicit. Confirmed
+        live — this machine's global setting *is* `'default'`. The world is the more specific,
+        more deliberate statement, so it wins in both directions.
+      - **`undefined` (inherit) is distinct from an explicit `'default'`**, which pins a world to
+        sending no instruction even if the global later changes.
+      - **The Relationship panel now respects the rating too.** It previously rendered all four
+        intimacy categories as clickable regardless, so a chat set to fade-to-black still handed
+        the player buttons that send an explicit action line as their own message — the dial held
+        on the prompt and not on the UI. `allowedIntimacyCategories` is the shared rule.
+      - **One deliberate asymmetry, corrected mid-implementation.** The first cut had the panel
+        match the prompt exactly, which withholds explicit categories at every level except
+        `'explicit'`. That was wrong: `intimacyGuidance`'s own contract is that `'default'` is
+        "the exact behavior every chat already had before this setting existed, so nobody's
+        existing output changes unless they deliberately pick a level" — and hiding the buttons at
+        `'default'` would have silently removed actions from every user who never opened the
+        setting. Only a rating that actually asks for *less* (`fade_to_black`/`suggestive`) now
+        takes the choice away. The two rules answer different questions — what the model may
+        volunteer unprompted, versus what the player may explicitly ask for — and a test asserts
+        that difference on purpose rather than letting a later change quietly re-align them.
+      - **Bug found and fixed while verifying**: "Use the global setting" sent
+        `intimacyLevel: undefined`, which `JSON.stringify` drops entirely, so the field never
+        reached the server, the `'intimacyLevel' in req.body` guard was false, and clearing a
+        rating silently left the old one in place. Reproduced live (explicit -> "use global" ->
+        still explicit) before fixing it to send `null`, the same convention `Chat.activeEvent`
+        and `Chat.authorNote` already use for exactly this trap.
+      - Also fixed in passing: `intimacyLevel` was never in `buildCurrentPrompt`'s dependency
+        array, so changing it left the callback closed over the old value until some other
+        dependency moved; and `customIntimacyOptions` was missing from the world **create**
+        handler's field list, so a world created with authored intimacy options in one request
+        lost them (masked because the update handler's spread restored them on the next save).
+- [x] **An explicit intimacy action now changes what the character is wearing.** Using a
+      position/toy/activity from the Relationship panel (never a kissing spot) switches the
+      character into their designated intimate outfit — `Outfit.intimate`, marked in the character
+      editor. Decided by the app rather than left to the model: this is a discrete, unambiguous,
+      player-initiated act, and the outfit it implies is usually `manualOnly` precisely so the
+      model cannot put anyone there on its own. Stamped onto the player's own message so it takes
+      effect from that moment rather than only once the reply agrees — which is why
+      `currentOutfitFrom` deliberately does not filter to character messages. One-way by design:
+      entering is a discrete signal, leaving is a narrative judgement with no comparable one, so
+      the story tags its own way back out via an ordinary `outfit=` on a later reply.
 - [x] Affection/relationship meter: `Chat.affection`/`relationshipStage`, updated by an AI-graded
       pass after each reply (`assessAffectionDelta` in `relationshipAssist.ts`), mirroring
       `detectCompletedTasks`.
@@ -3041,7 +3253,8 @@ SillyTavern docs/releases, RisuAI (CCv3, CBS/trigger system, regex scripts), Agn
       "give a gift" example action — that's already its own dedicated Bag/gift-shop flow (section
       2), a quick-reply button sending plain text isn't the right shape for it. Overlaps with
       section 12's plugin API but doesn't need it, per this item's original scoping.
-- [ ] **Trigger / event system** (RisuAI's CBS + triggers) — an author-facing "when X, then Y"
+- [x] **Trigger / event system** (RisuAI's CBS + triggers) — shipped as `src/lib/world/triggers.ts` + a Worlds -> Dating sim -> Rules editor; see section 2's entry for the design and what was deliberately left out. Original note kept below for context.
+- [~] **(original wording)** — an author-facing "when X, then Y"
       layer: on a keyword, on a stat crossing a threshold, on a scene flag, on day-advance → set a
       variable, swap the background, fire a lorebook entry, queue a message. We already produce all
       the events (`relationship_events`, `sceneFlags`, the world clock); there's just no way for an

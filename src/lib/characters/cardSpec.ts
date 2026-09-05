@@ -6,6 +6,7 @@ import type { TtsProviderId } from '@/lib/voice/ttsProviders'
 import type { ReplyLength } from '@/lib/characters/voice'
 import type { ScheduleEntry, WeatherPreferences } from '@/lib/world/calendar'
 import { DEFAULT_EXPRESSION_IDS, type CustomExpression } from '@/lib/vn/expressions'
+import type { Outfit } from '@/lib/vn/outfits'
 
 export type WorldInfoActivationMode = 'always' | 'keyword' | 'manual'
 
@@ -103,10 +104,17 @@ export interface Character {
   avatarDataUrl?: string
   /** The world this character lives in, if any — not part of the portable card spec, so it lives here rather than on `card`. */
   worldId?: string
-  /** Expression art keyed by id (src/lib/vn/expressions.ts) — falls back to the main avatar when missing. */
+  /**
+   * Expression art — falls back to the main avatar when missing. Keyed by expression id
+   * (src/lib/vn/expressions.ts) for the base outfit, or `<outfitId>--<expressionId>` for one of
+   * `outfits` below (src/lib/vn/outfits.ts). A character authored before outfits existed uses
+   * only bare keys, which is exactly the base outfit — hence no migration.
+   */
   sprites?: Record<string, string>
-  /** Minimum affection required before an expression sprite can be selected/displayed. */
+  /** Minimum affection required before an expression sprite can be selected/displayed. Keyed the same way as `sprites`, so an individual outfit's expression can carry its own threshold. */
   spriteUnlocks?: Record<string, number>
+  /** Wardrobe states beyond the base art (src/lib/vn/outfits.ts). The base outfit is implicit and never listed here. */
+  outfits?: Outfit[]
   /** Expression slots beyond the built-in default set (src/lib/vn/expressions.ts) — e.g. a signature expression unique to this character. Their sprites/unlocks live in the same `sprites`/`spriteUnlocks` maps as any default expression. */
   customExpressions?: CustomExpression[]
   /** Gift preference score per gift id (-2..3) used by the gift economy to affect relationship gain. */

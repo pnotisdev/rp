@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_EXPRESSION_IDS, EXPRESSION_FALLBACKS, resolveExpressionSprite, slugifyExpressionId } from './expressions'
+import { BASE_OUTFIT_ID } from './outfits'
 
 describe('slugifyExpressionId', () => {
   it('lowercases and hyphenates a plain label', () => {
@@ -91,5 +92,67 @@ describe('resolveExpressionSprite', () => {
     for (const fallbacks of Object.values(EXPRESSION_FALLBACKS)) {
       expect(fallbacks).not.toContain('neutral')
     }
+  })
+})
+
+describe('resolveExpressionSprite — outfits', () => {
+  const AVATAR = 'data:avatar'
+  // A character drawn before outfits existed, plus a partially-drawn swimsuit added later.
+  const sprites = {
+    neutral: 'base-neutral',
+    blush: 'base-blush',
+    angry: 'base-angry',
+    'swimsuit--neutral': 'swim-neutral',
+    'swimsuit--blush': 'swim-blush',
+  }
+
+  it('resolves within the requested outfit', () => {
+    expect(resolveExpressionSprite(sprites, {}, AVATAR, 'blush', 50, 'swimsuit')).toBe('swim-blush')
+  })
+
+  it('is byte-for-byte unchanged when no outfit is passed', () => {
+    // The backward-compatibility guarantee: every pre-outfit character and every call site that
+    // does not pass an outfit must resolve exactly as it did before this feature existed.
+    expect(resolveExpressionSprite(sprites, {}, AVATAR, 'blush', 50)).toBe('base-blush')
+    expect(resolveExpressionSprite(sprites, {}, AVATAR, 'angry', 50)).toBe('base-angry')
+  })
+
+  it('treats an explicit base outfit the same as omitting it', () => {
+    expect(resolveExpressionSprite(sprites, {}, AVATAR, 'blush', 50, BASE_OUTFIT_ID)).toBe('base-blush')
+  })
+
+  it('walks the same-family fallback chain inside the outfit before leaving it', () => {
+    // 'embarrassed' falls back to 'blush', which the swimsuit has — so it must not reach base art.
+    expect(resolveExpressionSprite(sprites, {}, AVATAR, 'embarrassed', 50, 'swimsuit')).toBe('swim-blush')
+  })
+
+  it("falls back to the outfit's own neutral before leaving the outfit", () => {
+    // 'sleepy' has an empty fallback list, so the outfit's neutral is the last in-outfit option.
+    expect(resolveExpressionSprite(sprites, {}, AVATAR, 'sleepy', 50, 'swimsuit')).toBe('swim-neutral')
+  })
+
+  it('degrades a partially-drawn outfit to base art rather than to the avatar', () => {
+    const partial = { neutral: 'base-neutral', angry: 'base-angry', 'swimsuit--sultry': 'swim-sultry' }
+    // Wrong clothes for one beat beats no character at all.
+    expect(resolveExpressionSprite(partial, {}, AVATAR, 'angry', 50, 'swimsuit')).toBe('base-angry')
+  })
+
+  it('falls through to the avatar when neither the outfit nor base has anything', () => {
+    expect(resolveExpressionSprite({ 'gala--happy': 'gala-happy' }, {}, AVATAR, 'happy', 50, 'swimsuit')).toBe(AVATAR)
+  })
+
+  it('gates each outfit sprite on its own unlock threshold', () => {
+    const unlocks = { 'swimsuit--blush': 60 }
+    expect(resolveExpressionSprite(sprites, unlocks, AVATAR, 'blush', 59, 'swimsuit')).toBe('swim-neutral')
+    expect(resolveExpressionSprite(sprites, unlocks, AVATAR, 'blush', 60, 'swimsuit')).toBe('swim-blush')
+  })
+
+  it('does not let an outfit sprite leak into a base-outfit resolution', () => {
+    const onlyOutfit = { 'swimsuit--blush': 'swim-blush' }
+    expect(resolveExpressionSprite(onlyOutfit, {}, AVATAR, 'blush', 50)).toBe(AVATAR)
+  })
+
+  it('handles an unknown outfit id by resolving base art', () => {
+    expect(resolveExpressionSprite(sprites, {}, AVATAR, 'blush', 50, 'battle-armor')).toBe('base-blush')
   })
 })

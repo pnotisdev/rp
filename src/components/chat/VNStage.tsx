@@ -21,6 +21,7 @@ import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import { parseSfxWordList } from '@/lib/text/messageSegments'
 import { sfxConfigFor } from '@/lib/text/sfx'
 import { resolveExpressionSprite } from '@/lib/vn/expressions'
+import { currentOutfitFrom } from '@/lib/vn/outfits'
 
 /** Falling petals only make sense for scenes actually outdoors — never indoors (kitchen, office, a bedroom). */
 const OUTDOOR_BACKGROUNDS = new Set(['park', 'forest', 'rooftop', 'city-street', 'beach'])
@@ -135,7 +136,19 @@ export function VNStage({
   // Guaranteed coverage (section 10): an unlocked/missing exact tag falls through to a
   // same-family expression before the plain avatar, rather than hard-swapping to the avatar the
   // moment the exact tag isn't available — see `resolveExpressionSprite`'s own doc comment.
-  const spriteUrl = resolveExpressionSprite(character?.sprites, character?.spriteUnlocks, character?.avatarDataUrl, expression, affection)
+  // Outfits (`outfits.ts`) are sticky across turns — read from the last reply that actually set
+  // one, not from this message's tag, so a model that stops repeating the field doesn't undress
+  // anyone. Resolution degrades outfit art -> base art -> avatar, so a half-drawn outfit still
+  // shows a real character.
+  const outfitId = currentOutfitFrom(messages)
+  const spriteUrl = resolveExpressionSprite(
+    character?.sprites,
+    character?.spriteUnlocks,
+    character?.avatarDataUrl,
+    expression,
+    affection,
+    outfitId,
+  )
   const sceneBackground = scene?.background ?? chat.activeEvent?.backgroundId
   const bgUnlocked = sceneBackground
     ? affection >= Number(world?.backgroundUnlocks?.[sceneBackground] ?? 0)

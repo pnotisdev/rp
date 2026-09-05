@@ -87,3 +87,57 @@ describe('buildSceneInstruction', () => {
     expect(out).not.toContain('mood')
   })
 })
+
+describe('scene tag — outfits', () => {
+  it('parses an outfit field', () => {
+    const { scene } = extractSceneTag('Hey.\n<<scene:expression=blush,background=beach,outfit=swimsuit>>')
+    expect(scene?.outfit).toBe('swimsuit')
+    expect(scene?.expression).toBe('blush')
+  })
+
+  it('leaves outfit unset when the tag omits it, so nothing changes by default', () => {
+    const { scene } = extractSceneTag('Hey.\n<<scene:expression=blush,background=beach>>')
+    expect(scene?.outfit).toBeUndefined()
+  })
+
+  it('still strips the tag from the text when an outfit is present', () => {
+    const { text } = extractSceneTag('Hey.\n<<scene:expression=blush,outfit=swimsuit>>')
+    expect(text).toBe('Hey.')
+  })
+
+  it('omits the outfit field entirely for a character with only base art', () => {
+    const out = buildSceneInstruction({ expressionIds: ['neutral'], backgroundIds: ['cafe'] })
+    expect(out).not.toContain('outfit')
+    expect(out).toContain('<<scene:expression=ID,background=ID>>')
+  })
+
+  it('omits the outfit field when base is the only selectable outfit', () => {
+    // One id is no choice at all — not worth the prompt tokens.
+    const out = buildSceneInstruction({ expressionIds: ['neutral'], backgroundIds: ['cafe'], outfitIds: ['base'] })
+    expect(out).not.toContain('outfit')
+  })
+
+  it('offers the outfit field once there is a real choice', () => {
+    const out = buildSceneInstruction({
+      expressionIds: ['neutral'],
+      backgroundIds: ['cafe'],
+      outfitIds: ['base', 'swimsuit'],
+      currentOutfitId: 'base',
+    })
+    expect(out).toContain('<<scene:expression=ID,background=ID,outfit=ID>>')
+    expect(out).toContain('Valid outfit IDs: base, swimsuit')
+    expect(out).toContain('currently wearing "base"')
+  })
+
+  it('composes correctly with mood', () => {
+    const out = buildSceneInstruction({
+      expressionIds: ['neutral'],
+      backgroundIds: ['cafe'],
+      moodIds: ['calm'],
+      outfitIds: ['base', 'swimsuit'],
+      currentOutfitId: 'swimsuit',
+    })
+    expect(out).toContain('<<scene:expression=ID,background=ID,mood=ID,outfit=ID>>')
+    expect(out).toContain('currently wearing "swimsuit"')
+  })
+})

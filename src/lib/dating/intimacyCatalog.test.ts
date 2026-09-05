@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+  allowedIntimacyCategories,
   composeIntimacyActionText,
+  isExplicitCategory,
   DEFAULT_INTIMACY_CATALOG,
   getIntimacyCatalog,
   getUnlockedIntimacyOptions,
@@ -199,5 +201,55 @@ describe('intimacyOptionsGuidance', () => {
   it('never emits a {{char}}/{{user}} macro — styleGuidance strings are not macro-substituted', () => {
     const unlocked = getUnlockedIntimacyOptions(100, 'exclusive')
     expect(intimacyOptionsGuidance(unlocked, 'explicit')).not.toContain('{{')
+  })
+})
+
+describe('allowedIntimacyCategories / isExplicitCategory', () => {
+  it('treats kissing as romantic rather than explicit, at every level', () => {
+    expect(isExplicitCategory('kissing_spot')).toBe(false)
+    for (const level of ['default', 'fade_to_black', 'suggestive', 'explicit'] as const) {
+      expect(allowedIntimacyCategories(level)).toContain('kissing_spot')
+    }
+  })
+
+  it('treats positions, toys and activities as explicit-tier', () => {
+    expect(isExplicitCategory('position')).toBe(true)
+    expect(isExplicitCategory('toy')).toBe(true)
+    expect(isExplicitCategory('activity')).toBe(true)
+  })
+
+  it('offers everything at the explicit level', () => {
+    expect(allowedIntimacyCategories('explicit')).toEqual(['kissing_spot', 'position', 'toy', 'activity'])
+  })
+
+  it('takes explicit actions away only when the rating asks for less', () => {
+    for (const level of ['fade_to_black', 'suggestive'] as const) {
+      expect(allowedIntimacyCategories(level)).toEqual(['kissing_spot'])
+    }
+  })
+
+  it("leaves 'default' untouched, because that level promises no behavior change at all", () => {
+    // `intimacyGuidance`'s own contract: 'default' is "the exact behavior every chat already had
+    // before this setting existed". Hiding actions from someone who never opened the setting would
+    // break that promise and silently remove buttons they already had.
+    expect(allowedIntimacyCategories('default')).toEqual(['kissing_spot', 'position', 'toy', 'activity'])
+  })
+
+  it('deliberately differs from the prompt gating at the default level', () => {
+    // Two different questions: what the model may volunteer unprompted (stricter) vs. what the
+    // player may explicitly ask for (only restricted by a rating that asks for less).
+    const unlocked = getUnlockedIntimacyOptions(100, 'married')
+    expect(intimacyOptionsGuidance(unlocked, 'default')).not.toContain('Positions this relationship has earned')
+    expect(allowedIntimacyCategories('default')).toContain('position')
+  })
+
+  it('agrees with the prompt wherever the rating is an actual statement of intent', () => {
+    const unlocked = getUnlockedIntimacyOptions(100, 'married')
+    for (const level of ['fade_to_black', 'suggestive', 'explicit'] as const) {
+      const text = intimacyOptionsGuidance(unlocked, level)
+      const allowed = allowedIntimacyCategories(level)
+      expect(text.includes('Positions this relationship has earned')).toBe(allowed.includes('position'))
+      expect(text.includes('Toys or props')).toBe(allowed.includes('toy'))
+    }
   })
 })
