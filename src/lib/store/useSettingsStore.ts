@@ -1,7 +1,9 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { GenerationParams } from '@/lib/api/types'
+import type { ChatCompletionSamplerParams, GenerationParams } from '@/lib/api/types'
+import { DEFAULT_CHAT_COMPLETION_SAMPLER } from '@/lib/api/types'
 import type { TtsProviderId } from '@/lib/voice/ttsProviders'
+import type { ChatBackendId } from '@/lib/api/chatBackend'
 import type { RelationshipDifficulty } from '@/lib/dating/relationshipAssist'
 import type { QuickReply, RegexScript } from '@/lib/types'
 import type { ThemePreset } from '@/lib/store/themePresets'
@@ -258,6 +260,31 @@ interface SettingsState {
     ttsRegion: string
     ttsVoice: string
   }>) => void
+
+  /**
+   * Section 8's "additional model backends". Defaults to `'koboldcpp'` so every existing user's
+   * setup is untouched unless they opt in from Settings. The other three fields only matter for
+   * `'openai-compatible'` — mirrors the flat `ttsProvider`/`ttsApiKey`/`ttsBaseUrl` shape above
+   * rather than a nested config object, for the same reason: one setter, one persisted shape.
+   */
+  chatBackend: ChatBackendId
+  chatBackendBaseUrl: string
+  chatBackendApiKey: string
+  chatBackendModel: string
+  setChatBackendConfig: (patch: Partial<{
+    chatBackend: ChatBackendId
+    chatBackendBaseUrl: string
+    chatBackendApiKey: string
+    chatBackendModel: string
+  }>) => void
+  /**
+   * The user's own framing, after live-testing section 8: "text completion and chat completion
+   * presets are different" — kept as its own object rather than folded into `sampler`
+   * (`GenerationParams`, KoboldCpp-only concepts) so switching `chatBackend` back and forth never
+   * clobbers either one's last-tuned values.
+   */
+  chatCompletionSampler: ChatCompletionSamplerParams
+  setChatCompletionSampler: (patch: Partial<ChatCompletionSamplerParams>) => void
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -409,6 +436,15 @@ export const useSettingsStore = create<SettingsState>()(
       ttsRegion: '',
       ttsVoice: '',
       setVoiceConfig: (patch) => set(patch),
+
+      chatBackend: 'koboldcpp',
+      chatBackendBaseUrl: '',
+      chatBackendApiKey: '',
+      chatBackendModel: '',
+      setChatBackendConfig: (patch) => set(patch),
+
+      chatCompletionSampler: DEFAULT_CHAT_COMPLETION_SAMPLER,
+      setChatCompletionSampler: (patch) => set((s) => ({ chatCompletionSampler: { ...s.chatCompletionSampler, ...patch } })),
     }),
     {
       name: 'rp-settings',

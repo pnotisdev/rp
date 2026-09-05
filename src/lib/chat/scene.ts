@@ -1,4 +1,4 @@
-import { KoboldClient } from '@/lib/api/kobold'
+import type { ChatBackend } from '@/lib/api/chatBackend'
 import type { Character } from '@/lib/characters/cardSpec'
 import type { ChatMessage } from '@/lib/prompt/builder'
 import type { Scene } from '@/lib/types'
@@ -62,7 +62,7 @@ const DIRECTOR_PARAMS = {
  * `undefined`, which every call site treats as "fall back to the primary."
  */
 export async function pickDirectorSpeaker(
-  client: KoboldClient,
+  client: ChatBackend,
   params: {
     roster: SceneRoster
     history: ChatMessage[]

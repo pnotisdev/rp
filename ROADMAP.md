@@ -636,14 +636,144 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
       11 new tests (390 total), typecheck + build clean. Verified live on `Heimdallr-26B-A4B`
       (Gemma): names-forced Gemma keeps Sumire fully in character across several turns, and a reply
       the model wrote with `<i>` tags stores as clean `*action*` markdown.
-- [ ] Support additional model backends alongside KoboldCpp-only `KoboldClient`
-      ([src/lib/api/kobold.ts](src/lib/api/kobold.ts)) — no generic OpenAI-compatible client
-      exists, let alone provider-specific ones. Concretely: Gemini, ChatGPT/OpenAI, Claude, and
-      OpenRouter. **Low priority per explicit user direction** — this is a local-first app built
-      around a self-hosted KoboldCpp server, so hosted-provider support is a nice-to-have, not
-      core. Same "one interface, many providers" shape as `ttsProviders.ts` and the section 11
-      image-generation backends — worth one `ChatBackend` abstraction rather than four bespoke
-      clients whenever this is picked up.
+- [x] **Additional model backends alongside KoboldCpp-only `KoboldClient`** (#121) — closes out
+      section 8. User's own framing going in: "I can't verify additional model backends since I
+      don't have any other APIs" — built and tested to that honest constraint first (documented
+      contract + mocked tests, explicitly *not* claimed as live-verified), then genuinely
+      live-verified against a real hosted provider once the user made a free OpenRouter account
+      specifically to check it — see the verification bullet below for both halves.
+      - **`ChatBackend`** ([src/lib/api/chatBackend.ts](src/lib/api/chatBackend.ts)) — the same "one
+        interface, many providers" shape `ttsProviders.ts` already uses for TTS: `generate`,
+        `generateStream`, `getEffectiveMaxContext`, `tokenCount`, `abort`, `getChatTemplate`.
+        `KoboldClient` now `implements ChatBackend` (structural conformance checked at compile
+        time, not just assumed); new **`OpenAICompatibleClient`**
+        ([src/lib/api/openaiCompatible.ts](src/lib/api/openaiCompatible.ts)) is the other
+        implementation — deliberately one client for the whole OpenAI Chat Completions wire format
+        rather than four bespoke ones, since OpenRouter alone re-exposes Claude/Gemini/etc. through
+        this exact shape: one implementation covers OpenAI, OpenRouter, Groq, Together, and local
+        OpenAI-shim servers (LM Studio, Ollama, llama.cpp's own `--api`).
+      - **Reconciling the two prompt paradigms**: every call site in this app builds one flat,
+        instruct-template-formatted `prompt: string` for KoboldCpp's text-completion API — nothing
+        like a hosted `{role, content}[]` messages array. Rather than rewriting the ~15 call sites
+        that build ad-hoc judge-call prompts as flat strings, `GenerateRequest` gained an optional
+        `messages?: ChatCompletionMessage[]` ([src/lib/api/types.ts](src/lib/api/types.ts)):
+        `KoboldClient` ignores it entirely; `OpenAICompatibleClient` sends it as-is when present,
+        else falls back to wrapping `prompt` as a single user turn — so every background judge/
+        assist call (relationship scoring, choice suggestion, objective planning, outreach
+        messages, VN scene vision, character generation/regeneration, lore suggestions) works
+        against a hosted backend completely unchanged, just without a system/user split. The one
+        call site worth that split — the main chat generation loop — gets it: `PromptBuildResult`
+        now separately exposes `systemText`/`conversationText`
+        ([src/lib/prompt/builder.ts](src/lib/prompt/builder.ts), the same two pieces already joined
+        into `prompt`), and `runGeneration` ([src/lib/hooks/useChatSession.ts](src/lib/hooks/useChatSession.ts))
+        passes them as a proper `[{role:'system',…},{role:'user',…}]` pair alongside the unchanged
+        `prompt` fallback.
+      - **The whole app respects the Settings choice, not just the main chat loop**: a new
+        `createChatBackend()` factory
+        ([src/lib/api/createChatBackend.ts](src/lib/api/createChatBackend.ts)) and
+        `useChatBackendClient()` hook
+        ([src/lib/hooks/useChatBackendClient.ts](src/lib/hooks/useChatBackendClient.ts)) replaced
+        every `new KoboldClient(baseUrl)` call site — `useChatSession.ts`, `GenerateCharacterDialog`,
+        `RegenerateFieldButton`, `ChatsPanel`/`NewChatDialog`'s greeting generation, `LorebookEditor`'s
+        "Suggest with AI", and `useOutreachTick`'s background world-tick — with the ~10 judge/assist
+        functions underneath them (`relationshipAssist.ts`, `choices.ts`, `objectiveAssist.ts`,
+        `aiAssist.ts`, `outreach.ts`, `sceneVision.ts`, `scene.ts`, `rapport.ts`) widened from a
+        `KoboldClient`-typed parameter to `ChatBackend`. The one deliberate exception:
+        `useConnectionStatus`'s Settings → Connection health check stays KoboldCpp-specific — it
+        reports the local server's own version/model/chat-template, a concept a hosted API has no
+        equivalent of.
+      - **Settings UI**: a new "Chat generation backend" section in Settings → Connection
+        ([src/components/settings/ConnectionSettings.tsx](src/components/settings/ConnectionSettings.tsx)),
+        below the existing KoboldCpp connection block — a backend picker plus base URL/API key/model
+        fields for `'openai-compatible'`, defaulting to `'koboldcpp'` so no existing setup changes
+        unless a user opts in. New settings-store fields
+        (`chatBackend`/`chatBackendBaseUrl`/`chatBackendApiKey`/`chatBackendModel`,
+        `setChatBackendConfig`) mirror the flat `ttsProvider`/`ttsApiKey`/`ttsBaseUrl` shape already
+        established for TTS.
+      - **Verification, in two honest stages**. First pass, before anyone had a real key: built to
+        the documented OpenAI Chat Completions contract plus 17 new mocked-`fetch` unit tests
+        ([src/lib/api/openaiCompatible.test.ts](src/lib/api/openaiCompatible.test.ts)) — request-body
+        shape (messages wrapping vs. pass-through, KoboldCpp-only fields correctly dropped,
+        `max_length`→`max_tokens`/`stop_sequence`→`stop` mapping), the `Authorization` header,
+        SSE-stream parsing (`delta.content` chunks, the `[DONE]` sentinel, malformed/keepalive
+        events), error handling (a parsed provider error message, an aborted-vs.-unreachable
+        distinction), and every no-op fallback (`getEffectiveMaxContext` returning the caller's
+        fallback, `tokenCount` using the same character-estimate the rest of the app already falls
+        back to, `getChatTemplate` returning null) — plus, in the running app with `fetch`
+        monkey-patched to a fake endpoint, confirming switching Settings to `'openai-compatible'`
+        and sending a real chat message produced the exact expected request shape end to end.
+        491 tests total, typecheck and build clean.
+
+        Second pass, genuinely live: the user made a free OpenRouter account specifically to check
+        this and handed over a real key for `minimax/minimax-m3:free`. Configured through the actual
+        Settings UI (not a shortcut) and run against three real turns of the seeded Sumire chat:
+        streaming worked end to end (real `tok/s`/first-token-latency/context-used numbers in the
+        HUD), replies came back fully in-character and well-formed (a tsundere architecture student
+        citing a real building — "St. Giles, Cheadle. Pugin, 1846" — then catching herself and
+        deflecting, unprompted), and both background judge calls fired correctly against the same
+        backend: relationship scoring advanced the stage tracker, and choice suggestions came back
+        contextually relevant each turn. One anomaly worth recording plainly: the very first live
+        attempt streamed to a clean `finish_reason: "stop"` with completely empty `content` — not
+        reproduced on either follow-up attempt (both fully successful on the first try), and nothing
+        in this client's own code path distinguishes attempt 1 from attempts 2–3, so a transient
+        upstream hiccup on OpenRouter's free-tier routing (the raw SSE opened with `: OPENROUTER
+        PROCESSING` keepalive comments, suggesting queuing behind other free-tier traffic) is far
+        more likely than a client bug — but it wasn't chased down further, so treat an occasional
+        silent-empty reply on a free-tier model as a known possibility, not a ruled-out one. This
+        confirms the `OpenAICompatibleClient` implementation against a real, independent
+        implementation of the wire format (OpenRouter's own gateway, not OpenAI's servers) — direct
+        OpenAI/Groq/Together/local-shim endpoints, and any paid model, remain exercised only by the
+        mocked tests above. The test conversation was rewound afterward to leave the real chat
+        history clean; the one artifact left behind is a harmless `+1` to that chat's relationship
+        score, since rewinding a message doesn't revert relationship deltas — not worth chasing for
+        one point at "near strangers."
+- [x] **Provider picker + native chat-completion generation settings** (#122) — direct follow-up to
+      #121, prompted by the user sharing SillyTavern's own Connection/preset screenshots with the
+      closing observation "text completion and chat completion presets are different." Two pieces,
+      plus a real bug the second one surfaced:
+      - **Provider picker** — `KNOWN_CHAT_PROVIDERS` ([src/lib/api/chatBackend.ts](src/lib/api/chatBackend.ts)):
+        eleven named providers (OpenAI, OpenRouter, Groq, Mistral, DeepSeek, Together AI, Fireworks
+        AI, Google AI Studio, xAI, local LM Studio, local Ollama), each vendor's own documented base
+        URL. A new "Provider" `SelectField` in Settings → Connection resolves its displayed value by
+        matching the current Base URL against this list (falls back to no selection — treated as
+        "Custom" — when it doesn't match anything, the same "derive from live state" idiom the
+        sampler/instruct-template presets already use elsewhere in Settings) and picking one just
+        fills in the Base URL field; the Model field's placeholder updates to that provider's own
+        example model id too. Honesty carried over from #121: only OpenRouter's entry has actually
+        been exercised against a real account — the rest are correct per each vendor's docs, not
+        independently re-verified here.
+      - **Native chat-completion generation settings** — a new `ChatCompletionSamplerParams`
+        ([src/lib/api/types.ts](src/lib/api/types.ts)): `temperature`/`top_p`/`frequency_penalty`/
+        `presence_penalty` plus `reasoningEffort` and `verbosity` (both `'auto'`, omitting the field
+        entirely, by default — genuinely relevant now that the live #121 test ran a reasoning model).
+        Stored as its own `chatCompletionSampler` settings-store field, deliberately separate from
+        `sampler` (the KoboldCpp `GenerationParams` shape) so switching `chatBackend` back and forth
+        never clobbers either one's tuning. A new **`ChatCompletionSamplerSection`**
+        ([src/components/settings/ChatCompletionSamplerSection.tsx](src/components/settings/ChatCompletionSamplerSection.tsx))
+        replaces the KoboldCpp "Generation" section (Starting point/Creativity-Focus-Avoid-repetition/
+        Advanced mode) in Settings → Generation whenever `chatBackend` is `'openai-compatible'`, and
+        the Quick Tuning slide-over (`TuningPanel.tsx`) gets the same swap. The KoboldCpp-only
+        Instruct-template section and the sampler-preset save/export/import section are hidden
+        entirely in this mode rather than shown irrelevant or silently no-op.
+      - **A real bug this surfaced**: building the "native" settings meant actually looking at what
+        `systemText`/`conversationText` (added in #121) contain, and it turned out the active
+        instruct template's own reserved tokens were baked in — `builder.ts`'s `fixedText` wraps the
+        whole system block in `template.systemPrefix`/`systemSuffix`, and every history turn carries
+        `template.userPrefix`/`assistantPrefix`. For ChatML that's literally the strings
+        `<|im_start|>system\n...<|im_end|>\n` inside the JSON `content` field sent to a real hosted
+        API — invisible in #121's own testing only because the live account happened to be running
+        `plain-chat`, whose affixes are empty. Fixed in `useChatSession.ts`: the template used to
+        build the prompt is forced to the token-free, name-prefixed `plain-chat` builtin whenever
+        `chatBackend` is `'openai-compatible'`, regardless of what the user has instruct-template set
+        to for KoboldCpp — a hosted chat-completion API formats its own turns and has no use for
+        KoboldCpp's turn-boundary tokens anyway. Re-verified live: with the settings' own instruct
+        template deliberately set to ChatML, three real chat-completion requests against the same
+        OpenRouter account confirmed zero `<|im_start|>`/`<|im_end|>` in either message's content.
+      3 new tests (`chatCompletionSampler.test.ts`, plus two more in `openaiCompatible.test.ts` for
+      the three new mapped fields), 495 total, typecheck and build clean. The user independently
+      hand-tested the same live setup in parallel with a real extended exchange (gift-giving,
+      several back-and-forth turns, relationship score climbing normally) — the best validation of
+      the three "live" checks so far, since it's genuine unscripted use rather than a scripted probe.
 - [x] Surface actual max-context from the server info endpoint — `KoboldClient.getEffectiveMaxContext()`
       (`kobold.ts`) calls the existing `getTrueMaxContextLength()`, caches the result per client
       instance (one extra request, not one per judge call), and falls back to `4096` if the server
@@ -2660,10 +2790,9 @@ SillyTavern docs/releases, RisuAI (CCv3, CBS/trigger system, regex scripts), Agn
       not a bit-for-bit match, since that endpoint's own "last" figure had almost certainly already
       moved on to the post-reply assist calls that fire right after a reply lands — exactly the
       attribution problem that ruled it out as this HUD's source of truth in the first place.
-- [ ] **Multiple chat-completion backends** — already section 8 and explicitly low-priority, noted
-      here only because it's the top reason an ST/Risu user on a hosted model (Claude, OpenRouter,
-      Gemini) can't adopt this app at all today. If hosted-provider support ever happens, the
-      `ChatBackend` abstraction section 8 describes is the right shape.
+- [x] **Multiple chat-completion backends** — shipped as #121 (section 8's own item) — an ST/Risu
+      user on a hosted model (Claude via OpenRouter, Gemini via OpenRouter, OpenAI directly) can now
+      point this app at it from Settings → Connection instead of needing a local KoboldCpp server.
 
 ## 15. Competitive ideas — AI Dungeon
 
@@ -3716,6 +3845,30 @@ Done so far (see checked boxes above for detail):
      relationship scoring still fires. **Still open there:** `buildCurrentPrompt`'s `contextBudget`
      still reserves the full `sampler.max_length` for output even when the band cap is smaller —
      harmless (slightly conservative on history), not yet threaded through.
+105. ~~Additional model backends alongside KoboldCpp-only `KoboldClient`~~ — shipped as #121,
+     closing out section 8 in full: a `ChatBackend` interface both `KoboldClient` and a new
+     `OpenAICompatibleClient` implement (OpenAI, OpenRouter, Groq, Together, local OpenAI-shim
+     servers), a `messages?:` field on `GenerateRequest` that degrades gracefully for every
+     call site that doesn't supply one, and a `createChatBackend()` factory that redirects the
+     whole app — not just the main chat loop — once Settings is pointed at it. Built to the
+     documented API contract plus mocked-`fetch` unit tests first, then genuinely live-verified:
+     the user made a free OpenRouter account and handed over a real key, and three real turns
+     against `minimax/minimax-m3:free` came back fully in-character with correct streaming,
+     relationship scoring, and choice suggestions — see that entry's own write-up for the one
+     anomaly worth knowing about (a single empty reply on the very first attempt, not reproduced
+     since) and exactly what's still unverified (direct OpenAI/Groq/local-shim endpoints).
+106. ~~Provider picker + native chat-completion generation settings~~ — shipped as #122, a direct
+     follow-up prompted by the user's own SillyTavern screenshots and the observation "text
+     completion and chat completion presets are different." A named-provider picker (eleven vendors'
+     documented base URLs, pre-filling Settings → Connection) plus a genuinely separate
+     `ChatCompletionSamplerParams` settings object (temperature/top_p/both penalties/reasoning
+     effort/verbosity) replacing the KoboldCpp sampler UI whenever that backend is active, in both
+     Settings → Generation and the Quick Tuning panel. Building the second piece surfaced a real bug
+     in #121's own `systemText`/`conversationText`: the active instruct template's reserved tokens
+     (ChatML's `<|im_start|>`, etc.) were leaking into the hosted API's message content verbatim,
+     invisible in #121's own test only because it happened to run on the token-free `plain-chat`
+     template. Fixed by forcing `plain-chat` for this backend regardless of the user's actual
+     instruct-template setting, and re-verified live with ChatML deliberately selected.
 
 That closes out SillyTavern's full World Info activation engine, plus the last "reasonable next batch," plus sections 10a, 10c, and 10d in full and a first
 slice each of 10b and 10f taken directly afterward since 10's own suggested phase order names them
@@ -3787,8 +3940,20 @@ now shipped, and so is ~~10b's breaking-the-ice opener + reactive portrait~~ (#1
 10b as originally scoped. ~~Multi-character relationship tracking~~ (#118) is shipped too — a
 non-primary participant is a tracked relationship now, not a scene NPC — and once that gave manual
 group chats a real reason to see more use, ~~the `Scene` entity + turn policies beyond manual~~
-(#120, section 4) followed in the same session. What's left in section 10 now is just section 12's
-living-world core — see section 10's own "Suggested phase order" for how to sequence that.
+(#120, section 4) followed in the same session. ~~Additional model backends~~ (#121) closes out
+section 8 in full — an `OpenAICompatibleClient` alongside `KoboldClient` behind one `ChatBackend`
+interface, redirecting the whole app (not just the main chat loop) once Settings points at it;
+built and mock-tested to the documented API contract first, then genuinely live-verified once the
+user made a free OpenRouter account for exactly that purpose — three real turns against
+`minimax/minimax-m3:free` came back in-character with working streaming, relationship scoring, and
+choice suggestions. ~~A provider picker and native chat-completion generation settings~~ (#122)
+followed immediately as a direct SillyTavern-inspired follow-up, and caught a real bug along the
+way: the active instruct template's reserved tokens (ChatML's `<|im_start|>`, etc.) were leaking
+verbatim into the hosted API's message content, invisible in #121's own test only because it
+happened to run on the token-free `plain-chat` template — now forced for this backend regardless of
+the user's actual instruct-template setting, re-verified live with ChatML deliberately selected.
+What's left in section 10 now is just section 12's living-world core — see section 10's own
+"Suggested phase order" for how to sequence that.
 
 Section 15 (added from a user-supplied AI Dungeon competitive analysis) is a separate set of ideas,
 not yet folded into this priority order. The high-contrast theme preset (#73) and raw-vs-processed

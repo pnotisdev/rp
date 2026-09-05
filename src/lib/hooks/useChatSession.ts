@@ -4,7 +4,8 @@ import { charactersApi, chatFactsApi, chatsApi, instructTemplatesApi, messagesAp
 import { newId } from '@/lib/id'
 import type { AuthorNote, Chat, CommitmentStatus, DateEventCard, MessageIntent, ObjectiveTask, RelationshipStage, StoredMessage, WorldCard } from '@/lib/types'
 import { collectImageBase64, composeMessageText, type PendingAttachment } from '@/lib/attachments'
-import { KoboldClient, makeGenKey } from '@/lib/api/kobold'
+import { makeGenKey } from '@/lib/api/kobold'
+import { useChatBackendClient } from '@/lib/hooks/useChatBackendClient'
 import { buildPrompt, estimateTokens, type ChatMessage } from '@/lib/prompt/builder'
 import { SUMMARY_MAX_LENGTH, summarizeMessages } from '@/lib/prompt/summarize'
 import { generateChoices } from '@/lib/prompt/choices'
@@ -51,7 +52,8 @@ import { defaultGiftInventory, getGiftCatalog, giftById, giftImpactBase } from '
 import { nextRoundRobinSpeaker, parseMention, pickDirectorSpeaker, rosterFrom } from '@/lib/chat/scene'
 import { itemById } from '@/lib/dating/items'
 import { buildRelationshipDescription } from '@/lib/dating/relationshipDescription'
-import { resolveInstructTemplate } from '@/lib/prompt/instructTemplates'
+import { getInstructTemplate, resolveInstructTemplate } from '@/lib/prompt/instructTemplates'
+import { chatCompletionSamplerToRequest } from '@/lib/api/chatCompletionSampler'
 import { extractSceneTag, stripSceneTagForDisplay, type SceneTag } from '@/lib/vn/sceneTag'
 import { buildSlopAvoidanceNote, cleanModelOutput, trimToLastSentence } from '@/lib/text/slop'
 import { normalizeRpMarkup } from '@/lib/text/messageSegments'
@@ -253,8 +255,9 @@ export interface GenerationStats {
 }
 
 export function useChatSession(chatId: string | null) {
-  const baseUrl = useSettingsStore((s) => s.baseUrl)
   const sampler = useSettingsStore((s) => s.sampler)
+  const chatBackend = useSettingsStore((s) => s.chatBackend)
+  const chatCompletionSampler = useSettingsStore((s) => s.chatCompletionSampler)
   const instructTemplateId = useSettingsStore((s) => s.instructTemplateId)
   const autoSummarize = useSettingsStore((s) => s.autoSummarize)
   const keepRecentMessages = useSettingsStore((s) => s.keepRecentMessages)
@@ -273,7 +276,7 @@ export function useChatSession(chatId: string | null) {
   const globalPostHistory = useSettingsStore((s) => s.postHistoryInstructions)
   const promptSections = useSettingsStore((s) => s.promptSections)
   const setActiveChatId = useSettingsStore((s) => s.setActiveChatId)
-  const client = useMemo(() => new KoboldClient(baseUrl), [baseUrl])
+  const client = useChatBackendClient()
   const customInstructTemplates = useApiQuery('instruct-templates', () => instructTemplatesApi.list(), []) ?? []
 
   const chat = useApiQuery('chats', () => (chatId ? chatsApi.get(chatId) : Promise.resolve(undefined)), [chatId])
@@ -283,7 +286,15 @@ export function useChatSession(chatId: string | null) {
     [chat?.characterId],
   )
   // A character's own override wins over the global Settings -> Generation default; empty/unset falls back.
-  const template = resolveInstructTemplate(character?.instructTemplateId || instructTemplateId, customInstructTemplates)
+  // A hosted chat-completion backend formats its own turns — the active instruct template's own
+  // reserved tokens (ChatML's `<|im_start|>`, Llama 3's `<|eot_id|>`, ...) have no meaning there and
+  // would otherwise leak into the system/user message content as literal text (only `plain-chat`'s
+  // empty affixes happen to hide this). Force the token-free, name-prefixed `plain-chat` template
+  // for this backend instead; KoboldCpp keeps using whatever the user actually has configured.
+  const template =
+    chatBackend === 'openai-compatible'
+      ? getInstructTemplate('plain-chat')
+      : resolveInstructTemplate(character?.instructTemplateId || instructTemplateId, customInstructTemplates)
   // Extra characters in a group chat, beyond the primary — [] for today's ordinary single-character
   // chats. Fetched by id rather than a batched endpoint since the character list is small (a local,
   // single-user app) and this reuses the exact same reactive `characters` resource as `character` above.
@@ -1260,6 +1271,17 @@ export function useChatSession(chatId: string | null) {
           const dynamicStops = ['<START>', `\n${personaName}:`, `\n${speaker.card.name}:`]
           const stopSequence = [...new Set([...template.stopSequences, ...(sampler.stop_sequence ?? []), ...dynamicStops])]
 
+          // The KoboldCpp sampler shape (top_k/min_p/rep_pen/DRY/mirostat/...) has no meaning for a
+          // chat-completion backend — swap in the chat-completion-native params instead
+          // (temperature/top_p/penalties/reasoning_effort/verbosity, from their own separately
+          // tuned settings object). `max_context_length` stays from `sampler` either way: it's what
+          // sized `buildCurrentPrompt`'s context budget above, even though only KoboldCpp's own
+          // request actually reads the field itself.
+          const generationParams =
+            chatBackend === 'openai-compatible'
+              ? { max_context_length: sampler.max_context_length, ...chatCompletionSamplerToRequest(chatCompletionSampler) }
+              : sampler
+
           const genStartedAt = performance.now()
           let firstTokenAt: number | null = null
           let streamedTokenCount = 0
@@ -1268,10 +1290,19 @@ export function useChatSession(chatId: string | null) {
           try {
             newText = await client.generateStream(
               {
-                ...sampler,
+                ...generationParams,
                 max_length: effectiveMaxLength,
                 stop_sequence: stopSequence,
                 prompt: built.prompt,
+                // Section 8's "additional model backends": KoboldClient ignores this entirely
+                // (it only ever reads `prompt`); OpenAICompatibleClient uses it instead of
+                // wrapping `prompt` as a single user turn, giving a hosted chat-completion
+                // backend a proper system/user split for the one call site worth the effort —
+                // the main generation loop, not every background judge/assist call.
+                messages: [
+                  { role: 'system', content: built.systemText },
+                  { role: 'user', content: built.conversationText },
+                ],
                 genkey,
                 images: images.length ? images : undefined,
               },
@@ -1295,7 +1326,18 @@ export function useChatSession(chatId: string | null) {
             // Fall back to non-streaming generate (some builds/proxies block SSE).
             console.warn('Streaming generation failed, falling back to non-streaming:', streamErr)
             newText = await client.generate(
-              { ...sampler, max_length: effectiveMaxLength, stop_sequence: stopSequence, prompt: built.prompt, genkey, images: images.length ? images : undefined },
+              {
+                ...generationParams,
+                max_length: effectiveMaxLength,
+                stop_sequence: stopSequence,
+                prompt: built.prompt,
+                messages: [
+                  { role: 'system', content: built.systemText },
+                  { role: 'user', content: built.conversationText },
+                ],
+                genkey,
+                images: images.length ? images : undefined,
+              },
               abort.signal,
             )
           }

@@ -2,11 +2,14 @@ import { useState } from 'react'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import { useConnectionStatus } from '@/lib/hooks/useConnectionStatus'
 import { BUILTIN_INSTRUCT_TEMPLATES } from '@/lib/prompt/instructTemplates'
-import { TextField } from '@/components/ui/Field'
+import { CHAT_BACKEND_LABELS, KNOWN_CHAT_PROVIDERS, type ChatBackendId } from '@/lib/api/chatBackend'
+import { TextField, SelectField } from '@/components/ui/Field'
 import { Section } from '@/components/ui/Section'
 import { SettingsPage } from '@/components/ui/SettingsPage'
 import { Button } from '@/components/ui/Button'
 import { toastSuccess } from '@/lib/store/useToastStore'
+
+const CHAT_BACKENDS = Object.keys(CHAT_BACKEND_LABELS) as ChatBackendId[]
 
 const STATUS_DOT = { online: 'bg-success', offline: 'bg-danger', checking: 'bg-warning' } as const
 const STATUS_LABEL = { online: 'Connected', offline: 'Not reachable', checking: 'Checking…' } as const
@@ -17,6 +20,11 @@ export function ConnectionSettings() {
   const setBaseUrl = useSettingsStore((s) => s.setBaseUrl)
   const instructTemplateId = useSettingsStore((s) => s.instructTemplateId)
   const setInstructTemplateId = useSettingsStore((s) => s.setInstructTemplateId)
+  const chatBackend = useSettingsStore((s) => s.chatBackend)
+  const chatBackendBaseUrl = useSettingsStore((s) => s.chatBackendBaseUrl)
+  const chatBackendApiKey = useSettingsStore((s) => s.chatBackendApiKey)
+  const chatBackendModel = useSettingsStore((s) => s.chatBackendModel)
+  const setChatBackendConfig = useSettingsStore((s) => s.setChatBackendConfig)
   const [draft, setDraft] = useState(baseUrl)
   const { status, model, version, maxContext, detectedTemplateId } = useConnectionStatus(baseUrl)
 
@@ -25,6 +33,12 @@ export function ConnectionSettings() {
   const detected = detectedTemplateId ? BUILTIN_INSTRUCT_TEMPLATES.find((t) => t.id === detectedTemplateId) : undefined
   const templateMismatch =
     detected && BUILTIN_IDS.has(instructTemplateId) && detectedTemplateId !== instructTemplateId ? detected : undefined
+
+  // Derived from the current base URL rather than stored separately (same "match against known
+  // values, fall back to custom" idiom as the sampler/instruct-template presets elsewhere in
+  // Settings) — picking a provider is a one-time convenience fill-in, not a lock; editing the Base
+  // URL afterward is exactly what quietly falls back to "Custom" here.
+  const matchedProvider = KNOWN_CHAT_PROVIDERS.find((p) => p.baseUrl === chatBackendBaseUrl)
 
   return (
     <SettingsPage>
@@ -81,6 +95,77 @@ export function ConnectionSettings() {
               </Button>
             </div>
           </div>
+        )}
+      </Section>
+
+      <Section
+        title="Chat generation backend"
+        description="Everything above is KoboldCpp's own connection — used whenever the backend below is left on 'KoboldCpp (local)'. Switching this to an OpenAI-compatible provider redirects generation (the main chat, and every background judge/assist call) there instead."
+        surface="bare"
+      >
+        <SelectField
+          label="Backend"
+          value={chatBackend}
+          onChange={(e) => setChatBackendConfig({ chatBackend: e.target.value as ChatBackendId })}
+        >
+          {CHAT_BACKENDS.map((id) => (
+            <option key={id} value={id}>
+              {CHAT_BACKEND_LABELS[id]}
+            </option>
+          ))}
+        </SelectField>
+
+        {chatBackend === 'openai-compatible' && (
+          <>
+            <p className="mb-2 text-xs text-text-muted">
+              Any server that speaks the OpenAI Chat Completions format. Live-verified against a real
+              account: three real turns against OpenRouter's free <code className="font-mono">minimax/minimax-m3:free</code>{' '}
+              came back in character with working streaming, relationship scoring, and choice
+              suggestions (ROADMAP.md #121). The rest of the list below is each vendor's own
+              documented endpoint, not independently re-checked here — worth a quick sanity check on
+              your first real reply with a new one.
+            </p>
+            <SelectField
+              label="Provider"
+              value={matchedProvider?.id ?? 'custom'}
+              onChange={(e) => {
+                const provider = KNOWN_CHAT_PROVIDERS.find((p) => p.id === e.target.value)
+                if (provider) setChatBackendConfig({ chatBackendBaseUrl: provider.baseUrl })
+              }}
+            >
+              {!matchedProvider && <option value="custom">Custom</option>}
+              {KNOWN_CHAT_PROVIDERS.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                </option>
+              ))}
+            </SelectField>
+            <TextField
+              label="Base URL"
+              value={chatBackendBaseUrl}
+              onChange={(e) => setChatBackendConfig({ chatBackendBaseUrl: e.target.value })}
+              placeholder="e.g. https://api.openai.com/v1 or https://openrouter.ai/api/v1"
+            />
+            <TextField
+              label="API key"
+              type="password"
+              value={chatBackendApiKey}
+              onChange={(e) => setChatBackendConfig({ chatBackendApiKey: e.target.value })}
+            />
+            <TextField
+              label="Model"
+              value={chatBackendModel}
+              onChange={(e) => setChatBackendConfig({ chatBackendModel: e.target.value })}
+              placeholder={matchedProvider ? `e.g. ${matchedProvider.modelExample}` : 'e.g. gpt-4o-mini'}
+            />
+            <p className="mt-2 text-xs text-text-muted">
+              Keys are stored only in this browser and sent directly to the base URL above — never
+              through any other server. Context-size and tokenizer figures elsewhere in the app fall
+              back to an estimate for this backend, since hosted providers don't expose either. Temperature,
+              top P, penalties, and reasoning effort for this backend live in Settings → Generation,
+              separate from the KoboldCpp sampler above.
+            </p>
+          </>
         )}
       </Section>
     </SettingsPage>

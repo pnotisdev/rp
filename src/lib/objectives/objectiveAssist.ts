@@ -1,4 +1,4 @@
-import { KoboldClient } from '@/lib/api/kobold'
+import type { ChatBackend } from '@/lib/api/chatBackend'
 import { parseLenientJson } from '@/lib/jsonRepair'
 import type { AiLoreSubject } from '@/lib/characters/aiAssist'
 
@@ -19,7 +19,7 @@ const GENERATE_PARAMS = {
 
 /** Breaks a user-entered objective into a concrete task list. */
 export async function generateTasks(
-  client: KoboldClient,
+  client: ChatBackend,
   objectiveTitle: string,
   objectiveDescription: string,
   character: AiLoreSubject,
@@ -42,7 +42,7 @@ export async function generateTasks(
 
 /** Proposes a plausible objective for this roleplay, grounded in the character and persona. */
 export async function suggestObjective(
-  client: KoboldClient,
+  client: ChatBackend,
   character: AiLoreSubject,
   persona: AiLoreSubject,
 ): Promise<{ title: string; description: string }> {
@@ -71,7 +71,7 @@ export async function suggestObjective(
  * the user checks it off by hand later.
  */
 export async function detectCompletedTasks(
-  client: KoboldClient,
+  client: ChatBackend,
   replyText: string,
   pendingTasks: string[],
 ): Promise<number[]> {

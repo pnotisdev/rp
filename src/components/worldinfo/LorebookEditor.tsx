@@ -2,8 +2,7 @@ import { useState } from 'react'
 import { ChevronDown, Plus, Sparkles, X } from 'lucide-react'
 import type { Lorebook, LorebookEntry, WorldInfoActivationMode } from '@/lib/characters/cardSpec'
 import { suggestLoreEntries, type AiLoreSubject } from '@/lib/characters/aiAssist'
-import { KoboldClient } from '@/lib/api/kobold'
-import { useSettingsStore } from '@/lib/store/useSettingsStore'
+import { useChatBackendClient } from '@/lib/hooks/useChatBackendClient'
 import { errorMessage, toastError } from '@/lib/store/useToastStore'
 import { anyKeyIsRisky } from '@/lib/text/regexSafety'
 import { Button } from '@/components/ui/Button'
@@ -42,7 +41,7 @@ export function LorebookEditor({
   /** When editing a character's or world's own lore, pass it so "Suggest with AI" can ground its proposals. */
   aiContext?: AiLoreSubject
 }) {
-  const baseUrl = useSettingsStore((s) => s.baseUrl)
+  const client = useChatBackendClient()
   const [suggesting, setSuggesting] = useState(false)
   const [expanded, setExpanded] = useState<Set<number>>(new Set())
 
@@ -62,7 +61,6 @@ export function LorebookEditor({
     if (!aiContext || suggesting) return
     setSuggesting(true)
     try {
-      const client = new KoboldClient(baseUrl)
       const suggestions = await suggestLoreEntries(client, aiContext, book.entries)
       if (suggestions.length === 0) throw new Error("The model didn't propose any usable entries — try again.")
       let nextBook = book

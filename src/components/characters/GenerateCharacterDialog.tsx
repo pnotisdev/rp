@@ -1,8 +1,7 @@
 import { useState } from 'react'
-import { KoboldClient } from '@/lib/api/kobold'
+import { useChatBackendClient } from '@/lib/hooks/useChatBackendClient'
 import { normalizeCardJson, type CharacterCardData } from '@/lib/characters/cardSpec'
 import { parseLenientJson } from '@/lib/jsonRepair'
-import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import { errorMessage, toastError } from '@/lib/store/useToastStore'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
@@ -21,7 +20,7 @@ export function GenerateCharacterDialog({
   onGenerated: (card: CharacterCardData) => void
   onClose: () => void
 }) {
-  const baseUrl = useSettingsStore((s) => s.baseUrl)
+  const client = useChatBackendClient()
   const [brief, setBrief] = useState('')
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState(false)
@@ -33,7 +32,6 @@ export function GenerateCharacterDialog({
     setFailed(false)
     setRawOutput('')
     try {
-      const client = new KoboldClient(baseUrl)
       const prompt = `${SYSTEM_INSTRUCTION}\n\nBrief: ${brief.trim()}\n\nJSON:`
       const text = await client.generate({
         prompt,

@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { charactersApi, chatsApi, instructTemplatesApi, messagesApi, personasApi, worldsApi } from '@/lib/api/client'
 import { newId } from '@/lib/id'
-import { KoboldClient } from '@/lib/api/kobold'
+import { createChatBackend } from '@/lib/api/createChatBackend'
 import { evaluateOutreach, generateOutreachMessage } from '@/lib/dating/outreach'
 import { resolveInstructTemplate } from '@/lib/prompt/instructTemplates'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
@@ -53,7 +53,14 @@ async function runTick(baseUrl: string) {
     )
   if (candidates.length === 0) return
 
-  const client = new KoboldClient(baseUrl)
+  const backendSettings = useSettingsStore.getState()
+  const client = createChatBackend({
+    baseUrl,
+    chatBackend: backendSettings.chatBackend,
+    chatBackendBaseUrl: backendSettings.chatBackendBaseUrl,
+    chatBackendApiKey: backendSettings.chatBackendApiKey,
+    chatBackendModel: backendSettings.chatBackendModel,
+  })
   const worldsById = new Map<string, WorldCard | undefined>()
   const customTemplates = await instructTemplatesApi.list().catch(() => [])
 

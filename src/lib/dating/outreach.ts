@@ -6,7 +6,7 @@ import { computeWarmth, getRelationshipStats } from '@/lib/dating/stage'
 import { buildRelationshipDescription } from '@/lib/dating/relationshipDescription'
 import { buildPrompt, estimateTokens, type ChatMessage } from '@/lib/prompt/builder'
 import type { InstructTemplate } from '@/lib/prompt/instructTemplates'
-import type { KoboldClient } from '@/lib/api/kobold'
+import type { ChatBackend } from '@/lib/api/chatBackend'
 import type { GenerationParams } from '@/lib/api/types'
 import { truncateAtStrayTurnMarker } from '@/lib/text/slop'
 
@@ -133,7 +133,7 @@ export interface GenerateOutreachParams {
  * follow-up once the core loop is verified live, not an oversight. The model's only job is to
  * write in-character text; whether/why to reach out was already decided by `evaluateOutreach`.
  */
-export async function generateOutreachMessage(client: KoboldClient, params: GenerateOutreachParams): Promise<string> {
+export async function generateOutreachMessage(client: ChatBackend, params: GenerateOutreachParams): Promise<string> {
   const { character, chat, world } = params
   const worldDescription = world
     ? [

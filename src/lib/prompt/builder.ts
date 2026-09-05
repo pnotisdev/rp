@@ -126,6 +126,15 @@ export interface PromptBuildResult {
   droppedForGroup: LorebookEntry[]
   /** Sticky/cooldown state to persist for the next turn — undefined when `worldInfoState` wasn't passed in. */
   worldInfoState?: WorldInfoRuntimeState
+  /**
+   * Section 8's "additional model backends": the exact same two pieces that get joined (with a
+   * blank line) into `prompt` above, exposed separately so a caller can hand them to a hosted
+   * chat-completion backend as a proper `{role: 'system', ...}` / `{role: 'user', ...}` pair
+   * instead of one flat text-completion string. `prompt` itself is unchanged either way — nothing
+   * about the existing KoboldCpp path reads these two fields at all.
+   */
+  systemText: string
+  conversationText: string
 }
 
 export { estimateTokens }
@@ -319,6 +328,8 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
     droppedForBudget,
     droppedForGroup,
     worldInfoState,
+    systemText: fixedText,
+    conversationText: tail,
   }
 }
 

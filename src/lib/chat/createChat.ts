@@ -1,5 +1,5 @@
 import { chatsApi, messagesApi } from '@/lib/api/client'
-import type { KoboldClient } from '@/lib/api/kobold'
+import type { ChatBackend } from '@/lib/api/chatBackend'
 import type { Character } from '@/lib/characters/cardSpec'
 import { substituteMacros } from '@/lib/characters/macros'
 import { computeWarmth, getRelationshipStats, relationshipMilestonesFor, relationshipStageForWarmth } from '@/lib/dating/stage'
@@ -36,7 +36,7 @@ export interface CreateChatOptions {
   /** Index into `availableGreetings(character)` — defaults to the card's own opening line (index 0). Pass -1 to start with no opening message at all. */
   greetingIndex?: number
   /** Optional — when given, fires a best-effort `detectGreetingScene` pass so the static opening greeting gets an expression/background tag too (see that function's doc comment). Omit from a context with no client handy; the chat still works fine, VN mode just starts on a placeholder until the first real reply. */
-  client?: KoboldClient
+  client?: ChatBackend
 }
 
 /**

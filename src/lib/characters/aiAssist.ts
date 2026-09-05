@@ -1,5 +1,5 @@
 import type { CharacterCardData, LorebookEntry } from './cardSpec'
-import { KoboldClient } from '@/lib/api/kobold'
+import type { ChatBackend } from '@/lib/api/chatBackend'
 import { parseLenientJson } from '@/lib/jsonRepair'
 
 const FIELD_LABELS: Record<string, string> = {
@@ -32,7 +32,7 @@ function contextSummary(subject: AiLoreSubject, omitField?: string): string {
 
 /** Rewrites a single card field (keeping it consistent with the rest), rather than the whole card. */
 export async function regenerateCardField(
-  client: KoboldClient,
+  client: ChatBackend,
   character: CharacterCardData,
   fieldKey: 'description' | 'personality' | 'scenario',
   hint?: string,
@@ -76,7 +76,7 @@ export interface SuggestedLoreEntry {
 
 /** Proposes new world-info entries grounded in a character or world card, avoiding whatever's already in the book. */
 export async function suggestLoreEntries(
-  client: KoboldClient,
+  client: ChatBackend,
   subject: AiLoreSubject,
   existingEntries: LorebookEntry[],
   count = 3,

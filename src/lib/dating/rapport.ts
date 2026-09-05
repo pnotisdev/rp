@@ -8,7 +8,7 @@
  * returns one label, nothing else. It never touches affection or the tracked dimensions.
  */
 
-import type { KoboldClient } from '@/lib/api/kobold'
+import type { ChatBackend } from '@/lib/api/chatBackend'
 import { parseLenientJson } from '@/lib/jsonRepair'
 import type { ChatMessage } from '@/lib/prompt/builder'
 import type { RapportRead, RapportTrajectory } from '@/lib/types'
@@ -80,7 +80,7 @@ const RAPPORT_PARAMS = {
  * failure — the caller just keeps showing the previous read rather than flashing an error mid-scene.
  */
 export async function assessRapport(
-  client: KoboldClient,
+  client: ChatBackend,
   params: {
     /** The date's own transcript so far, oldest first — the caller passes a short tail, not the whole thing. */
     transcript: ChatMessage[]

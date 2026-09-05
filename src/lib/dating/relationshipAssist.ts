@@ -1,4 +1,4 @@
-import { KoboldClient } from '@/lib/api/kobold'
+import type { ChatBackend } from '@/lib/api/chatBackend'
 import { parseLenientJson } from '@/lib/jsonRepair'
 import type { Character } from '@/lib/characters/cardSpec'
 import type { CustomSceneFlag, DateEventCard, RelationshipDimension, SceneFlag } from '@/lib/types'
@@ -116,7 +116,7 @@ export interface RelationshipMoment {
  * should move.
  */
 export async function assessRelationshipMoment(
-  client: KoboldClient,
+  client: ChatBackend,
   params: {
     history: ChatMessage[]
     latestReply: string
@@ -174,7 +174,7 @@ export async function assessRelationshipMoment(
  * Checks whether any locked gallery entries seem to have been earned by the latest moment.
  */
 export async function detectGalleryUnlocks(
-  client: KoboldClient,
+  client: ChatBackend,
   params: {
     character: Character
     locked: { id: string; title: string; unlockAffection: number; unlockHint?: string }[]
@@ -222,7 +222,7 @@ export interface DateOutcome {
  * legitimately score near-zero across the board for a date that went nowhere.
  */
 export async function assessDateOutcome(
-  client: KoboldClient,
+  client: ChatBackend,
   params: {
     transcript: ChatMessage[]
     eventTitle: string
@@ -301,7 +301,7 @@ export async function assessDateOutcome(
 
 /** Suggests a themed event card that can be spun into an objective-driven scene. */
 export async function suggestDateEvent(
-  client: KoboldClient,
+  client: ChatBackend,
   params: {
     characterName: string
     characterDescription?: string
@@ -356,7 +356,7 @@ export async function suggestDateEvent(
  * outcome, a made-up one that contradicts the card is not.
  */
 export async function draftHiddenAgenda(
-  client: KoboldClient,
+  client: ChatBackend,
   params: {
     charName: string
     charPersonality?: string
@@ -406,7 +406,7 @@ export interface CommitmentAskOutcome {
  * coin flip or a hardcoded rule for what counts as "badly timed."
  */
 export async function assessCommitmentAsk(
-  client: KoboldClient,
+  client: ChatBackend,
   params: {
     history: ChatMessage[]
     charName: string

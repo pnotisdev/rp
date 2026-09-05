@@ -16,6 +16,7 @@ import {
   paramsToRepetition,
   repetitionToParams,
 } from '@/lib/prompt/samplerSimpleMode'
+import { REASONING_EFFORT_OPTIONS, VERBOSITY_OPTIONS } from '@/lib/api/chatCompletionSampler'
 import { IconButton } from '@/components/ui/IconButton'
 import { Slider } from '@/components/ui/Slider'
 import { TextAreaField } from '@/components/ui/Field'
@@ -53,6 +54,9 @@ export function TuningPanel({
 }) {
   const sampler = useSettingsStore((s) => s.sampler)
   const setSampler = useSettingsStore((s) => s.setSampler)
+  const chatBackend = useSettingsStore((s) => s.chatBackend)
+  const chatCompletionSampler = useSettingsStore((s) => s.chatCompletionSampler)
+  const setChatCompletionSampler = useSettingsStore((s) => s.setChatCompletionSampler)
   const instructTemplateId = useSettingsStore((s) => s.instructTemplateId)
   const setInstructTemplateId = useSettingsStore((s) => s.setInstructTemplateId)
   const systemPrompt = useSettingsStore((s) => s.systemPrompt)
@@ -117,97 +121,186 @@ export function TuningPanel({
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-5">
-        <div className="mb-5">
-          <span className="mb-1.5 block text-sm font-semibold text-text">Sampler</span>
-          <div className="mb-3">
-            <div className="mb-1.5 text-xs font-medium text-text-muted">Starting point</div>
-            <select
-              value={samplerSelectValue}
-              onChange={(e) => onSelectSamplerPreset(e.target.value)}
-              className={SELECT_CLASS}
-            >
-              <optgroup label="Built-in">
-                {BUILTIN_PRESETS.map((p) => (
-                  <option key={p.id} value={`builtin:${p.id}`}>
-                    {p.name}
-                  </option>
-                ))}
-              </optgroup>
-              {savedPresets.length > 0 && (
-                <optgroup label="Your presets">
-                  {savedPresets.map((p) => (
-                    <option key={p.id} value={`saved:${p.id}`}>
+        {chatBackend === 'koboldcpp' ? (
+          <div className="mb-5">
+            <span className="mb-1.5 block text-sm font-semibold text-text">Sampler</span>
+            <div className="mb-3">
+              <div className="mb-1.5 text-xs font-medium text-text-muted">Starting point</div>
+              <select
+                value={samplerSelectValue}
+                onChange={(e) => onSelectSamplerPreset(e.target.value)}
+                className={SELECT_CLASS}
+              >
+                <optgroup label="Built-in">
+                  {BUILTIN_PRESETS.map((p) => (
+                    <option key={p.id} value={`builtin:${p.id}`}>
                       {p.name}
                     </option>
                   ))}
                 </optgroup>
-              )}
-              {samplerSelectValue === 'custom' && <option value="custom">Custom (edited)</option>}
-            </select>
+                {savedPresets.length > 0 && (
+                  <optgroup label="Your presets">
+                    {savedPresets.map((p) => (
+                      <option key={p.id} value={`saved:${p.id}`}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {samplerSelectValue === 'custom' && <option value="custom">Custom (edited)</option>}
+              </select>
+            </div>
+            <div className="rounded-xl bg-bg-sunken p-4">
+              <Slider
+                label="Creativity"
+                min={0}
+                max={100}
+                value={paramsToCreativity(sampler.temperature)}
+                onChange={(v) => setSampler(creativityToParams(v))}
+              />
+              <Slider
+                label="Focus"
+                min={0}
+                max={100}
+                value={paramsToFocus(sampler.top_p)}
+                onChange={(v) => setSampler(focusToParams(v))}
+              />
+              <Slider
+                label="Avoid repetition"
+                min={0}
+                max={100}
+                value={paramsToRepetition(sampler.rep_pen)}
+                onChange={(v) => setSampler(repetitionToParams(v))}
+              />
+              <Slider
+                label="Reply length"
+                min={16}
+                max={4096}
+                step={16}
+                value={sampler.max_length}
+                onChange={(v) => setSampler({ max_length: v })}
+                formatValue={(v) => `${v} tok`}
+              />
+            </div>
+            <p className="mt-1.5 text-[11px] text-text-muted">Applies to every chat. For raw sampler fields, saving a new preset, and advanced mode, see full Settings.</p>
           </div>
-          <div className="rounded-xl bg-bg-sunken p-4">
-            <Slider
-              label="Creativity"
-              min={0}
-              max={100}
-              value={paramsToCreativity(sampler.temperature)}
-              onChange={(v) => setSampler(creativityToParams(v))}
-            />
-            <Slider
-              label="Focus"
-              min={0}
-              max={100}
-              value={paramsToFocus(sampler.top_p)}
-              onChange={(v) => setSampler(focusToParams(v))}
-            />
-            <Slider
-              label="Avoid repetition"
-              min={0}
-              max={100}
-              value={paramsToRepetition(sampler.rep_pen)}
-              onChange={(v) => setSampler(repetitionToParams(v))}
-            />
-            <Slider
-              label="Reply length"
-              min={16}
-              max={4096}
-              step={16}
-              value={sampler.max_length}
-              onChange={(v) => setSampler({ max_length: v })}
-              formatValue={(v) => `${v} tok`}
-            />
+        ) : (
+          <div className="mb-5">
+            <span className="mb-1.5 block text-sm font-semibold text-text">Generation (chat completion)</span>
+            <div className="rounded-xl bg-bg-sunken p-4">
+              <Slider
+                label="Temperature"
+                min={0}
+                max={2}
+                step={0.01}
+                value={chatCompletionSampler.temperature}
+                onChange={(v) => setChatCompletionSampler({ temperature: v })}
+              />
+              <Slider
+                label="Top P"
+                min={0}
+                max={1}
+                step={0.01}
+                value={chatCompletionSampler.top_p}
+                onChange={(v) => setChatCompletionSampler({ top_p: v })}
+              />
+              <Slider
+                label="Frequency penalty"
+                min={-2}
+                max={2}
+                step={0.01}
+                value={chatCompletionSampler.frequency_penalty}
+                onChange={(v) => setChatCompletionSampler({ frequency_penalty: v })}
+              />
+              <Slider
+                label="Presence penalty"
+                min={-2}
+                max={2}
+                step={0.01}
+                value={chatCompletionSampler.presence_penalty}
+                onChange={(v) => setChatCompletionSampler({ presence_penalty: v })}
+              />
+              <Slider
+                label="Reply length"
+                min={16}
+                max={4096}
+                step={16}
+                value={sampler.max_length}
+                onChange={(v) => setSampler({ max_length: v })}
+                formatValue={(v) => `${v} tok`}
+              />
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-text-muted">Reasoning effort</span>
+                  <select
+                    value={chatCompletionSampler.reasoningEffort}
+                    onChange={(e) =>
+                      setChatCompletionSampler({ reasoningEffort: e.target.value as typeof chatCompletionSampler.reasoningEffort })
+                    }
+                    className={SELECT_CLASS}
+                  >
+                    {REASONING_EFFORT_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-text-muted">Verbosity</span>
+                  <select
+                    value={chatCompletionSampler.verbosity}
+                    onChange={(e) => setChatCompletionSampler({ verbosity: e.target.value as typeof chatCompletionSampler.verbosity })}
+                    className={SELECT_CLASS}
+                  >
+                    {VERBOSITY_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            </div>
+            <p className="mt-1.5 text-[11px] text-text-muted">
+              Applies to every chat. Separate from the KoboldCpp sampler above — switch backends in
+              Settings → Connection.
+            </p>
           </div>
-          <p className="mt-1.5 text-[11px] text-text-muted">Applies to every chat. For raw sampler fields, saving a new preset, and advanced mode, see full Settings.</p>
-        </div>
+        )}
 
-        <div className="mb-5">
-          <span className="mb-1.5 block text-sm font-semibold text-text">Instruct template</span>
-          <select
-            value={instructTemplateId}
-            onChange={(e) => setInstructTemplateId(e.target.value)}
-            className={SELECT_CLASS}
-          >
-            <optgroup label="Built-in">
-              {BUILTIN_INSTRUCT_TEMPLATES.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
-            </optgroup>
-            {customTemplates.length > 0 && (
-              <optgroup label="Custom">
-                {customTemplates.map((t) => (
+        {/* A chat-completion backend formats its own turns — an instruct template (ChatML, Llama 3,
+            ...) is a text-completion-only concept and would be actively misleading to show here. */}
+        {chatBackend === 'koboldcpp' && (
+          <div className="mb-5">
+            <span className="mb-1.5 block text-sm font-semibold text-text">Instruct template</span>
+            <select
+              value={instructTemplateId}
+              onChange={(e) => setInstructTemplateId(e.target.value)}
+              className={SELECT_CLASS}
+            >
+              <optgroup label="Built-in">
+                {BUILTIN_INSTRUCT_TEMPLATES.map((t) => (
                   <option key={t.id} value={t.id}>
                     {t.name}
                   </option>
                 ))}
               </optgroup>
-            )}
-          </select>
-          <p className="mt-1.5 text-[11px] text-text-muted">
-            How turns are formatted for the model — match this to your model's training format.
-          </p>
-        </div>
+              {customTemplates.length > 0 && (
+                <optgroup label="Custom">
+                  {customTemplates.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+            </select>
+            <p className="mt-1.5 text-[11px] text-text-muted">
+              How turns are formatted for the model — match this to your model's training format.
+            </p>
+          </div>
+        )}
 
         <div>
           <span className="mb-1.5 block text-sm font-semibold text-text">System prompt</span>

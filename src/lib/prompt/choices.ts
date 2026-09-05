@@ -1,5 +1,5 @@
 import type { ChatMessage } from '@/lib/prompt/builder'
-import { KoboldClient } from '@/lib/api/kobold'
+import type { ChatBackend } from '@/lib/api/chatBackend'
 import { parseLenientJson } from '@/lib/jsonRepair'
 import type { ChoiceOption } from '@/lib/types'
 
@@ -31,7 +31,7 @@ function renderContext(history: ChatMessage[], charName: string, userName: strin
  * after a reply lands, so picking one nudges the scene forward instead of staring at a blank composer.
  */
 export async function generateChoices(
-  client: KoboldClient,
+  client: ChatBackend,
   params: {
     history: ChatMessage[]
     charName: string

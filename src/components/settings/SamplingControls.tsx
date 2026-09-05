@@ -24,6 +24,7 @@ import { PromptSectionsSection } from './PromptSectionsSection'
 import { SystemPromptSection } from './SystemPromptSection'
 import { WritingStyleSection } from './WritingStyleSection'
 import { QuickRepliesSection } from './QuickRepliesSection'
+import { ChatCompletionSamplerSection } from './ChatCompletionSamplerSection'
 
 const ADVANCED_FIELDS: { key: string; label: string; step?: number; min?: number; max?: number }[] = [
   { key: 'temperature', label: 'Temperature', step: 0.01, min: 0 },
@@ -45,6 +46,7 @@ const ADVANCED_FIELDS: { key: string; label: string; step?: number; min?: number
 ]
 
 export function SamplingControls() {
+  const chatBackend = useSettingsStore((s) => s.chatBackend)
   const advancedSamplerMode = useSettingsStore((s) => s.advancedSamplerMode)
   const setAdvancedSamplerMode = useSettingsStore((s) => s.setAdvancedSamplerMode)
   const sampler = useSettingsStore((s) => s.sampler)
@@ -233,120 +235,131 @@ export function SamplingControls() {
 
       <PromptSectionsSection />
 
-      <InstructTemplateSection />
+      {/* A chat-completion backend formats its own turns — an instruct template (ChatML, Llama 3,
+          ...) is a text-completion-only concept and would be actively misleading to show here. */}
+      {chatBackend === 'koboldcpp' && <InstructTemplateSection />}
 
-      <Section
-        title="Generation"
-        description="How the model picks its next word. Start from a preset, then nudge it with the sliders below (or every field, in Advanced mode)."
-        surface="bare"
-        action={<Toggle checked={advancedSamplerMode} onChange={setAdvancedSamplerMode} label="Advanced mode" />}
-      >
-        <div className="mb-1.5 text-xs font-medium text-text-muted">Starting point</div>
-        <select
-          value={activeBuiltinPreset ?? 'custom'}
-          onChange={(e) => {
-            const preset = BUILTIN_PRESETS.find((p) => p.id === e.target.value)
-            if (preset) setSampler(preset.params)
-          }}
-          className="w-full rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40"
+      {chatBackend === 'openai-compatible' ? (
+        <ChatCompletionSamplerSection />
+      ) : (
+        <Section
+          title="Generation"
+          description="How the model picks its next word. Start from a preset, then nudge it with the sliders below (or every field, in Advanced mode)."
+          surface="bare"
+          action={<Toggle checked={advancedSamplerMode} onChange={setAdvancedSamplerMode} label="Advanced mode" />}
         >
-          {BUILTIN_PRESETS.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-          {!activeBuiltinPreset && <option value="custom">Custom (edited)</option>}
-        </select>
-        {activeBuiltinPresetUse && <p className="mb-3 mt-1.5 text-xs text-text-muted">{activeBuiltinPresetUse}</p>}
-        {!activeBuiltinPresetUse && <div className="mb-3" />}
+          <div className="mb-1.5 text-xs font-medium text-text-muted">Starting point</div>
+          <select
+            value={activeBuiltinPreset ?? 'custom'}
+            onChange={(e) => {
+              const preset = BUILTIN_PRESETS.find((p) => p.id === e.target.value)
+              if (preset) setSampler(preset.params)
+            }}
+            className="w-full rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40"
+          >
+            {BUILTIN_PRESETS.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+            {!activeBuiltinPreset && <option value="custom">Custom (edited)</option>}
+          </select>
+          {activeBuiltinPresetUse && <p className="mb-3 mt-1.5 text-xs text-text-muted">{activeBuiltinPresetUse}</p>}
+          {!activeBuiltinPresetUse && <div className="mb-3" />}
 
-        {!advancedSamplerMode ? (
-          <div className="rounded-xl bg-bg-elevated p-5">
-            <Slider
-              label="Creativity"
-              min={0}
-              max={100}
-              value={paramsToCreativity(sampler.temperature)}
-              onChange={(v) => setSampler(creativityToParams(v))}
-              description="Lower = safer and more predictable. Higher = more surprising and varied."
-            />
-            <Slider
-              label="Focus"
-              min={0}
-              max={100}
-              value={paramsToFocus(sampler.top_p)}
-              onChange={(v) => setSampler(focusToParams(v))}
-              description="How narrowly the model sticks to its most likely next words."
-            />
-            <Slider
-              label="Avoid repetition"
-              min={0}
-              max={100}
-              value={paramsToRepetition(sampler.rep_pen)}
-              onChange={(v) => setSampler(repetitionToParams(v))}
-              description="Discourages repeating the same words and phrases."
-            />
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1 rounded-xl bg-bg-elevated p-5 sm:grid-cols-3">
-            {ADVANCED_FIELDS.map((f) => (
-              <TextField
-                key={f.key}
-                label={f.label}
-                type="number"
-                step={f.step}
-                min={f.min}
-                max={f.max}
-                value={String((sampler as unknown as Record<string, number>)[f.key] ?? 0)}
-                onChange={(e) => setSampler({ [f.key]: Number(e.target.value) } as Partial<GenerationParams>)}
+          {!advancedSamplerMode ? (
+            <div className="rounded-xl bg-bg-elevated p-5">
+              <Slider
+                label="Creativity"
+                min={0}
+                max={100}
+                value={paramsToCreativity(sampler.temperature)}
+                onChange={(v) => setSampler(creativityToParams(v))}
+                description="Lower = safer and more predictable. Higher = more surprising and varied."
               />
-            ))}
-            <TextField
-              label="Stop sequences (comma separated)"
-              className="col-span-full"
-              value={(sampler.stop_sequence ?? []).join(', ')}
-              onChange={(e) =>
-                setSampler({ stop_sequence: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) })
-              }
+              <Slider
+                label="Focus"
+                min={0}
+                max={100}
+                value={paramsToFocus(sampler.top_p)}
+                onChange={(v) => setSampler(focusToParams(v))}
+                description="How narrowly the model sticks to its most likely next words."
+              />
+              <Slider
+                label="Avoid repetition"
+                min={0}
+                max={100}
+                value={paramsToRepetition(sampler.rep_pen)}
+                onChange={(v) => setSampler(repetitionToParams(v))}
+                description="Discourages repeating the same words and phrases."
+              />
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1 rounded-xl bg-bg-elevated p-5 sm:grid-cols-3">
+              {ADVANCED_FIELDS.map((f) => (
+                <TextField
+                  key={f.key}
+                  label={f.label}
+                  type="number"
+                  step={f.step}
+                  min={f.min}
+                  max={f.max}
+                  value={String((sampler as unknown as Record<string, number>)[f.key] ?? 0)}
+                  onChange={(e) => setSampler({ [f.key]: Number(e.target.value) } as Partial<GenerationParams>)}
+                />
+              ))}
+              <TextField
+                label="Stop sequences (comma separated)"
+                className="col-span-full"
+                value={(sampler.stop_sequence ?? []).join(', ')}
+                onChange={(e) =>
+                  setSampler({ stop_sequence: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) })
+                }
+              />
+            </div>
+          )}
+        </Section>
+      )}
+
+      {/* Saves/loads the KoboldCpp `sampler` shape specifically — meaningless while a
+          chat-completion backend (its own separate settings, no saved-preset library yet) is
+          active, so hidden rather than shown greyed-out or silently no-op. */}
+      {chatBackend === 'koboldcpp' && (
+        <Section title="Presets" surface="bare">
+          <TextField label="Preset name" value={presetName} onChange={(e) => setPresetName(e.target.value)} />
+          <div className="flex flex-wrap gap-2">
+            <Button variant="primary" onClick={savePreset}>
+              Save current
+            </Button>
+            <Button onClick={exportPreset}>Export JSON</Button>
+            <Button onClick={() => fileRef.current?.click()}>Import JSON</Button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".json"
+              className="hidden"
+              onChange={(e) => e.target.files?.[0] && importPreset(e.target.files[0])}
             />
           </div>
-        )}
-      </Section>
-
-      <Section title="Presets" surface="bare">
-        <TextField label="Preset name" value={presetName} onChange={(e) => setPresetName(e.target.value)} />
-        <div className="flex flex-wrap gap-2">
-          <Button variant="primary" onClick={savePreset}>
-            Save current
-          </Button>
-          <Button onClick={exportPreset}>Export JSON</Button>
-          <Button onClick={() => fileRef.current?.click()}>Import JSON</Button>
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".json"
-            className="hidden"
-            onChange={(e) => e.target.files?.[0] && importPreset(e.target.files[0])}
-          />
-        </div>
-        {presets.length > 0 && (
-          <div className="mt-3 space-y-1">
-            {presets.map((p) => (
-              <div key={p.id} className="flex items-center justify-between rounded-xl bg-bg-sunken px-4 py-3 text-sm">
-                <span className="text-text">{p.name}</span>
-                <div className="flex gap-2">
-                  <Button variant="ghost" onClick={() => setSampler(p.params)}>
-                    Apply
-                  </Button>
-                  <Button variant="ghost" onClick={() => presetsApi.remove(p.id)}>
-                    Delete
-                  </Button>
+          {presets.length > 0 && (
+            <div className="mt-3 space-y-1">
+              {presets.map((p) => (
+                <div key={p.id} className="flex items-center justify-between rounded-xl bg-bg-sunken px-4 py-3 text-sm">
+                  <span className="text-text">{p.name}</span>
+                  <div className="flex gap-2">
+                    <Button variant="ghost" onClick={() => setSampler(p.params)}>
+                      Apply
+                    </Button>
+                    <Button variant="ghost" onClick={() => presetsApi.remove(p.id)}>
+                      Delete
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </Section>
+              ))}
+            </div>
+          )}
+        </Section>
+      )}
 
       <RegexScriptsSection />
     </SettingsPage>

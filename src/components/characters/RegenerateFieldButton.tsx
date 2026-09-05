@@ -1,9 +1,8 @@
 import { useState } from 'react'
 import { RotateCcw } from 'lucide-react'
-import { KoboldClient } from '@/lib/api/kobold'
+import { useChatBackendClient } from '@/lib/hooks/useChatBackendClient'
 import { regenerateCardField } from '@/lib/characters/aiAssist'
 import type { CharacterCardData } from '@/lib/characters/cardSpec'
-import { useSettingsStore } from '@/lib/store/useSettingsStore'
 
 export function RegenerateFieldButton({
   character,
@@ -14,7 +13,7 @@ export function RegenerateFieldButton({
   fieldKey: 'description' | 'personality' | 'scenario'
   onResult: (text: string) => void
 }) {
-  const baseUrl = useSettingsStore((s) => s.baseUrl)
+  const client = useChatBackendClient()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -23,7 +22,6 @@ export function RegenerateFieldButton({
     setBusy(true)
     setError(null)
     try {
-      const client = new KoboldClient(baseUrl)
       const text = await regenerateCardField(client, character, fieldKey)
       if (text) onResult(text)
     } catch (e) {

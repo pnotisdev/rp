@@ -20,7 +20,7 @@
  * every returned id is validated against the caller's allowed set before it's used.
  */
 
-import type { KoboldClient } from '@/lib/api/kobold'
+import type { ChatBackend } from '@/lib/api/chatBackend'
 import { parseLenientJson } from '@/lib/jsonRepair'
 import type { SceneTag } from '@/lib/vn/sceneTag'
 
@@ -64,7 +64,7 @@ export interface SpriteForVision {
  * Needs at least two sprites to be worth running — with one or none there is nothing to choose.
  */
 export async function detectExpressionFromSprites(
-  client: KoboldClient,
+  client: ChatBackend,
   params: {
     charName: string
     replyText: string
@@ -126,7 +126,7 @@ export interface ExpressionCandidate {
  * caller always gets a non-empty shortlist when candidates exist.
  */
 export async function shortlistExpressions(
-  client: KoboldClient,
+  client: ChatBackend,
   params: {
     charName: string
     replyText: string
@@ -199,7 +199,7 @@ export interface SceneClassification {
  * value is validated against what the caller actually offered.
  */
 export async function classifyAttachedImageScene(
-  client: KoboldClient,
+  client: ChatBackend,
   params: {
     images: string[]
     backgroundIds: string[]
@@ -260,7 +260,7 @@ const GREETING_SCENE_PARAMS = {
  * turn would have picked on its own.
  */
 export async function detectGreetingScene(
-  client: KoboldClient,
+  client: ChatBackend,
   params: { text: string; expressionIds: string[]; backgroundIds: string[] },
 ): Promise<SceneTag | null> {
   const text = params.text.trim()

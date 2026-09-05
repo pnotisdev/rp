@@ -6,6 +6,7 @@ import type {
   PerfInfo,
 } from './types'
 import { KoboldApiError } from './types'
+import type { ChatBackend } from './chatBackend'
 
 // Background judge/choice calls (relationshipAssist.ts, choices.ts, objectiveAssist.ts,
 // aiAssist.ts) never pass their own AbortSignal — without this, a hung KoboldCpp connection
@@ -50,7 +51,7 @@ export function makeGenKey(): string {
   return `rp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
-export class KoboldClient {
+export class KoboldClient implements ChatBackend {
   constructor(public baseUrl: string) {}
 
   private cachedMaxContext: number | undefined

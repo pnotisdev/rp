@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import { Copy, GitFork, MessageSquarePlus, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Pin, PinOff, Plus, Star, Trash2 } from 'lucide-react'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { charactersApi, chatsApi, worldsApi } from '@/lib/api/client'
-import { KoboldClient } from '@/lib/api/kobold'
+import { useChatBackendClient } from '@/lib/hooks/useChatBackendClient'
 import { createChat } from '@/lib/chat/createChat'
 import { getCurrentActivity, presenceLabel } from '@/lib/world/calendar'
 import type { Character } from '@/lib/characters/cardSpec'
@@ -33,7 +33,7 @@ export function ChatsPanel({
   const trashCount = useApiQuery('chats', () => chatsApi.trash(), [])?.length ?? 0
   const collapsed = useSettingsStore((s) => s.chatsPanelCollapsed)
   const setCollapsed = useSettingsStore((s) => s.setChatsPanelCollapsed)
-  const baseUrl = useSettingsStore((s) => s.baseUrl)
+  const client = useChatBackendClient()
 
   // Section 14's "chat management basics" — rename, duplicate, one-click "new chat, same
   // character & persona," and delete, none of which had any UI before this. One row menu at a
@@ -109,7 +109,7 @@ export function ChatsPanel({
     setBusyId(chat.id)
     try {
       const world = worlds.find((w) => w.id === character.worldId)
-      const fresh = await createChat({ character, world, personaId: chat.personaId, client: new KoboldClient(baseUrl) })
+      const fresh = await createChat({ character, world, personaId: chat.personaId, client })
       onSelect(fresh.id)
     } catch (e) {
       toastError(errorMessage(e))
