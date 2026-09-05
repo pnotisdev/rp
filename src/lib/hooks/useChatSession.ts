@@ -13,6 +13,7 @@ import { detectCompletedTasks, generateTasks, suggestObjective } from '@/lib/obj
 import {
   assessCommitmentAsk,
   assessDateOutcome,
+  assessIntimacyMilestone,
   assessRelationshipMoment,
   detectGalleryUnlocks,
   draftHiddenAgenda,
@@ -62,6 +63,10 @@ import { replyMaxTokens, resolveReplyLength } from '@/lib/characters/voice'
 import { SCENE_MOOD_IDS } from '@/lib/vn/moods'
 import { DEFAULT_EXPRESSIONS } from '@/lib/vn/expressions'
 import { getUnlockedBackgroundIds, getUnlockedExpressionIds } from '@/lib/vn/unlocks'
+import { backgroundLabel } from '@/lib/vn/backgrounds'
+import { countStaticSceneTurns, sceneProgressionNudge } from '@/lib/prompt/sceneProgression'
+import { getUnlockedIntimacyOptions, intimacyItemById, intimacyOptionsGuidance } from '@/lib/dating/intimacyCatalog'
+import { characterIntentGuidance, moodGuidance, needGuidance } from '@/lib/prompt/mindGuidance'
 import { classifyAttachedImageScene, detectExpressionFromSprites, shortlistExpressions } from '@/lib/vn/sceneVision'
 import { assessRapport } from '@/lib/dating/rapport'
 import { bookAppliesToChat } from '@/lib/worldinfo/scope'
@@ -483,6 +488,45 @@ export function useChatSession(chatId: string | null) {
       ].filter(Boolean)
       const worldDescription = worldDescriptionLines.length > 0 ? worldDescriptionLines.join('\n') : undefined
 
+      // Ordinary chat has no push to ever change the physical setting otherwise — the scene-tag
+      // instruction only asks the model to label wherever the story already is, never to progress
+      // it. Suppressed during a live hangout/date: that event *is* the scene change, and nudging
+      // toward yet another one mid-event would fight the "stay here until it resolves" point of it.
+      const { count: staticSceneTurns, currentBackground: staticSceneBackground } = countStaticSceneTurns(messages)
+      const scheduleLocation = speaker.schedule?.length
+        ? getCurrentActivity(speaker.schedule, world?.currentDay ?? 0, world?.currentPhaseIndex ?? 0).location
+        : undefined
+      const sceneNudge = freshChat.activeEvent
+        ? ''
+        : sceneProgressionNudge(staticSceneTurns, {
+            scheduleLocation,
+            alternateBackgroundLabels: scheduleLocation
+              ? undefined
+              : getUnlockedBackgroundIds(world, affection)
+                  .filter((id) => id !== staticSceneBackground)
+                  .slice(0, 3)
+                  .map((id) => backgroundLabel(id, world)),
+          })
+
+      // What this specific relationship has earned so far (places to kiss, and — once the user has
+      // explicit content turned on — positions/toys/other intimate beats), offered as a bank of
+      // ideas the model can draw from if a scene genuinely goes there. See `intimacyCatalog.ts`.
+      const speakerTrack = getRelationshipTrack(freshChat, speaker.id)
+      const speakerWarmth = computeWarmth(speakerTrack.affection ?? 0, getRelationshipStats(speakerTrack))
+      // A toy only ever reaches the model once actually bought (`Chat.toyInventory`) — warmth/
+      // commitment alone just gate *eligibility to buy*, see `intimacyCatalog.ts`.
+      const ownedToyIds = new Set(Object.keys(freshChat.toyInventory ?? {}))
+      const intimacyOptions = intimacyOptionsGuidance(
+        getUnlockedIntimacyOptions(speakerWarmth, speakerTrack.commitmentStatus ?? 'none', world, ownedToyIds),
+        intimacyLevel,
+      )
+
+      // "Character Mind" scoped slice — a transient mood, an underlying need, and a private
+      // intention, all deliberately separate from the relationship track above. See `prompt/mindGuidance.ts`.
+      const moodLine = moodGuidance(speaker.card.name, persona?.name || 'You', speakerTrack.mood)
+      const needLine = needGuidance(speaker.card.name, speakerTrack.currentNeed)
+      const intentLine = characterIntentGuidance(speaker.card.name, speakerTrack.characterIntent)
+
       // Messages already folded into chat.summary are represented there, not sent verbatim.
       const cutoff = freshChat.summaryUpToTimestamp ?? 0
       const createdAtById = new Map(messages.map((m) => [m.id, m.createdAt]))
@@ -523,6 +567,11 @@ export function useChatSession(chatId: string | null) {
             ? "Pace intimacy like a slow burn. Earn it through many small moments; don't grant it just because it was asked for. If pushed toward more affection, a kiss, or closeness faster than the relationship has earned, react the way your character actually would. Hesitation, deflection, or a flat no are often the right call, especially early on. Don't cave just to be agreeable."
             : '',
           intimacyGuidance(intimacyLevel),
+          intimacyOptions,
+          moodLine,
+          needLine,
+          intentLine,
+          sceneNudge,
           replyLengthInstruction,
           styleGuidanceNote.trim(),
           slopAvoidance ?? '',
@@ -705,7 +754,7 @@ export function useChatSession(chatId: string | null) {
       const currentAffection = track.affection ?? 0
       const currentStats = getRelationshipStats(track)
       const existingFlags = new Set((freshChat.sceneFlags ?? []) as SceneFlag[])
-      const { deltas: rawDeltas, newFlags, reason, newFacts, completedTaskIndices } = await assessRelationshipMoment(client, {
+      const { deltas: rawDeltas, newFlags, reason, newFacts, completedTaskIndices, mood, currentNeed, characterIntent } = await assessRelationshipMoment(client, {
         history,
         latestReply,
         charName: speaker.card.name,
@@ -715,6 +764,9 @@ export function useChatSession(chatId: string | null) {
         customFlags: world?.customSceneFlags,
         intent,
         pendingTasks: pendingTasks?.map((t) => t.description),
+        currentMood: track.mood,
+        currentNeed: track.currentNeed,
+        currentIntent: track.characterIntent,
       })
       const deltas = scaleDeltasForDifficulty(rawDeltas, relationshipDifficulty)
       newFlags.forEach((flag) => existingFlags.add(flag))
@@ -762,9 +814,14 @@ export function useChatSession(chatId: string | null) {
       const nextCoins = isPrimary ? Math.max(0, (freshChat.giftCoins ?? 0) + 2) : (freshChat.giftCoins ?? 0)
       const noStatChange = Object.values(deltas).every((d) => d === 0)
       const noRiskChange = !risk.warnedJustNow && !risk.brokeUpJustNow && !risk.clearedJustNow
+      const noMindChange =
+        (!mood || mood === track.mood) &&
+        (!currentNeed || currentNeed === track.currentNeed) &&
+        (!characterIntent || characterIntent === track.characterIntent)
       if (
         noStatChange &&
         noRiskChange &&
+        noMindChange &&
         newFlags.length === 0 &&
         unlockedSet.size === (track.unlockedGalleryIds ?? []).length &&
         nextCoins === (freshChat.giftCoins ?? 0)
@@ -782,6 +839,9 @@ export function useChatSession(chatId: string | null) {
           relationshipWarning: risk.relationshipWarning ?? null,
           breakupCount: risk.breakupCount,
           unlockedGalleryIds: [...unlockedSet],
+          mood: mood ?? track.mood,
+          currentNeed: currentNeed ?? track.currentNeed,
+          characterIntent: characterIntent ?? track.characterIntent,
         }),
         sceneFlags: [...existingFlags],
         giftCoins: nextCoins,
@@ -857,6 +917,26 @@ export function useChatSession(chatId: string | null) {
       await chatsApi.update(chatId, {
         giftCoins: coins - def.price,
         itemInventory: inventory,
+      })
+    },
+    [chatId, world],
+  )
+
+  /** Byte-for-byte mirrors `buyGift`/`buyItem` — a toy is a purchase like either, just tracked in its own `toyInventory` (`intimacyCatalog.ts`'s own doc comment explains why toys, unlike every other intimacy-catalog category, need an actual ownership step). */
+  const buyToy = useCallback(
+    async (toyId: string) => {
+      if (!chatId) return
+      const def = intimacyItemById(toyId, world)
+      if (!def?.price) return
+      const freshChat = await chatsApi.get(chatId)
+      if (!freshChat) return
+      const coins = freshChat.giftCoins ?? 0
+      if (coins < def.price) return
+      const inventory = { ...(freshChat.toyInventory ?? {}) }
+      inventory[toyId] = (inventory[toyId] ?? 0) + 1
+      await chatsApi.update(chatId, {
+        giftCoins: coins - def.price,
+        toyInventory: inventory,
       })
     },
     [chatId, world],
@@ -986,6 +1066,103 @@ export function useChatSession(chatId: string | null) {
             text: `${persona?.name || 'You'} and ${target.card.name} are officially ${formatCommitmentStatus(tier)}.`,
           })
           .catch(() => {})
+      } else if (outcome.decision === 'backfire') {
+        toastError(`That didn't land well. ${outcome.reason}`)
+      } else {
+        toastInfo(`Not the right moment. ${outcome.reason}`)
+      }
+      announceMilestone({
+        charName: target.card.name,
+        personaName: persona?.name || 'You',
+        chatId,
+        previousStage,
+        relationshipStage,
+      })
+    },
+    [chatId, client, messages, persona?.name, relationshipDifficulty, resolveSpeaker, world],
+  )
+
+  /**
+   * A deliberate "first time together" ask — the user's own direct follow-up to the intimacy
+   * catalog ("we should be able to choose... lose virginity"). Byte-for-byte mirrors
+   * `askForCommitment`'s shape (eligibility already gated by the caller's `canInitiateFirstTime`,
+   * same judge-call/deltas/risk/toast structure) with two differences: there's no tier to actually
+   * transition into, just `firstIntimateSceneAt` set once on accept; and deliberately no
+   * auto-sent narrative line afterward — this beat is big enough that the player's own next
+   * message should carry it, same restraint the commitment-ask flow already shows.
+   */
+  const initiateFirstTime = useCallback(
+    async (characterId?: string) => {
+      if (!chatId) return
+      const { active: target } = resolveSpeaker(characterId)
+      if (!target) return
+      const freshChat = await chatsApi.get(chatId)
+      if (!freshChat) return
+      const track = getRelationshipTrack(freshChat, target.id)
+      const currentStats = getRelationshipStats(track)
+      const currentAffection = track.affection ?? 0
+      const historyForAssist: ChatMessage[] = messages.map((m) => ({ id: m.id, role: m.role, name: m.name, text: m.text }))
+      let outcome
+      try {
+        outcome = await assessIntimacyMilestone(client, {
+          history: historyForAssist,
+          charName: target.card.name,
+          charPersonality: target.card.personality,
+          userName: persona?.name || 'You',
+          current: { affection: currentAffection, ...currentStats },
+        })
+      } catch (e) {
+        toastError(errorMessage(e))
+        return
+      }
+      const deltas = scaleDeltasForDifficulty(outcome.deltas, relationshipDifficulty)
+      const affection = clampAffection(currentAffection + deltas.affection)
+      let nextStats = { ...currentStats }
+      for (const dim of RELATIONSHIP_DIMENSIONS) nextStats[dim] = clampStat(currentStats[dim] + deltas[dim])
+      const milestones = relationshipMilestonesFor(world?.relationshipThresholds)
+      const previousStage = relationshipStageForWarmth(computeWarmth(currentAffection, currentStats), milestones)
+      const risk = applyRelationshipRisk({
+        charName: target.card.name,
+        commitmentStatus: track.commitmentStatus ?? 'none',
+        stats: nextStats,
+        existingWarning: track.relationshipWarning ?? undefined,
+        breakupCount: track.breakupCount ?? 0,
+      })
+      nextStats = risk.stats
+      const warmth = computeWarmth(affection, nextStats)
+      const relationshipStage = relationshipStageForWarmth(warmth, milestones)
+
+      await chatsApi.update(chatId, patchRelationshipTrack(freshChat, target.id, {
+        affection,
+        relationshipStats: nextStats,
+        relationshipStage,
+        commitmentStatus: risk.commitmentStatus,
+        relationshipWarning: risk.relationshipWarning ?? null,
+        breakupCount: risk.breakupCount,
+        firstIntimateSceneAt: outcome.decision === 'accept' ? (track.firstIntimateSceneAt ?? Date.now()) : track.firstIntimateSceneAt,
+      }))
+
+      const changedDeltas = Object.fromEntries(Object.entries(deltas).filter(([, v]) => v !== 0))
+      relationshipEventsApi
+        .create({
+          chatId,
+          characterId: target.id,
+          reason: `Initiated their first time together: ${outcome.reason}`,
+          deltas: changedDeltas,
+          sourceMessageId: messages[messages.length - 1]?.id,
+        })
+        .catch(() => {})
+
+      if (outcome.decision === 'accept') {
+        toastSuccess(`${target.card.name} wants this too. ${outcome.reason}`, { chime: true })
+        if (!track.firstIntimateSceneAt) {
+          chatFactsApi
+            .create({
+              chatId,
+              text: `${persona?.name || 'You'} and ${target.card.name} were intimate together for the first time.`,
+            })
+            .catch(() => {})
+        }
       } else if (outcome.decision === 'backfire') {
         toastError(`That didn't land well. ${outcome.reason}`)
       } else {
@@ -2306,8 +2483,10 @@ export function useChatSession(chatId: string | null) {
     regenerateChoices,
     buyGift,
     buyItem,
+    buyToy,
     useItem,
     askForCommitment,
+    initiateFirstTime,
     endRelationship,
     forkChat,
     client,

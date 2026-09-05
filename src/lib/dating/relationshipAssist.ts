@@ -5,6 +5,7 @@ import type { CustomSceneFlag, DateEventCard, RelationshipDimension, SceneFlag }
 import type { ChatMessage } from '@/lib/prompt/builder'
 import { RELATIONSHIP_DIMENSIONS, SCENE_FLAGS } from '@/lib/dating/stage'
 import { describeIntentForJudge, describeIntentsForDate } from '@/lib/dating/intent'
+import { MOOD_VOCAB, NEED_VOCAB, type CharacterMood, type CharacterNeed } from '@/lib/prompt/mindGuidance'
 
 // max_context_length is deliberately omitted here — every call site fetches the server's actual
 // loaded context via `client.getEffectiveMaxContext()` instead of hardcoding a guess.
@@ -109,6 +110,10 @@ export interface RelationshipMoment {
    * Always `[]` when `pendingTasks` wasn't passed (nothing was asked, so nothing to report).
    */
   completedTaskIndices: number[]
+  /** The "Character Mind" scoped slice — see `prompt/mindGuidance.ts`'s doc comment. Undefined means no clear shift this turn, not "neutral"; all three are sticky rather than reset every turn nothing moved them. */
+  mood?: CharacterMood
+  currentNeed?: CharacterNeed
+  characterIntent?: string
 }
 
 /**
@@ -140,11 +145,15 @@ export async function assessRelationshipMoment(
     intent?: string
     /** Pending objective task descriptions, in the caller's index order — only passed when task-detection is also due this turn. Omitted/empty means "don't ask", not "nothing completed". */
     pendingTasks?: string[]
+    /** The character's mood/need/intention going into this exchange (before it), so the classifier can judge whether any genuinely shifted rather than guessing blind. See `prompt/mindGuidance.ts`. */
+    currentMood?: CharacterMood
+    currentNeed?: CharacterNeed
+    currentIntent?: string
   },
 ): Promise<RelationshipMoment> {
   const hasTasks = !!params.pendingTasks?.length
   const prompt = [
-    'You are scoring relationship momentum, tracking high-level romance route flags, AND noting durable facts worth remembering long-term, in an in-character roleplay.',
+    'You are scoring relationship momentum, tracking high-level romance route flags, noting durable facts worth remembering long-term, AND (separately) reading the character\'s own current emotional state, an underlying need, and private intentions, in an in-character roleplay.',
     `Current scores (0-100 each): ${DELTA_KEYS.map((k) => `${k}=${params.current[k]}`).join(', ')}.`,
     `Recent context:\n${recentText(params.history, params.charName, params.userName, 8)}`,
     `Latest reply from ${params.charName}:\n${params.latestReply}`,
@@ -153,10 +162,14 @@ export async function assessRelationshipMoment(
     describeIntentForJudge(params.intent)?.replace(/\{\{char\}\}/g, params.charName) ?? '',
     params.knownFacts?.length ? `Facts already remembered (don't repeat these): ${params.knownFacts.join('; ')}.` : '',
     hasTasks ? `Pending objective tasks:\n${params.pendingTasks!.map((t, i) => `${i}: ${t}`).join('\n')}` : '',
-    `Return ONLY a minified JSON object: {"deltas":{ one integer -2..2 per dimension key },"newFlags":[ any newly-established flags from the known set, or [] ],"reason":"...","newFacts":[ any new durable facts, or [] ]${hasTasks ? ',"completedTaskIndices":[ pending task index numbers this exchange clearly and unambiguously accomplished, or [] ]' : ''}}.`,
+    `${params.charName}'s mood going into this exchange: ${params.currentMood ?? 'not yet read'}. Their underlying need lately: ${params.currentNeed ?? 'not yet read'}. Their private intention going in: ${params.currentIntent ?? 'none noted'}.`,
+    `Return ONLY a minified JSON object: {"deltas":{ one integer -2..2 per dimension key },"newFlags":[ any newly-established flags from the known set, or [] ],"reason":"...","newFacts":[ any new durable facts, or [] ]${hasTasks ? ',"completedTaskIndices":[ pending task index numbers this exchange clearly and unambiguously accomplished, or [] ]' : ''},"mood":"one of [${MOOD_VOCAB.join(', ')}], only if this exchange gives a clear enough read to state one — omit entirely otherwise","currentNeed":"one of [${NEED_VOCAB.join(', ')}], only if this stretch of the story clearly shows this need going unmet — omit entirely otherwise, and don't change it lightly","characterIntent":"a short (under 12 words) private thing ${params.charName} now wants, only if something concrete and new became clear this exchange — omit entirely otherwise"}.`,
     'Only move a dimension if this specific exchange clearly affected it. Leave the rest at 0. Most turns should move only one or two dimensions and add no new flags.',
     '"reason" is a short (under 12 words) in-world one-liner naming what just happened, e.g. "Complimented her cooking unprompted". Give one only if at least one dimension moved or a flag was added, otherwise "".',
     '"newFacts" is for concrete, durable facts about {{user}} worth recalling much later: a name, a stated preference, a piece of backstory, a promise made. Not every line of dialogue. Most turns should add none. Each fact as one short standalone sentence, e.g. "Prefers tea over coffee" or "Promised to visit again next weekend".',
+    `"mood" is ${params.charName}'s own transient emotional state right now, independent of the relationship dimensions above — a close, trusted relationship can still have an "annoyed" or "exhausted" day. Omit it on most turns; only state one when this exchange actually gave a clear signal, and don't just repeat the current mood back for no reason.`,
+    `"currentNeed" is steadier than mood — a psychological undercurrent this stretch of the story hasn't been meeting (e.g. "reassurance" after being flaky, "recognition" after going unnoticed, "solitude" after being crowded). Omit it almost every turn; it shouldn't flip as readily as mood does, and should only be set or changed on a genuinely clear, sustained signal, not one line of dialogue.`,
+    `"characterIntent" is a private thing ${params.charName} wants that the player hasn't necessarily been told — a small hidden agenda that can quietly color future turns (wanting reassurance, wanting space, planning a surprise, wanting an apology first). Omit it on almost every turn; once set it should usually stay omitted (meaning "no change") for a while rather than being reset every exchange.`,
     hasTasks
       ? 'Be conservative about "completedTaskIndices": only include a task index if this exchange plainly and unambiguously accomplished it, not if it merely became more likely. Use [] if none did.'
       : '',
@@ -190,7 +203,11 @@ export async function assessRelationshipMoment(
     hasTasks && Array.isArray(obj.completedTaskIndices)
       ? obj.completedTaskIndices.filter((i): i is number => typeof i === 'number' && Number.isInteger(i) && i >= 0 && i < pendingCount)
       : []
-  return { deltas, newFlags, reason, newFacts, completedTaskIndices }
+  const mood = MOOD_VOCAB.includes(obj.mood as CharacterMood) ? (obj.mood as CharacterMood) : undefined
+  const currentNeed = NEED_VOCAB.includes(obj.currentNeed as CharacterNeed) ? (obj.currentNeed as CharacterNeed) : undefined
+  const characterIntent =
+    typeof obj.characterIntent === 'string' && obj.characterIntent.trim() ? obj.characterIntent.trim().slice(0, 160) : undefined
+  return { deltas, newFlags, reason, newFacts, completedTaskIndices, mood, currentNeed, characterIntent }
 }
 
 /**
@@ -453,6 +470,57 @@ export async function assessCommitmentAsk(
     'Return ONLY a minified JSON object: {"decision":"accept"|"deflect"|"backfire","reason":"one short in-character sentence explaining the reaction","deltas":{ one integer -3..3 per dimension key }}.',
     '"accept" should generally have positive deltas; "deflect" should stay close to neutral; "backfire" should have real negative deltas, not just zeros.',
     'Example: {"decision":"accept","reason":"She laughs and pulls you into a hug. Of course she wants that too.","deltas":{"affection":3,"trust":2,"chemistry":2,"comfort":1,"respect":1,"curiosity":0,"tension":-1}}',
+    'JSON:',
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+
+  const text = await client.generate({ ...REL_PARAMS, max_length: 260, max_context_length: await client.getEffectiveMaxContext(), prompt })
+  const parsed = parseLenientJson(text)
+  const obj = (parsed && typeof parsed === 'object' ? parsed : {}) as Record<string, unknown>
+  const decision = obj.decision === 'accept' || obj.decision === 'backfire' ? obj.decision : 'deflect'
+  const reason =
+    typeof obj.reason === 'string' && obj.reason.trim() ? obj.reason.trim().slice(0, 300) : 'They need a moment to process this.'
+  const deltasObj = (obj.deltas && typeof obj.deltas === 'object' ? obj.deltas : {}) as Record<string, unknown>
+  const deltas = { ...ZERO_DELTAS }
+  for (const key of DELTA_KEYS) {
+    const v = Number(deltasObj[key])
+    deltas[key] = Number.isInteger(v) ? Math.max(-3, Math.min(3, v)) : 0
+  }
+  return { decision, reason, deltas }
+}
+
+/**
+ * Judges a single "first time together" ask — the user's own direct follow-up to the intimacy
+ * catalog ("we should be able to choose... lose virginity"), a deliberate initiation rather than
+ * only ever something the relationship-moment classifier might notice after the fact. Same shape
+ * and same three-outcome spirit as `assessCommitmentAsk` (reusing `CommitmentAskOutcome`) —
+ * reaching the warmth/commitment floor (`stage.ts`'s `canInitiateFirstTime`) only unlocks *asking*,
+ * never guarantees a yes.
+ */
+export async function assessIntimacyMilestone(
+  client: ChatBackend,
+  params: {
+    history: ChatMessage[]
+    charName: string
+    charPersonality?: string
+    userName: string
+    current: RelationshipDeltas
+  },
+): Promise<CommitmentAskOutcome> {
+  const recent = recentText(params.history, params.charName, params.userName, 10)
+  const prompt = [
+    `You are judging a single pivotal moment in an in-character roleplay: ${params.userName} has just initiated taking things all the way with ${params.charName} for the first time together.`,
+    `Current scores (0-100 each): ${DELTA_KEYS.map((k) => `${k}=${params.current[k]}`).join(', ')}.`,
+    params.charPersonality ? `${params.charName}'s personality: ${params.charPersonality}` : '',
+    `Recent conversation leading up to this:\n${recent || '(no prior conversation)'}`,
+    'Decide how {{char}} genuinely reacts, in character. Never an automatic yes just because it was initiated. Three possible outcomes:',
+    '- "accept": they genuinely want this too, right now.',
+    '- "deflect": not right now. Caught off guard, needs more time, or it feels premature, but nothing is damaged and this can come up again later.',
+    '- "backfire": the timing or delivery was genuinely bad given how things have actually been going (asked too soon, mid-argument, or reads as presumptuous). This stings and costs something real.',
+    'Return ONLY a minified JSON object: {"decision":"accept"|"deflect"|"backfire","reason":"one short in-character sentence explaining the reaction","deltas":{ one integer -3..3 per dimension key }}.',
+    '"accept" should generally have positive deltas; "deflect" should stay close to neutral; "backfire" should have real negative deltas, not just zeros.',
+    'Example: {"decision":"accept","reason":"She goes still for a moment, then pulls you closer instead of pulling away.","deltas":{"affection":3,"trust":2,"chemistry":3,"comfort":1,"respect":0,"curiosity":0,"tension":-1}}',
     'JSON:',
   ]
     .filter(Boolean)

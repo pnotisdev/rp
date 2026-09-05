@@ -37,3 +37,12 @@ export interface CustomBackground {
 export function slugifyBackgroundId(label: string, existingIds: string[]): string {
   return slugifyId(label, existingIds, 'location')
 }
+
+/** The human-readable label for a background id — one of the 12 defaults, or a world's own custom
+ *  one. Falls back to the raw id (title-cased) for one that's been removed from both lists since it
+ *  was set, rather than showing nothing. */
+export function backgroundLabel(id: string, world?: { customBackgrounds?: CustomBackground[] }): string {
+  const found = DEFAULT_BACKGROUNDS.find((b) => b.id === id) ?? world?.customBackgrounds?.find((b) => b.id === id)
+  if (found) return found.label
+  return id.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}

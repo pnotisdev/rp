@@ -44,14 +44,15 @@ export function combinedSceneFlags(customFlags?: CustomSceneFlag[]): { id: strin
   ]
 }
 
-/** 10c's Define-the-Relationship ladder, lowest first. Separate from `RELATIONSHIP_MILESTONES` — warmth only ever gates when a tier can be *asked for*, never grants it automatically. */
-export const COMMITMENT_ORDER: CommitmentStatus[] = ['none', 'dating', 'exclusive', 'living_together']
+/** 10c's Define-the-Relationship ladder, lowest first. Separate from `RELATIONSHIP_MILESTONES` — warmth only ever gates when a tier can be *asked for*, never grants it automatically. `married` is the top rung (the user's own ask: "unlocking moving together, getting married, and other things") — same ask/accept/backfire flow as every other tier below it, just one rung further. */
+export const COMMITMENT_ORDER: CommitmentStatus[] = ['none', 'dating', 'exclusive', 'living_together', 'married']
 
 const COMMITMENT_LABELS: Record<CommitmentStatus, string> = {
   none: 'not official',
   dating: 'dating',
   exclusive: 'exclusive',
   living_together: 'living together',
+  married: 'married',
 }
 
 export function formatCommitmentStatus(status: CommitmentStatus): string {
@@ -64,11 +65,20 @@ export function nextCommitmentTier(current: CommitmentStatus): Exclude<Commitmen
   return i >= 0 && i < COMMITMENT_ORDER.length - 1 ? (COMMITMENT_ORDER[i + 1] as Exclude<CommitmentStatus, 'none'>) : undefined
 }
 
-/** Reuses the same warmth milestones already authored for `RelationshipStage` rather than a second set of thresholds — dating needs getting_close's warmth, exclusive needs close's, living together needs sweethearts'. */
+/**
+ * Reuses the same warmth milestones already authored for `RelationshipStage` rather than a second
+ * set of thresholds — dating needs getting_close's warmth, exclusive needs close's, living together
+ * and married both need sweethearts' (the ladder's own top stage, so there's nowhere higher to peg
+ * a warmth floor for married specifically). That's fine: `nextCommitmentTier` already refuses to
+ * offer married until *currently* living_together, so the real gate marriage needs — you have to
+ * have already moved in together first — comes from ladder order, not from a warmth number no
+ * stage would ever clear.
+ */
 const COMMITMENT_TIER_STAGE: Record<Exclude<CommitmentStatus, 'none'>, RelationshipStage> = {
   dating: 'getting_close',
   exclusive: 'close',
   living_together: 'sweethearts',
+  married: 'sweethearts',
 }
 
 export function commitmentTierThreshold(
@@ -85,6 +95,16 @@ export function canAskForCommitment(
   milestones: { stage: RelationshipStage; at: number }[] = RELATIONSHIP_MILESTONES,
 ): boolean {
   return warmth >= commitmentTierThreshold(tier, milestones)
+}
+
+/**
+ * True once this relationship is ready to be *asked* about a "first time together" milestone (see
+ * `RelationshipTrack.firstIntimateSceneAt`) — same "asking doesn't mean yes" spirit as
+ * `canAskForCommitment`, just gated on warmth + any real commitment rather than one specific tier,
+ * since this isn't itself a rung on the `COMMITMENT_ORDER` ladder.
+ */
+export function canInitiateFirstTime(warmth: number, commitmentStatus: CommitmentStatus): boolean {
+  return warmth >= 75 && commitmentStatus !== 'none'
 }
 
 /** The six dimensions tracked in `Chat.relationshipStats`, alongside the top-level `affection`. */
@@ -145,6 +165,10 @@ type TrackHost = Pick<
   | 'breakupCount'
   | 'unlockedGalleryIds'
   | 'giftsGiven'
+  | 'mood'
+  | 'currentNeed'
+  | 'characterIntent'
+  | 'firstIntimateSceneAt'
   | 'participantRelationships'
 >
 
@@ -169,6 +193,10 @@ export function getRelationshipTrack(chat: TrackHost, characterId: string): Rela
       breakupCount: chat.breakupCount,
       unlockedGalleryIds: chat.unlockedGalleryIds,
       giftsGiven: chat.giftsGiven,
+      mood: chat.mood,
+      currentNeed: chat.currentNeed,
+      characterIntent: chat.characterIntent,
+      firstIntimateSceneAt: chat.firstIntimateSceneAt,
     }
   }
   return chat.participantRelationships?.[characterId] ?? {}

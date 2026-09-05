@@ -4,6 +4,8 @@ import type { InstructTemplate } from '@/lib/prompt/instructTemplates'
 import type { SceneTag } from '@/lib/vn/sceneTag'
 import type { WorldTemplateId } from '@/lib/world/worldTemplates'
 import type { CustomBackground } from '@/lib/vn/backgrounds'
+import type { CharacterMood, CharacterNeed } from '@/lib/prompt/mindGuidance'
+import type { IntimacyUnlockable } from '@/lib/dating/intimacyCatalog'
 
 export interface Persona {
   id: string
@@ -74,7 +76,7 @@ export interface QuickReply {
  * `commitmentTierThreshold`); actually reaching a tier always requires asking and the character
  * accepting — never an automatic side effect of warmth crossing a number.
  */
-export type CommitmentStatus = 'none' | 'dating' | 'exclusive' | 'living_together'
+export type CommitmentStatus = 'none' | 'dating' | 'exclusive' | 'living_together' | 'married'
 
 /**
  * A committed relationship under real strain (10c's "Breakups & reconciliation") — a grace period
@@ -132,6 +134,22 @@ export interface RelationshipTrack {
   unlockedGalleryIds?: string[]
   /** Per-gift-id tally of how many of that gift this specific character has received — separate from `Chat.giftInventory`, which is the player's shared, unspent stock. */
   giftsGiven?: Record<string, number>
+  /**
+   * The "Character Mind" scoped slice — a transient emotional read, an underlying need, and a
+   * private intention, all deliberately separate from the warmth-driving fields above (a character
+   * can love/trust someone while currently `annoyed`, per the user's own "Emotion ≠ relationship"
+   * point). All three are set by `assessRelationshipMoment`'s judge call (no extra AI cost) and
+   * read back by `prompt/mindGuidance.ts`, whose own doc comment explains how the three differ.
+   * Undefined means no clear read yet, not "neutral" — a fresh chat says nothing here rather than
+   * asserting a mood/need/intention that was never actually inferred.
+   */
+  mood?: CharacterMood
+  /** See `mood`'s doc comment — a steadier undercurrent than mood, not shown as a "need" to the player but not a secret either (see `RelationshipPanel`). */
+  currentNeed?: CharacterNeed
+  /** A short, hidden thing this character currently privately wants — never shown to the player, only shapes tone via `mindGuidance.ts`. See `mood`'s own doc comment. */
+  characterIntent?: string
+  /** Set (to when it happened) the first time this relationship reaches a deliberately-initiated "first time together" milestone (see `stage.ts`'s `canInitiateFirstTime` and `useChatSession.ts`'s `initiateFirstTime`) — undefined means it hasn't happened yet. A real fact about this specific relationship, not chat-wide. */
+  firstIntimateSceneAt?: number
 }
 
 /**
@@ -391,7 +409,14 @@ export interface Chat {
   giftsGiven?: Record<string, number>
   /** Owned quantity per `ItemDef.id` — 10d's item catalog, separate from `giftInventory` since items are used/consumed, not given to a character. */
   itemInventory?: Record<string, number>
+  /** Owned quantity per `IntimacyUnlockable.id` (toy-category only in practice) — a shared, chat-wide stock exactly like `giftInventory`/`itemInventory`, not owed to any one character. Warmth/commitment (see `intimacyCatalog.ts`) only ever gate *eligibility to buy*; this is actual possession. */
+  toyInventory?: Record<string, number>
   unlockedGalleryIds?: string[]
+  /** The primary's own mood/need/intention — see `RelationshipTrack.mood`'s doc comment for what these are and why they're separate from the relationship fields above. */
+  mood?: CharacterMood
+  currentNeed?: CharacterNeed
+  characterIntent?: string
+  firstIntimateSceneAt?: number
   activeEvent?: DateEventCard
   /** 10b's live rapport read — how the scene is trending, refreshed each turn *only* while a live date is active, cleared when it ends. Qualitative only; never affects affection or the tracked dimensions. See `src/lib/dating/rapport.ts`. */
   rapport?: RapportRead
@@ -474,6 +499,8 @@ export interface WorldCard {
   gifts?: GiftItem[]
   /** Per-world item catalog (10d) — no built-in default catalog the way gifts have one, since items are optional; empty/unset just means no items exist yet. */
   items?: ItemDef[]
+  /** World-authored additions to the built-in intimacy catalog (kissing spots/positions/toys/activities) beyond the ~30 defaults — additive, same pattern as `customBackgrounds`. See `intimacyCatalog.ts`. */
+  customIntimacyOptions?: IntimacyUnlockable[]
   /** Overrides the default warmth thresholds for characters living here. Unset stages fall back to the default. */
   relationshipThresholds?: Partial<Record<Exclude<RelationshipStage, 'near_strangers'>, number>>
   /** World-authored scene flags beyond the 4 built-in defaults — see `CustomSceneFlag`. */

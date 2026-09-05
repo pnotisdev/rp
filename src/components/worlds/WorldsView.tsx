@@ -6,7 +6,8 @@ import type { CustomSceneFlag, GiftItem, GiftRarity, ItemDef, ItemEffect, Relati
 import { fileToDataUrl } from '@/lib/characters/importExport'
 import { DEFAULT_BACKGROUNDS, DEFAULT_BACKGROUND_IDS, slugifyBackgroundId, type CustomBackground } from '@/lib/vn/backgrounds'
 import { BGM_DEFAULT_KEY, SCENE_MOODS } from '@/lib/vn/moods'
-import { combinedSceneFlags, formatRelationshipStage, RELATIONSHIP_MILESTONES } from '@/lib/dating/stage'
+import { combinedSceneFlags, COMMITMENT_ORDER, formatCommitmentStatus, formatRelationshipStage, RELATIONSHIP_MILESTONES } from '@/lib/dating/stage'
+import { type IntimacyCategory, type IntimacyUnlockable } from '@/lib/dating/intimacyCatalog'
 import { advancePhase, getCalendarInfo, getEnergyRemaining, getMaxEnergyForDay, getWeather, describeWeather, PHASES } from '@/lib/world/calendar'
 import { WORLD_TEMPLATES, getWorldTemplate, hiddenWorldTabs, type WorldTemplateId } from '@/lib/world/worldTemplates'
 import { newId } from '@/lib/id'
@@ -54,15 +55,24 @@ function blankWorld(template?: WorldTemplateId): Omit<WorldCard, 'id' | 'created
 
 export function WorldsView({
   initialWorldId,
+  initialTab,
   onConsumedInitial,
 }: {
   /** Deep-link into this world's editor on mount (the command palette's "jump to a world"). */
   initialWorldId?: string | null
+  /** Paired with `initialWorldId` — also land on this specific tab (the Relationship panel's "Customize" link jumping straight to 'dating'). Ignored without `initialWorldId`. */
+  initialTab?: string | null
   onConsumedInitial?: () => void
 } = {}) {
   const worlds = useApiQuery('worlds', () => worldsApi.list(), []) ?? []
   const [selected, setSelected] = useState<WorldCard | 'new' | null>(null)
   const [pendingTemplate, setPendingTemplate] = useState<WorldTemplateId | undefined>(undefined)
+  // Latched into local state the moment a match is found, same reason `pendingTemplate` is local
+  // rather than read straight from a prop: `onConsumedInitial` clears the parent's `initialTab` in
+  // the same effect that sets `selected`, and React batches both into one re-render — reading the
+  // prop directly at `<WorldEditor initialTab={initialTab}>` would see it already cleared by the
+  // time `WorldEditor` actually mounts, silently dropping the deep-linked tab.
+  const [resolvedTab, setResolvedTab] = useState<string | undefined>(undefined)
   const [showTemplateGallery, setShowTemplateGallery] = useState(false)
 
   useEffect(() => {
@@ -70,6 +80,7 @@ export function WorldsView({
     const match = worlds.find((w) => w.id === initialWorldId)
     if (!match) return
     setSelected(match)
+    setResolvedTab(initialTab ?? undefined)
     onConsumedInitial?.()
     // Only re-run when the target id itself changes (or the list finishes loading) — not on every
     // `worlds` refetch, which would otherwise snap back open every time this world's own editor saves.
@@ -80,6 +91,7 @@ export function WorldsView({
       <WorldEditor
         world={selected === 'new' ? null : selected}
         initialTemplate={selected === 'new' ? pendingTemplate : undefined}
+        initialTab={selected === 'new' ? undefined : resolvedTab}
         onDone={() => setSelected(null)}
       />
     )
@@ -158,14 +170,17 @@ const WORLD_TABS: EditorTab[] = [
 function WorldEditor({
   world,
   initialTemplate,
+  initialTab,
   onDone,
 }: {
   world: WorldCard | null
   initialTemplate?: WorldTemplateId
+  /** Deep-link straight to one tab on mount (the Relationship panel's "Customize" link). */
+  initialTab?: string | null
   onDone: () => void
 }) {
   const base = world ?? { id: '', createdAt: 0, updatedAt: 0, ...blankWorld(initialTemplate) }
-  const [tab, setTab] = useState('overview')
+  const [tab, setTab] = useState(initialTab ?? 'overview')
   const [name, setName] = useState(base.name)
   const [description, setDescription] = useState(base.description)
   const [rules, setRules] = useState(base.rules ?? '')
@@ -179,6 +194,7 @@ function WorldEditor({
   const [music, setMusic] = useState<Record<string, string>>(base.music ?? {})
   const [gifts, setGifts] = useState<GiftItem[]>(base.gifts ?? [])
   const [items, setItems] = useState<ItemDef[]>(base.items ?? [])
+  const [intimacyOptions, setIntimacyOptions] = useState<IntimacyUnlockable[]>(base.customIntimacyOptions ?? [])
   const [customSceneFlags, setCustomSceneFlags] = useState<CustomSceneFlag[]>(base.customSceneFlags ?? [])
   const [thresholds, setThresholds] = useState(base.relationshipThresholds ?? {})
   const [currentDay, setCurrentDay] = useState(base.currentDay ?? 0)
@@ -204,6 +220,7 @@ function WorldEditor({
       music,
       gifts,
       items,
+      customIntimacyOptions: intimacyOptions,
       customSceneFlags,
       relationshipThresholds: thresholds,
     }
@@ -224,6 +241,12 @@ function WorldEditor({
   const updateGift = (id: string, patch: Partial<GiftItem>) =>
     setGifts((g) => g.map((item) => (item.id === id ? { ...item, ...patch } : item)))
   const removeGift = (id: string) => setGifts((g) => g.filter((item) => item.id !== id))
+
+  const addIntimacyOption = () =>
+    setIntimacyOptions((list) => [...list, { id: newId(), category: 'activity', label: 'New idea', minWarmth: 50 }])
+  const updateIntimacyOption = (id: string, patch: Partial<IntimacyUnlockable>) =>
+    setIntimacyOptions((list) => list.map((o) => (o.id === id ? { ...o, ...patch } : o)))
+  const removeIntimacyOption = (id: string) => setIntimacyOptions((list) => list.filter((o) => o.id !== id))
 
   const addItem = () =>
     setItems((list) => [
@@ -642,6 +665,64 @@ function WorldEditor({
                     value={gift.price}
                     onChange={(e) => updateGift(gift.id, { price: Math.max(0, Number(e.target.value) || 0) })}
                   />
+                </div>
+              )}
+            />
+          </Section>
+
+          <Section
+            title="Intimacy catalog"
+            description="Kissing spots, positions, toys, and other intimate beats a relationship living here can unlock, beyond the ~37 built-in defaults. Positions/toys/activities only ever surface in the prompt once the user's own Intimacy detail setting is 'Explicit'. Give a toy a price and it has to actually be bought (from the Relationship panel) before it's usable or ever mentioned to the model — leave it at 0 for no purchase step, same as every non-toy category."
+            surface="bare"
+          >
+            <ListEditor
+              items={intimacyOptions}
+              getKey={(o) => o.id}
+              onAdd={addIntimacyOption}
+              onRemove={(o) => removeIntimacyOption(o.id)}
+              addLabel="Add unlockable"
+              emptyHint="No custom additions — the built-in catalog of ~37 is used."
+              renderItem={(option) => (
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-[1fr_140px_90px_100px_140px]">
+                  <TextField label="Label" value={option.label} onChange={(e) => updateIntimacyOption(option.id, { label: e.target.value })} />
+                  <SelectField
+                    label="Category"
+                    value={option.category}
+                    onChange={(e) => updateIntimacyOption(option.id, { category: e.target.value as IntimacyCategory })}
+                  >
+                    <option value="kissing_spot">Kissing spot</option>
+                    <option value="position">Position</option>
+                    <option value="toy">Toy</option>
+                    <option value="activity">Activity</option>
+                  </SelectField>
+                  <NumberField
+                    label="Price"
+                    min={0}
+                    value={option.price ?? 0}
+                    onChange={(e) => updateIntimacyOption(option.id, { price: Math.max(0, Number(e.target.value) || 0) || undefined })}
+                  />
+                  <NumberField
+                    label="Min warmth"
+                    min={0}
+                    max={100}
+                    value={option.minWarmth}
+                    onChange={(e) => updateIntimacyOption(option.id, { minWarmth: Math.max(0, Math.min(100, Number(e.target.value) || 0)) })}
+                  />
+                  <SelectField
+                    label="Min commitment"
+                    value={option.minCommitment ?? 'none'}
+                    onChange={(e) =>
+                      updateIntimacyOption(option.id, {
+                        minCommitment: e.target.value === 'none' ? undefined : (e.target.value as IntimacyUnlockable['minCommitment']),
+                      })
+                    }
+                  >
+                    {COMMITMENT_ORDER.map((c) => (
+                      <option key={c} value={c}>
+                        {c === 'none' ? 'No floor' : formatCommitmentStatus(c)}
+                      </option>
+                    ))}
+                  </SelectField>
                 </div>
               )}
             />

@@ -66,11 +66,14 @@ export function ChatWindow({
   chatId,
   onBack,
   onOpenSettings,
+  onNavigateToWorld,
 }: {
   chatId: string | null
   onBack?: () => void
   /** Deep link from the Quick tuning panel's "Open full Generation settings" — optional so ChatWindow stays usable without a view-switcher in scope. */
   onOpenSettings?: () => void
+  /** The Relationship panel's "Customize in World editor" link — optional for the same reason as `onOpenSettings`. */
+  onNavigateToWorld?: (worldId: string, tab?: string) => void
 }) {
   const {
     chat,
@@ -114,8 +117,10 @@ export function ChatWindow({
     regenerateChoices,
     buyGift,
     buyItem,
+    buyToy,
     useItem,
     askForCommitment,
+    initiateFirstTime,
     endRelationship,
     forkChat,
   } = useChatSession(chatId)
@@ -580,8 +585,15 @@ export function ChatWindow({
           onClose={() => setShowRelationship(false)}
           onBuyGift={buyGift}
           onBuyItem={buyItem}
+          onBuyToy={buyToy}
           onAskCommitment={askForCommitment}
+          onInitiateFirstTime={initiateFirstTime}
           onEndRelationship={endRelationship}
+          onNavigateToWorld={onNavigateToWorld}
+          onSendAction={(text) => {
+            sendUserMessage(text, [])
+            setShowRelationship(false)
+          }}
         />
       )}
       {showAuthorNote && (

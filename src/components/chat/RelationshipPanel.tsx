@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { X } from 'lucide-react'
+import { ArrowUpRight, X } from 'lucide-react'
 import type { Character, GalleryEntry } from '@/lib/characters/cardSpec'
 import type { Chat, WorldCard } from '@/lib/types'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
@@ -8,6 +8,7 @@ import { getGiftCatalog } from '@/lib/dating/gifts'
 import { getItemCatalog } from '@/lib/dating/items'
 import {
   canAskForCommitment,
+  canInitiateFirstTime,
   commitmentTierThreshold,
   computeWarmth,
   formatCommitmentStatus,
@@ -19,6 +20,7 @@ import {
   relationshipMilestonesFor,
   relationshipStageForWarmth,
 } from '@/lib/dating/stage'
+import { composeIntimacyActionText, getUnlockedIntimacyOptions, nextLockedInCategory, type IntimacyCategory, type IntimacyUnlockable } from '@/lib/dating/intimacyCatalog'
 import type { CommitmentStatus } from '@/lib/types'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
@@ -38,6 +40,15 @@ const DIMENSION_LABELS: Record<(typeof ALL_STAT_KEYS)[number], string> = {
   tension: 'Tension',
 }
 
+const INTIMACY_CATEGORIES: { id: IntimacyCategory; label: string }[] = [
+  { id: 'kissing_spot', label: 'Kissing spots' },
+  { id: 'position', label: 'Positions' },
+  { id: 'toy', label: 'Toys' },
+  { id: 'activity', label: 'Activities' },
+]
+
+type PanelTab = 'overview' | 'unlocks' | 'shop' | 'more'
+
 interface RelationshipPanelProps {
   chat: Chat
   character?: Character
@@ -47,8 +58,15 @@ interface RelationshipPanelProps {
   onClose: () => void
   onBuyGift: (giftId: string) => Promise<void>
   onBuyItem: (itemId: string) => Promise<void>
+  onBuyToy: (toyId: string) => Promise<void>
   onAskCommitment: (tier: Exclude<CommitmentStatus, 'none'>, characterId?: string) => Promise<void>
+  /** The "First time together" milestone ask — see `stage.ts`'s `canInitiateFirstTime`. */
+  onInitiateFirstTime: (characterId?: string) => Promise<void>
   onEndRelationship: (characterId?: string) => Promise<void>
+  /** The "Customize in World editor" link, when this character has a bound world — jumps straight to its "Dating sim" tab rather than just the world's overview. Absent when there's nowhere to route to (no view-switcher in scope). */
+  onNavigateToWorld?: (worldId: string, tab?: string) => void
+  /** Clicking an unlocked (and, for toys, owned) intimacy action — sends `composeIntimacyActionText`'s result as the player's own message, same mechanism Quick Replies already use. */
+  onSendAction: (text: string) => void
 }
 
 function upcomingGallery(gallery: GalleryEntry[], unlocked: Set<string>, affection: number, flags: Set<string>) {
@@ -72,6 +90,20 @@ function formatDeltas(deltas: Partial<Record<string, number>>): string {
     .join(', ')
 }
 
+/** The small "Customize in World editor" link shared by the Unlocks and Shop tabs — a no-op render (not a disabled button) with no bound world, since there's genuinely nowhere to send the player. */
+function CustomizeLink({ world, onNavigateToWorld }: { world?: WorldCard; onNavigateToWorld?: (worldId: string, tab?: string) => void }) {
+  if (!world || !onNavigateToWorld) return null
+  return (
+    <button
+      onClick={() => onNavigateToWorld(world.id, 'dating')}
+      className="flex items-center gap-1 text-xs text-text-muted transition-colors hover:text-accent"
+    >
+      Customize in World editor
+      <ArrowUpRight size={12} strokeWidth={2} />
+    </button>
+  )
+}
+
 export function RelationshipPanel({
   chat,
   character,
@@ -80,8 +112,12 @@ export function RelationshipPanel({
   onClose,
   onBuyGift,
   onBuyItem,
+  onBuyToy,
   onAskCommitment,
+  onInitiateFirstTime,
   onEndRelationship,
+  onNavigateToWorld,
+  onSendAction,
 }: RelationshipPanelProps) {
   // Multi-character relationship tracking: everyone this chat actually tracks a relationship for —
   // the primary plus any participant — with a tab switcher below when there's more than one. Falls
@@ -99,6 +135,7 @@ export function RelationshipPanel({
   const flags = new Set(chat.sceneFlags ?? [])
   const inventory = chat.giftInventory ?? {}
   const itemInventory = chat.itemInventory ?? {}
+  const toyInventory = chat.toyInventory ?? {}
   const milestones = relationshipMilestonesFor(world?.relationshipThresholds)
   const nextMilestone = milestones.find((m) => warmth < m.at)
   const relationshipStage = relationshipStageForWarmth(warmth, milestones)
@@ -112,6 +149,51 @@ export function RelationshipPanel({
   const eligibleForNextTier = nextTier ? canAskForCommitment(nextTier, warmth, milestones) : false
   const [asking, setAsking] = useState(false)
   const [ending, setEnding] = useState(false)
+  const [initiatingFirstTime, setInitiatingFirstTime] = useState(false)
+  const [buyingToyId, setBuyingToyId] = useState<string | null>(null)
+
+  // Eligible (warmth/commitment-met) toys regardless of ownership — the panel itself needs to see
+  // an unbought-but-eligible toy too, to render its "Buy" state, unlike the prompt's own call
+  // (`useChatSession.ts`), which passes `ownedToyIds` to filter those out before the model ever
+  // sees them.
+  const intimacyUnlocked = getUnlockedIntimacyOptions(warmth, commitmentStatus, world)
+  const canTakeFirstTime = canInitiateFirstTime(warmth, commitmentStatus)
+
+  const handleUseIntimacyOption = (option: IntimacyUnlockable) => {
+    onSendAction(composeIntimacyActionText(option, viewingCharacter?.card.name ?? 'them'))
+    onClose()
+  }
+
+  const handleBuyToy = async (toyId: string) => {
+    setBuyingToyId(toyId)
+    try {
+      await onBuyToy(toyId)
+    } finally {
+      setBuyingToyId(null)
+    }
+  }
+
+  const handleInitiateFirstTime = async () => {
+    if (!viewingCharacter) return
+    setInitiatingFirstTime(true)
+    try {
+      await onInitiateFirstTime(viewingCharacter.id)
+    } finally {
+      setInitiatingFirstTime(false)
+    }
+  }
+
+  const [tab, setTab] = useState<PanelTab>('overview')
+  const hasShop = giftCatalog.length > 0 || itemCatalog.length > 0
+  const tabs: { id: PanelTab; label: string }[] = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'unlocks', label: 'Unlocks' },
+    ...(hasShop ? [{ id: 'shop' as const, label: 'Shop' }] : []),
+    { id: 'more', label: 'More' },
+  ]
+  // A shop-less character never gets to see the tab in the first place — nothing to fall out of if
+  // gifts/items are ever added later, since this re-derives from the catalogs on every render.
+  const activeTab: PanelTab = tab === 'shop' && !hasShop ? 'overview' : tab
 
   const handleAsk = async () => {
     if (!nextTier || !viewingCharacter) return
@@ -179,115 +261,113 @@ export function RelationshipPanel({
 
   return (
     <Modal onClose={onClose} title="Relationship" size="3xl" scrollable>
-        {trackedCharacters.length > 1 && (
-          <div className="mb-4 flex flex-wrap gap-1.5 rounded-xl bg-bg-sunken p-1.5">
-            {trackedCharacters.map((c) => (
-              <button
-                key={c.id}
-                onClick={() => setViewingId(c.id)}
-                className={`flex-1 rounded-lg px-3 py-2 text-sm capitalize transition-colors ${
-                  viewingCharacter?.id === c.id ? 'bg-bg-elevated text-text themed-shadow' : 'text-text-muted hover:text-text'
-                }`}
-              >
-                {c.card.name}
-              </button>
-            ))}
-          </div>
+    <div className="flex min-h-0 flex-1 flex-col">
+      {/* Pinned: never scrolls away, regardless of which tab below is open. */}
+      <div className="shrink-0">
+      {trackedCharacters.length > 1 && (
+        <div className="mb-4 flex flex-wrap gap-1.5 rounded-xl bg-bg-sunken p-1.5">
+          {trackedCharacters.map((c) => (
+            <button
+              key={c.id}
+              onClick={() => setViewingId(c.id)}
+              className={`flex-1 rounded-lg px-3 py-2 text-sm capitalize transition-colors ${
+                viewingCharacter?.id === c.id ? 'bg-bg-elevated text-text themed-shadow' : 'text-text-muted hover:text-text'
+              }`}
+            >
+              {c.card.name}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Pinned above the tabs — the things worth seeing no matter which tab is open: how close
+          things are, what's going on emotionally right now, and (if things are genuinely at risk)
+          the one banner that shouldn't ever be a tab-click away. */}
+      <div className="mb-4 rounded-xl bg-bg-sunken p-4">
+        <div className="mb-1 flex items-center justify-between text-xs text-text-muted">
+          <span>Bond with {viewingCharacter?.card.name ?? 'Character'}</span>
+          <span className="capitalize">
+            {formatRelationshipStage(relationshipStage)} • {warmth} warmth
+          </span>
+        </div>
+        <div className="h-2 overflow-hidden rounded-full bg-bg-elevated">
+          <div className="h-full rounded-full bg-romance transition-[width] duration-500" style={{ width: `${warmth}%` }} />
+        </div>
+        {nextMilestone ? (
+          <p className="mt-2 text-xs text-text-muted">
+            Next stage: {formatRelationshipStage(nextMilestone.stage)} at {nextMilestone.at} warmth
+          </p>
+        ) : (
+          <p className="mt-2 text-xs text-text-muted">Max stage reached.</p>
         )}
+        {(track.mood || track.currentNeed) && (
+          <p className="mt-2 border-t border-bg-elevated pt-2 text-xs italic text-text-muted">
+            Right now: {[track.mood, track.currentNeed ? `could use more ${track.currentNeed}` : ''].filter(Boolean).join(' · ')}
+            {' — '}a passing read, separate from the bond above.
+          </p>
+        )}
+      </div>
 
-        <div className="mb-4 rounded-xl bg-bg-sunken p-4">
-          <div className="mb-1 flex items-center justify-between text-xs text-text-muted">
-            <span>Bond with {viewingCharacter?.card.name ?? 'Character'}</span>
-            <span className="capitalize">
-              {formatRelationshipStage(relationshipStage)} • {warmth} warmth
-            </span>
-          </div>
-          <div className="h-2 overflow-hidden rounded-full bg-bg-elevated">
-            <div className="h-full rounded-full bg-romance transition-[width] duration-500" style={{ width: `${warmth}%` }} />
-          </div>
-          {nextMilestone ? (
-            <p className="mt-2 text-xs text-text-muted">
-              Next stage: {formatRelationshipStage(nextMilestone.stage)} at {nextMilestone.at} warmth
-            </p>
-          ) : (
-            <p className="mt-2 text-xs text-text-muted">Max stage reached.</p>
-          )}
+      {track.relationshipWarning && (
+        <div className="mb-4 rounded-xl border border-danger/40 bg-danger/10 p-4">
+          <div className="text-sm font-semibold text-danger">On the rocks</div>
+          <p className="mt-1 text-xs text-text-muted">
+            {track.relationshipWarning.reason.charAt(0).toUpperCase() + track.relationshipWarning.reason.slice(1)} — if this
+            isn't resolved soon, the relationship will break on its own.
+          </p>
         </div>
+      )}
 
-        <div className="mb-4 grid grid-cols-1 gap-3 rounded-xl bg-bg-sunken p-4 sm:grid-cols-2">
-          <SelectField
-            label="Track relationship for this chat"
-            hint="Overrides the global Settings → Generation default, just for this chat."
-            value={overrideValue('autoTrackRelationship')}
-            onChange={(e) => setOverride('autoTrackRelationship', e.target.value as 'default' | 'on' | 'off')}
+      <div className="mb-4 flex gap-1 border-b border-border">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className={`border-b-2 px-3 py-2 text-sm transition-colors ${
+              activeTab === t.id ? 'border-accent text-accent' : 'border-transparent text-text-muted hover:text-text'
+            }`}
           >
-            <option value="default">Use global default</option>
-            <option value="on">On</option>
-            <option value="off">Off</option>
-          </SelectField>
-          <SelectField
-            label="Suggest choices for this chat"
-            hint="Overrides the global Settings → Generation default, just for this chat."
-            value={overrideValue('autoSuggestChoices')}
-            onChange={(e) => setOverride('autoSuggestChoices', e.target.value as 'default' | 'on' | 'off')}
-          >
-            <option value="default">Use global default</option>
-            <option value="on">On</option>
-            <option value="off">Off</option>
-          </SelectField>
-          <SelectField
-            label="Visual Novel mode for this chat"
-            hint="Overrides the global Settings → Appearance default, just for this chat."
-            value={overrideValue('visualNovelMode')}
-            onChange={(e) => setOverride('visualNovelMode', e.target.value as 'default' | 'on' | 'off')}
-          >
-            <option value="default">Use global default</option>
-            <option value="on">On</option>
-            <option value="off">Off</option>
-          </SelectField>
-        </div>
+            {t.label}
+          </button>
+        ))}
+      </div>
+      </div>
 
-        <div className="mb-4 flex items-center justify-between rounded-xl bg-bg-sunken p-4">
-          <div>
-            <div className="text-xs text-text-muted">Status</div>
-            <div className="text-sm capitalize text-text">{formatCommitmentStatus(commitmentStatus)}</div>
-            {track.breakupCount ? (
-              <div className="mt-0.5 text-[11px] text-text-muted">
-                Broken up before ({track.breakupCount}×) — trust, comfort, and chemistry still carry that scar.
-              </div>
-            ) : null}
-          </div>
-          <div className="flex items-center gap-2">
-            {commitmentStatus !== 'none' && (
-              <Button variant="ghost" onClick={handleEnd} disabled={ending}>
-                {ending ? 'Ending…' : 'End things'}
-              </Button>
-            )}
-            {nextTier &&
-              (eligibleForNextTier ? (
-                <Button variant="primary" onClick={handleAsk} disabled={asking}>
-                  {asking ? 'Asking…' : `Ask to be ${formatCommitmentStatus(nextTier)}`}
-                </Button>
-              ) : (
-                <div className="text-right text-xs text-text-muted">
-                  {formatCommitmentStatus(nextTier)} unlocks at {commitmentTierThreshold(nextTier, milestones)} warmth
+      {/* The only part that actually scrolls — bounded by the Modal's own max-height, so no tab
+          can ever push the panel taller than the viewport regardless of how much it holds. */}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+      {activeTab === 'overview' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between rounded-xl bg-bg-sunken p-4">
+            <div>
+              <div className="text-xs text-text-muted">Status</div>
+              <div className="text-sm capitalize text-text">{formatCommitmentStatus(commitmentStatus)}</div>
+              {track.breakupCount ? (
+                <div className="mt-0.5 text-[11px] text-text-muted">
+                  Broken up before ({track.breakupCount}×) — trust, comfort, and chemistry still carry that scar.
                 </div>
-              ))}
+              ) : null}
+            </div>
+            <div className="flex items-center gap-2">
+              {commitmentStatus !== 'none' && (
+                <Button variant="ghost" onClick={handleEnd} disabled={ending}>
+                  {ending ? 'Ending…' : 'End things'}
+                </Button>
+              )}
+              {nextTier &&
+                (eligibleForNextTier ? (
+                  <Button variant="primary" onClick={handleAsk} disabled={asking}>
+                    {asking ? 'Asking…' : `Ask to be ${formatCommitmentStatus(nextTier)}`}
+                  </Button>
+                ) : (
+                  <div className="text-right text-xs text-text-muted">
+                    {formatCommitmentStatus(nextTier)} unlocks at {commitmentTierThreshold(nextTier, milestones)} warmth
+                  </div>
+                ))}
+            </div>
           </div>
-        </div>
 
-        {track.relationshipWarning && (
-          <div className="mb-4 rounded-xl border border-danger/40 bg-danger/10 p-4">
-            <div className="text-sm font-semibold text-danger">On the rocks</div>
-            <p className="mt-1 text-xs text-text-muted">
-              {track.relationshipWarning.reason.charAt(0).toUpperCase() + track.relationshipWarning.reason.slice(1)} — if this
-              isn't resolved soon, the relationship will break on its own.
-            </p>
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 gap-4 overflow-y-auto md:grid-cols-2">
-          <Section title="Relationship stats" surface="sunken" className="md:col-span-2">
+          <Section title="Relationship stats" surface="sunken">
             <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-4">
               {ALL_STAT_KEYS.map((key) => {
                 const value = key === 'affection' ? affection : stats[key]
@@ -312,7 +392,11 @@ export function RelationshipPanel({
               })}
             </div>
           </Section>
+        </div>
+      )}
 
+      {activeTab === 'unlocks' && (
+        <div className="space-y-4">
           <Section title="Scene flags" surface="sunken">
             <div className="flex flex-wrap gap-2">
               {knownFlags.map((f) => (
@@ -323,15 +407,104 @@ export function RelationshipPanel({
             </div>
           </Section>
 
-          <Section title="Upcoming unlocks" surface="sunken">
-            <div className="space-y-1 text-xs text-text-muted">
-              <div>{nextSpriteUnlock ? `Expression ${nextSpriteUnlock[0]} @ ${nextSpriteUnlock[1]}` : 'No locked expressions'}</div>
-              <div>{nextBackgroundUnlock ? `Background ${nextBackgroundUnlock[0]} @ ${nextBackgroundUnlock[1]}` : 'No locked backgrounds'}</div>
-              <div>{upcoming[0] ? `Gallery: ${upcoming[0].title}${upcoming[0].missingAffection > 0 ? ` (+${upcoming[0].missingAffection} affection)` : ''}` : 'No locked gallery entries'}</div>
+          <Section
+            title="Intimate unlocks"
+            description="Kissing spots, positions, toys, and other beats this relationship has earned — click one to do it now."
+            surface="sunken"
+          >
+            <div className="space-y-3">
+              {INTIMACY_CATEGORIES.map(({ id, label }) => {
+                const items = intimacyUnlocked.filter((i) => i.category === id)
+                const next = nextLockedInCategory(id, warmth, commitmentStatus, world)
+                return (
+                  <div key={id}>
+                    <div className="mb-1 text-[11px] font-medium text-text-muted">{label}</div>
+                    {items.length > 0 ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        {items.map((i) => {
+                          // A toy with no authored price (a world author left it unset) is treated
+                          // as free/pre-owned, same as every non-toy category — only an actually
+                          // priced, not-yet-bought toy needs the purchase step.
+                          const needsPurchase = i.category === 'toy' && (i.price ?? 0) > 0 && (toyInventory[i.id] ?? 0) <= 0
+                          if (!needsPurchase) {
+                            return (
+                              <button
+                                key={i.id}
+                                onClick={() => handleUseIntimacyOption(i)}
+                                title={`${i.label} — click to do this now`}
+                                className="rounded-lg bg-romance/15 px-2 py-1 text-xs text-romance transition-colors hover:bg-romance/25"
+                              >
+                                {i.label}
+                              </button>
+                            )
+                          }
+                          return (
+                            <button
+                              key={i.id}
+                              onClick={() => handleBuyToy(i.id)}
+                              disabled={buyingToyId === i.id || (chat.giftCoins ?? 0) < (i.price ?? 0)}
+                              title={`Buy ${i.label} for ${i.price} coins`}
+                              className="rounded-lg border border-romance/40 px-2 py-1 text-xs text-romance/80 transition-colors hover:bg-romance/10 disabled:opacity-40"
+                            >
+                              {buyingToyId === i.id ? 'Buying…' : `${i.label} · ${i.price}c`}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    ) : (
+                      <div className="text-xs text-text-muted">Nothing unlocked yet.</div>
+                    )}
+                    {next && (
+                      <div className="mt-1 text-[11px] text-text-muted">
+                        Next: {next.label} at {next.minWarmth} warmth
+                        {next.minCommitment ? ` and ${formatCommitmentStatus(next.minCommitment)}` : ''}.
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           </Section>
 
-          <Section title="Gift inventory" description={`Coins: ${chat.giftCoins ?? 0}`} surface="sunken" className="md:col-span-2">
+          {(canTakeFirstTime || track.firstIntimateSceneAt) && (
+            <Section title="Milestone" surface="sunken">
+              {track.firstIntimateSceneAt ? (
+                <p className="text-xs text-text-muted">Already happened — their first time together.</p>
+              ) : (
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-xs text-text-muted">Ready to take things all the way, for the first time.</p>
+                  <Button variant="primary" onClick={handleInitiateFirstTime} disabled={initiatingFirstTime}>
+                    {initiatingFirstTime ? 'Asking…' : 'First time together'}
+                  </Button>
+                </div>
+              )}
+            </Section>
+          )}
+
+          <Section title="Progress" surface="sunken">
+            <div className="space-y-1 text-xs text-text-muted">
+              <div>{nextSpriteUnlock ? `Expression ${nextSpriteUnlock[0]} @ ${nextSpriteUnlock[1]}` : 'No locked expressions'}</div>
+              <div>{nextBackgroundUnlock ? `Background ${nextBackgroundUnlock[0]} @ ${nextBackgroundUnlock[1]}` : 'No locked backgrounds'}</div>
+              {upcoming.slice(0, 4).map((g) => (
+                <div key={g.id}>
+                  Gallery: {g.title}
+                  {g.missingAffection > 0 ? ` (+${g.missingAffection} affection)` : ''}
+                  {g.missingFlags.length > 0 ? ` — missing flags: ${g.missingFlags.join(', ')}` : ''}
+                </div>
+              ))}
+              {upcoming.length === 0 && <div>Everything unlocked for this character.</div>}
+            </div>
+          </Section>
+
+          <div className="flex justify-end">
+            <CustomizeLink world={world} onNavigateToWorld={onNavigateToWorld} />
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'shop' && hasShop && (
+        <div className="space-y-4">
+          <Section title="Gift inventory" description={`Coins: ${chat.giftCoins ?? 0}`} surface="sunken">
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {giftCatalog.map((gift) => {
                 const qty = inventory[gift.id] ?? 0
@@ -349,12 +522,7 @@ export function RelationshipPanel({
           </Section>
 
           {itemCatalog.length > 0 && (
-            <Section
-              title="Item shop"
-              description="Buy here, use from the Bag for an immediate effect."
-              surface="sunken"
-              className="md:col-span-2"
-            >
+            <Section title="Item shop" description="Buy here, use from the Bag for an immediate effect." surface="sunken">
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 {itemCatalog.map((item) => {
                   const qty = itemInventory[item.id] ?? 0
@@ -372,24 +540,50 @@ export function RelationshipPanel({
             </Section>
           )}
 
-          <Section title="Gallery progress" surface="sunken" className="md:col-span-2">
-            <div className="space-y-2">
-              {upcoming.slice(0, 5).map((g) => (
-                <div key={g.id} className="rounded-lg bg-bg-elevated px-3 py-2 text-xs text-text-muted">
-                  <div className="text-text">{g.title}</div>
-                  <div>
-                    {g.missingAffection > 0 ? `Need +${g.missingAffection} affection.` : 'Affection requirement met.'}
-                    {g.missingFlags.length > 0 ? ` Missing flags: ${g.missingFlags.join(', ')}` : ''}
-                  </div>
-                </div>
-              ))}
-              {upcoming.length === 0 && <div className="text-xs text-text-muted">Everything unlocked for this character.</div>}
-            </div>
+          <div className="flex justify-end">
+            <CustomizeLink world={world} onNavigateToWorld={onNavigateToWorld} />
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'more' && (
+        <div className="space-y-4">
+          <Section title="Chat settings" surface="sunken" contentClassName="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <SelectField
+              label="Track relationship for this chat"
+              hint="Overrides the global Settings → Generation default, just for this chat."
+              value={overrideValue('autoTrackRelationship')}
+              onChange={(e) => setOverride('autoTrackRelationship', e.target.value as 'default' | 'on' | 'off')}
+            >
+              <option value="default">Use global default</option>
+              <option value="on">On</option>
+              <option value="off">Off</option>
+            </SelectField>
+            <SelectField
+              label="Suggest choices for this chat"
+              hint="Overrides the global Settings → Generation default, just for this chat."
+              value={overrideValue('autoSuggestChoices')}
+              onChange={(e) => setOverride('autoSuggestChoices', e.target.value as 'default' | 'on' | 'off')}
+            >
+              <option value="default">Use global default</option>
+              <option value="on">On</option>
+              <option value="off">Off</option>
+            </SelectField>
+            <SelectField
+              label="Visual Novel mode for this chat"
+              hint="Overrides the global Settings → Appearance default, just for this chat."
+              value={overrideValue('visualNovelMode')}
+              onChange={(e) => setOverride('visualNovelMode', e.target.value as 'default' | 'on' | 'off')}
+            >
+              <option value="default">Use global default</option>
+              <option value="on">On</option>
+              <option value="off">Off</option>
+            </SelectField>
           </Section>
 
           {/* Chat-wide, not per-character — a durable fact ("allergic to cats") isn't owed to
               whichever tab happens to be selected, so this stays the same across the switcher above. */}
-          <Section title="What's remembered in this chat" surface="sunken" className="md:col-span-2">
+          <Section title="What's remembered in this chat" surface="sunken">
             <div className="mb-3 flex flex-wrap gap-2">
               {activeFacts.map((f) => (
                 <button
@@ -416,7 +610,7 @@ export function RelationshipPanel({
             </div>
           </Section>
 
-          <details className="rounded-xl bg-bg-sunken p-4 md:col-span-2">
+          <details className="rounded-xl bg-bg-sunken p-4">
             <summary className="cursor-pointer text-sm font-semibold text-text">History ({events.length})</summary>
             <div className="mt-2 max-h-56 space-y-2 overflow-y-auto">
               {events.map((e) => (
@@ -433,6 +627,9 @@ export function RelationshipPanel({
             </div>
           </details>
         </div>
+      )}
+      </div>
+    </div>
     </Modal>
   )
 }

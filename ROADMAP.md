@@ -2311,6 +2311,153 @@ below:**
       the exact broken message from the user's real session (clean output, referencing the actual
       prior conversation correctly) and by a completely organic follow-up turn the user sent
       mid-session, unprompted by any test setup, which also came back clean.
+- [x] **Scenes no longer stay static forever** (#130) — the user's own direct ask, prioritized
+      first of a 4-item roleplay-experience list ("Scenes staying static — this is the one to fix
+      first"). Ordinary chat had no mechanism nudging the model to ever change the physical
+      setting — the scene-tag instruction only ever asked it to *label* wherever the story already
+      was. `prompt/sceneProgression.ts`'s `countStaticSceneTurns` (a deterministic turn-counter
+      over tagged character turns) plus `sceneProgressionNudge` (a conditional `styleGuidance`
+      line, firing only past 6 consecutive turns on the same background) closes the gap, preferring
+      the character's own authored schedule location over a generic background list, and
+      explicitly suppressed during a live hangout/date (the event itself already is the scene
+      change). Live-verified via the Prompt Inspector on a real chat driven to a 6-turn static
+      streak — caught and fixed a real bug along the way: `styleGuidance` strings are never
+      macro-substituted (only specific named `buildPrompt` fields like `relationshipDescription`
+      are), so an initial `{{char}}` in the nudge text was leaking literally into the real prompt;
+      fixed to interpolate/phrase around it instead, same fix repeated for every item below.
+- [x] **NSFW unlockables: kissing spots, sex positions, toys, and other intimate beats, gated by
+      relationship progression** (#131) — item 2 of the same list ("unlocking sex positions,
+      places to kiss at, sex toys and more nsfw related things. Be creative"). A ~30-entry built-in
+      catalog (`dating/intimacyCatalog.ts`, same shape as `DEFAULT_GIFT_CATALOG`) gated by warmth
+      and, for the more involved entries, `CommitmentStatus` — `kissing_spot` entries surface at
+      any `IntimacyDetailLevel` (kissing was never gated behind that dial to begin with), while
+      `position`/`toy`/`activity` entries only ever surface once the user has actually set it to
+      `'explicit'`. `intimacyOptionsGuidance` caps each category to the top 4 (by threshold) so the
+      list doesn't grow into a wall of text as more unlocks, and always closes with "never force
+      one in just because it's unlocked" — a bank of ideas, not a mandate, same split as #130's
+      nudge. Live-verified via the Prompt Inspector at max warmth + `exclusive` commitment with
+      Explicit turned on, confirming all four categories appear correctly capped and gated.
+- [x] **A `married` commitment tier, above `living_together`** (#132) — item 3 ("unlocking moving
+      together, getting married, and other things"; moving in already existed as
+      `living_together`, the prior top of the ladder). Purely additive to `stage.ts`'s existing
+      generic tier machinery — `COMMITMENT_ORDER` gained one entry, `COMMITMENT_TIER_STAGE.married`
+      reuses the `sweethearts` warmth floor `living_together` already needs (the real gate is
+      ladder order via `nextCommitmentTier`, not a warmth number no stage would ever clear, since
+      sweethearts is already the top of that ladder) — every UI surface
+      (`RelationshipPanel`'s ask button, `askForCommitment`'s judge-call flow, toasts, the
+      resulting chat fact) is generic over `CommitmentStatus` and needed zero changes. Live-verified
+      through the real "Ask to be married" button end-to-end against the user's actual OpenRouter
+      backend: one real judge call backfired (character pushed back, stats dropped, ladder
+      correctly stayed at `living_together`), a second rejected gently ("let the structure cure
+      before adding another floor") — both proving the full accept/reject/backfire pipeline, which
+      is otherwise identical code to the already-shipped lower tiers.
+- [x] **"Character Mind," scoped to a first real slice: an emotional state and a private
+      intention, independent of relationship warmth** (#133) — item 4, off the user's own
+      unprompted "Character Mind" brainstorm (personality/emotions/needs/desires/goals/secrets/
+      plans/social graph/rumors — deliberately not attempted in one pass; see below for what's
+      still open). Ships the two pieces with the clearest payoff on their own, matching the user's
+      "Emotion ≠ relationship... someone can love/trust the player while currently being angry with
+      them": `RelationshipTrack.mood` (a closed 20-word vocabulary, `prompt/mindGuidance.ts`) and
+      `.characterIntent` (a short hidden per-character want, mirroring the player-facing
+      `Objective` system but hidden from the player). Both ride inside the *same* judge call that
+      already scores relationship movement every turn (`assessRelationshipMoment`) — no added AI
+      cost — sticky by default (the classifier is told to omit either key most turns, not reset
+      them). Read back into `styleGuidance` via `moodGuidance`/`characterIntentGuidance`, both
+      interpolating real names rather than `{{char}}`/`{{user}}` from the start, having learned
+      that lesson from #130. Live-verified twice: once via direct DB injection + the Prompt
+      Inspector (confirming the injected lines reach the real prompt), once via one real live turn
+      against the user's OpenRouter backend — the model's actual reply organically reflected both
+      the injected `guarded` mood and the injected private intent (bringing up "the silent vigil"
+      unprompted), and the judge call correctly updated `characterIntent` to a new, contextually
+      sound read of the scene afterward. The rest of the mindmap (needs/desires/goals/fears/
+      beliefs/secrets/plans/social graph/rumors/promises) stays a documented follow-up — section
+      12 already sketches related, vaguer precursors ("NPC-to-NPC background simulation," "fog of
+      knowledge") this could eventually connect to.
+- [x] **"Complete the mind guidance" — a third dynamic dimension (`currentNeed`) plus real UI
+      visibility** (#134) — the user's own direct follow-up to #133. Checked first whether the
+      *static* half of the mindmap (goals/desires/boundaries/social graph) was actually missing —
+      it wasn't: `Character.goals`/`.boundaries`/`.socialConnections` already reach every ordinary
+      turn via `characters/profile.ts`'s `buildCharacterProfileNote`, just never wired into
+      `draftHiddenAgenda`'s separate date-event params (unrelated, left alone). What was genuinely
+      missing: the brainstorm's specific 8-category "needs" list (social connection, solitude,
+      achievement, reassurance, excitement, stability, recognition, belonging — `NEED_VOCAB`,
+      `mindGuidance.ts`), added as a third field on the same judge call, deliberately written as
+      *steadier* than mood (the prompt explicitly tells the classifier not to flip it on one line
+      of dialogue) — and the fact that mood/need were completely invisible anywhere in the UI.
+      `RelationshipPanel` now shows a small "Right now: guarded · could use more reassurance — a
+      passing read, separate from the bond above" line under the warmth bar; `characterIntent`
+      stays hidden by design (it's a hidden agenda, not a mood). Live-verified: DB-injected all
+      three fields, confirmed the panel renders correctly and the Prompt Inspector shows all three
+      guidance lines in the real assembled prompt in the intended order (mood → need → intent).
+      What's still explicitly out of scope, named as such rather than attempted: desires, fears,
+      beliefs, opinions, secrets-as-first-class-entities, plans-with-interruption, the social graph
+      beyond authored `socialConnections`, rumors, promises, internal conflicts — each is a
+      structurally different, standalone system (own storage shape, often its own UI), not another
+      field on this one judge call.
+- [x] **Relationship panel overhaul: a clean 4-tab layout, real intimacy-unlocks visibility, and
+      per-world intimacy-catalog customization** (#135) — the user's own ask, "the relationship tab
+      really needs an overhaul... without messy scroll and missing information," broadened
+      mid-request to "easier to customize locations, fantasy elements, gifts, sex toys, sex
+      positions." Investigation before building anything: custom genres/settings (a Rance
+      X/STEINS;GATE/Muv-Luv/CLANNAD-style world) are already fully supported today via
+      `WorldCard.lorebook` + `Character.description`/`.personality`/`.tags`/`.character_book` — no
+      engineering needed, just explained to the user — and locations/gifts already have full
+      editors in `WorldsView.tsx`; the actual gaps were (a) the intimacy catalog from #131 had zero
+      per-world customization and zero UI presence anywhere, and (b) the panel itself was 12+
+      stacked same-looking blocks in one long scroll. Fixed: `getUnlockedIntimacyOptions`/
+      `getIntimacyCatalog`/new `nextLockedInCategory` (`intimacyCatalog.ts`) now merge in a world's
+      own `customIntimacyOptions` (additive, same pattern as `customBackgrounds`), with a
+      `ListEditor`-based "Intimacy catalog" section in `WorldsView`'s Dating-sim tab mirroring the
+      gift editor exactly. `RelationshipPanel.tsx` rebuilt around a pinned summary (bond/mood/
+      warning, never scrolls away) plus 4 tabs (Overview/Unlocks/Shop/More), with a genuinely new
+      "Intimate unlocks" block in Unlocks grouping what's earned by category with a "next unlock"
+      line each — the first time this catalog has been visible anywhere. A "Customize in World
+      editor" link jumps straight to the bound world's Dating-sim tab, reusing (and extending with
+      a tab-aware `initialTab`) the exact deep-link plumbing the Command Palette's "jump to a
+      world" already used. Two real bugs caught and fixed live, not just in review: the tab
+      rewrite initially dropped the inner `overflow-y-auto` the old single-scroll layout relied on
+      (Modal's own shell doesn't scroll on its own — content has to opt in), silently causing tall
+      tab content to overflow uncontained; and the new tab-deep-link raced its own "consumed" signal
+      — `WorldsView` read `initialTab` straight from a prop that the parent cleared in the same
+      render batch that mounted `WorldEditor`, so the target tab was already `null` by the time it
+      was read, fixed by latching it into local state the instant a match is found (same reason
+      `pendingTemplate` already avoided this exact race for `initialTemplate`). Live-verified
+      end-to-end: added a custom catalog entry through the new editor, confirmed it appears in the
+      panel's Unlocks tab once its threshold is met and in the real assembled prompt via
+      `intimacyOptionsGuidance` once `intimacyLevel` is `'explicit'`, and confirmed the customize
+      link now lands directly on "Dating sim," not just the world's overview.
+- [x] **Unlocked ≠ usable: every intimacy-catalog entry becomes a real, clickable action, toys
+      become an actual purchase, and a deliberate "first time together" milestone** (#136) — the
+      user's own direct follow-up to #135/#131: "we should be able to choose 'unlock kiss', and
+      then choose where to do it and how... or like lose virginity, or buy toys." Until now,
+      "unlocked" only ever meant "the model may draw on this" — nothing to click, nothing to buy,
+      nothing to deliberately initiate. Three pieces: (1) every `IntimacyUnlockable` gained a
+      hand-written `actionText` (all ~37 built-in entries, not a templated sentence — a generic
+      "does {label}" line read badly across this varied a catalog), sent verbatim as the player's
+      own message via `composeIntimacyActionText` + the exact mechanism Quick Replies already use
+      (`sendUserMessage`, "sends immediately, exactly as if you'd typed and sent it yourself"),
+      closing the Relationship panel so the reply generates right there; (2) toys gained a `price`
+      and `Chat.toyInventory` (byte-for-byte mirroring `giftInventory`/`itemInventory` and
+      `buyGift`/`buyItem`'s own shape) — `getUnlockedIntimacyOptions` gained an `ownedToyIds` filter
+      so a toy only ever reaches the model, or becomes clickable in the panel, once actually bought,
+      warmth/commitment now only gating *eligibility to buy*; (3) `assessIntimacyMilestone`
+      (`relationshipAssist.ts`) + `initiateFirstTime` (`useChatSession.ts`) — a deliberate ask
+      mirroring `askForCommitment`'s exact accept/deflect/backfire judge-call shape, gated by a new
+      `canInitiateFirstTime` (warmth ≥75 + any real commitment), persisting `firstIntimateSceneAt`
+      only on accept and deliberately not auto-sending a narrative line afterward — this beat is big
+      enough that the player's own next message should carry it. Caught one real accessibility
+      regression live, not in review: every pill's `title` was the identical generic "Click to do
+      this now"/"Buy for N coins," giving a screen reader no way to distinguish which of 15+ items
+      it was announcing — fixed to include the item's own label. Live-verified end-to-end against
+      the real backend: clicked a kissing-spot pill and confirmed the exact authored line
+      ("*leans in and presses a slow kiss to Sumire's forehead*") landed as a real sent message with
+      a real generated reply; bought a toy (refused at insufficient coins, succeeded once funded,
+      pill flipped to its usable state, and the Prompt Inspector confirmed only the bought toy ever
+      reached the model, not the other eligible-but-unbought ones); and ran the first-time-together
+      ask twice against the real backend, getting a live deflect outcome and then a live 429 from
+      the provider — both handled correctly (state left untouched, the error surfaced as a toast)
+      without needing to force an accept outcome to trust code that's structurally identical to the
+      already-proven `askForCommitment` accept path.
 
 **Suggested phase order** for this whole section, since it's too large for one pass — updated now
 that the 7-dimension/warmth rework (originally step 4, deferred until after 10b) landed early: (1)
@@ -4336,3 +4483,33 @@ not yet folded into this priority order. The high-contrast theme preset (#73) an
 output in the Prompt Inspector (#82) have both shipped. The user-authored scripting idea is
 the standout but is deliberately scoped in stages precisely so it doesn't get picked up as a single
 large unplanned effort — see that item's own "smallest first" breakdown before starting on it.
+
+A separate playthrough QA pass (tracked in `PLAYTHROUGH_REPORT.md`, not here) shipped 5 bug fixes
+in the same session: the connection-status dot now checks whichever backend is actually selected,
+plus a new Settings → Connection "test connection" for hosted providers (OpenRouter's real
+auth-validating `/key` endpoint, not its public, always-200 `/models`); a verbatim-echo guard
+(`isVerbatimEcho`) stops a weak model's parroted reply from being saved as real dialogue, which
+also surfaced and fixed a root-cause scene-tag bug (`extractSceneTag` only ever found the *last*
+of two `<<scene:...>>` tags, letting a mid-reply one survive into the generic HTML-tag stripper and
+come out as literal `"<>"`); and `endRelationship` now recomputes `relationshipStage` on breakup
+instead of leaving it stale, matching every other relationship-write path. Off the back of that QA
+pass, and a long unprompted "Character Mind" brainstorm, the user asked for a prioritized 4-item
+roleplay-experience push, explicitly deferring image generation: ~~scenes staying static~~ (#130),
+~~NSFW unlockables~~ (#131), and ~~a `married` commitment tier~~ (#132) each shipped in turn, each
+live-verified against the user's real OpenRouter backend rather than only unit-tested. ~~"Character
+Mind," scoped to mood + a private intention~~ (#133) closed out the list — deliberately a first
+slice of the much larger brainstorm rather than an attempt at all of it at once, with the
+still-open remainder (needs/desires/goals/fears/beliefs/secrets/plans/social graph/rumors) noted
+above rather than guessed at. The user's own direct "complete the mind guidance" follow-up
+(#134) added the brainstorm's specific 8-category needs list as a third dimension on the same
+judge call, and gave mood/need their first real UI surface — while confirming, before adding
+anything, that goals/boundaries/social connections were already reaching every turn all along via
+the existing `buildCharacterProfileNote`, not a gap that needed closing. The user's next ask, "the
+relationship tab really needs an overhaul," then broadened mid-request into a genuine planning
+exercise (`EnterPlanMode`, approved before touching code) — ~~a 4-tab panel redesign plus
+per-world intimacy-catalog customization~~ (#135) shipped both, alongside confirming the user's
+"build a Rance X/STEINS;GATE-style world" question was already fully answerable with existing
+lorebook/character-authoring tools rather than new engineering. The user's own direct follow-up —
+noticing that "unlocked" never actually meant "usable" — led straight into another planned pass:
+~~clickable intimacy actions, a real toy economy, and a first-time-together milestone~~ (#136),
+live-verified against the real backend down to a genuine mid-test 429 handled cleanly.

@@ -26,10 +26,12 @@ function ChatSurface({
   activeChatId,
   onSelect,
   onNavigate,
+  onNavigateToWorld,
 }: {
   activeChatId: string | null
   onSelect: (id: string | null) => void
   onNavigate: (view: ViewId) => void
+  onNavigateToWorld: (worldId: string, tab?: string) => void
 }) {
   const chats = useApiQuery('chats', () => chatsApi.list(), [])
   // Below `md` there's only room for one of the chat list / the active chat at a time — this is
@@ -58,6 +60,7 @@ function ChatSurface({
           chatId={activeChatId}
           onBack={() => setMobileListOpen(true)}
           onOpenSettings={() => onNavigate('settings')}
+          onNavigateToWorld={onNavigateToWorld}
         />
       </div>
     </>
@@ -76,6 +79,15 @@ export default function App() {
   // by the view itself once it's actually opened that item's editor, not re-armed on every render.
   const [pendingCharacterId, setPendingCharacterId] = useState<string | null>(null)
   const [pendingWorldId, setPendingWorldId] = useState<string | null>(null)
+  const [pendingWorldTab, setPendingWorldTab] = useState<string | null>(null)
+  // The Relationship panel's "Customize in World editor" link — same deep-link shape as the
+  // command palette's `onSelectWorld` below, just also landing on a specific tab (e.g. 'dating'
+  // for the gift/intimacy catalogs) instead of always the world's overview.
+  const navigateToWorld = (worldId: string, tab?: string) => {
+    setPendingWorldId(worldId)
+    setPendingWorldTab(tab ?? null)
+    setView('worlds')
+  }
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -113,14 +125,21 @@ export default function App() {
           stress with tall-enough content to catch. */}
       <div className="flex min-h-0 flex-1 min-w-0 pb-14 md:pb-0">
         {view === 'chat' && (
-          <ChatSurface activeChatId={activeChatId} onSelect={setActiveChatId} onNavigate={setView} />
+          <ChatSurface activeChatId={activeChatId} onSelect={setActiveChatId} onNavigate={setView} onNavigateToWorld={navigateToWorld} />
         )}
         {view === 'companion' && <CompanionView />}
         {view === 'characters' && (
           <CharactersView initialCharacterId={pendingCharacterId} onConsumedInitial={() => setPendingCharacterId(null)} />
         )}
         {view === 'worlds' && (
-          <WorldsView initialWorldId={pendingWorldId} onConsumedInitial={() => setPendingWorldId(null)} />
+          <WorldsView
+            initialWorldId={pendingWorldId}
+            initialTab={pendingWorldTab}
+            onConsumedInitial={() => {
+              setPendingWorldId(null)
+              setPendingWorldTab(null)
+            }}
+          />
         )}
         {view === 'personas' && <PersonasView />}
         {view === 'worldinfo' && <WorldInfoView />}

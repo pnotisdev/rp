@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   applyBreakupScar,
   canAskForCommitment,
+  canInitiateFirstTime,
   combinedSceneFlags,
   commitmentTierThreshold,
   crossedMilestone,
@@ -135,10 +136,11 @@ describe('nextCommitmentTier', () => {
     expect(nextCommitmentTier('none')).toBe('dating')
     expect(nextCommitmentTier('dating')).toBe('exclusive')
     expect(nextCommitmentTier('exclusive')).toBe('living_together')
+    expect(nextCommitmentTier('living_together')).toBe('married')
   })
 
   it('is undefined at the top of the ladder', () => {
-    expect(nextCommitmentTier('living_together')).toBeUndefined()
+    expect(nextCommitmentTier('married')).toBeUndefined()
   })
 })
 
@@ -147,6 +149,7 @@ describe('commitmentTierThreshold', () => {
     expect(commitmentTierThreshold('dating')).toBe(55) // getting_close
     expect(commitmentTierThreshold('exclusive')).toBe(75) // close
     expect(commitmentTierThreshold('living_together')).toBe(90) // sweethearts
+    expect(commitmentTierThreshold('married')).toBe(90) // sweethearts — same as living_together; ladder order is the real gate, see COMMITMENT_TIER_STAGE's doc comment
   })
 
   it('honors custom milestone overrides', () => {
@@ -166,12 +169,28 @@ describe('canAskForCommitment', () => {
   })
 })
 
+describe('canInitiateFirstTime', () => {
+  it('is false below 75 warmth even with real commitment', () => {
+    expect(canInitiateFirstTime(74, 'dating')).toBe(false)
+  })
+
+  it('is false at high warmth with no commitment at all', () => {
+    expect(canInitiateFirstTime(100, 'none')).toBe(false)
+  })
+
+  it('is true once both warmth and any real commitment are met', () => {
+    expect(canInitiateFirstTime(75, 'dating')).toBe(true)
+    expect(canInitiateFirstTime(100, 'married')).toBe(true)
+  })
+})
+
 describe('formatCommitmentStatus', () => {
   it('formats every status as readable lowercase text', () => {
     expect(formatCommitmentStatus('none')).toBe('not official')
     expect(formatCommitmentStatus('dating')).toBe('dating')
     expect(formatCommitmentStatus('exclusive')).toBe('exclusive')
     expect(formatCommitmentStatus('living_together')).toBe('living together')
+    expect(formatCommitmentStatus('married')).toBe('married')
   })
 })
 
@@ -362,6 +381,32 @@ describe('getRelationshipTrack / patchRelationshipTrack', () => {
         rival: { affection: 18, breakupCount: 0, relationshipStage: 'acquaintances' },
         other: { affection: 99 },
       },
+    })
+  })
+
+  it("reads and patches the primary's mood/currentNeed/characterIntent the same as every other top-level field", () => {
+    const chat: Chat = { ...baseChat, mood: 'content', currentNeed: 'stability', characterIntent: 'wants to surprise him' }
+    expect(getRelationshipTrack(chat, 'primary').mood).toBe('content')
+    expect(getRelationshipTrack(chat, 'primary').currentNeed).toBe('stability')
+    expect(getRelationshipTrack(chat, 'primary').characterIntent).toBe('wants to surprise him')
+    expect(patchRelationshipTrack(chat, 'primary', { mood: 'annoyed' })).toEqual({ mood: 'annoyed' })
+  })
+
+  it("reads and patches the primary's firstIntimateSceneAt the same as every other top-level field", () => {
+    const chat: Chat = { ...baseChat, firstIntimateSceneAt: 12345 }
+    expect(getRelationshipTrack(chat, 'primary').firstIntimateSceneAt).toBe(12345)
+    expect(getRelationshipTrack(chat, 'newcomer').firstIntimateSceneAt).toBeUndefined()
+    expect(patchRelationshipTrack(chat, 'primary', { firstIntimateSceneAt: 99999 })).toEqual({ firstIntimateSceneAt: 99999 })
+  })
+
+  it("reads and patches a participant's mood/currentNeed/characterIntent through their own entry", () => {
+    const chat: Chat = {
+      ...baseChat,
+      participantRelationships: { rival: { mood: 'jealous', currentNeed: 'recognition', characterIntent: 'wants to be noticed' } },
+    }
+    expect(getRelationshipTrack(chat, 'rival')).toEqual({ mood: 'jealous', currentNeed: 'recognition', characterIntent: 'wants to be noticed' })
+    expect(patchRelationshipTrack(chat, 'rival', { mood: 'proud' })).toEqual({
+      participantRelationships: { rival: { mood: 'proud', currentNeed: 'recognition', characterIntent: 'wants to be noticed' } },
     })
   })
 })

@@ -3,6 +3,7 @@ import type { KoboldClient } from '@/lib/api/kobold'
 import type { ChatMessage } from '@/lib/prompt/builder'
 import {
   assessDateOutcome,
+  assessIntimacyMilestone,
   assessRelationshipMoment,
   draftHiddenAgenda,
   scaleDeltasForDifficulty,
@@ -163,6 +164,120 @@ describe('assessRelationshipMoment: task-detection merge', () => {
       baseParams,
     )
     expect(moment.completedTaskIndices).toEqual([])
+  })
+})
+
+// "Character Mind" scoped slice — mood/currentNeed/characterIntent ride along in this same judge
+// call, see `prompt/mindGuidance.ts`.
+describe('assessRelationshipMoment: mood, currentNeed, and characterIntent', () => {
+  const baseParams = { history: TRANSCRIPT, latestReply: 'Thanks for helping me pack up.', charName: 'Sumire', userName: 'Kai', current: currentStats }
+  const NO_MIND_REPLY = '{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[]}'
+
+  it('sends the current mood/need/intent as context and asks for all three in the schema', async () => {
+    let sentPrompt = ''
+    await assessRelationshipMoment(
+      stubClient(NO_MIND_REPLY, (p) => {
+        sentPrompt = p.prompt as string
+      }),
+      { ...baseParams, currentMood: 'content', currentNeed: 'stability', currentIntent: 'wants to visit the festival together' },
+    )
+    expect(sentPrompt).toContain('content')
+    expect(sentPrompt).toContain('stability')
+    expect(sentPrompt).toContain('wants to visit the festival together')
+    expect(sentPrompt).toContain('"mood"')
+    expect(sentPrompt).toContain('"currentNeed"')
+    expect(sentPrompt).toContain('"characterIntent"')
+  })
+
+  it('returns undefined for all three when the model gives no clear read', async () => {
+    const moment = await assessRelationshipMoment(stubClient(NO_MIND_REPLY), baseParams)
+    expect(moment.mood).toBeUndefined()
+    expect(moment.currentNeed).toBeUndefined()
+    expect(moment.characterIntent).toBeUndefined()
+  })
+
+  it('accepts a currentNeed from the closed vocabulary', async () => {
+    const reply = '{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"currentNeed":"recognition"}'
+    const moment = await assessRelationshipMoment(stubClient(reply), baseParams)
+    expect(moment.currentNeed).toBe('recognition')
+  })
+
+  it('rejects a currentNeed outside the closed vocabulary rather than passing it through', async () => {
+    const reply = '{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"currentNeed":"world domination"}'
+    const moment = await assessRelationshipMoment(stubClient(reply), baseParams)
+    expect(moment.currentNeed).toBeUndefined()
+  })
+
+  it('accepts a mood from the closed vocabulary', async () => {
+    const reply = '{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"mood":"anxious"}'
+    const moment = await assessRelationshipMoment(stubClient(reply), baseParams)
+    expect(moment.mood).toBe('anxious')
+  })
+
+  it('rejects a mood outside the closed vocabulary rather than passing it through', async () => {
+    const reply = '{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"mood":"murderous"}'
+    const moment = await assessRelationshipMoment(stubClient(reply), baseParams)
+    expect(moment.mood).toBeUndefined()
+  })
+
+  it('accepts and trims a characterIntent, capped at 160 chars', async () => {
+    const longIntent = 'w'.repeat(300)
+    const reply = `{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"characterIntent":"  ${longIntent}  "}`
+    const moment = await assessRelationshipMoment(stubClient(reply), baseParams)
+    expect(moment.characterIntent?.length).toBe(160)
+  })
+
+  it('treats an empty-string characterIntent as no change, not a blank value', async () => {
+    const reply = '{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"characterIntent":""}'
+    const moment = await assessRelationshipMoment(stubClient(reply), baseParams)
+    expect(moment.characterIntent).toBeUndefined()
+  })
+})
+
+// The user's own direct follow-up to the intimacy catalog: a deliberate "first time together" ask,
+// same three-outcome shape as assessCommitmentAsk (untested itself, so this establishes the
+// pattern for both).
+describe('assessIntimacyMilestone', () => {
+  const baseParams = { history: TRANSCRIPT, charName: 'Sumire', userName: 'Kai', current: currentStats }
+
+  it('defaults to "deflect" when the model gives an unrecognized decision', async () => {
+    const outcome = await assessIntimacyMilestone(stubClient('{"decision":"maybe later","reason":"","deltas":{}}'), baseParams)
+    expect(outcome.decision).toBe('deflect')
+    expect(outcome.reason.length).toBeGreaterThan(0)
+  })
+
+  it('accepts a well-formed "accept" outcome with its deltas', async () => {
+    const reply = '{"decision":"accept","reason":"She pulls you closer instead of pulling away.","deltas":{"affection":3,"trust":2,"chemistry":3,"comfort":1,"respect":0,"curiosity":0,"tension":-1}}'
+    const outcome = await assessIntimacyMilestone(stubClient(reply), baseParams)
+    expect(outcome.decision).toBe('accept')
+    expect(outcome.reason).toBe('She pulls you closer instead of pulling away.')
+    expect(outcome.deltas.chemistry).toBe(3)
+    expect(outcome.deltas.tension).toBe(-1)
+  })
+
+  it('accepts a well-formed "backfire" outcome', async () => {
+    const reply = '{"decision":"backfire","reason":"That landed all wrong, mid-argument.","deltas":{"affection":-2,"trust":-2,"chemistry":-1,"comfort":-2,"respect":-1,"curiosity":0,"tension":3}}'
+    const outcome = await assessIntimacyMilestone(stubClient(reply), baseParams)
+    expect(outcome.decision).toBe('backfire')
+    expect(outcome.deltas.tension).toBe(3)
+  })
+
+  it('clamps an out-of-range delta rather than passing it through', async () => {
+    const reply = '{"decision":"accept","reason":"Yes.","deltas":{"affection":99,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0}}'
+    const outcome = await assessIntimacyMilestone(stubClient(reply), baseParams)
+    expect(outcome.deltas.affection).toBe(3)
+  })
+
+  it('mentions the character by name and the recent conversation in the prompt', async () => {
+    let sentPrompt = ''
+    await assessIntimacyMilestone(
+      stubClient('{"decision":"deflect","reason":"Not tonight.","deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0}}', (p) => {
+        sentPrompt = p.prompt as string
+      }),
+      baseParams,
+    )
+    expect(sentPrompt).toContain('Sumire')
+    expect(sentPrompt).toContain('first time together')
   })
 })
 
