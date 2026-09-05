@@ -450,6 +450,8 @@ describe('getRelationshipTrack / patchRelationshipTrack', () => {
       mood: 'content',
       currentNeed: 'stability',
       characterIntent: 'wants to surprise him',
+      momentum: 1.4,
+      plans: [{ id: 'plan-1', goal: 'finish the mural', kind: 'personal', formedTurn: 8 }],
       firstIntimateSceneAt: 12345,
     }
     // `Chat` stores `relationshipWarning` as `T | undefined` while the track accepts `T | null`

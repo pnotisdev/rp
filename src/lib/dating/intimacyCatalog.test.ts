@@ -6,8 +6,11 @@ import {
   DEFAULT_INTIMACY_CATALOG,
   getIntimacyCatalog,
   getUnlockedIntimacyOptions,
+  intimacyActionDirective,
   intimacyOptionsGuidance,
   nextLockedInCategory,
+  resolveIntimacyPromptNote,
+  type IntimacyUnlockable,
 } from './intimacyCatalog'
 
 describe('getUnlockedIntimacyOptions', () => {
@@ -95,12 +98,16 @@ describe('getUnlockedIntimacyOptions', () => {
 describe('composeIntimacyActionText', () => {
   it("substitutes {char} into a built-in entry's own authored actionText", () => {
     const kiss = DEFAULT_INTIMACY_CATALOG.find((i) => i.id === 'kiss-forehead')!
-    expect(composeIntimacyActionText(kiss, 'Sumire')).toBe("*leans in and presses a slow kiss to Sumire's forehead*")
+    const text = composeIntimacyActionText(kiss, 'Sumire')
+    expect(text).toContain('Sumire')
+    expect(text).not.toContain('{char}')
+    expect(text.startsWith('*') && text.endsWith('*')).toBe(true)
   })
 
-  it('every built-in entry has its own hand-written actionText, not the generic fallback', () => {
+  it('every built-in entry has its own hand-written actionText and a promptNote, not the generic fallback', () => {
     for (const item of DEFAULT_INTIMACY_CATALOG) {
       expect(item.actionText, `${item.id} is missing actionText`).toBeTruthy()
+      expect(item.promptNote, `${item.id} is missing promptNote`).toBeTruthy()
     }
   })
 
@@ -117,6 +124,37 @@ describe('composeIntimacyActionText', () => {
   it('replaces every occurrence of {char}, not just the first', () => {
     const custom = { id: 'custom-7', category: 'activity' as const, label: 'x', minWarmth: 0, actionText: '*looks at {char}, then at {char} again*' }
     expect(composeIntimacyActionText(custom, 'Kai')).toBe('*looks at Kai, then at Kai again*')
+  })
+})
+
+describe('resolveIntimacyPromptNote', () => {
+  it("uses the entry's own promptNote with {char} substituted", () => {
+    const missionary = DEFAULT_INTIMACY_CATALOG.find((i) => i.id === 'pos-missionary')!
+    const note = resolveIntimacyPromptNote(missionary, 'Sumire')
+    expect(note).toContain('missionary position')
+    expect(note).toContain('Sumire')
+    expect(note).not.toContain('{char}')
+  })
+
+  it('falls back to a per-category template for a custom entry with no promptNote', () => {
+    const kissCustom: IntimacyUnlockable = { id: 'c1', category: 'kissing_spot', label: 'earlobe', minWarmth: 20 }
+    expect(resolveIntimacyPromptNote(kissCustom, 'Kai')).toBe("a kiss to Kai's earlobe")
+    const posCustom: IntimacyUnlockable = { id: 'c2', category: 'position', label: 'standing', minWarmth: 50 }
+    expect(resolveIntimacyPromptNote(posCustom, 'Kai')).toBe('the standing position')
+    const toyCustom: IntimacyUnlockable = { id: 'c3', category: 'toy', label: 'a wand', minWarmth: 50 }
+    expect(resolveIntimacyPromptNote(toyCustom, 'Kai')).toBe('using a wand on Kai')
+  })
+})
+
+describe('intimacyActionDirective', () => {
+  it('names the persona, the act, and the character, and tells the model to write a real response', () => {
+    const missionary = DEFAULT_INTIMACY_CATALOG.find((i) => i.id === 'pos-missionary')!
+    const line = intimacyActionDirective(missionary, 'Kai', 'Sumire')
+    expect(line).toContain('Kai has just moved the scene into')
+    expect(line).toContain('missionary position')
+    expect(line).toMatch(/write sumire's response/i)
+    expect(line).not.toContain('{{')
+    expect(line).not.toContain('{char}')
   })
 })
 

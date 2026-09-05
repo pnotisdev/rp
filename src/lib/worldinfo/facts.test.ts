@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildFactsLorebook, FACTS_TOKEN_BUDGET } from './facts'
+import { buildFactsLorebook, factContent, FACTS_TOKEN_BUDGET } from './facts'
 import { activateWorldInfo } from './activation'
 import type { ChatFact } from '@/lib/types'
 
@@ -45,6 +45,44 @@ describe('buildFactsLorebook', () => {
     expect(olderEntry.content).toBe('Old fact.')
     expect(newerEntry.content).toBe('New fact.')
     expect(newerEntry.insertion_order).toBeGreaterThan(olderEntry.insertion_order)
+  })
+
+  it('with no emotional metadata, still orders purely by recency (unchanged behaviour)', () => {
+    const [book] = buildFactsLorebook([
+      fact({ text: 'oldest', createdAt: 1 }),
+      fact({ text: 'middle', createdAt: 2 }),
+      fact({ text: 'newest', createdAt: 3 }),
+    ])
+    expect(book.entries.map((e) => e.content)).toEqual(['oldest', 'middle', 'newest'])
+  })
+
+  it('a high-importance older fact outranks a trivial recent one', () => {
+    const [book] = buildFactsLorebook([
+      fact({ text: 'She told me her real reason for leaving her hometown.', createdAt: 1, importance: 0.9 }),
+      fact({ text: 'Ordered the pasta.', createdAt: 2, importance: 0.1 }),
+    ])
+    // higher insertion_order = kept under budget pressure + printed closest to generation
+    const important = book.entries.find((e) => e.content.includes('real reason'))!
+    const trivial = book.entries.find((e) => e.content.includes('pasta'))!
+    expect(important.insertion_order).toBeGreaterThan(trivial.insertion_order)
+  })
+
+  it('an unresolved fact gets a priority bump and a flagged content wrapper', () => {
+    const [book] = buildFactsLorebook([
+      fact({ text: 'Likes her coffee black.', createdAt: 2, importance: 0.4 }),
+      fact({ text: 'Forgot her birthday.', createdAt: 1, importance: 0.4, valence: -0.7, unresolved: true }),
+    ])
+    const wound = book.entries.find((e) => e.content.includes('birthday'))!
+    const trivial = book.entries.find((e) => e.content.includes('coffee'))!
+    expect(wound.content).toBe('Still unsettled, not resolved: Forgot her birthday.')
+    expect(wound.insertion_order).toBeGreaterThan(trivial.insertion_order)
+  })
+
+  it('factContent: negative unresolved gets the strong tag, non-negative unresolved the light one, resolved is plain', () => {
+    expect(factContent({ text: 'x', valence: -0.5, unresolved: true })).toBe('Still unsettled, not resolved: x')
+    expect(factContent({ text: 'x', valence: 0.3, unresolved: true })).toBe('Still an open thread: x')
+    expect(factContent({ text: 'x', valence: -0.5, unresolved: false })).toBe('x')
+    expect(factContent({ text: 'x' })).toBe('x')
   })
 
   it('end to end with activateWorldInfo: a tight budget keeps the most recent facts, drops the oldest', () => {

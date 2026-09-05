@@ -1,4 +1,5 @@
 import { getRelationshipStats, computeWarmth, relationshipStageForWarmth, relationshipMilestonesFor, formatRelationshipStage, formatCommitmentStatus } from '@/lib/dating/stage'
+import { relationshipPacingNote } from '@/lib/dating/momentum'
 import type { Character } from '@/lib/characters/cardSpec'
 import type { Chat, WorldCard } from '@/lib/types'
 
@@ -18,14 +19,15 @@ export function buildGiftTasteNote(character: Character): string | undefined {
 }
 
 export function buildRelationshipDescription(
-  chat: Pick<Chat, 'affection' | 'relationshipStats' | 'commitmentStatus' | 'relationshipWarning' | 'breakupCount'>,
+  chat: Pick<Chat, 'affection' | 'relationshipStats' | 'commitmentStatus' | 'relationshipWarning' | 'breakupCount' | 'momentum'>,
   world: WorldCard | undefined,
   character: Character,
 ): string | undefined {
   if (chat.affection === undefined) return undefined
   const primaryName = character.card.name
   const stats = getRelationshipStats(chat)
-  const stage = relationshipStageForWarmth(computeWarmth(chat.affection, stats), relationshipMilestonesFor(world?.relationshipThresholds))
+  const warmth = computeWarmth(chat.affection, stats)
+  const stage = relationshipStageForWarmth(warmth, relationshipMilestonesFor(world?.relationshipThresholds))
   const notes: string[] = []
   if (stats.trust >= 70) notes.push('a deep mutual trust has built up')
   if (stats.chemistry >= 70) notes.push('there is a strong romantic spark')
@@ -47,12 +49,16 @@ export function buildRelationshipDescription(
     chat.breakupCount && chat.breakupCount > 0
       ? `${primaryName} and {{user}} have broken up before. Some caution or guardedness is earned here, whether or not that's fully behind them now.`
       : undefined
+  // Momentum: how fast (and which way) things have been moving recently, separate from where they
+  // are — the "how quickly should this relationship be moving" the level-only lines can't give.
+  const pacingNote = relationshipPacingNote(primaryName, warmth, chat.momentum ?? 0, stats.tension)
   // `primaryName` is spelled out rather than left as a `{{char}}` macro — this stays about the
   // scene's primary/relationship-tracked character even in a group chat, where `{{char}}` would
   // otherwise resolve to whoever's currently speaking instead (see resolveSpeaker/buildCurrentPrompt).
   return [
     `Relationship: {{user}} and ${primaryName} are at the "${formatRelationshipStage(stage)}" stage${notes.length ? `: ${notes.join('; ')}` : ''}.`,
     '(Let this colour tone, warmth, and what feels earned right now. Never state a number, "affection", or "stage" out loud.)',
+    pacingNote,
     commitmentNote,
     warningNote,
     breakupNote,

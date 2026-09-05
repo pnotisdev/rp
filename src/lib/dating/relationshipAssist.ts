@@ -8,6 +8,7 @@ import { formatCommitmentStatus, RELATIONSHIP_DIMENSIONS, SCENE_FLAGS } from '@/
 import { describeIntentForJudge, describeIntentsForDate } from '@/lib/dating/intent'
 import { AFTERCARE_VERDICTS, isAftercareVerdict, type AftercareVerdict } from '@/lib/dating/aftercare'
 import { MOOD_VOCAB, NEED_VOCAB, type CharacterMood, type CharacterNeed } from '@/lib/prompt/mindGuidance'
+import { parsePlanUpdates, type PlanUpdate } from '@/lib/dating/plans'
 
 // max_context_length is deliberately omitted here — every call site fetches the server's actual
 // loaded context via `client.getEffectiveMaxContext()` instead of hardcoding a guess.
@@ -148,13 +149,78 @@ export function scaleDeltasForDifficulty(deltas: RelationshipDeltas, difficulty:
   return Object.fromEntries(DELTA_KEYS.map((k) => [k, Math.round(deltas[k] * factor)])) as RelationshipDeltas
 }
 
+/**
+ * "Repeated same interaction → diminishing returns" (part of the momentum/friction work): when the
+ * player keeps playing the exact same move (the same intent chip three turns running), a positive
+ * warmth gain is scaled toward nothing — a compliment that landed the first time is just noise by
+ * the fifth. Negative deltas and `tension` pass through untouched: a repeated *bad* move shouldn't
+ * be softened, and rising friction from the repetition is a real reaction. `curiosity` is left
+ * alone too (it's not warmth). Applied after `scaleDeltasForDifficulty`, on the same "adjust the
+ * numbers, not the judge" principle.
+ */
+export function dampenRepeatedDeltas(deltas: RelationshipDeltas): RelationshipDeltas {
+  const out = { ...deltas }
+  for (const k of ['affection', 'trust', 'chemistry', 'comfort', 'respect'] as const) {
+    if (out[k] > 0) out[k] = Math.round(out[k] * 0.4)
+  }
+  return out
+}
+
+/**
+ * A durable memory with its emotional colouring ("memory emotion") — so a later callback can be
+ * triggered by the *feel* of a remembered event without the model re-deriving it from prose. All
+ * three numbers are defaulted, so a model that regresses to a bare string still produces a usable
+ * fact.
+ */
+export interface RememberedFact {
+  text: string
+  /** 0-1: long-term weight. */
+  importance: number
+  /** -1..1: how it landed for the character. */
+  valence: number
+  /** An open thread the story hasn't closed. */
+  unresolved: boolean
+}
+
+const clamp = (v: number, lo: number, hi: number) => (Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : 0)
+
+/**
+ * Parses the judge's `newFacts` — either the current `["short sentence", ...]` form or the richer
+ * `[{"text","importance","valence","unresolved"}, ...]` form (models drift between the two). A bare
+ * string gets neutral defaults: importance 0.5, valence 0, not unresolved.
+ */
+export function parseRememberedFacts(raw: unknown): RememberedFact[] {
+  if (!Array.isArray(raw)) return []
+  const out: RememberedFact[] = []
+  for (const entry of raw) {
+    if (typeof entry === 'string') {
+      const text = entry.trim().slice(0, 200)
+      if (text) out.push({ text, importance: 0.5, valence: 0, unresolved: false })
+      continue
+    }
+    if (!entry || typeof entry !== 'object') continue
+    const o = entry as Record<string, unknown>
+    const text = typeof o.text === 'string' ? o.text.trim().slice(0, 200) : ''
+    if (!text) continue
+    out.push({
+      text,
+      importance: clamp(Number(o.importance ?? 0.5), 0, 1),
+      valence: clamp(Number(o.valence ?? 0), -1, 1),
+      unresolved: o.unresolved === true,
+    })
+  }
+  return out
+}
+
 export interface RelationshipMoment {
   deltas: RelationshipDeltas
   newFlags: SceneFlag[]
   /** Short one-line reason for whatever moved, e.g. "Complimented her cooking unprompted" — undefined when nothing moved. */
   reason?: string
-  /** New durable facts worth remembering long-term (name, preference, backstory, a promise made) — [] most turns. */
-  newFacts: string[]
+  /** New durable facts, each with its emotional colouring — `[]` most turns. */
+  newFacts: RememberedFact[]
+  /** Indices into `params.unresolvedFacts` this exchange clearly closed (an apology landed, a promise was kept). `[]` when none were passed or none closed. */
+  resolvedFactIndices: number[]
   /**
    * Section 9(c)'s remaining (a) item: indices into the `pendingTasks` array passed in, for tasks
    * this exchange clearly and unambiguously completed — same conservative contract as
@@ -174,6 +240,13 @@ export interface RelationshipMoment {
   mood?: CharacterMood
   currentNeed?: CharacterNeed
   characterIntent?: string
+  /**
+   * Changes to the character's persistent agency layer (`dating/plans.ts`) — form a new plan,
+   * annotate one, or close one out. `[]` on most turns. `note`/`resolve` indices point into the
+   * `activePlans` list passed in. The caller folds these into `RelationshipTrack.plans` via
+   * `applyPlanUpdates`.
+   */
+  planUpdates: PlanUpdate[]
 }
 
 /**
@@ -199,6 +272,14 @@ export async function assessRelationshipMoment(
     current: RelationshipDeltas
     /** Facts already known, so the model doesn't re-extract the same thing every turn. */
     knownFacts?: string[]
+    /** Currently-unresolved facts, in the caller's index order — the judge can mark one closed via `resolvedFactIndices`. Omit when there are none. */
+    unresolvedFacts?: string[]
+    /**
+     * The character's persistent plans (`dating/plans.ts`), pre-formatted one per line (kind + note
+     * baked in by `planLinesForJudge`), in the caller's index order — the judge annotates or closes
+     * one by that index, and can always add new ones. Omit when there are none.
+     */
+    activePlans?: string[]
     /** World-authored flags beyond the 4 built-in defaults (see `CustomSceneFlag`) — glossaried and validated exactly like the built-ins. */
     customFlags?: CustomSceneFlag[]
     /** 10b: how the player tagged their most recent line (`MessageIntent`) — interpretation context, not a direct stat move. */
@@ -219,6 +300,8 @@ export async function assessRelationshipMoment(
 ): Promise<RelationshipMoment> {
   const hasTasks = !!params.pendingTasks?.length
   const hasAftercare = !!params.aftercareTurns?.length
+  const hasOpenThreads = !!params.unresolvedFacts?.length
+  const hasPlans = !!params.activePlans?.length
   const prompt = [
     'You are scoring relationship momentum, tracking high-level romance route flags, noting durable facts worth remembering long-term, AND (separately) reading the character\'s own current emotional state, an underlying need, and private intentions, in an in-character roleplay.',
     `Current scores (0-100 each): ${DELTA_KEYS.map((k) => `${k}=${params.current[k]}`).join(', ')}.`,
@@ -228,27 +311,37 @@ export async function assessRelationshipMoment(
     `Known route flags: ${describeFlags(params.customFlags)}.`,
     describeIntentForJudge(params.intent)?.replace(/\{\{char\}\}/g, params.charName) ?? '',
     params.knownFacts?.length ? `Facts already remembered (don't repeat these): ${params.knownFacts.join('; ')}.` : '',
+    hasOpenThreads
+      ? `Open threads still unresolved (something between them the story hasn't closed):\n${params.unresolvedFacts!.map((f, i) => `${i}: ${f}`).join('\n')}`
+      : '',
     hasTasks ? `Pending objective tasks:\n${params.pendingTasks!.map((t, i) => `${i}: ${t}`).join('\n')}` : '',
     hasAftercare
       ? `Separately: ${params.charName} and ${params.userName} were intimate a few turns ago, and you are also judging how the time SINCE went for ${params.charName} — the aftermath, not the act. Everything said since:\n${recentText(params.aftercareTurns!, params.charName, params.userName, 24)}`
       : '',
     `${params.charName}'s mood going into this exchange: ${params.currentMood ?? 'not yet read'}. Their underlying need lately: ${params.currentNeed ?? 'not yet read'}. Their private intention going in: ${params.currentIntent ?? 'none noted'}.`,
-    `Return ONLY a minified JSON object: {"deltas":{ one integer -2..2 per dimension key },"newFlags":[ any newly-established flags from the known set, or [] ],"reason":"...","newFacts":[ any new durable facts, or [] ]${hasTasks ? ',"completedTaskIndices":[ pending task index numbers this exchange clearly and unambiguously accomplished, or [] ]' : ''}${hasAftercare ? `,"aftercareVerdict":"exactly one of [${AFTERCARE_VERDICTS.join(', ')}]"` : ''},"mood":"one of [${MOOD_VOCAB.join(', ')}], only if this exchange gives a clear enough read to state one — omit entirely otherwise","currentNeed":"one of [${NEED_VOCAB.join(', ')}], only if this stretch of the story clearly shows this need going unmet — omit entirely otherwise, and don't change it lightly","characterIntent":"a short (under 12 words) private thing ${params.charName} now wants, only if something concrete and new became clear this exchange — omit entirely otherwise"}.`,
+    hasPlans
+      ? `${params.charName}'s current standing plans — concrete intentions they're carrying between turns, not just this-turn reactions:\n${params.activePlans!.map((p, i) => `${i}: ${p}`).join('\n')}`
+      : `${params.charName} has no standing plans on record yet.`,
+    `Return ONLY a minified JSON object: {"deltas":{ one integer -2..2 per dimension key },"newFlags":[ any newly-established flags from the known set, or [] ],"reason":"...","newFacts":[ any new durable facts, or [] ]${hasOpenThreads ? ',"resolvedFactIndices":[ open-thread index numbers this exchange clearly closed, or [] ]' : ''}${hasTasks ? ',"completedTaskIndices":[ pending task index numbers this exchange clearly and unambiguously accomplished, or [] ]' : ''}${hasAftercare ? `,"aftercareVerdict":"exactly one of [${AFTERCARE_VERDICTS.join(', ')}]"` : ''},"mood":"one of [${MOOD_VOCAB.join(', ')}], only if this exchange gives a clear enough read to state one — omit entirely otherwise","currentNeed":"one of [${NEED_VOCAB.join(', ')}], only if this stretch of the story clearly shows this need going unmet — omit entirely otherwise, and don't change it lightly","characterIntent":"a short (under 12 words) private thing ${params.charName} now wants, only if something concrete and new became clear this exchange — omit entirely otherwise","planUpdates":[ usually [] — see the plan rules below ]}.`,
     'Only move a dimension if this specific exchange clearly affected it. Leave the rest at 0. Most turns should move only one or two dimensions and add no new flags.',
     '"reason" is a short (under 12 words) in-world one-liner naming what just happened, e.g. "Complimented her cooking unprompted". Give one only if at least one dimension moved or a flag was added, otherwise "".',
-    '"newFacts" is for concrete, durable facts about {{user}} worth recalling much later: a name, a stated preference, a piece of backstory, a promise made. Not every line of dialogue. Most turns should add none. Each fact as one short standalone sentence, e.g. "Prefers tea over coffee" or "Promised to visit again next weekend".',
+    `"newFacts" is for concrete, durable things worth recalling much later: a name, a stated preference, a piece of backstory, a promise made, a moment that landed hard. Not every line of dialogue. Most turns add none. Each fact is an object {"text": one short standalone sentence, "importance": 0-1, "valence": -1 to 1, "unresolved": true/false}. "importance": ~0.2 for a small detail, 0.8+ for something that reshapes how ${params.charName} sees ${params.userName}. "valence": how it felt to ${params.charName} — negative if it hurt or disappointed, positive if it meant a lot, 0 for neutral information. "unresolved": true only for an open wound or open question the story has NOT closed (a slight not addressed, a promise not yet kept, a question dodged) — most facts are false.`,
+    hasOpenThreads
+      ? '"resolvedFactIndices" lists open-thread indices from the list above that this exchange clearly closed — an apology that landed, a promise kept, a dodged question finally answered. Be conservative: [] unless it plainly happened this turn.'
+      : '',
     `"mood" is ${params.charName}'s own transient emotional state right now, independent of the relationship dimensions above — a close, trusted relationship can still have an "annoyed" or "exhausted" day. Omit it on most turns; only state one when this exchange actually gave a clear signal, and don't just repeat the current mood back for no reason.`,
     `"currentNeed" is steadier than mood — a psychological undercurrent this stretch of the story hasn't been meeting (e.g. "reassurance" after being flaky, "recognition" after going unnoticed, "solitude" after being crowded). Omit it almost every turn; it shouldn't flip as readily as mood does, and should only be set or changed on a genuinely clear, sustained signal, not one line of dialogue.`,
     `"characterIntent" is a private thing ${params.charName} wants that the player hasn't necessarily been told — a small hidden agenda that can quietly color future turns (wanting reassurance, wanting space, planning a surprise, wanting an apology first). Omit it on almost every turn; once set it should usually stay omitted (meaning "no change") for a while rather than being reset every exchange.`,
+    `"planUpdates" changes ${params.charName}'s standing plans — bigger and longer-lived than "characterIntent": a real intention that spans many turns and can be entirely about ${params.charName}'s own life. Each entry is one of: {"action":"add","goal":"short, in ${params.charName}'s own terms","kind":"personal"|"together"|"distance","note":"optional"} to form a new one; {"action":"note","index":N,"note":"..."} to record progress or a setback on plan N; {"action":"resolve","index":N} to close plan N (finished, abandoned, or overtaken by events). "personal" = ${params.charName}'s own life independent of ${params.userName}; "together" = something they want to do with ${params.userName}; "distance" = deliberately holding back or protecting themselves. Use [] on almost every turn. Only "add" when this exchange genuinely gave ${params.charName} a new reason to want something lasting — a plan formed on a whim and never mentioned again is noise. Resolve a plan the moment the story has clearly moved past it.`,
     hasAftercare
       ? `"aftercareVerdict" judges only how ${params.userName} treated ${params.charName} in the turns since they were intimate. "tender" = stayed present and warm, gave reassurance or closeness, took ${params.charName} seriously. "cold" = pulled away, went distant or dismissive, changed the subject, or acted as if it had not happened. "awkward" = anything in between, including a fumbled or self-conscious aftermath that was still well meant. Judge ${params.userName}'s behaviour, not ${params.charName}'s, and not whether the intimacy itself went well. Most aftermaths are "awkward" — reserve "cold" for a real, visible withdrawal, not merely for a quiet stretch.`
       : '',
     hasTasks
       ? 'Be conservative about "completedTaskIndices": only include a task index if this exchange plainly and unambiguously accomplished it, not if it merely became more likely. Use [] if none did.'
       : '',
-    hasTasks
-      ? 'Example: {"deltas":{"affection":1,"trust":0,"chemistry":0,"comfort":1,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"Stayed to help clean up without being asked","newFacts":[],"completedTaskIndices":[]}'
-      : 'Example: {"deltas":{"affection":1,"trust":0,"chemistry":0,"comfort":1,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"Stayed to help clean up without being asked","newFacts":[]}',
+    `Example (nothing much happened): {"deltas":{"affection":1,"trust":0,"chemistry":0,"comfort":1,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"Stayed to help clean up without being asked","newFacts":[]${hasOpenThreads ? ',"resolvedFactIndices":[]' : ''}${hasTasks ? ',"completedTaskIndices":[]' : ''},"planUpdates":[]}`,
+    `Example (a fact landed hard): {"deltas":{"affection":-2,"trust":-1,"chemistry":0,"comfort":-1,"respect":0,"curiosity":0,"tension":2},"newFlags":[],"reason":"Forgot her birthday entirely","newFacts":[{"text":"Forgot ${params.charName}'s birthday","importance":0.75,"valence":-0.7,"unresolved":true}]${hasOpenThreads ? ',"resolvedFactIndices":[]' : ''}${hasTasks ? ',"completedTaskIndices":[]' : ''},"planUpdates":[]}`,
+    `Example (a plan forms — ${params.charName} decides on something lasting): {"deltas":{"affection":0,"trust":1,"chemistry":0,"comfort":0,"respect":1,"curiosity":0,"tension":0},"newFlags":[],"reason":"Opened up about the gallery showcase deadline","newFacts":[]${hasOpenThreads ? ',"resolvedFactIndices":[]' : ''}${hasTasks ? ',"completedTaskIndices":[]' : ''},"planUpdates":[{"action":"add","goal":"finish the mural before the showcase","kind":"personal","note":"three weeks out, behind on it"}]}`,
     'JSON:',
   ]
     .filter(Boolean)
@@ -256,7 +349,7 @@ export async function assessRelationshipMoment(
 
   const text = await generateWithTimeout(
     client,
-    { ...REL_PARAMS, max_length: 340, max_context_length: await client.getEffectiveMaxContext(), prompt },
+    { ...REL_PARAMS, max_length: 380, max_context_length: await client.getEffectiveMaxContext(), prompt },
     'Relationship check-in',
   )
   const parsed = parseLenientJson(text)
@@ -272,13 +365,22 @@ export async function assessRelationshipMoment(
     ? obj.newFlags.filter((f): f is SceneFlag => typeof f === 'string' && allowed.has(f))
     : []
   const reason = typeof obj.reason === 'string' && obj.reason.trim() ? obj.reason.trim().slice(0, 160) : undefined
-  const newFacts = Array.isArray(obj.newFacts)
-    ? obj.newFacts.filter((f): f is string => typeof f === 'string' && f.trim().length > 0).map((f) => f.trim().slice(0, 200))
-    : []
+  const newFacts = parseRememberedFacts(obj.newFacts)
   const pendingCount = params.pendingTasks?.length ?? 0
   const completedTaskIndices =
     hasTasks && Array.isArray(obj.completedTaskIndices)
       ? obj.completedTaskIndices.filter((i): i is number => typeof i === 'number' && Number.isInteger(i) && i >= 0 && i < pendingCount)
+      : []
+  const openThreadCount = params.unresolvedFacts?.length ?? 0
+  const resolvedFactIndices =
+    hasOpenThreads && Array.isArray(obj.resolvedFactIndices)
+      ? [
+          ...new Set(
+            obj.resolvedFactIndices.filter(
+              (i): i is number => typeof i === 'number' && Number.isInteger(i) && i >= 0 && i < openThreadCount,
+            ),
+          ),
+        ]
       : []
   // Only trusted when it was actually asked for: a model that volunteers the field unprompted is
   // guessing about a window that isn't open, and honouring that would apply a real stat swing for
@@ -288,7 +390,13 @@ export async function assessRelationshipMoment(
   const currentNeed = NEED_VOCAB.includes(obj.currentNeed as CharacterNeed) ? (obj.currentNeed as CharacterNeed) : undefined
   const characterIntent =
     typeof obj.characterIntent === 'string' && obj.characterIntent.trim() ? obj.characterIntent.trim().slice(0, 160) : undefined
-  return { deltas, newFlags, reason, newFacts, completedTaskIndices, aftercareVerdict, mood, currentNeed, characterIntent }
+  // `note`/`resolve` updates that point past the plans actually passed in are dropped — a stale
+  // index from a model that miscounted must not silently rewrite or delete the wrong plan.
+  const planCount = params.activePlans?.length ?? 0
+  const planUpdates = parsePlanUpdates(obj.planUpdates).filter(
+    (u) => u.action === 'add' || u.index < planCount,
+  )
+  return { deltas, newFlags, reason, newFacts, resolvedFactIndices, completedTaskIndices, aftercareVerdict, mood, currentNeed, characterIntent, planUpdates }
 }
 
 /**
@@ -334,7 +442,7 @@ export interface DateOutcome {
   newFlags: SceneFlag[]
   /** A short (1-3 sentence) in-world recap of how the whole date went — shown to the player, unlike the terser per-turn `reason`. */
   recap: string
-  newFacts: string[]
+  newFacts: RememberedFact[]
 }
 
 /**
@@ -398,14 +506,14 @@ export async function assessDateOutcome(
     params.walkedOut
       ? '"recap" must read as the abrupt, in-world exit it was — a line or two on what made {{char}} leave, not a neutral summary.'
       : `"recap" is a short 1-3 sentence in-world summary of how the ${sceneNoun} felt from {{char}}'s side, written for the player to read afterward, not a mechanical report.`,
-    '"newFacts" is for concrete, durable facts about {{user}} worth recalling much later. Most scenes add one or none.',
+    '"newFacts" is for concrete, durable things worth recalling much later. Most scenes add one or none. Each is an object {"text": one short sentence, "importance": 0-1, "valence": -1 to 1 (how it felt to {{char}}), "unresolved": true only for an open thread the scene left hanging}.',
     // The example's `newFlags` has to stay inside the same set the menu above offers: a hangout
     // that withholds `first_date` while still *demonstrating* it would be handing the classifier
     // the flag back in the most suggestive line of the whole prompt. Hangouts get modest deltas
     // here too, matching the gentler framing they're judged under.
     isHangout
-      ? 'Example: {"deltas":{"affection":1,"trust":2,"chemistry":0,"comfort":2,"respect":0,"curiosity":1,"tension":0},"newFlags":["promise"],"recap":"She talked about her old bakery for the first time, and made you swear to try her cinnamon rolls sometime.","newFacts":["Used to run a small bakery before moving here"]}'
-      : 'Example: {"deltas":{"affection":3,"trust":2,"chemistry":2,"comfort":1,"respect":0,"curiosity":1,"tension":0},"newFlags":["first_date"],"recap":"She lit up talking about her old bakery and kept finding reasons to lean in closer.","newFacts":["Used to run a small bakery before moving here"]}',
+      ? 'Example: {"deltas":{"affection":1,"trust":2,"chemistry":0,"comfort":2,"respect":0,"curiosity":1,"tension":0},"newFlags":["promise"],"recap":"She talked about her old bakery for the first time, and made you swear to try her cinnamon rolls sometime.","newFacts":[{"text":"Used to run a small bakery before moving here","importance":0.6,"valence":0.3,"unresolved":false}]}'
+      : 'Example: {"deltas":{"affection":3,"trust":2,"chemistry":2,"comfort":1,"respect":0,"curiosity":1,"tension":0},"newFlags":["first_date"],"recap":"She lit up talking about her old bakery and kept finding reasons to lean in closer.","newFacts":[{"text":"Used to run a small bakery before moving here","importance":0.6,"valence":0.3,"unresolved":false}]}',
     'JSON:',
   ]
     .filter(Boolean)
@@ -431,9 +539,7 @@ export async function assessDateOutcome(
     ? obj.newFlags.filter((f): f is SceneFlag => typeof f === 'string' && allowed.has(f))
     : []
   const recap = typeof obj.recap === 'string' && obj.recap.trim() ? obj.recap.trim().slice(0, 400) : 'The date came to an end.'
-  const newFacts = Array.isArray(obj.newFacts)
-    ? obj.newFacts.filter((f): f is string => typeof f === 'string' && f.trim().length > 0).map((f) => f.trim().slice(0, 200))
-    : []
+  const newFacts = parseRememberedFacts(obj.newFacts)
   return { deltas, newFlags, recap, newFacts }
 }
 

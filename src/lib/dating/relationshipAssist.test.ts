@@ -7,8 +7,10 @@ import {
   assessDateOutcome,
   assessIntimacyMilestone,
   assessRelationshipMoment,
+  dampenRepeatedDeltas,
   draftHiddenAgenda,
   generateWithTimeout,
+  parseRememberedFacts,
   scaleDeltasForDifficulty,
   suggestDateEvent,
   type RelationshipDeltas,
@@ -65,6 +67,23 @@ describe('scaleDeltasForDifficulty', () => {
     const zero = deltas({})
     expect(scaleDeltasForDifficulty(zero, 'gentle')).toEqual(zero)
     expect(scaleDeltasForDifficulty(zero, 'harsh')).toEqual(zero)
+  })
+})
+
+describe('dampenRepeatedDeltas', () => {
+  it('scales positive warmth gains toward nothing', () => {
+    const d = dampenRepeatedDeltas(deltas({ affection: 2, trust: 1, comfort: 2 }))
+    expect(d.affection).toBe(1) // round(2 * 0.4)
+    expect(d.trust).toBe(0) // round(1 * 0.4)
+    expect(d.comfort).toBe(1)
+  })
+
+  it('leaves negative deltas, tension, and curiosity untouched', () => {
+    const d = dampenRepeatedDeltas(deltas({ affection: -2, tension: 2, curiosity: 2, respect: -1 }))
+    expect(d.affection).toBe(-2)
+    expect(d.tension).toBe(2)
+    expect(d.curiosity).toBe(2)
+    expect(d.respect).toBe(-1)
   })
 })
 
@@ -200,6 +219,81 @@ describe('assessRelationshipMoment: first_kiss flag', () => {
   })
 })
 
+describe('parseRememberedFacts', () => {
+  it('gives a bare string neutral defaults', () => {
+    expect(parseRememberedFacts(['Prefers tea over coffee'])).toEqual([
+      { text: 'Prefers tea over coffee', importance: 0.5, valence: 0, unresolved: false },
+    ])
+  })
+
+  it('reads the structured object form and clamps out-of-range numbers', () => {
+    expect(
+      parseRememberedFacts([{ text: 'Forgot her birthday', importance: 5, valence: -3, unresolved: true }]),
+    ).toEqual([{ text: 'Forgot her birthday', importance: 1, valence: -1, unresolved: true }])
+  })
+
+  it('only treats unresolved:true as unresolved, and drops entries with no text', () => {
+    const out = parseRememberedFacts([
+      { text: 'a', unresolved: 'yes' },
+      { text: '   ' },
+      { importance: 0.9 },
+      42,
+    ])
+    expect(out).toEqual([{ text: 'a', importance: 0.5, valence: 0, unresolved: false }])
+  })
+
+  it('returns [] for a non-array', () => {
+    expect(parseRememberedFacts('nope')).toEqual([])
+    expect(parseRememberedFacts(undefined)).toEqual([])
+  })
+})
+
+describe('assessRelationshipMoment: unresolved threads', () => {
+  const baseParams = { history: TRANSCRIPT, latestReply: 'Sorry about last week.', charName: 'Sumire', userName: 'Kai', current: currentStats }
+
+  it('numbers the open threads in the prompt and asks for resolvedFactIndices only when there are some', async () => {
+    let withThreads = ''
+    await assessRelationshipMoment(
+      stubClient('{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"resolvedFactIndices":[]}', (p) => {
+        withThreads = p.prompt as string
+      }),
+      { ...baseParams, unresolvedFacts: ['Forgot her birthday', 'Never answered why he cancelled'] },
+    )
+    expect(withThreads).toContain('0: Forgot her birthday')
+    expect(withThreads).toContain('1: Never answered why he cancelled')
+    expect(withThreads).toContain('resolvedFactIndices')
+
+    let without = ''
+    await assessRelationshipMoment(
+      stubClient('{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[]}', (p) => {
+        without = p.prompt as string
+      }),
+      baseParams,
+    )
+    expect(without).not.toContain('resolvedFactIndices')
+  })
+
+  it('filters resolvedFactIndices to valid in-range integers and dedupes', async () => {
+    const moment = await assessRelationshipMoment(
+      stubClient(
+        '{"deltas":{"affection":1,"trust":1,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"Apologised for the birthday","newFacts":[],"resolvedFactIndices":[0,0,2,-1,"1"]}',
+      ),
+      { ...baseParams, unresolvedFacts: ['Forgot her birthday', 'Never answered why he cancelled'] },
+    )
+    expect(moment.resolvedFactIndices).toEqual([0])
+  })
+
+  it('parses structured newFacts with emotional metadata', async () => {
+    const moment = await assessRelationshipMoment(
+      stubClient(
+        '{"deltas":{"affection":-2,"trust":-1,"chemistry":0,"comfort":-1,"respect":0,"curiosity":0,"tension":2},"newFlags":[],"reason":"Forgot her birthday","newFacts":[{"text":"Forgot Sumire\'s birthday","importance":0.8,"valence":-0.7,"unresolved":true}]}',
+      ),
+      baseParams,
+    )
+    expect(moment.newFacts).toEqual([{ text: "Forgot Sumire's birthday", importance: 0.8, valence: -0.7, unresolved: true }])
+  })
+})
+
 // "Character Mind" scoped slice — mood/currentNeed/characterIntent ride along in this same judge
 // call, see `prompt/mindGuidance.ts`.
 describe('assessRelationshipMoment: mood, currentNeed, and characterIntent', () => {
@@ -264,6 +358,57 @@ describe('assessRelationshipMoment: mood, currentNeed, and characterIntent', () 
     const reply = '{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"characterIntent":""}'
     const moment = await assessRelationshipMoment(stubClient(reply), baseParams)
     expect(moment.characterIntent).toBeUndefined()
+  })
+})
+
+// The persistent agency layer (`dating/plans.ts`) — planUpdates ride along in this same judge call.
+describe('assessRelationshipMoment: persistent plans', () => {
+  const baseParams = { history: TRANSCRIPT, latestReply: 'Thanks for helping me pack up.', charName: 'Sumire', userName: 'Kai', current: currentStats }
+  const NO_PLAN_REPLY = '{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"planUpdates":[]}'
+
+  it('always asks for planUpdates, and numbers the active plans only when some were passed', async () => {
+    let withPlans = ''
+    await assessRelationshipMoment(
+      stubClient(NO_PLAN_REPLY, (p) => {
+        withPlans = p.prompt as string
+      }),
+      { ...baseParams, activePlans: ['[personal] finish the mural', '[together] visit the coast'] },
+    )
+    expect(withPlans).toContain('"planUpdates"')
+    expect(withPlans).toContain('0: [personal] finish the mural')
+    expect(withPlans).toContain('1: [together] visit the coast')
+
+    let without = ''
+    await assessRelationshipMoment(
+      stubClient(NO_PLAN_REPLY, (p) => {
+        without = p.prompt as string
+      }),
+      baseParams,
+    )
+    expect(without).toContain('"planUpdates"')
+    expect(without).toContain('no standing plans on record yet')
+  })
+
+  it('returns a parsed add update', async () => {
+    const reply =
+      '{"deltas":{"affection":0,"trust":1,"chemistry":0,"comfort":0,"respect":1,"curiosity":0,"tension":0},"newFlags":[],"reason":"Opened up about the deadline","newFacts":[],"planUpdates":[{"action":"add","goal":"finish the mural before the showcase","kind":"personal","note":"behind on it"}]}'
+    const moment = await assessRelationshipMoment(stubClient(reply), baseParams)
+    expect(moment.planUpdates).toEqual([
+      { action: 'add', goal: 'finish the mural before the showcase', kind: 'personal', note: 'behind on it' },
+    ])
+  })
+
+  it('drops a note/resolve update whose index is past the plans actually passed in', async () => {
+    const reply =
+      '{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"planUpdates":[{"action":"resolve","index":4},{"action":"note","index":0,"note":"progress"}]}'
+    const moment = await assessRelationshipMoment(stubClient(reply), { ...baseParams, activePlans: ['[personal] finish the mural'] })
+    expect(moment.planUpdates).toEqual([{ action: 'note', index: 0, note: 'progress' }])
+  })
+
+  it('is [] when the model omits planUpdates entirely', async () => {
+    const reply = '{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[]}'
+    const moment = await assessRelationshipMoment(stubClient(reply), baseParams)
+    expect(moment.planUpdates).toEqual([])
   })
 })
 

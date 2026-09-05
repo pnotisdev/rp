@@ -111,6 +111,36 @@ export interface RelationshipEvent {
 }
 
 /**
+ * One entry in a character's persistent *agency layer* (`RelationshipTrack.plans`) — a concrete
+ * intention the character carries between turns, so the model can act on its own initiative
+ * rather than only react to the player. Where `characterIntent` is one transient private want,
+ * reset every turn, a plan persists and has a lifecycle: the judge call (`assessRelationshipMoment`)
+ * forms it, annotates it as things happen, and eventually resolves or drops it. Read back into the
+ * prompt by `mindGuidance.ts`'s `plansGuidance`; capped at 3 active per character (`dating/plans.ts`).
+ *
+ * Deliberately small — a short `goal` in the character's own framing, a coarse `kind` so guidance
+ * phrases it right, the turn it formed (for age-based pruning), and an optional running `note` the
+ * judge appends to. No status enum: a plan that's done or abandoned is removed, not kept; the
+ * `ChatFact` log is where the durable "she did X" trace lives.
+ */
+export interface CharacterPlan {
+  id: string
+  /** The intention in the character's own terms, short: "finish the mural before the showcase", "stop letting the pace be set for her", "introduce {{user}} to her sister". */
+  goal: string
+  /**
+   * What the plan is oriented around, so `plansGuidance` frames it correctly:
+   * - `personal` — the character's own life, independent of the player ("get the studio lease signed").
+   * - `together` — something the character wants to do *with* the player ("take {{user}} to the coast").
+   * - `distance` — the character deliberately holding back or protecting themselves ("keep things light until {{user}} is honest about the ex").
+   */
+  kind: 'personal' | 'together' | 'distance'
+  /** `Chat.messages.length` when the judge formed this — lets stale plans age out. */
+  formedTurn: number
+  /** Optional running annotation the judge appends as the plan progresses or hits friction. */
+  note?: string
+}
+
+/**
  * The bundle of relationship state that used to live only as `Chat`'s own top-level fields —
  * always the primary's, even in a group chat, per that field's own original doc comment. A
  * non-primary participant needs the exact same shape to be tracked as a real person rather than an
@@ -159,6 +189,24 @@ export interface RelationshipTrack {
   currentNeed?: CharacterNeed
   /** A short, hidden thing this character currently privately wants — never shown to the player, only shapes tone via `mindGuidance.ts`. See `mood`'s own doc comment. */
   characterIntent?: string
+  /**
+   * Relationship *momentum* — the recent rate of change of warmth, not its level. A decayed
+   * running sum of each turn's warmth movement (`dating/momentum.ts`'s `nextMomentum`): positive =
+   * deepening fast, negative = cooling off, ~0 = settled. Fed to the generation layer as a pacing
+   * clause ("moving fast, likely to want to slow down" / "cooled off lately, more guarded than the
+   * closeness suggests") — the "how quickly is this particular relationship moving" the state-only
+   * model couldn't answer. Undefined/0 for a chat from before this existed.
+   */
+  momentum?: number
+  /**
+   * The character's persistent *agency layer* — a few concrete intentions they're carrying that
+   * outlast a single turn, so the model can write "given what she wants, what she's doing, and what
+   * just happened, what would she naturally do" rather than only "what should she say back". The
+   * richer sibling of `characterIntent` (one transient private want): `plans` are several, have a
+   * lifecycle (the judge forms, annotates, and resolves them), and can be entirely about the
+   * character's own life. Max 3 active; see `dating/plans.ts`.
+   */
+  plans?: CharacterPlan[]
   /** Set (to when it happened) the first time this relationship reaches a deliberately-initiated "first time together" milestone (see `stage.ts`'s `canInitiateFirstTime` and `useChatSession.ts`'s `initiateFirstTime`) — undefined means it hasn't happened yet. A real fact about this specific relationship, not chat-wide. */
   firstIntimateSceneAt?: number
 }
@@ -207,6 +255,19 @@ export interface ChatFact {
   active: boolean
   sourceMessageId?: string
   createdAt: number
+  /**
+   * "Memory emotion" — the same event should be carried differently depending on how it landed and
+   * how much it matters, so a callback can happen later without the model re-deriving the whole
+   * thing from prose. All three are set by `assessRelationshipMoment`'s judge call and read back by
+   * `buildFactsLorebook`. All optional: a fact from before this existed, or a plain informational
+   * one, simply omits them and behaves as it always did.
+   */
+  /** 0-1: how much this matters long-term. Unset is treated as ~0.5. Drives which facts keep a prompt slot when the budget is tight, over pure recency. */
+  importance?: number
+  /** -1..1: how the event felt to the character — negative if it hurt or disappointed, positive if it meant something, ~0 for neutral information. Unset is neutral. */
+  valence?: number
+  /** An open thread the story hasn't closed: a slight not addressed, a promise not kept, a question dodged. Gets a stronger prompt treatment ("Still unsettled: …") until the judge marks it resolved. */
+  unresolved?: boolean
 }
 
 /**
@@ -427,6 +488,10 @@ export interface Chat {
   mood?: CharacterMood
   currentNeed?: CharacterNeed
   characterIntent?: string
+  /** The primary's relationship momentum — see `RelationshipTrack.momentum`. */
+  momentum?: number
+  /** The primary's persistent agency layer — see `RelationshipTrack.plans`. */
+  plans?: CharacterPlan[]
   firstIntimateSceneAt?: number
   /** The primary's own copy of `RelationshipTrack.afterglow` — see that field, and `getRelationshipTrack`. */
   afterglow?: Afterglow | null

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { Character } from '@/lib/characters/cardSpec'
-import type { Chat, WorldCard } from '@/lib/types'
+import type { CharacterPlan, Chat, WorldCard } from '@/lib/types'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { chatFactsApi, chatsApi, relationshipEventsApi, worldsApi } from '@/lib/api/client'
 import { getGiftCatalog } from '@/lib/dating/gifts'
@@ -43,6 +43,12 @@ const DIMENSION_LABELS: Record<string, string> = {
   tension: 'Tension',
 }
 
+const PLAN_KIND_LABELS: Record<string, string> = {
+  personal: 'personal',
+  together: 'with the player',
+  distance: 'keeping distance',
+}
+
 interface DirectorPanelProps {
   chat: Chat
   character?: Character
@@ -76,9 +82,17 @@ export function DirectorPanel({ chat, character, world, onClose }: DirectorPanel
 
   const facts = useApiQuery('chat-facts', () => chatFactsApi.listByChat(chat.id), [chat.id]) ?? []
   const recentFacts = facts
-    .filter((f) => f.active)
+    // `typeof f.text === 'string'` guards a malformed row from rendering an object as a React child.
+    .filter((f) => f.active && typeof f.text === 'string')
     .sort((a, b) => b.createdAt - a.createdAt)
     .slice(0, 8)
+
+  // The primary's persistent agency layer (`dating/plans.ts`). Every field is type-guarded before
+  // it reaches JSX — a half-written plan object must never render as a React child (that crash has
+  // happened before, with facts).
+  const activePlans = (chat.plans ?? []).filter(
+    (p): p is CharacterPlan => !!p && typeof p.goal === 'string' && typeof p.kind === 'string',
+  )
 
   const giftCatalog = getGiftCatalog(world)
   const itemCatalog = getItemCatalog(world)
@@ -261,10 +275,36 @@ export function DirectorPanel({ chat, character, world, onClose }: DirectorPanel
             {recentFacts.map((f) => (
               <div key={f.id} className="rounded-lg bg-bg-elevated px-3 py-1.5 text-xs text-text-muted">
                 <span className="text-text">{f.text}</span>
-                <div className="mt-0.5 text-[10px]">{new Date(f.createdAt).toLocaleString()}</div>
+                <div className="mt-0.5 text-[10px]">
+                  {new Date(f.createdAt).toLocaleString()}
+                  {f.unresolved
+                    ? (f.valence ?? 0) <= -0.15
+                      ? ' · unresolved, sits badly'
+                      : ' · unresolved, still open'
+                    : ''}
+                </div>
               </div>
             ))}
             {recentFacts.length === 0 && <span className="text-xs text-text-muted">Nothing remembered yet.</span>}
+          </div>
+        </Section>
+
+        <Section
+          title="Plans"
+          description="What the character is quietly working toward on their own, formed and retired by the per-turn judge — read-only."
+          surface="sunken"
+        >
+          <div className="space-y-1.5">
+            {activePlans.map((p) => (
+              <div key={p.id} className="rounded-lg bg-bg-elevated px-3 py-1.5 text-xs text-text-muted">
+                <span className="text-text">{p.goal}</span>
+                <div className="mt-0.5 text-[10px]">
+                  {PLAN_KIND_LABELS[p.kind] ?? p.kind}
+                  {typeof p.note === 'string' && p.note ? ` · ${p.note}` : ''}
+                </div>
+              </div>
+            ))}
+            {activePlans.length === 0 && <span className="text-xs text-text-muted">No active plans.</span>}
           </div>
         </Section>
 

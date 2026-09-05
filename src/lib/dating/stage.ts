@@ -220,6 +220,8 @@ type TrackHost = Pick<
   | 'mood'
   | 'currentNeed'
   | 'characterIntent'
+  | 'momentum'
+  | 'plans'
   | 'firstIntimateSceneAt'
   | 'afterglow'
   | 'participantRelationships'
@@ -249,6 +251,8 @@ export function getRelationshipTrack(chat: TrackHost, characterId: string): Rela
       mood: chat.mood,
       currentNeed: chat.currentNeed,
       characterIntent: chat.characterIntent,
+      momentum: chat.momentum,
+      plans: chat.plans,
       firstIntimateSceneAt: chat.firstIntimateSceneAt,
       afterglow: chat.afterglow,
     }

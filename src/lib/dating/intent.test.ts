@@ -6,6 +6,8 @@ import {
   describeIntentsForDate,
   intentSpec,
   isMessageIntent,
+  repeatedIntentNudge,
+  trailingIntentRun,
 } from './intent'
 
 describe('intent specs', () => {
@@ -56,6 +58,36 @@ describe('describeIntentForJudge', () => {
   it('returns undefined for an untagged or unknown line', () => {
     expect(describeIntentForJudge(undefined)).toBeUndefined()
     expect(describeIntentForJudge('bogus')).toBeUndefined()
+  })
+})
+
+describe('trailingIntentRun', () => {
+  it('counts the run of identical values at the end', () => {
+    expect(trailingIntentRun(['tease', 'flirt', 'flirt', 'flirt'])).toBe(3)
+    expect(trailingIntentRun(['flirt', 'flirt'])).toBe(2)
+  })
+
+  it('is 0 when the newest entry is untagged', () => {
+    expect(trailingIntentRun(['flirt', 'flirt', undefined])).toBe(0)
+    expect(trailingIntentRun([])).toBe(0)
+  })
+
+  it("stops at the first entry that doesn't match the newest", () => {
+    expect(trailingIntentRun(['flirt', 'tease', 'flirt'])).toBe(1)
+  })
+})
+
+describe('repeatedIntentNudge', () => {
+  it('fires at a streak of 3+, naming both parties and telling the character to notice', () => {
+    const line = repeatedIntentNudge(3, 'Sumire', 'Kai')!
+    expect(line).toContain('Sumire')
+    expect(line).toContain('Kai')
+    expect(line).toMatch(/novelty has worn off|less weight|repetition/i)
+  })
+
+  it('stays quiet below the threshold', () => {
+    expect(repeatedIntentNudge(2, 'Sumire', 'Kai')).toBeUndefined()
+    expect(repeatedIntentNudge(0, 'Sumire', 'Kai')).toBeUndefined()
   })
 })
 

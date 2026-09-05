@@ -18,10 +18,15 @@
  * hidden). `mood`/`need` are shown to the player (`RelationshipPanel`) since neither is a secret;
  * `characterIntent` never is, by design.
  *
- * The remaining mindmap (desires, fears, beliefs, opinions, secrets-as-entities, plans with
- * interruption, the social graph beyond `socialConnections`, rumors, promises, internal conflicts)
- * stays a documented follow-up (see ROADMAP) — those are each a structurally different, standalone
- * system (their own storage shape, often their own UI), not another field on this one judge call.
+ * `intent`'s bigger sibling — a persistent *plan layer*, where a character carries several
+ * turn-spanning intentions with their own lifecycle (form / annotate / resolve), possibly about
+ * their own life entirely — now lives in `dating/plans.ts`, driven by the same judge call and read
+ * back as its own `styleGuidance` line (`plansGuidance`).
+ *
+ * The rest of the mindmap (desires, fears, beliefs, opinions, secrets-as-entities, the social
+ * graph beyond `socialConnections`, rumors, internal conflicts) stays a documented follow-up (see
+ * ROADMAP) — those are each a structurally different, standalone system (their own storage shape,
+ * often their own UI), not another field on this one judge call.
  */
 
 /** A closed vocabulary, not free text — keeps the classifier's output legible and stops it drifting into paragraph-length "moods." */

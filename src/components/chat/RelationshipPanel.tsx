@@ -22,9 +22,10 @@ import {
   relationshipMilestonesFor,
   relationshipStageForWarmth,
 } from '@/lib/dating/stage'
-import { allowedIntimacyCategories, composeIntimacyActionText, getUnlockedIntimacyOptions, nextLockedInCategory, type IntimacyCategory, type IntimacyUnlockable } from '@/lib/dating/intimacyCatalog'
+import { allowedIntimacyCategories, getUnlockedIntimacyOptions, nextLockedInCategory, type IntimacyCategory, type IntimacyUnlockable } from '@/lib/dating/intimacyCatalog'
 import { resolveIntimacyLevel } from '@/lib/prompt/intimacyGuidance'
 import { AFTERGLOW_TURNS, afterglowTurnsSince } from '@/lib/dating/aftercare'
+import { describeMomentum } from '@/lib/dating/momentum'
 import type { CommitmentStatus } from '@/lib/types'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
@@ -70,9 +71,14 @@ interface RelationshipPanelProps {
   onEndRelationship: (characterId?: string) => Promise<void>
   /** The "Customize in World editor" link, when this character has a bound world — jumps straight to its "Dating sim" tab rather than just the world's overview. Absent when there's nowhere to route to (no view-switcher in scope). */
   onNavigateToWorld?: (worldId: string, tab?: string) => void
-  /** Clicking an unlocked (and, for toys, owned) intimacy action — sends `composeIntimacyActionText`'s result as the player's own message, same mechanism Quick Replies already use. */
-  /** `intimacyOptionId` lets the caller react to *which* action this was — an explicit-tier one switches the character's outfit (`intimateOutfitFor`). */
-  onSendAction: (text: string, intimacyOptionId?: string) => void
+  /**
+   * Clicking an unlocked (and, for toys, owned) intimacy action. The connected model adapts the
+   * entry's `actionText` to the current scene (`draftIntimacyAction`) and the caller drops the
+   * result into the composer for review, arming the option id so a deliberate send still switches
+   * the outfit / opens the aftercare window. Resolves once the composer is populated so the panel
+   * knows when to close; the model call can take a few seconds, so the button shows a pending state.
+   */
+  onIntimacyAction: (option: IntimacyUnlockable) => Promise<void>
   /** How many replies the character has given, the unit the aftercare window is counted in (`dating/aftercare.ts`). */
   charReplyCount: number
 }
@@ -125,7 +131,7 @@ export function RelationshipPanel({
   onInitiateFirstTime,
   onEndRelationship,
   onNavigateToWorld,
-  onSendAction,
+  onIntimacyAction,
   charReplyCount,
 }: RelationshipPanelProps) {
   // Multi-character relationship tracking: everyone this chat actually tracks a relationship for —
@@ -168,6 +174,7 @@ export function RelationshipPanel({
   const [ending, setEnding] = useState(false)
   const [initiatingFirstTime, setInitiatingFirstTime] = useState(false)
   const [buyingToyId, setBuyingToyId] = useState<string | null>(null)
+  const [pendingActionId, setPendingActionId] = useState<string | null>(null)
 
   // Eligible (warmth/commitment-met) toys regardless of ownership — the panel itself needs to see
   // an unbought-but-eligible toy too, to render its "Buy" state, unlike the prompt's own call
@@ -187,9 +194,15 @@ export function RelationshipPanel({
   const allowedCategories = allowedIntimacyCategories(effectiveIntimacyLevel)
   const canTakeFirstTime = canInitiateFirstTime(warmth, commitmentStatus)
 
-  const handleUseIntimacyOption = (option: IntimacyUnlockable) => {
-    onSendAction(composeIntimacyActionText(option, viewingCharacter?.card.name ?? 'them'), option.id)
-    onClose()
+  const handleUseIntimacyOption = async (option: IntimacyUnlockable) => {
+    if (pendingActionId) return
+    setPendingActionId(option.id)
+    try {
+      await onIntimacyAction(option)
+      onClose()
+    } finally {
+      setPendingActionId(null)
+    }
   }
 
   const handleBuyToy = async (toyId: string) => {
@@ -266,7 +279,9 @@ export function RelationshipPanel({
   // primary rather than only ever matching an explicit id.
   const events = allEvents.filter((e) => (e.characterId ?? chat.characterId) === viewingCharacter?.id)
   const facts = useApiQuery('chat-facts', () => chatFactsApi.listByChat(chat.id), [chat.id]) ?? []
-  const activeFacts = facts.filter((f) => f.active)
+  // `typeof f.text === 'string'` guards against a malformed row (e.g. one written during an HMR
+  // half-edit) rendering an object as a React child and white-screening the panel.
+  const activeFacts = facts.filter((f) => f.active && typeof f.text === 'string')
   const [newFactText, setNewFactText] = useState('')
 
   const addFact = async () => {
@@ -328,9 +343,16 @@ export function RelationshipPanel({
         ) : (
           <p className="mt-2 text-xs text-text-muted">Max stage reached.</p>
         )}
-        {(track.mood || track.currentNeed) && (
+        {(track.mood || track.currentNeed || describeMomentum(track.momentum)) && (
           <p className="mt-2 border-t border-bg-elevated pt-2 text-xs italic text-text-muted">
-            Right now: {[track.mood, track.currentNeed ? `could use more ${track.currentNeed}` : ''].filter(Boolean).join(' · ')}
+            Right now:{' '}
+            {[
+              track.mood ?? '',
+              track.currentNeed ? `could use more ${track.currentNeed}` : '',
+              describeMomentum(track.momentum) ?? '',
+            ]
+              .filter(Boolean)
+              .join(' · ')}
             {' — '}a passing read, separate from the bond above.
           </p>
         )}
@@ -454,7 +476,7 @@ export function RelationshipPanel({
 
           <Section
             title="Intimate unlocks"
-            description="Kissing spots, positions, toys, and other beats this relationship has earned — click one to do it now."
+            description="Kissing spots, positions, toys, and other beats this relationship has earned. Click one and the model writes your move into it, adapted to where the scene is, for you to review in the composer before you send."
             surface="sunken"
           >
             <div className="space-y-3">
@@ -476,10 +498,11 @@ export function RelationshipPanel({
                               <button
                                 key={i.id}
                                 onClick={() => handleUseIntimacyOption(i)}
-                                title={`${i.label} — click to do this now`}
-                                className="rounded-lg bg-romance/15 px-2 py-1 text-xs text-romance transition-colors hover:bg-romance/25"
+                                disabled={!!pendingActionId}
+                                title={`${i.label} — the model writes your move into it, adapted to the scene, for you to review`}
+                                className="rounded-lg bg-romance/15 px-2 py-1 text-xs text-romance transition-colors hover:bg-romance/25 disabled:opacity-40"
                               >
-                                {i.label}
+                                {pendingActionId === i.id ? 'Writing…' : i.label}
                               </button>
                             )
                           }

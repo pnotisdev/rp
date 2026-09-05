@@ -22,15 +22,26 @@ export interface IntimacyUnlockable {
   /** Unset means no commitment floor — warmth alone is enough. */
   minCommitment?: CommitmentStatus
   /**
-   * A natural, pre-written player-action line sent verbatim (via `composeIntimacyActionText`,
-   * `{char}` replaced with the real name) when this is clicked in the Relationship panel — e.g.
-   * `"*leans in and presses a slow kiss to {char}'s forehead*"`. Every built-in entry has one,
+   * A natural, pre-written player-action line — the starting point for the composer when this is
+   * clicked in the Relationship panel (the connected model adapts it to the current scene first;
+   * see `draftIntimacyAction`), and the verbatim fallback via `composeIntimacyActionText` when no
+   * model is reachable. `{char}` is replaced with the real name. Every built-in entry has one,
    * hand-written for that specific action rather than templated, since a generic "does {label}"
    * sentence reads badly across this varied a catalog. A world's own custom entries fall back to
    * `composeIntimacyActionText`'s generic per-category template when this is unset, so authoring
    * one is optional, not required, to add a new unlockable.
    */
   actionText?: string
+  /**
+   * A clear, model-facing description of the physical act — used in two places the terse player
+   * `actionText` isn't enough on its own: the brief for `draftIntimacyAction`'s scene-adaptation
+   * call, and a directive injected into the *character's* reply turn (`intimacyActionDirective`) so
+   * the model unmistakably registers what the player just initiated and writes a real response to
+   * it rather than glossing past a one-line stage direction. `{char}` is substituted; the player is
+   * always "you". Phrased to slot after "moved the scene into" / "initiating this now:". Falls back
+   * to `defaultIntimacyPromptNote`'s per-category template when unset (a world's custom entries).
+   */
+  promptNote?: string
   /**
    * Coins required to actually own this before it can be bought/used (`Chat.toyInventory`) —
    * meaningful for `toy`-category entries in practice (the user's own ask: "buy toys"); unset
@@ -50,49 +61,49 @@ export interface IntimacyUnlockable {
  */
 export const DEFAULT_INTIMACY_CATALOG: IntimacyUnlockable[] = [
   // --- kissing_spot: available across the whole warmth ladder, no commitment required ---
-  { id: 'kiss-forehead', category: 'kissing_spot', label: 'forehead', minWarmth: 15, actionText: "*leans in and presses a slow kiss to {char}'s forehead*" },
-  { id: 'kiss-cheek', category: 'kissing_spot', label: 'cheek', minWarmth: 15, actionText: "*kisses {char}'s cheek, lingering a moment*" },
-  { id: 'kiss-hand', category: 'kissing_spot', label: 'the back of the hand', minWarmth: 15, actionText: "*brings {char}'s hand up and kisses the back of it*" },
-  { id: 'kiss-temple', category: 'kissing_spot', label: 'temple', minWarmth: 35, actionText: '*kisses {char} softly at the temple*' },
-  { id: 'kiss-neck', category: 'kissing_spot', label: 'neck', minWarmth: 35, actionText: "*trails a kiss along {char}'s neck*" },
-  { id: 'kiss-jaw', category: 'kissing_spot', label: 'along the jaw', minWarmth: 55, actionText: "*kisses along {char}'s jaw, slow and unhurried*" },
-  { id: 'kiss-collarbone', category: 'kissing_spot', label: 'collarbone', minWarmth: 55, actionText: "*presses a kiss to {char}'s collarbone*" },
-  { id: 'kiss-wrist', category: 'kissing_spot', label: 'inner wrist', minWarmth: 55, actionText: "*turns {char}'s wrist over and kisses the inside of it*" },
-  { id: 'kiss-ear', category: 'kissing_spot', label: 'behind the ear', minWarmth: 75, actionText: '*kisses {char} just behind the ear*' },
-  { id: 'kiss-shoulder', category: 'kissing_spot', label: 'shoulder blade', minWarmth: 75, actionText: "*kisses {char}'s shoulder blade, gentle*" },
-  { id: 'kiss-thigh', category: 'kissing_spot', label: 'inner thigh', minWarmth: 90, minCommitment: 'dating', actionText: "*kisses along the inside of {char}'s thigh*" },
+  { id: 'kiss-forehead', category: 'kissing_spot', label: 'forehead', minWarmth: 15, actionText: "*I tilt {char}'s chin up and press a slow kiss to their forehead, lingering there a second before I pull back.*", promptNote: "a slow, tender kiss to {char}'s forehead" },
+  { id: 'kiss-cheek', category: 'kissing_spot', label: 'cheek', minWarmth: 15, actionText: "*I lean in and kiss {char}'s cheek, letting it linger a moment longer than it needs to.*", promptNote: "a lingering kiss to {char}'s cheek" },
+  { id: 'kiss-hand', category: 'kissing_spot', label: 'the back of the hand', minWarmth: 15, actionText: "*I take {char}'s hand, turn it in mine, and kiss the back of it without breaking eye contact.*", promptNote: "a kiss to the back of {char}'s hand, eyes held" },
+  { id: 'kiss-temple', category: 'kissing_spot', label: 'temple', minWarmth: 35, actionText: "*I brush {char}'s hair back and kiss them softly at the temple.*", promptNote: "a soft kiss to {char}'s temple" },
+  { id: 'kiss-neck', category: 'kissing_spot', label: 'neck', minWarmth: 35, actionText: "*I dip my head and trail a kiss along the side of {char}'s neck, slow, feeling them react.*", promptNote: "kisses trailed slowly along {char}'s neck" },
+  { id: 'kiss-jaw', category: 'kissing_spot', label: 'along the jaw', minWarmth: 55, actionText: "*I kiss along {char}'s jaw, unhurried, working from just under their ear toward their chin.*", promptNote: "unhurried kisses along {char}'s jaw" },
+  { id: 'kiss-collarbone', category: 'kissing_spot', label: 'collarbone', minWarmth: 55, actionText: "*I ease {char}'s collar aside and press a kiss to the line of their collarbone.*", promptNote: "a kiss to {char}'s collarbone" },
+  { id: 'kiss-wrist', category: 'kissing_spot', label: 'inner wrist', minWarmth: 55, actionText: "*I turn {char}'s wrist over and kiss the thin skin on the inside of it, right over the pulse.*", promptNote: "a kiss to the inside of {char}'s wrist, over the pulse" },
+  { id: 'kiss-ear', category: 'kissing_spot', label: 'behind the ear', minWarmth: 75, actionText: "*I kiss {char} just behind the ear, close enough that they can feel me breathe.*", promptNote: "a kiss just behind {char}'s ear" },
+  { id: 'kiss-shoulder', category: 'kissing_spot', label: 'shoulder blade', minWarmth: 75, actionText: "*I move behind {char} and kiss the curve of their shoulder blade, one hand resting at their waist.*", promptNote: "a kiss to {char}'s shoulder blade, from behind" },
+  { id: 'kiss-thigh', category: 'kissing_spot', label: 'inner thigh', minWarmth: 90, minCommitment: 'dating', actionText: "*I settle lower and kiss my way slowly up the inside of {char}'s thigh, taking my time.*", promptNote: "kisses working slowly up the inside of {char}'s thigh" },
 
-  // --- position: explicit-only (see intimacyOptionsGuidance). Phrased as guiding things there mid-scene, not a cold-start action. ---
-  { id: 'pos-missionary', category: 'position', label: 'missionary', minWarmth: 75, minCommitment: 'dating', actionText: '*guides {char} onto their back, settling over them*' },
-  { id: 'pos-face-to-face', category: 'position', label: 'face to face in their lap', minWarmth: 75, minCommitment: 'dating', actionText: '*pulls {char} into their lap, face to face*' },
-  { id: 'pos-cowgirl', category: 'position', label: 'on top', minWarmth: 75, minCommitment: 'dating', actionText: '*settles back and pulls {char} on top*' },
-  { id: 'pos-doggy', category: 'position', label: 'from behind', minWarmth: 75, minCommitment: 'dating', actionText: '*turns {char} around, guiding them from behind*' },
-  { id: 'pos-spooning', category: 'position', label: 'spooning', minWarmth: 55, minCommitment: 'dating', actionText: '*pulls {char} close from behind, spooning*' },
-  { id: 'pos-against-wall', category: 'position', label: 'pressed against a wall', minWarmth: 90, minCommitment: 'exclusive', actionText: '*presses {char} back against the wall*' },
-  { id: 'pos-reverse-cowgirl', category: 'position', label: 'reverse cowgirl', minWarmth: 90, minCommitment: 'exclusive', actionText: '*has {char} turn around, facing away*' },
-  { id: 'pos-legs-over-shoulders', category: 'position', label: 'legs over their shoulders', minWarmth: 90, minCommitment: 'exclusive', actionText: "*hooks {char}'s legs over their shoulders*" },
-  { id: 'pos-sixty-nine', category: 'position', label: '69', minWarmth: 90, minCommitment: 'exclusive', actionText: '*shifts them both around, head to toe*' },
+  // --- position: explicit-only (see intimacyOptionsGuidance). Phrased as guiding things there mid-scene. ---
+  { id: 'pos-missionary', category: 'position', label: 'missionary', minWarmth: 75, minCommitment: 'dating', actionText: "*I ease {char} down onto their back and move over them, settling between their legs, weight on my forearms so I can watch their face.*", promptNote: "the missionary position: {char} on their back, you over them, face to face" },
+  { id: 'pos-face-to-face', category: 'position', label: 'in their lap, face to face', minWarmth: 75, minCommitment: 'dating', actionText: "*I pull {char} up into my lap so we're chest to chest, their legs around me, close enough to feel every breath.*", promptNote: "{char} straddling your lap, the two of you chest to chest, face to face" },
+  { id: 'pos-cowgirl', category: 'position', label: 'them on top', minWarmth: 75, minCommitment: 'dating', actionText: "*I lie back and guide {char} over me, hands on their hips, letting them set the pace from up there.*", promptNote: "{char} on top, riding you, setting the pace" },
+  { id: 'pos-doggy', category: 'position', label: 'from behind', minWarmth: 75, minCommitment: 'dating', actionText: "*I turn {char} over onto their hands and knees and move in behind them, one hand spread flat on their lower back.*", promptNote: "taking {char} from behind, them on their hands and knees" },
+  { id: 'pos-spooning', category: 'position', label: 'spooning', minWarmth: 55, minCommitment: 'dating', actionText: "*I fit myself against {char}'s back, both of us on our sides, and pull them in close by the hip.*", promptNote: "spooning: you at {char}'s back, both on your sides" },
+  { id: 'pos-against-wall', category: 'position', label: 'against the wall', minWarmth: 90, minCommitment: 'exclusive', actionText: "*I back {char} into the wall and lift them, their legs coming up around me, my forearm braced beside their head.*", promptNote: "{char} pinned against the wall, legs around you, you holding them up" },
+  { id: 'pos-reverse-cowgirl', category: 'position', label: 'reverse cowgirl', minWarmth: 90, minCommitment: 'exclusive', actionText: "*I have {char} turn around so they're facing away, then guide them back down over me, hands running up their spine.*", promptNote: "{char} on top but facing away from you" },
+  { id: 'pos-legs-over-shoulders', category: 'position', label: 'legs over shoulders', minWarmth: 90, minCommitment: 'exclusive', actionText: "*I press forward until {char}'s knees fold toward their chest and hook their legs over my shoulders.*", promptNote: "{char} on their back, their legs hooked over your shoulders, folded close" },
+  { id: 'pos-sixty-nine', category: 'position', label: '69', minWarmth: 90, minCommitment: 'exclusive', actionText: "*I shift us both around until we're head to toe, mouths where our hands were.*", promptNote: "the two of you head to toe, going down on each other at the same time" },
 
   // --- toy: explicit-only, and now the one category that costs coins — see `price` ---
-  { id: 'toy-massage-oil', category: 'toy', label: 'massage oil', minWarmth: 55, price: 8, actionText: "*warms massage oil between their hands and starts working it into {char}'s skin*" },
-  { id: 'toy-feather', category: 'toy', label: 'a feather tickler', minWarmth: 55, price: 8, actionText: "*trails a feather tickler slowly along {char}'s skin*" },
-  { id: 'toy-blindfold', category: 'toy', label: 'a blindfold', minWarmth: 75, minCommitment: 'dating', price: 15, actionText: "*ties a blindfold gently over {char}'s eyes*" },
-  { id: 'toy-ice', category: 'toy', label: 'ice, traced slowly', minWarmth: 75, minCommitment: 'dating', price: 12, actionText: "*traces a piece of ice slowly along {char}'s skin*" },
-  { id: 'toy-body-paint', category: 'toy', label: 'body-safe paint or chocolate', minWarmth: 75, minCommitment: 'dating', price: 18, actionText: "*dips a finger in and drags it slowly across {char}'s skin*" },
-  { id: 'toy-vibrator', category: 'toy', label: 'a vibrator', minWarmth: 90, minCommitment: 'dating', price: 30, actionText: '*reaches for the vibrator, teasing {char} with it first*' },
-  { id: 'toy-silk-ties', category: 'toy', label: 'silk ties for light bondage', minWarmth: 90, minCommitment: 'exclusive', price: 25, actionText: "*ties {char}'s wrists loosely with the silk*" },
-  { id: 'toy-handcuffs', category: 'toy', label: 'playful handcuffs', minWarmth: 90, minCommitment: 'exclusive', price: 25, actionText: "*clicks the handcuffs on, playful, watching {char}'s reaction*" },
+  { id: 'toy-massage-oil', category: 'toy', label: 'massage oil', minWarmth: 55, price: 8, actionText: "*I warm a little massage oil between my palms and start working it slowly into {char}'s back and shoulders.*", promptNote: "warming massage oil and working it over {char}'s body" },
+  { id: 'toy-feather', category: 'toy', label: 'a feather tickler', minWarmth: 55, price: 8, actionText: "*I draw a feather tickler in a slow line down {char}'s side, watching for the shiver.*", promptNote: "teasing {char}'s bare skin with a feather tickler" },
+  { id: 'toy-blindfold', category: 'toy', label: 'a blindfold', minWarmth: 75, minCommitment: 'dating', price: 15, actionText: "*I gather {char}'s hair aside and settle a blindfold over their eyes, checking it isn't too tight.*", promptNote: "slipping a blindfold over {char}'s eyes so they can't see" },
+  { id: 'toy-ice', category: 'toy', label: 'ice, traced slowly', minWarmth: 75, minCommitment: 'dating', price: 12, actionText: "*I take a piece of ice from the glass and trace it slowly along {char}'s collarbone, down the centre of their chest.*", promptNote: "tracing a piece of ice slowly over {char}'s bare skin" },
+  { id: 'toy-body-paint', category: 'toy', label: 'body paint or chocolate', minWarmth: 75, minCommitment: 'dating', price: 18, actionText: "*I dip a finger in and drag a slow line across {char}'s stomach, then lean down to follow it.*", promptNote: "dragging body paint or chocolate across {char}'s skin, then following it with your mouth" },
+  { id: 'toy-vibrator', category: 'toy', label: 'a vibrator', minWarmth: 90, minCommitment: 'dating', price: 30, actionText: "*I switch the vibrator on low and run it in a slow circle over {char}'s hip, not where they want it yet.*", promptNote: "using a vibrator on {char}, teasing before giving them what they want" },
+  { id: 'toy-silk-ties', category: 'toy', label: 'silk ties', minWarmth: 90, minCommitment: 'exclusive', price: 25, actionText: "*I loop the silk loosely around {char}'s wrists and knot it to the headboard, leaving enough give that they could pull free if they wanted.*", promptNote: "loosely tying {char}'s wrists with silk, light bondage they could slip if they wanted" },
+  { id: 'toy-handcuffs', category: 'toy', label: 'playful handcuffs', minWarmth: 90, minCommitment: 'exclusive', price: 25, actionText: "*I click the cuffs closed around {char}'s wrists, slow, watching their face the whole time.*", promptNote: "cuffing {char}'s wrists with playful handcuffs" },
 
   // --- activity: explicit-only (kinks, aftercare, and other non-position/toy intimate beats) ---
-  { id: 'act-dirty-talk', category: 'activity', label: 'dirty talk', minWarmth: 55, actionText: "*leans in close and murmurs something filthy in {char}'s ear*" },
-  { id: 'act-massage', category: 'activity', label: 'a slow, sensual massage', minWarmth: 55, actionText: "*starts working slow, deliberate hands into {char}'s shoulders*" },
-  { id: 'act-aftercare', category: 'activity', label: 'quiet aftercare and reassurance', minWarmth: 55, actionText: '*pulls {char} in close, quiet, just holding them*' },
-  { id: 'act-shower', category: 'activity', label: 'showering together', minWarmth: 75, minCommitment: 'dating', actionText: "*takes {char}'s hand and pulls them toward the shower*" },
-  { id: 'act-roleplay', category: 'activity', label: 'acting out a shared fantasy', minWarmth: 75, minCommitment: 'dating', actionText: "*grins and starts play-acting the fantasy they'd talked about*" },
-  { id: 'act-morning-after', category: 'activity', label: 'slow, unhurried morning-after intimacy', minWarmth: 75, minCommitment: 'dating', actionText: '*pulls {char} back down, in no hurry to start the day*' },
-  { id: 'act-praise', category: 'activity', label: 'praise, said while it matters most', minWarmth: 75, minCommitment: 'dating', actionText: "*cups {char}'s face and tells them exactly how good they are*" },
-  { id: 'act-edging', category: 'activity', label: 'teasing and edging', minWarmth: 90, minCommitment: 'exclusive', actionText: '*slows everything down right at the edge, teasing*' },
-  { id: 'act-exhibitionism', category: 'activity', label: 'the thrill of maybe being overheard', minWarmth: 90, minCommitment: 'exclusive', actionText: "*doesn't bother lowering their voice, door barely closed*" },
+  { id: 'act-dirty-talk', category: 'activity', label: 'dirty talk', minWarmth: 55, actionText: "*I bring my mouth to {char}'s ear and tell them, low and specific, exactly what I want to do to them.*", promptNote: "murmuring filthy, specific things in {char}'s ear" },
+  { id: 'act-massage', category: 'activity', label: 'a slow, sensual massage', minWarmth: 55, actionText: "*I have {char} lie down and start working slow, deliberate pressure up either side of their spine.*", promptNote: "giving {char} a slow, sensual full-body massage" },
+  { id: 'act-aftercare', category: 'activity', label: 'quiet aftercare', minWarmth: 55, actionText: "*I pull {char} in against my chest and just hold them, one hand moving slow circles on their back, in no rush to move or talk.*", promptNote: "quiet aftercare: holding {char} close, reassuring them, letting them come down" },
+  { id: 'act-shower', category: 'activity', label: 'showering together', minWarmth: 75, minCommitment: 'dating', actionText: "*I take {char}'s hand and pull them toward the bathroom, reaching in to start the water.*", promptNote: "moving things into the shower together" },
+  { id: 'act-roleplay', category: 'activity', label: 'acting out a fantasy', minWarmth: 75, minCommitment: 'dating', actionText: "*I catch {char}'s eye and slip into the role from the fantasy we talked about, waiting to see if they'll play along.*", promptNote: "acting out a shared fantasy the two of you talked about earlier" },
+  { id: 'act-morning-after', category: 'activity', label: 'slow morning-after', minWarmth: 75, minCommitment: 'dating', actionText: "*I pull {char} back down under the covers, half-asleep, hands already wandering, in no hurry for the day to start.*", promptNote: "slow, unhurried morning-after sex, both of you still half-asleep" },
+  { id: 'act-praise', category: 'activity', label: 'praise, when it counts', minWarmth: 75, minCommitment: 'dating', actionText: "*I take {char}'s face in both hands and tell them, plainly, how good they are, how good they feel, how much I want them.*", promptNote: "praising {char} out loud while it matters most: how good they are, how much you want them" },
+  { id: 'act-edging', category: 'activity', label: 'teasing and edging', minWarmth: 90, minCommitment: 'exclusive', actionText: "*I bring {char} right up to the edge, then still my hand and wait, watching them, until the tension eases enough to start again.*", promptNote: "edging {char}: bringing them to the brink, then stopping, over and over" },
+  { id: 'act-exhibitionism', category: 'activity', label: 'somewhere you could be overheard', minWarmth: 90, minCommitment: 'exclusive', actionText: "*I don't lower my voice, and the door's barely shut. The chance of being heard is half the point.*", promptNote: "fooling around somewhere the two of you could be overheard, the risk part of the thrill" },
 ]
 
 function commitmentMet(min: CommitmentStatus | undefined, actual: CommitmentStatus): boolean {
@@ -166,6 +177,40 @@ export function nextLockedInCategory(
 export function composeIntimacyActionText(option: IntimacyUnlockable, charName: string): string {
   const template = option.actionText ?? (option.category === 'kissing_spot' ? `*kisses {char} on the ${option.label}*` : `*brings up trying ${option.label}*`)
   return template.replace(/\{char\}/g, charName)
+}
+
+/** The per-category fallback description for an entry with no authored `promptNote` (a world's own
+ *  custom addition). Deliberately plain — an author who wants something sharper adds a `promptNote`. */
+function defaultIntimacyPromptNote(option: IntimacyUnlockable): string {
+  switch (option.category) {
+    case 'kissing_spot':
+      return `a kiss to {char}'s ${option.label}`
+    case 'position':
+      return `the ${option.label} position`
+    case 'toy':
+      return `using ${option.label} on {char}`
+    default:
+      return option.label
+  }
+}
+
+/** The model-facing description of an intimacy action, `{char}` resolved. Shared by
+ *  `intimacyActionDirective` and `draftIntimacyAction`. */
+export function resolveIntimacyPromptNote(option: IntimacyUnlockable, charName: string): string {
+  return (option.promptNote ?? defaultIntimacyPromptNote(option)).replace(/\{char\}/g, charName)
+}
+
+/**
+ * The line injected into the *character's* reply turn (`useChatSession` → `runGeneration`'s
+ * `extraStyleGuidance`) right after the player sends an intimacy action. Its whole job is to make
+ * sure the model actually registers what the player just deliberately initiated — a terse
+ * `*I ease {char} onto their back*` on its own reads like a stage direction the model can gloss
+ * past — and writes a real, in-the-moment response to it. Real names interpolated directly rather
+ * than `{{char}}`/`{{user}}`: `styleGuidance` strings are never macro-substituted (see
+ * `mindGuidance.ts`'s note on the same point).
+ */
+export function intimacyActionDirective(option: IntimacyUnlockable, personaName: string, charName: string): string {
+  return `${personaName} has just moved the scene into ${resolveIntimacyPromptNote(option, charName)}. This is something ${personaName} is doing on purpose, right now, not a passing detail. Write ${charName}'s response to it as the actual next beat: how ${charName} takes it, what they do and say, in ${charName}'s own voice and at the register the scene is already at.`
 }
 
 /** How many items from one category to actually name in the prompt — the highest-threshold (most recently earned, most "current") ones read as most relevant, and capping keeps this from growing into a wall of text turn after turn as more unlock. */

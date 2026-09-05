@@ -63,6 +63,7 @@ import { currentOutfitFrom } from '@/lib/vn/outfits'
 import { countCharReplies } from '@/lib/dating/aftercare'
 import { getGiftCatalog } from '@/lib/dating/gifts'
 import { getItemCatalog } from '@/lib/dating/items'
+import { composeIntimacyActionText, type IntimacyUnlockable } from '@/lib/dating/intimacyCatalog'
 
 export function ChatWindow({
   chatId,
@@ -106,6 +107,7 @@ export function ChatWindow({
     continueMessage,
     canContinue,
     impersonate,
+    draftIntimacyAction,
     activeObjective,
     createObjective,
     generateTasksForActiveObjective,
@@ -151,11 +153,15 @@ export function ChatWindow({
   const highlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [draft, setDraft] = useState('')
   const [armedIntent, setArmedIntent] = useState<MessageIntent | null>(null)
+  // Set when a Relationship-panel intimacy action populated the composer — travels with the next
+  // send so the deliberate outfit-switch / aftercare-window side effects still fire, then clears.
+  const [armedIntimacyOptionId, setArmedIntimacyOptionId] = useState<string | null>(null)
   const [refreshingChoices, setRefreshingChoices] = useState(false)
   const [exporting, setExporting] = useState(false)
 
   useEffect(() => {
     setArmedIntent(null)
+    setArmedIntimacyOptionId(null)
   }, [chatId])
 
   useEffect(() => {
@@ -426,8 +432,29 @@ export function ChatWindow({
   })()
 
   const sendWithIntent = (text: string, attachments: Parameters<typeof sendUserMessage>[1] = []) => {
-    sendUserMessage(text, attachments, armedIntent ? { intent: armedIntent } : undefined)
+    const opts =
+      armedIntent || armedIntimacyOptionId
+        ? { ...(armedIntent ? { intent: armedIntent } : {}), ...(armedIntimacyOptionId ? { intimacyOptionId: armedIntimacyOptionId } : {}) }
+        : undefined
+    sendUserMessage(text, attachments, opts)
     setArmedIntent(null)
+    setArmedIntimacyOptionId(null)
+  }
+
+  // Clicking an intimacy action: the model rewrites the entry's action line for the scene as it
+  // stands, the result goes in the composer for review (never auto-sent), and the option id is
+  // armed so a real send still fires the outfit/aftercare side effects. Falls back to the entry's
+  // own hand-written line if the model call fails or isn't reachable.
+  const onIntimacyAction = async (option: IntimacyUnlockable) => {
+    let text = ''
+    try {
+      text = await draftIntimacyAction(option.id)
+    } catch {
+      /* fall through to the canned line */
+    }
+    setDraft(text.trim() || composeIntimacyActionText(option, character?.card.name ?? 'them'))
+    setArmedIntimacyOptionId(option.id)
+    setShowRelationship(false)
   }
 
   // Section 4/12's Scene entity: once a non-'manual' policy is active, the composer's own "reply
@@ -452,7 +479,12 @@ export function ChatWindow({
     <Composer
       variant={variant}
       value={draft}
-      onChangeValue={setDraft}
+      onChangeValue={(v) => {
+        setDraft(v)
+        // Clearing the composer discards the armed intimacy action too — a fresh, unrelated message
+        // shouldn't quietly still switch the outfit / open the aftercare window.
+        if (!v.trim()) setArmedIntimacyOptionId(null)
+      }}
       disabled={!character}
       isGenerating={isGenerating}
       canContinue={canContinue}
@@ -596,10 +628,7 @@ export function ChatWindow({
           onEndRelationship={endRelationship}
           onNavigateToWorld={onNavigateToWorld}
           charReplyCount={countCharReplies(messages)}
-          onSendAction={(text, intimacyOptionId) => {
-            sendUserMessage(text, [], { intimacyOptionId })
-            setShowRelationship(false)
-          }}
+          onIntimacyAction={onIntimacyAction}
         />
       )}
       {showAuthorNote && (

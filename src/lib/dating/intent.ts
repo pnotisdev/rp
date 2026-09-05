@@ -95,6 +95,30 @@ export function describeIntentForJudge(id: string | undefined): string | undefin
   return `The player tagged their latest line as ${spec.judgeLine} Weigh {{char}}'s honest reaction to that; do not just reward the attempt.`
 }
 
+/**
+ * How many turns running the player has now played the same intent chip — the trailing run of
+ * identical values at the end of `userIntents` (oldest-first). `0` when the newest is untagged.
+ * Feeds "repeated same interaction → diminishing returns" (`dampenRepeatedDeltas` +
+ * `repeatedIntentNudge`).
+ */
+export function trailingIntentRun(userIntents: (string | undefined)[]): number {
+  const last = userIntents[userIntents.length - 1]
+  if (!last) return 0
+  let n = 0
+  for (let i = userIntents.length - 1; i >= 0 && userIntents[i] === last; i--) n++
+  return n
+}
+
+/**
+ * The prompt nudge once the player has leaned on the same intent 3+ turns running, so the character
+ * notices the repetition instead of being moved by it forever. Real names — `styleGuidance` strings
+ * aren't macro-substituted. `undefined` below the threshold.
+ */
+export function repeatedIntentNudge(streak: number, charName: string, userName: string): string | undefined {
+  if (streak < 3) return undefined
+  return `${userName} has now played the same kind of move several turns in a row. The novelty has worn off for ${charName}: it lands with much less weight than the first time, and ${charName} might get wry about it, gently point it out, or simply be less visibly affected. Don't keep rewarding the repetition as if it were fresh.`
+}
+
 /** Summary line for the end-of-date judge — which intents the player leaned on across the scene. */
 export function describeIntentsForDate(ids: string[]): string | undefined {
   const counts = new Map<string, number>()

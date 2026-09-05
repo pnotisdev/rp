@@ -5,6 +5,7 @@ import { newId } from '@/lib/id'
 import type { AuthorNote, Chat, CommitmentStatus, DateEventCard, MessageIntent, Objective, ObjectiveTask, RelationshipStage, StoredMessage, WorldCard } from '@/lib/types'
 import { collectImageBase64, composeMessageText, type PendingAttachment } from '@/lib/attachments'
 import { makeGenKey } from '@/lib/api/kobold'
+import { generateWithTimeout } from '@/lib/api/generateWithTimeout'
 import { useChatBackendClient } from '@/lib/hooks/useChatBackendClient'
 import { buildPrompt, estimateTokens, type ChatMessage } from '@/lib/prompt/builder'
 import { SUMMARY_MAX_LENGTH, summarizeMessages } from '@/lib/prompt/summarize'
@@ -15,11 +16,15 @@ import {
   assessDateOutcome,
   assessIntimacyMilestone,
   assessRelationshipMoment,
+  dampenRepeatedDeltas,
   detectGalleryUnlocks,
   draftHiddenAgenda,
   scaleDeltasForDifficulty,
   suggestDateEvent,
 } from '@/lib/dating/relationshipAssist'
+import { nextMomentum, warmthDeltaOf } from '@/lib/dating/momentum'
+import { applyPlanUpdates, planLinesForJudge, plansChanged, plansGuidance } from '@/lib/dating/plans'
+import { repeatedIntentNudge, trailingIntentRun } from '@/lib/dating/intent'
 import {
   activityPhase,
   describePresence,
@@ -89,7 +94,15 @@ import {
 } from '@/lib/dating/aftercare'
 import { backgroundLabel } from '@/lib/vn/backgrounds'
 import { countStaticSceneTurns, sceneProgressionNudge } from '@/lib/prompt/sceneProgression'
-import { getUnlockedIntimacyOptions, intimacyItemById, intimacyOptionsGuidance, isExplicitCategory } from '@/lib/dating/intimacyCatalog'
+import {
+  composeIntimacyActionText,
+  getUnlockedIntimacyOptions,
+  intimacyActionDirective,
+  intimacyItemById,
+  intimacyOptionsGuidance,
+  isExplicitCategory,
+  resolveIntimacyPromptNote,
+} from '@/lib/dating/intimacyCatalog'
 import { afterglowGuidance, characterIntentGuidance, moodGuidance, needGuidance } from '@/lib/prompt/mindGuidance'
 import { classifyAttachedImageScene, detectExpressionFromSprites, shortlistExpressions } from '@/lib/vn/sceneVision'
 import { assessRapport } from '@/lib/dating/rapport'
@@ -520,6 +533,8 @@ export function useChatSession(chatId: string | null) {
         continueLastTurn?: boolean
         impersonateAsUser?: boolean
         speakerId?: string | null
+        /** This turn's player intent chip, if any — used only to detect a repeated-intent streak for the diminishing-returns nudge. */
+        intent?: MessageIntent
         /** One-off addition to `styleGuidance`, for a generation shape none of the standing settings cover — e.g. 10b's live-scene opener, "you're breaking the ice, not replying to a message." Never persisted, never reused past this one call. */
         extraStyleGuidance?: string
       },
@@ -628,6 +643,9 @@ export function useChatSession(chatId: string | null) {
       const moodLine = moodGuidance(speaker.card.name, persona?.name || 'You', speakerTrack.mood)
       const needLine = needGuidance(speaker.card.name, speakerTrack.currentNeed)
       const intentLine = characterIntentGuidance(speaker.card.name, speakerTrack.characterIntent)
+      // The persistent agency layer — a few turn-spanning intentions the character carries of their
+      // own (`dating/plans.ts`), formed and retired by the same judge call that sets mood/need/intent.
+      const plansLine = plansGuidance(speaker.card.name, persona?.name || 'You', speakerTrack.plans)
 
       // Messages already folded into chat.summary are represented there, not sent verbatim.
       const cutoff = freshChat.summaryUpToTimestamp ?? 0
@@ -680,6 +698,16 @@ export function useChatSession(chatId: string | null) {
       // answering when asked.
       const activityInitiativeGuidance =
         "Your character doesn't only answer what's put in front of them. Every so often, especially once things feel comfortable, let them bring up an idea of their own: something to do together, a place to go, a topic they're curious about, drawing on their own interests and routine rather than only reacting to what's proposed to them."
+      // "Repeated same interaction → diminishing returns": if the player has leaned on the same
+      // intent chip several turns running, tell the character to notice rather than keep being moved.
+      // `messages` here is a turn behind (this turn's user line is created but not yet re-queried),
+      // so `opts.intent` is the current turn folded in.
+      const priorUserIntents = messages.filter((m) => m.role === 'user').map((m) => m.intent as string | undefined)
+      const repeatNudge = repeatedIntentNudge(
+        trailingIntentRun([...priorUserIntents, opts?.intent]),
+        speaker.card.name,
+        persona?.name || 'You',
+      )
       const emDashRule = avoidEmDashes
         ? 'Never use em dashes (the — character) in your writing. Use a comma, period, or parentheses instead.'
         : ''
@@ -699,6 +727,8 @@ export function useChatSession(chatId: string | null) {
             moodLine,
             needLine,
             intentLine,
+            plansLine,
+            repeatNudge ?? '',
             sceneNudge,
             replyLengthInstruction,
             styleGuidanceNote.trim(),
@@ -902,13 +932,21 @@ export function useChatSession(chatId: string | null) {
       const charRepliesNow = countCharReplies(messages)
       const aftercareDue = isAfterglowComplete(openAfterglow, charRepliesNow)
       const aftercareWindow = aftercareDue ? history.slice(-(AFTERGLOW_TURNS * 2 + 2)) : undefined
-      const { deltas: rawDeltas, newFlags, reason, newFacts, completedTaskIndices, aftercareVerdict, mood, currentNeed, characterIntent } = await assessRelationshipMoment(client, {
+      // Open threads (unresolved facts) go to the judge in a stable index order so it can mark one
+      // closed via `resolvedFactIndices` — same numbered-list / index-return shape as pending tasks.
+      const openThreads = activeFacts.filter((f) => f.unresolved)
+      // The character's standing plans go to the judge in the same stable numbered-list shape, so
+      // its `planUpdates` can annotate or close one by index (and always add new ones).
+      const activePlans = track.plans ?? []
+      const { deltas: rawDeltas, newFlags, reason, newFacts, resolvedFactIndices, completedTaskIndices, aftercareVerdict, mood, currentNeed, characterIntent, planUpdates } = await assessRelationshipMoment(client, {
         history,
         latestReply,
         charName: speaker.card.name,
         userName: persona?.name || 'You',
         current: { affection: currentAffection, ...currentStats },
         knownFacts: activeFacts.map((f) => f.text),
+        unresolvedFacts: openThreads.map((f) => f.text),
+        activePlans: planLinesForJudge(activePlans),
         customFlags: world?.customSceneFlags,
         intent,
         pendingTasks: pendingTasks?.map((t) => t.description),
@@ -921,7 +959,13 @@ export function useChatSession(chatId: string | null) {
       // would keep the aftermath guidance running forever. An unusable answer is read as the
       // middle outcome rather than as "ask again next turn".
       const resolvedAftercare = aftercareDue ? (aftercareVerdict ?? 'awkward') : undefined
-      const deltas = scaleDeltasForDifficulty(
+      // "Repeated same interaction → diminishing returns": the player playing the same intent chip
+      // 3+ turns running scales this turn's positive warmth gains toward nothing (a repeated *bad*
+      // move and rising friction pass through). `messages` may not yet carry this turn's user line,
+      // so `intent` is folded in explicitly.
+      const userIntents = messages.filter((m) => m.role === 'user').map((m) => m.intent as string | undefined)
+      if (userIntents[userIntents.length - 1] !== intent) userIntents.push(intent)
+      const scaledDeltas = scaleDeltasForDifficulty(
         resolvedAftercare
           ? (Object.fromEntries(
               (['affection', ...RELATIONSHIP_DIMENSIONS] as const).map((k) => [
@@ -932,12 +976,26 @@ export function useChatSession(chatId: string | null) {
           : rawDeltas,
         relationshipDifficulty,
       )
+      const deltas = trailingIntentRun(userIntents) >= 3 ? dampenRepeatedDeltas(scaledDeltas) : scaledDeltas
       newFlags.forEach((flag) => existingFlags.add(flag))
       if (newFacts.length > 0) {
         const sourceMessageId = history[history.length - 1]?.id
-        for (const text of newFacts) {
-          chatFactsApi.create({ chatId: chatIdForRelationship, text, sourceMessageId }).catch(() => {})
+        for (const f of newFacts) {
+          chatFactsApi
+            .create({
+              chatId: chatIdForRelationship,
+              text: f.text,
+              sourceMessageId,
+              importance: f.importance,
+              valence: f.valence,
+              unresolved: f.unresolved || undefined,
+            })
+            .catch(() => {})
         }
+      }
+      for (const i of resolvedFactIndices) {
+        const closed = openThreads[i]
+        if (closed) chatFactsApi.update(closed.id, { unresolved: false }).catch(() => {})
       }
       const affection = clampAffection(currentAffection + deltas.affection)
       let nextStats = { ...currentStats }
@@ -999,6 +1057,19 @@ export function useChatSession(chatId: string | null) {
         }
       }
 
+      // Momentum: this turn's warmth movement folded into the decayed running value. Recomputed
+      // even on an otherwise-flat turn so a burst actually fades (a stale +4 would keep the pacing
+      // clause saying "moving fast" through a quiet stretch); the `noMomentumChange` check below
+      // lets a meaningful decay force a small persist.
+      const momentum = nextMomentum(track.momentum, warmthDeltaOf(deltas))
+      const noMomentumChange = Math.abs(momentum - (track.momentum ?? 0)) < 0.15
+
+      // Persistent agency layer: fold this turn's `planUpdates` into the character's plan list
+      // (`dating/plans.ts` caps it at 3 and ages stale ones out). `messages.length` is the turn
+      // counter, same unit `worldInfoTurn` uses.
+      const nextPlans = applyPlanUpdates(activePlans, planUpdates, messages.length)
+      const noPlanChange = !plansChanged(activePlans, nextPlans)
+
       const noStatChange = Object.values(deltas).every((d) => d === 0)
       const noRiskChange = !risk.warnedJustNow && !risk.brokeUpJustNow && !risk.clearedJustNow
       const noMindChange =
@@ -1019,6 +1090,8 @@ export function useChatSession(chatId: string | null) {
         noStatChange &&
         noRiskChange &&
         noMindChange &&
+        noMomentumChange &&
+        noPlanChange &&
         // A resolved window must always be written, even if its verdict happened to score flat —
         // otherwise `afterglow` stays set and the aftermath guidance runs forever.
         !resolvedAftercare &&
@@ -1049,6 +1122,8 @@ export function useChatSession(chatId: string | null) {
           // and it may already have noticed something better than "reassurance".
           currentNeed: currentNeed ?? (resolvedAftercare ? aftercareNeed(resolvedAftercare) : undefined) ?? track.currentNeed,
           characterIntent: characterIntent ?? track.characterIntent,
+          momentum,
+          plans: nextPlans,
           // `null`, not `undefined` — `JSON.stringify` drops undefined-valued keys, so an
           // undefined here would silently leave the window open. Same trap `relationshipWarning`
           // one field up already documents.
@@ -1787,6 +1862,7 @@ export function useChatSession(chatId: string | null) {
           let built = await buildCurrentPrompt(currentHistory, {
             continueLastTurn: continuing,
             speakerId: opts?.speakerId,
+            intent: opts?.intent,
             extraStyleGuidance: opts?.extraStyleGuidance,
           })
           if (!built) throw new Error('Could not build prompt: missing character or chat.')
@@ -2339,7 +2415,18 @@ export function useChatSession(chatId: string | null) {
           name: m.name,
           text: m.text,
         }))
-        await runGeneration(historyForPrompt, charMsg.id, apiImages, { speakerId: speaker?.id ?? null, intent: opts?.intent })
+        // When the player used a Relationship-panel intimacy action, hand the reply turn an explicit
+        // directive naming what was just initiated — a terse `*I ease {char} onto their back*` alone
+        // reads like a stage direction the model can skip past (the user's own report).
+        const intimacyDirective =
+          usedIntimacyOption && speaker
+            ? intimacyActionDirective(usedIntimacyOption, persona?.name || 'You', speaker.card.name)
+            : undefined
+        await runGeneration(historyForPrompt, charMsg.id, apiImages, {
+          speakerId: speaker?.id ?? null,
+          intent: opts?.intent,
+          extraStyleGuidance: intimacyDirective,
+        })
       } finally {
         endGeneration()
       }
@@ -2451,7 +2538,11 @@ export function useChatSession(chatId: string | null) {
     }))
     const built = await buildCurrentPrompt(historyForPrompt, { impersonateAsUser: true })
     if (!built) return ''
-    const text = await client.generate({ ...sampler, prompt: built.prompt, genkey: makeGenKey() })
+    const text = await generateWithTimeout(
+      client,
+      { ...sampler, prompt: built.prompt, genkey: makeGenKey() },
+      'Suggest a reply',
+    )
     // The generation cue already ends with "{{user}}:", so a model that opens with "Kai: " is
     // echoing the label, not naming itself — the same scrub the character reply path gets. Passing
     // the persona name as `charName` (the expected speaker of *this* text) strips that leading
@@ -2459,6 +2550,38 @@ export function useChatSession(chatId: string | null) {
     // on past {{user}}'s line into {{char}}'s reply.
     return cleanModelOutput(text, { charName: persona?.name || 'You', personaName: character.card.name })
   }, [buildCurrentPrompt, character, chat, client, messages, persona?.name, sampler])
+
+  /**
+   * Writes the player's action line for a Relationship-panel intimacy option, adapted to the scene
+   * as it stands right now instead of the one fixed sentence every time (the user's ask: "a
+   * different message each time, depending on scenario and the messages before"). Returns text for
+   * the composer — reviewed and sent by hand, never auto-sent, same as `impersonate`. On any
+   * failure the caller falls back to the entry's own `composeIntimacyActionText`.
+   */
+  const draftIntimacyAction = useCallback(
+    async (optionId: string): Promise<string> => {
+      if (!character || !chat) return ''
+      const option = intimacyItemById(optionId, world)
+      if (!option) return ''
+      const personaName = persona?.name || 'You'
+      const charName = character.card.name
+      const historyForPrompt: ChatMessage[] = messages.map((m) => ({ id: m.id, role: m.role, name: m.name, text: m.text }))
+      const directive = [
+        `${personaName} is initiating this now: ${resolveIntimacyPromptNote(option, charName)}.`,
+        `Write ${personaName}'s move into it: one to three sentences, present tense, in ${personaName}'s voice, fitting exactly where the scene already is (what was just said, the mood, what everyone is or isn't wearing). Actions in *asterisks*, anything said aloud in "quotes".`,
+        `A starting point, only if it helps: ${composeIntimacyActionText(option, charName)}`,
+      ].join(' ')
+      const built = await buildCurrentPrompt(historyForPrompt, { impersonateAsUser: true, extraStyleGuidance: directive })
+      if (!built) return ''
+      const text = await generateWithTimeout(
+        client,
+        { ...sampler, prompt: built.prompt, genkey: makeGenKey() },
+        'Adapt intimacy action',
+      )
+      return cleanModelOutput(text, { charName: personaName, personaName: charName })
+    },
+    [buildCurrentPrompt, character, chat, client, messages, persona?.name, sampler, world],
+  )
 
   const createObjective = useCallback(
     async (title: string, description: string, createdBy: 'user' | 'ai' = 'user') => {
@@ -2743,8 +2866,10 @@ export function useChatSession(chatId: string | null) {
     outcome.newFlags.forEach((flag) => existingFlags.add(flag))
     if (outcome.newFacts.length > 0) {
       const sourceMessageId = transcript[transcript.length - 1]?.id
-      for (const text of outcome.newFacts) {
-        chatFactsApi.create({ chatId, text, sourceMessageId }).catch(() => {})
+      for (const f of outcome.newFacts) {
+        chatFactsApi
+          .create({ chatId, text: f.text, sourceMessageId, importance: f.importance, valence: f.valence, unresolved: f.unresolved || undefined })
+          .catch(() => {})
       }
     }
     const affection = clampAffection(currentAffection + deltas.affection)
@@ -2922,6 +3047,7 @@ export function useChatSession(chatId: string | null) {
     continueMessage,
     canContinue,
     impersonate,
+    draftIntimacyAction,
     createObjective,
     generateTasksForActiveObjective,
     addManualTask,

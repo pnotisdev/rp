@@ -2746,6 +2746,79 @@ below:**
       beyond authored `socialConnections`, rumors, promises, internal conflicts — each is a
       structurally different, standalone system (own storage shape, often its own UI), not another
       field on this one judge call.
+- [x] **Memory emotion — a durable fact carries how it landed, not just what it was** (#139) — off a
+      three-part user brainstorm (memory emotion / relationship momentum / a persistent agency
+      layer), taken first as the smallest and cleanest. A `ChatFact` gained three optional fields —
+      `importance` (0-1), `valence` (-1..1), `unresolved` — all set by the existing
+      `assessRelationshipMoment` judge call (no extra AI cost) and stored in the row's JSON blob, so
+      no schema migration and a pre-"memory emotion" fact simply omits them and behaves exactly as
+      before. The judge now emits `newFacts` as `{text, importance, valence, unresolved}` objects
+      (shared `parseRememberedFacts` still accepts a bare string with neutral defaults, since models
+      drift), and — mirroring the numbered-list / index-return shape `pendingTasks` uses — it's
+      handed the currently-unresolved threads and can close one via `resolvedFactIndices` (an apology
+      that landed, a promise kept). `buildFactsLorebook` moved from pure recency to a
+      `factScore` blend (`0.45·importance + 0.3·recency + 0.45·unresolved`) so "forgot her birthday"
+      outlives "ordered the pasta", and an unresolved thread gets a content wrapper ("Still
+      unsettled, not resolved: …" / "Still an open thread: …") so the model can let it put an edge on
+      a later, unrelated moment — a callback without an exposition dump. `assessDateOutcome`'s
+      `newFacts` got the same structured treatment. `DirectorPanel` marks an unresolved memory; both
+      it and `RelationshipPanel` now filter non-string `text` (a malformed row from a mid-refactor
+      HMR half-edit was white-screening the Director panel, and `buildFactsLorebook` skips one too).
+      11 new `facts.test.ts` / `relationshipAssist.test.ts` cases (parse both forms + clamp,
+      resolve-index filtering, importance-beats-recency, unresolved bump + wrapper, and the
+      no-metadata path still ordering purely by recency). Live-confirmed against the real backend:
+      the judge produced a properly-structured emotional fact ("Sumire asked Kai to stay silent and
+      motionless behind her during intimacy", importance 0.4 / valence 0.5) that persisted and
+      rendered correctly. Rest of the brainstorm: momentum landed as #140, the agency/plan layer as #141.
+- [x] **Relationship momentum & friction — how fast is this relationship moving, not just where is
+      it** (#140) — the second brainstorm slice. The state model is good at "where"; it couldn't say
+      "how fast", which is what actually governs pacing (a warmth-90 couple mid-whirlwind and a
+      warmth-90 couple in a quiet stretch shouldn't read the same). `Chat.momentum` (top-level for
+      the primary, mirrored on `RelationshipTrack`, `getRelationshipTrack`) is one decayed running
+      number (`dating/momentum.ts`): each turn `momentum = momentum·0.65 + thisTurn'sWarmthMovement`,
+      where warmth movement is the mean of the same five deltas `computeWarmth` averages. Decay makes
+      a burst fade over ~5 quiet turns on its own; `noMomentumChange` lets a meaningful decay force a
+      small persist even on an otherwise-flat turn. `buildRelationshipDescription` gained a
+      `relationshipPacingNote` clause driven by warmth × momentum × tension: "moved fast, treat as
+      something to let settle not a standing invitation" / "cooled off lately, more guarded than the
+      closeness suggests" / "real friction alongside the closeness — don't let accumulated warmth
+      make {char} more receptive than the current strain allows" (the user's "friction ≠ points"
+      point) / "steady and comfortable, doesn't need a manufactured development". Plus **diminishing
+      returns**: `trailingIntentRun` counts the player playing the same intent chip N turns running;
+      at 3+, `dampenRepeatedDeltas` scales that turn's positive warmth gains ×0.4 (negatives and
+      tension pass through) and `repeatedIntentNudge` tells the next prompt the character has noticed.
+      `RelationshipPanel`'s "Right now:" line shows the momentum band ("deepening fast" / "cooling
+      off"). 24 new tests (`momentum.test.ts`, `relationshipDescription.test.ts`, `intent.test.ts` +
+      `relationshipAssist.test.ts` additions). Live-confirmed: set momentum on the real Sumire save,
+      the panel showed "deepening fast" and the Prompt Inspector carried the friction/receptiveness
+      clause into the assembled prompt with the real name. **Still open** from the brainstorm: the
+      persistent agency/plan layer (now #141).
+- [x] **Persistent agency / plan layer — a character carries turn-spanning intentions of their own**
+      (#141) — the last of the three-part brainstorm. `characterIntent` (#133) was one transient
+      private want, reset every turn; the user wanted more ("given what she wants, what she's doing
+      today, what she knows, and what just happened, what would she naturally do" — cancel plans,
+      change her mind, pursue something unrelated to the player, act off-screen between turns).
+      `RelationshipTrack.plans` (mirrored on `Chat.plans` for the primary, wired through
+      `getRelationshipTrack`/`TrackHost`, JSON blob so no migration) is a list of `CharacterPlan`
+      `{ id, goal, kind: 'personal'|'together'|'distance', formedTurn, note? }`, capped at 3 active
+      (`dating/plans.ts`). Lifecycle is entirely judge-driven: `assessRelationshipMoment` gained an
+      `activePlans` numbered list in and a `planUpdates` array out — `{action:'add'|'note'|'resolve'}`,
+      same numbered-list / index-return shape as `pendingTasks`/`resolvedFactIndices` — and
+      `applyPlanUpdates` folds them in (dedupes near-identical goals, ages one out past 60 turns as a
+      backstop against the judge never closing it, trims to the 3 most recent). Read back into the
+      prompt as its own `styleGuidance` line (`plansGuidance`, real names, no `{{macros}}`) right
+      after the activity-initiative line: "Beyond just responding to Kai, Sumire is carrying
+      intentions of their own... a turn doesn't have to be only about Kai... can drop one if the
+      scene makes it moot." `noPlanChange` keeps a flat turn from writing. `DirectorPanel` gained a
+      read-only "Plans" section (every field type-guarded before JSX — the object-as-React-child
+      crash from #139's mid-refactor half-edit is a known hazard here). 21 new tests
+      (`plans.test.ts` — parse/validate, cap, age-out, dedupe, guidance shape; `relationshipAssist.test.ts`
+      — schema always present, index-range filtering, omitted → `[]`). Live-verified: seeded a
+      throwaway chat with three plans, the Prompt Inspector carried all three into the assembled
+      prompt with real names and correct kind framing ("(their own life)" / "(with Kai)" /
+      "(holding back)"), the Director panel rendered them without crashing; throwaway chat purged,
+      no real save touched. Full NPC-to-NPC background simulation (section 12) stays deferred — the
+      lightweight stand-in is a `personal` plan pointed at a `socialConnection`.
 - [x] **Relationship panel overhaul: a clean 4-tab layout, real intimacy-unlocks visibility, and
       per-world intimacy-catalog customization** (#135) — the user's own ask, "the relationship tab
       really needs an overhaul... without messy scroll and missing information," broadened
@@ -2810,6 +2883,28 @@ below:**
       the provider — both handled correctly (state left untouched, the error surfaced as a toast)
       without needing to force an accept outcome to trust code that's structurally identical to the
       already-proven `askForCommitment` accept path.
+      **Follow-up (#138, user-reported): the action lines were too terse and always identical** — a
+      clicked "missionary" sent a flat `*guides Sumire onto their back*` with nothing telling the
+      model what was actually being initiated, so the reply often glossed straight past it. Rewritten
+      on two fronts. (a) Every built-in `actionText` is now a fuller, first-person line, and every
+      entry gained a `promptNote` — a plain, model-facing description of the physical act ("the
+      missionary position: {char} on their back, you over them, face to face"). `intimacyActionDirective`
+      turns that note into a directive injected into the *character's* reply turn via
+      `runGeneration`'s `extraStyleGuidance` ("Kai has just moved the scene into ... write Sumire's
+      response to it as the actual next beat"), so the model can't miss it. (b) Clicking an option no
+      longer auto-sends a canned line: `draftIntimacyAction` (mirroring `impersonate` — the
+      `IMPERSONATION_SYSTEM_PROMPT` plus the promptNote as a brief) has the connected model rewrite
+      the move for the scene as it stands (what was just said, the mood, state of undress), and the
+      result lands in the composer for review, the option armed via a new `armedIntimacyOptionId` so
+      a real send still fires the outfit-switch / aftercare side effects. Falls back to the entry's
+      hand-written line if the model call fails or times out (both `draftIntimacyAction` and
+      `impersonate` are now wrapped in `generateWithTimeout`, a latent gap). New
+      `intimacyCatalog.test.ts` cases for `resolveIntimacyPromptNote`'s fallbacks and the directive's
+      shape, plus a `promptNote`-coverage assertion over the whole catalog. Live-verified against the
+      warmth-96 Sumire save produced a scene-adapted first-person line in the composer ("*I shift my
+      weight, easing Sumire down onto her back against the cushion, my hands guiding her hips as I
+      settle between her legs.* \"Here.\" ...") — far more than the old one-liner; the reply-turn
+      directive is unit-tested but wasn't sent into the real save to keep it clean.
 
 **Suggested phase order** for this whole section, since it's too large for one pass — updated now
 that the 7-dimension/warmth rework (originally step 4, deferred until after 10b) landed early: (1)
@@ -3000,7 +3095,10 @@ once it exists.
       involve the player directly (two characters' friendship souring, one covering a shift for
       another), resolved as lightweight deterministic state changes rather than full LLM-generated
       scenes, with a model call spent only when the player actually witnesses or asks about it —
-      keeps a populated world computationally affordable.
+      keeps a populated world computationally affordable. The lightweight stand-in exists as of #141:
+      a `personal` `CharacterPlan` can be pointed at a `socialConnection` ("patch things up with her
+      sister"), so a character's own dialogue can reflect an offscreen relationship without any
+      actual second-character state being simulated. The full version is a separate system.
 - [ ] **A town/social feed**: an in-world feed of posts characters make based on their own lives
       (schedule, mood, recent events), giving the player an indirect, ambient way to learn what's
       happening without it being narrated at them directly.
