@@ -101,6 +101,14 @@ export interface RelationshipMoment {
   reason?: string
   /** New durable facts worth remembering long-term (name, preference, backstory, a promise made) — [] most turns. */
   newFacts: string[]
+  /**
+   * Section 9(c)'s remaining (a) item: indices into the `pendingTasks` array passed in, for tasks
+   * this exchange clearly and unambiguously completed — same conservative contract as
+   * `detectCompletedTasks` in `objectiveAssist.ts`, folded into this call instead of firing as its
+   * own separate request when both relationship-tracking and task-detection are due the same turn.
+   * Always `[]` when `pendingTasks` wasn't passed (nothing was asked, so nothing to report).
+   */
+  completedTaskIndices: number[]
 }
 
 /**
@@ -113,7 +121,8 @@ export interface RelationshipMoment {
  * on literally every single turn (unlike the conditional gallery-unlock check below) and keeping
  * it to one call is a real responsiveness win, not just tidiness. Most dimensions, all flags, and
  * facts should stay unchanged on most turns — only what this specific exchange clearly touched
- * should move.
+ * should move. `pendingTasks`, when passed, folds `objectiveAssist.ts`'s `detectCompletedTasks`
+ * in as a fourth thing checked in the same call — section 9(c)'s last open (a) item, same idea.
  */
 export async function assessRelationshipMoment(
   client: ChatBackend,
@@ -129,8 +138,11 @@ export async function assessRelationshipMoment(
     customFlags?: CustomSceneFlag[]
     /** 10b: how the player tagged their most recent line (`MessageIntent`) — interpretation context, not a direct stat move. */
     intent?: string
+    /** Pending objective task descriptions, in the caller's index order — only passed when task-detection is also due this turn. Omitted/empty means "don't ask", not "nothing completed". */
+    pendingTasks?: string[]
   },
 ): Promise<RelationshipMoment> {
+  const hasTasks = !!params.pendingTasks?.length
   const prompt = [
     'You are scoring relationship momentum, tracking high-level romance route flags, AND noting durable facts worth remembering long-term, in an in-character roleplay.',
     `Current scores (0-100 each): ${DELTA_KEYS.map((k) => `${k}=${params.current[k]}`).join(', ')}.`,
@@ -140,11 +152,17 @@ export async function assessRelationshipMoment(
     `Known route flags: ${describeFlags(params.customFlags)}.`,
     describeIntentForJudge(params.intent)?.replace(/\{\{char\}\}/g, params.charName) ?? '',
     params.knownFacts?.length ? `Facts already remembered (don't repeat these): ${params.knownFacts.join('; ')}.` : '',
-    'Return ONLY a minified JSON object: {"deltas":{ one integer -2..2 per dimension key },"newFlags":[ any newly-established flags from the known set, or [] ],"reason":"...","newFacts":[ any new durable facts, or [] ]}.',
+    hasTasks ? `Pending objective tasks:\n${params.pendingTasks!.map((t, i) => `${i}: ${t}`).join('\n')}` : '',
+    `Return ONLY a minified JSON object: {"deltas":{ one integer -2..2 per dimension key },"newFlags":[ any newly-established flags from the known set, or [] ],"reason":"...","newFacts":[ any new durable facts, or [] ]${hasTasks ? ',"completedTaskIndices":[ pending task index numbers this exchange clearly and unambiguously accomplished, or [] ]' : ''}}.`,
     'Only move a dimension if this specific exchange clearly affected it. Leave the rest at 0. Most turns should move only one or two dimensions and add no new flags.',
     '"reason" is a short (under 12 words) in-world one-liner naming what just happened, e.g. "Complimented her cooking unprompted". Give one only if at least one dimension moved or a flag was added, otherwise "".',
     '"newFacts" is for concrete, durable facts about {{user}} worth recalling much later: a name, a stated preference, a piece of backstory, a promise made. Not every line of dialogue. Most turns should add none. Each fact as one short standalone sentence, e.g. "Prefers tea over coffee" or "Promised to visit again next weekend".',
-    'Example: {"deltas":{"affection":1,"trust":0,"chemistry":0,"comfort":1,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"Stayed to help clean up without being asked","newFacts":[]}',
+    hasTasks
+      ? 'Be conservative about "completedTaskIndices": only include a task index if this exchange plainly and unambiguously accomplished it, not if it merely became more likely. Use [] if none did.'
+      : '',
+    hasTasks
+      ? 'Example: {"deltas":{"affection":1,"trust":0,"chemistry":0,"comfort":1,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"Stayed to help clean up without being asked","newFacts":[],"completedTaskIndices":[]}'
+      : 'Example: {"deltas":{"affection":1,"trust":0,"chemistry":0,"comfort":1,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"Stayed to help clean up without being asked","newFacts":[]}',
     'JSON:',
   ]
     .filter(Boolean)
@@ -167,7 +185,12 @@ export async function assessRelationshipMoment(
   const newFacts = Array.isArray(obj.newFacts)
     ? obj.newFacts.filter((f): f is string => typeof f === 'string' && f.trim().length > 0).map((f) => f.trim().slice(0, 200))
     : []
-  return { deltas, newFlags, reason, newFacts }
+  const pendingCount = params.pendingTasks?.length ?? 0
+  const completedTaskIndices =
+    hasTasks && Array.isArray(obj.completedTaskIndices)
+      ? obj.completedTaskIndices.filter((i): i is number => typeof i === 'number' && Number.isInteger(i) && i >= 0 && i < pendingCount)
+      : []
+  return { deltas, newFlags, reason, newFacts, completedTaskIndices }
 }
 
 /**

@@ -3,6 +3,7 @@ import type { KoboldClient } from '@/lib/api/kobold'
 import type { ChatMessage } from '@/lib/prompt/builder'
 import {
   assessDateOutcome,
+  assessRelationshipMoment,
   draftHiddenAgenda,
   scaleDeltasForDifficulty,
   suggestDateEvent,
@@ -99,6 +100,71 @@ const TRANSCRIPT: ChatMessage[] = [
 ]
 
 const currentStats: RelationshipDeltas = deltas({ affection: 40, trust: 40, chemistry: 40, comfort: 40, respect: 40, curiosity: 40 })
+
+// Section 9(c)'s (a) item: task-completion detection folded into this same judge call when
+// `pendingTasks` is passed, instead of `detectAndMarkTasks` firing its own separate request.
+describe('assessRelationshipMoment: task-detection merge', () => {
+  const baseParams = { history: TRANSCRIPT, latestReply: 'Thanks for helping me pack up.', charName: 'Sumire', userName: 'Kai', current: currentStats }
+  const REPLY_NO_TASKS = '{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[]}'
+  const pendingTasks = ['Find the missing cat', 'Apologize to the neighbor']
+
+  it("doesn't mention tasks in the prompt and returns [] when pendingTasks is omitted", async () => {
+    let sentPrompt = ''
+    const moment = await assessRelationshipMoment(
+      stubClient(REPLY_NO_TASKS, (p) => {
+        sentPrompt = p.prompt as string
+      }),
+      baseParams,
+    )
+    expect(sentPrompt).not.toContain('Pending objective tasks')
+    expect(sentPrompt).not.toContain('completedTaskIndices')
+    expect(moment.completedTaskIndices).toEqual([])
+  })
+
+  it('lists the pending tasks and asks for completedTaskIndices when pendingTasks is passed', async () => {
+    let sentPrompt = ''
+    await assessRelationshipMoment(
+      stubClient('{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"completedTaskIndices":[]}', (p) => {
+        sentPrompt = p.prompt as string
+      }),
+      { ...baseParams, pendingTasks },
+    )
+    expect(sentPrompt).toContain('Pending objective tasks')
+    expect(sentPrompt).toContain('0: Find the missing cat')
+    expect(sentPrompt).toContain('1: Apologize to the neighbor')
+    expect(sentPrompt).toContain('completedTaskIndices')
+  })
+
+  it('returns a valid completed task index from the model', async () => {
+    const moment = await assessRelationshipMoment(
+      stubClient(
+        '{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"completedTaskIndices":[1]}',
+      ),
+      { ...baseParams, pendingTasks },
+    )
+    expect(moment.completedTaskIndices).toEqual([1])
+  })
+
+  it('filters out-of-range and malformed completed task indices', async () => {
+    const moment = await assessRelationshipMoment(
+      stubClient(
+        '{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"completedTaskIndices":[5,-1,"1",0]}',
+      ),
+      { ...baseParams, pendingTasks },
+    )
+    expect(moment.completedTaskIndices).toEqual([0])
+  })
+
+  it("ignores a model-hallucinated completedTaskIndices when pendingTasks was never asked for", async () => {
+    const moment = await assessRelationshipMoment(
+      stubClient(
+        '{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"completedTaskIndices":[0]}',
+      ),
+      baseParams,
+    )
+    expect(moment.completedTaskIndices).toEqual([])
+  })
+})
 
 describe('assessDateOutcome', () => {
   it('defaults to date framing — walkout/hidden-agenda language allowed, no gentler-hangout note', async () => {

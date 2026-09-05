@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { charactersApi, chatFactsApi, chatsApi, instructTemplatesApi, messagesApi, objectivesApi, personasApi, relationshipEventsApi, worldInfoBooksApi, worldsApi } from '@/lib/api/client'
 import { newId } from '@/lib/id'
-import type { AuthorNote, Chat, CommitmentStatus, DateEventCard, MessageIntent, ObjectiveTask, RelationshipStage, StoredMessage, WorldCard } from '@/lib/types'
+import type { AuthorNote, Chat, CommitmentStatus, DateEventCard, MessageIntent, Objective, ObjectiveTask, RelationshipStage, StoredMessage, WorldCard } from '@/lib/types'
 import { collectImageBase64, composeMessageText, type PendingAttachment } from '@/lib/attachments'
 import { makeGenKey } from '@/lib/api/kobold'
 import { useChatBackendClient } from '@/lib/hooks/useChatBackendClient'
@@ -640,7 +640,23 @@ export function useChatSession(chatId: string | null) {
     [character, chat, client, keepRecentMessages, messages, persona, sampler.max_context_length, summaryDetail],
   )
 
-  /** Fire-and-forget: checks whether the reply that just landed accomplished any pending objective tasks. */
+  /**
+   * Marks the given indices (into `pending`, the exact array a detector was offered) done on
+   * `objective`. Shared by the standalone task-detection pass below and the merged
+   * relationship+tasks pass in `runGeneration` (section 9(c)'s (a) item) so both write the same way.
+   */
+  const applyCompletedTasks = useCallback(async (objective: Objective, pending: ObjectiveTask[], completedIndices: number[]) => {
+    const completedIds = new Set(completedIndices.map((i) => pending[i].id))
+    const now = Date.now()
+    const updatedTasks = objective.tasks.map((t) => (completedIds.has(t.id) ? { ...t, status: 'done' as const, completedAt: now } : t))
+    await objectivesApi.update(objective.id, { tasks: updatedTasks })
+  }, [])
+
+  /**
+   * Fire-and-forget: checks whether the reply that just landed accomplished any pending objective
+   * tasks. Standalone path only — when relationship-tracking is also due the same turn, this check
+   * rides along inside `updateAffectionFromReply`'s own call instead (see `runGeneration`).
+   */
   const detectAndMarkTasks = useCallback(
     async (chatIdForTasks: string, replyText: string) => {
       const objective = await objectivesApi.getActive(chatIdForTasks)
@@ -653,14 +669,9 @@ export function useChatSession(chatId: string | null) {
         pending.map((t) => t.description),
       )
       if (completedIndices.length === 0) return
-      const completedIds = new Set(completedIndices.map((i) => pending[i].id))
-      const now = Date.now()
-      const updatedTasks = objective.tasks.map((t) =>
-        completedIds.has(t.id) ? { ...t, status: 'done' as const, completedAt: now } : t,
-      )
-      await objectivesApi.update(objective.id, { tasks: updatedTasks })
+      await applyCompletedTasks(objective, pending, completedIndices)
     },
-    [client],
+    [client, applyCompletedTasks],
   )
 
   /**
@@ -671,17 +682,30 @@ export function useChatSession(chatId: string | null) {
    * this function always did), or their own entry in `Chat.participantRelationships` otherwise —
    * every stat/warmth/stage/risk/gallery-unlock function below already took plain values rather
    * than reading `Chat` directly, so none of them needed to change, only what feeds them.
+   *
+   * `pendingTasks`, when passed, is folded into the same `assessRelationshipMoment` call as a
+   * fourth thing checked (section 9(c)'s (a) item) — the returned indices are always handed back
+   * to the caller, who applies them via `applyCompletedTasks`, since this function only owns
+   * relationship state, not the objective. Omitted/empty when task-detection isn't due this turn,
+   * matching every other assist here staying independently toggleable.
    */
   const updateAffectionFromReply = useCallback(
-    async (chatIdForRelationship: string, history: ChatMessage[], latestReply: string, intent: MessageIntent | undefined, speaker: Character) => {
+    async (
+      chatIdForRelationship: string,
+      history: ChatMessage[],
+      latestReply: string,
+      intent: MessageIntent | undefined,
+      speaker: Character,
+      pendingTasks?: ObjectiveTask[],
+    ): Promise<number[]> => {
       const freshChat = await chatsApi.get(chatIdForRelationship)
-      if (!freshChat) return
+      if (!freshChat) return []
       const isPrimary = speaker.id === freshChat.characterId
       const track = getRelationshipTrack(freshChat, speaker.id)
       const currentAffection = track.affection ?? 0
       const currentStats = getRelationshipStats(track)
       const existingFlags = new Set((freshChat.sceneFlags ?? []) as SceneFlag[])
-      const { deltas: rawDeltas, newFlags, reason, newFacts } = await assessRelationshipMoment(client, {
+      const { deltas: rawDeltas, newFlags, reason, newFacts, completedTaskIndices } = await assessRelationshipMoment(client, {
         history,
         latestReply,
         charName: speaker.card.name,
@@ -690,6 +714,7 @@ export function useChatSession(chatId: string | null) {
         knownFacts: activeFacts.map((f) => f.text),
         customFlags: world?.customSceneFlags,
         intent,
+        pendingTasks: pendingTasks?.map((t) => t.description),
       })
       const deltas = scaleDeltasForDifficulty(rawDeltas, relationshipDifficulty)
       newFlags.forEach((flag) => existingFlags.add(flag))
@@ -744,7 +769,9 @@ export function useChatSession(chatId: string | null) {
         unlockedSet.size === (track.unlockedGalleryIds ?? []).length &&
         nextCoins === (freshChat.giftCoins ?? 0)
       ) {
-        return
+        // Nothing relationship-related moved, but a task can still have completed on a turn that
+        // otherwise scored flat — the caller still needs these indices either way.
+        return completedTaskIndices
       }
       await chatsApi.update(chatIdForRelationship, {
         ...patchRelationshipTrack(freshChat, speaker.id, {
@@ -792,6 +819,7 @@ export function useChatSession(chatId: string | null) {
         const entry = speaker.gallery?.find((g) => g.id === id)
         toastSuccess(entry?.isEnding ? `An ending unlocked: ${entry.title}` : `New gallery scene unlocked: ${entry?.title ?? 'untitled'}`, { chime: true })
       }
+      return completedTaskIndices
     },
     [activeFacts, client, persona?.name, relationshipDifficulty, world],
   )
@@ -1474,13 +1502,37 @@ export function useChatSession(chatId: string | null) {
         // not only the primary — `updateAffectionFromReply` resolves the right track either way.
         // A live date still suppresses this entirely regardless of speaker (dates stay primary-only
         // and end-of-scene-scored; see `inLiveDate` above).
+        //
+        // Section 9(c)'s last open (a) item: when task-detection is ALSO due this turn, its check
+        // rides along inside this same judge call (`updateAffectionFromReply` → `assessRelationshipMoment`)
+        // instead of firing as a second, separately-queued request — the same "fold it into the one
+        // call already running" idea item 18 used for scene flags and fact extraction.
+        // `tasksHandledByMerge` tells the standalone `autoDetectTasks` block below to skip its own
+        // call when that happened. The merge only applies here (relationship tracking is due, not
+        // suppressed by a live date) — during a live date, or with relationship-tracking off,
+        // task-detection still runs standalone exactly as before.
+        let tasksHandledByMerge = false
         if (effectiveAssistFlag(chat.assistOverrides?.autoTrackRelationship, autoTrackRelationship) && !inLiveDate) {
           // Intent from the just-sent message (opts), or from the latest stored user turn on a
           // regenerate/swipe where no fresh message was sent.
           const latestIntent = opts?.intent ?? [...messages].reverse().find((m) => m.role === 'user')?.intent
-          runAssist('relationship', 'Updating relationship', () =>
-            updateAffectionFromReply(chat.id, relationshipHistory, combined, latestIntent, speaker),
-          )
+          if (autoDetectTasks) {
+            tasksHandledByMerge = true
+            runAssist('relationship', 'Updating relationship', async () => {
+              // Fresh fetch, not the closure-captured `activeObjective` — this runs fire-and-forget
+              // after the reply already landed, so a stale read here would risk marking tasks done
+              // against an objective that's since moved on (same reasoning `detectAndMarkTasks` below
+              // already followed).
+              const objective = await objectivesApi.getActive(chat.id)
+              const pending = objective?.tasks.filter((t) => t.status === 'pending') ?? []
+              const completedIndices = await updateAffectionFromReply(chat.id, relationshipHistory, combined, latestIntent, speaker, pending)
+              if (objective && completedIndices.length > 0) await applyCompletedTasks(objective, pending, completedIndices)
+            })
+          } else {
+            runAssist('relationship', 'Updating relationship', () =>
+              updateAffectionFromReply(chat.id, relationshipHistory, combined, latestIntent, speaker),
+            )
+          }
         }
         // 10b live rapport: during a live date, no stat scoring runs, so instead read how the scene
         // is trending and show that qualitatively. Cheap, stateless — never touches affection/stats.
@@ -1517,7 +1569,7 @@ export function useChatSession(chatId: string | null) {
         if (effectiveAssistFlag(chat.assistOverrides?.autoSuggestChoices, autoSuggestChoices) && isPrimarySpeaker) {
           runAssist('choices', 'Suggesting replies', () => suggestChoicesForMessage(targetMessageId, relationshipHistory))
         }
-        if (autoDetectTasks) {
+        if (autoDetectTasks && !tasksHandledByMerge) {
           runAssist('tasks', 'Checking objective', () => detectAndMarkTasks(chat.id, combined))
         }
         if (autoSummarize) {
@@ -1544,6 +1596,7 @@ export function useChatSession(chatId: string | null) {
       }
     },
     [
+      applyCompletedTasks,
       autoDetectTasks,
       autoSummarize,
       autoSuggestChoices,

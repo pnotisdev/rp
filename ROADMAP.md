@@ -248,8 +248,10 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
       real sprite for it via the API (exercising the exact same server code the UI's file picker
       calls), and confirmed the Prompt Inspector listed it as a valid expression ID for the model to
       tag replies with.
-- [ ] AI-assisted sprite/portrait/CG generation — see section 11 (SwarmUI / ComfyUI / NovelAI) —
-      no image-generation integration exists anywhere in the repo yet, only image *upload*.
+- [x] AI-assisted sprite/portrait/CG generation — shipped as section 11's #124/#125: four
+      `ImageBackend` implementations (A1111, ComfyUI, SwarmUI, NovelAI) and `GenerateImageButton`
+      wired into every art slot (avatar, sprites, backgrounds, gallery CGs), plus a dedicated
+      expression-set generator. See section 11's own changelog for the full write-up.
 - [x] Voice presets per character — `Character.voice?: { provider?, voiceId? }` (`cardSpec.ts`)
       overrides the global `ttsProvider`/`ttsVoice` in `CompanionView.tsx`, editable in a "Voice"
       section in `CharacterEditor`; unset fields fall back to the global Settings → Voice config.
@@ -634,12 +636,14 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
       `CharacterEditor` as "Export pack" (existing characters) / "Import pack" (new character
       screen). The bare SillyTavern-spec PNG/JSON export/import is unchanged and still used for
       cross-app compatibility.
-- [ ] As section 10 lands, grow the pack format to match: schedules, typed memories, gift/item
-      catalogs, and world-level relationship thresholds are all things a finished world/character
-      should be able to travel with, the same way sprites and gallery CGs do today. A creator
-      finishing a whole dating-sim world should be able to share the complete experience, not just
-      the character card underneath it — worth revisiting `CharacterPackV1` once those types exist
-      rather than bolting each on piecemeal.
+- [x] Grow the pack format to match section 10 — done incrementally as each feature shipped rather
+      than in one pass, so this checkbox was stale: `CharacterPackV1` already carries schedules
+      (`Character.schedule`), gift preferences/likes, weather preferences, relationship starters,
+      social connections, and (on the world side) the gift/item catalogs and relationship
+      thresholds — checked directly in `pack.ts` rather than assumed. "Typed memories" from this
+      item's original wording doesn't actually fit a reusable template pack the way the rest does:
+      `ChatFact`s are accumulated per-chat runtime history, not authored character/world data, so
+      there's nothing there to bundle into a pack meant to travel to someone else's fresh install.
 
 ## 8. Backend/AI
 - [x] **Gemma + Llama 3 instruct templates, and detect a template mismatch** (#106) — the app
@@ -1233,7 +1237,7 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
         and confirmed the server accepted (not silently substituted) the custom id, then restored
         the world to its exact original seed state. 161 tests passing, clean typecheck, clean
         production build.
-- [~] **Per-turn assist-call orchestration + a visible "thinking" state** — the (b) part is done:
+- [x] **Per-turn assist-call orchestration + a visible "thinking" state** — the (b) part is done:
       the post-reply assists (relationship scoring, choice suggestion, objective check, memory
       summary) are now routed through a `runAssist(key, label, fn)` helper in `useChatSession.ts`
       that tracks which are in flight, exposed as `assistActivity: string[]` and rendered as a
@@ -1243,12 +1247,20 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
       choices before tasks + summary), so the results a user waits on queue ahead on the server.
       The four Settings → Generation toggle descriptions were rewritten to be honest about the
       cost (each is a model call; on a local single-GPU server they queue with each other and
-      ahead of the next reply) instead of the old "never blocks or delays it".
-      **Still open**: (a) a real merge (e.g. task-detection folded into the relationship judge call
-      the way item 18 merged two others) — low value since task-detection only runs with an active
-      objective; and (c) the one-switch "minimal assists" profile, which is genuinely blocked on
-      section 10e's world templates / section 13's onboarding (the four individual toggles already
-      exist and now describe their cost).
+      ahead of the next reply) instead of the old "never blocks or delays it". (c) the one-switch
+      "minimal assists" profile shipped as #128: two derived-state `Chip` buttons ("All assists on" /
+      "Minimal (all off)") in a new "Background AI assists" section atop Settings → Generation
+      batch-set the same four toggles through their existing setters — no fifth persisted "profile"
+      field to drift out of sync with the four real booleans, the individual toggles still work fine
+      on their own either way. (a) shipped as #129, closing this bullet out in full: when
+      relationship-tracking and task-detection are both due the same turn (not suppressed by a live
+      date), `assessRelationshipMoment` now takes an optional `pendingTasks` list and returns
+      `completedTaskIndices` alongside its usual deltas/flags/facts — the same "fold it into the one
+      call already running" idea item 18 used for scene flags and fact extraction — instead of
+      `detectAndMarkTasks` firing its own separate, serialized request. Either toggle alone, or a
+      live date, still takes the exact original standalone path; an inactive/empty objective makes
+      the merged call behave identically to a plain relationship check (no wasted prompt tokens, no
+      spurious completions).
 - [x] **`manuallyActivatedIds` is still dead machinery** — deleted rather than wired up. Sized both
       options first, per this item's own framing: a real per-entry "force on for next reply"
       control needs a stable key to force *one specific* entry on, but `LorebookEntry.id` is only
@@ -2911,8 +2923,9 @@ SillyTavern docs/releases, RisuAI (CCv3, CBS/trigger system, regex scripts), Agn
       persisted `chatsPanelCollapsed` preference the dialog was `display:none` and completely
       unopenable on a phone — moved to a sibling of both panel variants. `NewChatDialog` also now
       uses the shared `Modal`'s `scrollable` mode and 16px-on-mobile inputs.
-- [~] **Chat management basics** — rename, duplicate, and one-click "new chat, same character &
-      persona" are done; folders/tags/pinned-chats stay open (below). `ChatsPanel.tsx` gained a
+- [~] **Chat management basics** — rename, duplicate, one-click "new chat, same character &
+      persona," and pin/favorite (`Chat.pinned`, shipped separately — see section 9's #119) are all
+      done; folders/tags stay open (below). `ChatsPanel.tsx` gained a
       per-row `MoreHorizontal` menu (a lightweight inline popover, click-outside-to-close via the
       same backdrop technique `Modal`/`CommandPalette` already use — no new shared component,
       since nothing else needs a generic dropdown yet) with four actions:
@@ -4170,6 +4183,32 @@ Done so far (see checked boxes above for detail):
      user-controlled dial over how explicit intimate scenes get written once earned, separate from
      the existing pacing-only `slowBurnPacing`, defaulting to no instruction at all so nobody's
      existing output changes unprompted.
+112. ~~Section 9(c): a one-switch "minimal assists" Settings profile~~ — shipped as #128, picked
+     directly off the "whats next" list: two derived-state `Chip` buttons ("All assists on" /
+     "Minimal (all off)") in a new "Background AI assists" section atop Settings → Generation,
+     batch-setting the four existing assist toggles (`autoSummarize`, `autoDetectTasks`,
+     `autoTrackRelationship`, `autoSuggestChoices`) through their existing setters — the same
+     derive-don't-duplicate pattern as the sampler-preset and instruct-template pickers elsewhere in
+     this app, so there's no fifth persisted "profile" field that could drift out of sync with the
+     four real booleans. Live-verified in both directions: clicking "Minimal (all off)" flips all
+     four in `localStorage` and swaps the Chip highlight; clicking "All assists on" confirms the
+     reverse, and a spot-checked individual toggle (`Auto-track relationship`) mirrors the shared
+     value correctly in the on state. Closes out the (c) sub-item in full — (a)'s low-value
+     assist-call merge is the only piece of that bullet still open.
+113. ~~Section 9(c)'s (a) item: merge task-detection into the relationship judge call~~ — shipped as
+     #129, asked as a quick follow-up right after #128 closed out (c). `assessRelationshipMoment`
+     (`relationshipAssist.ts`) takes an optional `pendingTasks` list and returns
+     `completedTaskIndices` alongside its existing deltas/flags/facts, the same "fold another
+     classifier into the call already running" idea item 18 used for scene flags and fact
+     extraction. `useChatSession.ts` fires the merged call only when relationship-tracking and
+     task-detection are both due the same turn (not suppressed by a live date); a new shared
+     `applyCompletedTasks` helper writes the results either from that merged path or from
+     `detectAndMarkTasks`'s original standalone one, so the two paths persist identically. An empty
+     or missing objective naturally degrades the merged call to a plain relationship check — no
+     wasted prompt tokens, no spurious completions. 5 new mocked tests cover the prompt only
+     mentioning tasks when asked, valid/out-of-range/malformed index filtering, and a
+     model-hallucinated index being ignored when tasks were never asked for. Closes out section 9's
+     assist-orchestration bullet in full.
 
 That closes out SillyTavern's full World Info activation engine, plus the last "reasonable next batch," plus sections 10a, 10c, and 10d in full and a first
 slice each of 10b and 10f taken directly afterward since 10's own suggested phase order names them
@@ -4285,6 +4324,12 @@ the whole entry. What's left in section 10 now is just section 12's living-world
 two items sections 2/10 both still flag as genuinely unspecified ("dating stats") or explicitly
 deferred pending live-verification ability this session still doesn't have (the context-budget
 tier system) — see section 10's own "Suggested phase order" for how to sequence the former.
+~~Section 9(c)'s one-switch "minimal assists" profile~~ (#128) followed right after, picked
+directly off this same list: two derived-state Chip buttons batch-set the four existing assist
+toggles at once, leaving only that bullet's low-value (a) assist-call merge open. ~~That (a) merge~~
+(#129) followed immediately as a quick direct ask: task-detection now rides inside the relationship
+judge call when both are due the same turn, instead of its own separately-queued request — closing
+out section 9's assist-orchestration bullet in full.
 
 Section 15 (added from a user-supplied AI Dungeon competitive analysis) is a separate set of ideas,
 not yet folded into this priority order. The high-contrast theme preset (#73) and raw-vs-processed

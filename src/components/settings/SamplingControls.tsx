@@ -14,6 +14,7 @@ import {
 } from '@/lib/prompt/samplerSimpleMode'
 import { Slider } from '@/components/ui/Slider'
 import { Toggle } from '@/components/ui/Toggle'
+import { Chip } from '@/components/ui/Chip'
 import { Button } from '@/components/ui/Button'
 import { TextField } from '@/components/ui/Field'
 import { Section } from '@/components/ui/Section'
@@ -100,8 +101,39 @@ export function SamplingControls() {
     setSampler(data)
   }
 
+  // Section 9(c)'s "one-switch minimal assists profile": four toggles, scattered across the
+  // Sections below (each is its own model call, so each has its own honest cost description
+  // right where it lives), get one batch-set pair here instead of a fifth persisted field to keep
+  // in sync with them — "derive from current state, don't duplicate it" is the same idiom the
+  // sampler-preset/instruct-template selects elsewhere in Settings already use. A chat with all
+  // four already on/off highlights the matching preset; anything in between (most setups, since
+  // these are independent toggles by design) highlights neither, which is correct, not a bug.
+  const allAssists = [autoSummarize, autoDetectTasks, autoTrackRelationship, autoSuggestChoices]
+  const allAssistsOn = allAssists.every(Boolean)
+  const allAssistsOff = allAssists.every((v) => !v)
+  const setAllAssists = (on: boolean) => {
+    setAutoSummarize(on)
+    setAutoDetectTasks(on)
+    setAutoTrackRelationship(on)
+    setAutoSuggestChoices(on)
+  }
+
   return (
     <SettingsPage>
+      <Section
+        title="Background AI assists"
+        description="Four independent toggles below (relationship tracking, choices, task detection, summarization) each fire their own model call after a reply — useful signal, but a real cost on a local single-GPU server, where they queue with each other and ahead of your next message. These two are a shortcut to set all four at once; each stays individually adjustable in its own section below either way."
+      >
+        <div className="flex gap-2">
+          <Chip on={allAssistsOn} onClick={() => setAllAssists(true)}>
+            All assists on
+          </Chip>
+          <Chip on={allAssistsOff} onClick={() => setAllAssists(false)}>
+            Minimal (all off)
+          </Chip>
+        </div>
+      </Section>
+
       <Section title="Context & length">
         <Slider
           label="Max context length"
