@@ -12,10 +12,43 @@ import type {
   WorldCard,
   WorldInfoBook,
 } from '@/lib/types'
+import { toastError, toastSuccess, useToastStore } from '@/lib/store/useToastStore'
 
 // The local API server runs on the same machine, but a wedged Node process (or a very large
 // backup/restore payload) shouldn't be able to hang a call forever with no way out.
 const DEFAULT_TIMEOUT_MS = 15000
+
+/**
+ * Every read/write in this file funnels through `request()`, and most callers either don't catch
+ * its rejection at all (`useApiQuery`'s background refetches swallow it into `undefined`, silently)
+ * or catch-and-toast only for the one action the user just took — so a dead local server used to be
+ * completely invisible: generation still works (it talks to the model backend directly, never
+ * through this server), but every save quietly failed with nothing on screen to say so. One sticky
+ * toast per outage (not one per failed call — an outage spans many) closes that gap for every call
+ * site at once, and clears itself the moment a request gets through again.
+ */
+let unreachableToastId: string | null = null
+
+function reportUnreachable(): void {
+  if (unreachableToastId) return
+  unreachableToastId = toastError(
+    "Can't reach your local server — nothing is being saved right now. Check that your dev server " +
+      '(`npm run dev`) is still running, then try again.',
+  )
+}
+
+function reportReachable(): void {
+  if (!unreachableToastId) return
+  useToastStore.getState().dismiss(unreachableToastId)
+  unreachableToastId = null
+  toastSuccess('Reconnected — your local server is back.')
+}
+
+/** Test-only: `unreachableToastId` is deliberately module-level (one toast per outage, tracked
+ *  across every call site), which otherwise leaks across test cases sharing this module instance. */
+export function __resetUnreachableStateForTests(): void {
+  unreachableToastId = null
+}
 
 async function request<T>(
   method: string,
@@ -38,10 +71,15 @@ async function request<T>(
     if (controller.signal.aborted) {
       throw new Error(`${method} ${path} timed out after ${timeoutMs / 1000}s`)
     }
+    // Anything else `fetch` throws on a same-origin relative URL — connection refused, DNS,
+    // the dev server not running at all — means the server genuinely can't be reached, not just
+    // that it answered with an error (that's the `!res.ok` branch below, left alone).
+    reportUnreachable()
     throw e
   } finally {
     clearTimeout(timeout)
   }
+  reportReachable()
   if (res.status === 404 && opts?.notFoundIsUndefined) return undefined as T
   if (!res.ok) {
     const text = await res.text().catch(() => '')
