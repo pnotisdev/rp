@@ -307,6 +307,71 @@ describe('assessDateOutcome', () => {
     expect(sentPrompt).not.toContain('hiddenAgenda')
     expect(outcome.recap).toBe('a relaxed afternoon')
   })
+
+  it('offers first_date to a date', async () => {
+    let sentPrompt = ''
+    await assessDateOutcome(
+      stubClient('{"deltas":{"affection":2,"trust":0,"chemistry":1,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"recap":"nice","newFacts":[]}', (p) => {
+        sentPrompt = p.prompt as string
+      }),
+      { transcript: TRANSCRIPT, eventTitle: 'Dinner', charName: 'Sumire', userName: 'Kai', current: currentStats, sceneKind: 'date' },
+    )
+    expect(sentPrompt).toContain('first_date')
+  })
+
+  it('withholds first_date from a hangout, but keeps every other flag on offer', async () => {
+    let sentPrompt = ''
+    await assessDateOutcome(
+      stubClient('{"deltas":{"affection":1,"trust":0,"chemistry":0,"comfort":1,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"recap":"nice","newFacts":[]}', (p) => {
+        sentPrompt = p.prompt as string
+      }),
+      { transcript: TRANSCRIPT, eventTitle: 'Walk', charName: 'Sumire', userName: 'Kai', current: currentStats, sceneKind: 'hangout' },
+    )
+    expect(sentPrompt).not.toContain('first_date')
+    expect(sentPrompt).toContain('confession')
+    expect(sentPrompt).toContain('jealousy')
+    expect(sentPrompt).toContain('promise')
+  })
+
+  it('drops a first_date a hangout returned anyway, and keeps its other flags', async () => {
+    // The live failure this gate exists for: `first_date` fired on a scene explicitly started and
+    // scored as a hangout, against a glossary line that already said a hangout doesn't qualify.
+    const outcome = await assessDateOutcome(
+      stubClient(
+        '{"deltas":{"affection":1,"trust":1,"chemistry":0,"comfort":1,"respect":0,"curiosity":0,"tension":0},"newFlags":["first_date","promise"],"recap":"nice","newFacts":[]}',
+      ),
+      { transcript: TRANSCRIPT, eventTitle: 'Walk', charName: 'Sumire', userName: 'Kai', current: currentStats, sceneKind: 'hangout' },
+    )
+    expect(outcome.newFlags).toEqual(['promise'])
+  })
+
+  it('keeps a first_date a real date returned', async () => {
+    const outcome = await assessDateOutcome(
+      stubClient(
+        '{"deltas":{"affection":3,"trust":1,"chemistry":2,"comfort":1,"respect":0,"curiosity":0,"tension":0},"newFlags":["first_date"],"recap":"nice","newFacts":[]}',
+      ),
+      { transcript: TRANSCRIPT, eventTitle: 'Dinner', charName: 'Sumire', userName: 'Kai', current: currentStats, sceneKind: 'date' },
+    )
+    expect(outcome.newFlags).toEqual(['first_date'])
+  })
+
+  it('still allows a world-authored flag inside a hangout', async () => {
+    const outcome = await assessDateOutcome(
+      stubClient(
+        '{"deltas":{"affection":1,"trust":0,"chemistry":0,"comfort":1,"respect":0,"curiosity":0,"tension":0},"newFlags":["shared_umbrella"],"recap":"nice","newFacts":[]}',
+      ),
+      {
+        transcript: TRANSCRIPT,
+        eventTitle: 'Walk',
+        charName: 'Sumire',
+        userName: 'Kai',
+        current: currentStats,
+        sceneKind: 'hangout',
+        customFlags: [{ id: 'shared_umbrella', label: 'Shared an umbrella', description: 'they walked home under one umbrella' }],
+      },
+    )
+    expect(outcome.newFlags).toEqual(['shared_umbrella'])
+  })
 })
 
 describe('suggestDateEvent', () => {
@@ -336,5 +401,53 @@ describe('suggestDateEvent', () => {
   it('falls back to date for an unrecognized kind', async () => {
     const event = await suggestDateEvent(stubClient('{"title":"Walk","objectiveTitle":"Talk","kind":"picnic"}'), baseParams)
     expect(event?.kind).toBe('date')
+  })
+
+  it('tells the model when the two are officially together', async () => {
+    // Before this, the call only ever saw `affection` — so an established couple kept being
+    // handed tentative "hangout" cards long after "ask to be dating" was accepted.
+    let sentPrompt = ''
+    await suggestDateEvent(
+      stubClient('{"title":"Dinner","objectiveTitle":"Celebrate","kind":"date"}', (p) => {
+        sentPrompt = p.prompt as string
+      }),
+      { ...baseParams, affection: 80, commitmentStatus: 'dating' },
+    )
+    expect(sentPrompt).toContain('already officially dating')
+    expect(sentPrompt).not.toContain('not officially together')
+  })
+
+  it('names the actual rung of the ladder, not just "together"', async () => {
+    let sentPrompt = ''
+    await suggestDateEvent(
+      stubClient('{"title":"Dinner","objectiveTitle":"Celebrate","kind":"date"}', (p) => {
+        sentPrompt = p.prompt as string
+      }),
+      { ...baseParams, affection: 95, commitmentStatus: 'living_together' },
+    )
+    expect(sentPrompt).toContain('already officially living together')
+  })
+
+  it("says they aren't together when the status is none", async () => {
+    let sentPrompt = ''
+    await suggestDateEvent(
+      stubClient('{"title":"Walk","objectiveTitle":"Talk","kind":"hangout"}', (p) => {
+        sentPrompt = p.prompt as string
+      }),
+      { ...baseParams, commitmentStatus: 'none' },
+    )
+    expect(sentPrompt).toContain('not officially together')
+    expect(sentPrompt).not.toContain('already officially')
+  })
+
+  it('treats an omitted status the same as none', async () => {
+    let sentPrompt = ''
+    await suggestDateEvent(
+      stubClient('{"title":"Walk","objectiveTitle":"Talk","kind":"hangout"}', (p) => {
+        sentPrompt = p.prompt as string
+      }),
+      baseParams,
+    )
+    expect(sentPrompt).toContain('not officially together')
   })
 })

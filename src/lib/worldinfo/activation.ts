@@ -308,3 +308,23 @@ export function recentMessagesText(messages: { text: string }[], scanDepth: numb
     .map((m) => m.text)
     .join('\n')
 }
+
+/**
+ * A short human label for a lorebook entry, for lists that name entries rather than show them
+ * (the Prompt Inspector's "matched but didn't fit" / "lost to a higher-priority entry" lines).
+ *
+ * The naive `keys[0] ?? comment` this replaces produced an empty string for the very entries
+ * these lists exist to explain: an always-active entry needs no keys, and `comment` is optional,
+ * so a world of them rendered as 96 empty slots separated by commas. `??` only catches the
+ * missing `comment`, never the empty one. Falls through keys -> comment -> a snippet of the
+ * content itself -> a last-resort placeholder, so the result is never blank.
+ */
+export function describeEntry(entry: Pick<LorebookEntry, 'keys' | 'comment' | 'content'>): string {
+  const key = entry.keys.find((k) => k.trim())
+  if (key) return key.trim()
+  const comment = entry.comment?.trim()
+  if (comment) return comment
+  const content = entry.content.trim().replace(/\s+/g, ' ')
+  if (content) return content.length > 40 ? `${content.slice(0, 40)}…` : content
+  return '(untitled entry)'
+}

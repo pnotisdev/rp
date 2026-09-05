@@ -1,9 +1,9 @@
 import type { ChatBackend } from '@/lib/api/chatBackend'
 import { parseLenientJson } from '@/lib/jsonRepair'
 import type { Character } from '@/lib/characters/cardSpec'
-import type { CustomSceneFlag, DateEventCard, RelationshipDimension, SceneFlag } from '@/lib/types'
+import type { CommitmentStatus, CustomSceneFlag, DateEventCard, RelationshipDimension, SceneFlag } from '@/lib/types'
 import type { ChatMessage } from '@/lib/prompt/builder'
-import { RELATIONSHIP_DIMENSIONS, SCENE_FLAGS } from '@/lib/dating/stage'
+import { formatCommitmentStatus, RELATIONSHIP_DIMENSIONS, SCENE_FLAGS } from '@/lib/dating/stage'
 import { describeIntentForJudge, describeIntentsForDate } from '@/lib/dating/intent'
 import { MOOD_VOCAB, NEED_VOCAB, type CharacterMood, type CharacterNeed } from '@/lib/prompt/mindGuidance'
 
@@ -66,15 +66,36 @@ const FLAG_GLOSSARY: Record<SceneFlag, string> = {
   promise: 'a specific, meaningful promise was made that the story should remember later',
 }
 
+/**
+ * Flags a hangout structurally cannot establish, no matter how the scene goes. `first_date`'s own
+ * glossary line above already spells out that a friendly hangout doesn't qualify, and it fired on
+ * a scene explicitly started and scored as a hangout anyway — a prose bar is a request, not a
+ * gate, and this app's whole design premise is that outcomes are judged by the model but *applied*
+ * deterministically. So the flag is withheld from the classifier's menu for a hangout and dropped
+ * on the way back in if it shows up regardless.
+ *
+ * Built-ins only. A world's own `CustomSceneFlag`s have no date/hangout marker to key off (see
+ * `CustomSceneFlag` in `types.ts`), so they keep relying on their `description` the way they
+ * always have — adding a per-flag "dates only" switch is a world-editor change, not this one.
+ */
+const DATE_ONLY_FLAGS: ReadonlySet<SceneFlag> = new Set<SceneFlag>(['first_date'])
+
+const NO_EXCLUSIONS: ReadonlySet<SceneFlag> = new Set<SceneFlag>()
+
+/** The flags a scene of this kind is allowed to establish. `undefined` (an ordinary chat turn or an unspecified scene) means "all of them" — only a hangout narrows the set. */
+function excludedFlagsFor(sceneKind?: 'date' | 'hangout'): ReadonlySet<SceneFlag> {
+  return sceneKind === 'hangout' ? DATE_ONLY_FLAGS : NO_EXCLUSIONS
+}
+
 /** World-authored flags (see `CustomSceneFlag`) get the same glossary treatment as the built-in 4 — their own `description` is the classifier's bar for firing, same idea as `FLAG_GLOSSARY`. */
-function describeFlags(customFlags?: CustomSceneFlag[]): string {
-  const builtIn = SCENE_FLAGS.map((f) => `${f} (${FLAG_GLOSSARY[f]})`)
+function describeFlags(customFlags?: CustomSceneFlag[], exclude: ReadonlySet<SceneFlag> = NO_EXCLUSIONS): string {
+  const builtIn = SCENE_FLAGS.filter((f) => !exclude.has(f)).map((f) => `${f} (${FLAG_GLOSSARY[f]})`)
   const custom = (customFlags ?? []).map((f) => `${f.id} (${f.description})`)
   return [...builtIn, ...custom].join('; ')
 }
 
-function allowedFlagIds(customFlags?: CustomSceneFlag[]): Set<string> {
-  return new Set([...SCENE_FLAGS, ...(customFlags ?? []).map((f) => f.id)])
+function allowedFlagIds(customFlags?: CustomSceneFlag[], exclude: ReadonlySet<SceneFlag> = NO_EXCLUSIONS): Set<string> {
+  return new Set([...SCENE_FLAGS.filter((f) => !exclude.has(f)), ...(customFlags ?? []).map((f) => f.id)])
 }
 
 const ZERO_DELTAS: RelationshipDeltas = Object.fromEntries(DELTA_KEYS.map((k) => [k, 0])) as RelationshipDeltas
@@ -283,6 +304,7 @@ export async function assessDateOutcome(
 ): Promise<DateOutcome> {
   const isHangout = params.sceneKind === 'hangout'
   const sceneNoun = isHangout ? 'hangout' : 'date'
+  const excludedFlags = excludedFlagsFor(params.sceneKind)
   // Cap at the last 24 turns — plenty for a single scene, and keeps the prompt bounded even
   // if the player let this run long. Empty messages (still-streaming placeholders) are dropped.
   const turns = params.transcript.filter((m) => m.text.trim()).slice(-24)
@@ -299,7 +321,7 @@ export async function assessDateOutcome(
     `Current scores (0-100 each): ${DELTA_KEYS.map((k) => `${k}=${params.current[k]}`).join(', ')}.`,
     `Full transcript of the ${sceneNoun}:\n${transcriptText || '(nothing was said)'}`,
     `Dimension meanings: ${DELTA_KEYS.map((k) => `${k} = ${DIMENSION_GLOSSARY[k]}`).join('; ')}.`,
-    `Known route flags: ${describeFlags(params.customFlags)}.`,
+    `Known route flags: ${describeFlags(params.customFlags, excludedFlags)}.`,
     describeIntentsForDate(params.intents ?? [])?.replace(/\{\{char\}\}/g, params.charName) ?? '',
     params.hiddenAgenda
       ? `${params.charName} went into this secretly wanting: ${params.hiddenAgenda} (never told to the other person). Weigh whether the date actually met that, ignored it, or worked against it — but never name "agenda" or break the fourth wall in the recap.`
@@ -313,7 +335,13 @@ export async function assessDateOutcome(
       ? '"recap" must read as the abrupt, in-world exit it was — a line or two on what made {{char}} leave, not a neutral summary.'
       : `"recap" is a short 1-3 sentence in-world summary of how the ${sceneNoun} felt from {{char}}'s side, written for the player to read afterward, not a mechanical report.`,
     '"newFacts" is for concrete, durable facts about {{user}} worth recalling much later. Most scenes add one or none.',
-    'Example: {"deltas":{"affection":3,"trust":2,"chemistry":2,"comfort":1,"respect":0,"curiosity":1,"tension":0},"newFlags":["first_date"],"recap":"She lit up talking about her old bakery and kept finding reasons to lean in closer.","newFacts":["Used to run a small bakery before moving here"]}',
+    // The example's `newFlags` has to stay inside the same set the menu above offers: a hangout
+    // that withholds `first_date` while still *demonstrating* it would be handing the classifier
+    // the flag back in the most suggestive line of the whole prompt. Hangouts get modest deltas
+    // here too, matching the gentler framing they're judged under.
+    isHangout
+      ? 'Example: {"deltas":{"affection":1,"trust":2,"chemistry":0,"comfort":2,"respect":0,"curiosity":1,"tension":0},"newFlags":["promise"],"recap":"She talked about her old bakery for the first time, and made you swear to try her cinnamon rolls sometime.","newFacts":["Used to run a small bakery before moving here"]}'
+      : 'Example: {"deltas":{"affection":3,"trust":2,"chemistry":2,"comfort":1,"respect":0,"curiosity":1,"tension":0},"newFlags":["first_date"],"recap":"She lit up talking about her old bakery and kept finding reasons to lean in closer.","newFacts":["Used to run a small bakery before moving here"]}',
     'JSON:',
   ]
     .filter(Boolean)
@@ -328,7 +356,9 @@ export async function assessDateOutcome(
     const v = Number(deltasObj[key])
     deltas[key] = Number.isInteger(v) ? Math.max(-5, Math.min(5, v)) : 0
   }
-  const allowed = allowedFlagIds(params.customFlags)
+  // Re-checked here, not just omitted from the prompt above: a model that names `first_date`
+  // anyway (it is, after all, a flag it has seen in every date scene) must not be able to set it.
+  const allowed = allowedFlagIds(params.customFlags, excludedFlags)
   const newFlags = Array.isArray(obj.newFlags)
     ? obj.newFlags.filter((f): f is SceneFlag => typeof f === 'string' && allowed.has(f))
     : []
@@ -349,14 +379,27 @@ export async function suggestDateEvent(
     worldDescription?: string
     availableBackgrounds: string[]
     affection: number
+    /**
+     * Where the two of them officially stand (10c's commitment ladder). Without it this call only
+     * ever saw `affection`, and an established couple kept getting handed casual "hangout" cards
+     * long after "ask to be dating" was accepted — affection alone can't distinguish "very fond of
+     * each other" from "actually together", which is exactly the distinction that decides whether
+     * a suggestion should read as a date or a get-together. Optional so an ordinary
+     * not-yet-official chat keeps the prompt it always had, unchanged.
+     */
+    commitmentStatus?: CommitmentStatus
   },
 ): Promise<DateEventCard | null> {
+  const official = params.commitmentStatus && params.commitmentStatus !== 'none' ? params.commitmentStatus : null
   const prompt = [
     'You design a lightweight dating-sim style event card for a roleplay chat.',
     `Character: ${params.characterName}${params.characterDescription ? `. ${params.characterDescription}` : ''}`,
     `User persona: ${params.personaName}`,
     params.worldDescription ? `World context: ${params.worldDescription}` : '',
     `Current affection: ${params.affection}/100`,
+    official
+      ? `They are already officially ${formatCommitmentStatus(official)}. Suggest something that fits a couple at that stage — an actual date, or something they'd plausibly do together now that it's established — rather than a tentative, getting-to-know-you outing.`
+      : 'They are not officially together.',
     `Available background ids: ${params.availableBackgrounds.join(', ')}`,
     'Return ONLY one minified JSON object:',
     '{"title":"...","description":"...","objectiveTitle":"...","objectiveDescription":"...","backgroundId":"...","kind":"date|hangout|gift|milestone"}',

@@ -50,6 +50,7 @@ import {
   unlockedEndingIds,
 } from '@/lib/dating/stage'
 import { defaultGiftInventory, getGiftCatalog, giftById, giftImpactBase } from '@/lib/dating/gifts'
+import { createGenerationLock, type GenerationLock } from '@/lib/chat/generationLock'
 import { nextRoundRobinSpeaker, parseMention, pickDirectorSpeaker, rosterFrom } from '@/lib/chat/scene'
 import { itemById } from '@/lib/dating/items'
 import { buildRelationshipDescription } from '@/lib/dating/relationshipDescription'
@@ -57,6 +58,7 @@ import { getInstructTemplate, resolveInstructTemplate } from '@/lib/prompt/instr
 import { intimacyGuidance } from '@/lib/prompt/intimacyGuidance'
 import { chatCompletionSamplerToRequest } from '@/lib/api/chatCompletionSampler'
 import { extractSceneTag, stripSceneTagForDisplay, type SceneTag } from '@/lib/vn/sceneTag'
+import { withIndefiniteArticle } from '@/lib/text/article'
 import { buildSlopAvoidanceNote, cleanModelOutput, isVerbatimEcho, trimToLastSentence } from '@/lib/text/slop'
 import { normalizeRpMarkup } from '@/lib/text/messageSegments'
 import { replyMaxTokens, resolveReplyLength } from '@/lib/characters/voice'
@@ -346,6 +348,30 @@ export function useChatSession(chatId: string | null) {
   const abortRef = useRef<AbortController | null>(null)
   const genKeyRef = useRef<string>('')
   const summarizingRef = useRef(false)
+  /**
+   * The single-generation lock (`generationLock.ts`). `isGenerating` above is React state, which
+   * every entry point here used to guard on directly — but state only reflects a run that started
+   * at least one render ago, and each callback reads the value captured in its own closure. Two
+   * calls dispatched inside the same tick therefore both saw `false` and both proceeded,
+   * interleaving writes against the same message row: observed live as a saved message whose
+   * `rawText` came from one run while its `text`/`failed` came from another. `sendUserMessage` had
+   * the worse version of it — a double send created two user messages *and* two placeholder
+   * replies before either generation began, since every early `messagesApi.create` happens before
+   * the first `await` that would have let a state update land.
+   *
+   * The lock is claimed and released synchronously, so a second caller observes the first's claim
+   * immediately, with no render in between. Held by the *entry point* for its whole awaited body
+   * (not by `runGeneration`, which several callers reach only after their own setup writes), so
+   * the window those writes sit in is inside the lock rather than in front of it. `isGenerating`
+   * stays exactly as it was for the UI — it's the render-visible mirror, not the guard.
+   *
+   * Lazily built rather than `useRef(createGenerationLock())`, which would allocate a fresh lock
+   * on every render only to discard it.
+   */
+  const generationLockRef = useRef<GenerationLock | null>(null)
+  if (!generationLockRef.current) generationLockRef.current = createGenerationLock()
+  const beginGeneration = useCallback(() => generationLockRef.current!.begin(), [])
+  const endGeneration = useCallback(() => generationLockRef.current!.end(), [])
   // Sprite URL -> base64 payload, memoised for the lifetime of the hook so the vision scene-detect
   // pass (§8) doesn't re-fetch and re-encode the same handful of sprite files on every VN turn.
   const spriteBase64Ref = useRef<Map<string, string>>(new Map())
@@ -1403,6 +1429,10 @@ export function useChatSession(chatId: string | null) {
       images: string[] = [],
       opts?: { continuing?: boolean; speakerId?: string | null; intent?: MessageIntent; extraStyleGuidance?: string },
     ) => {
+      // Every caller claims `generatingRef` before reaching here and releases it in a `finally`
+      // around its own awaited body — this function only mirrors that into React state for the
+      // UI, and deliberately doesn't claim it itself: several callers write placeholder messages
+      // before calling in, and those writes need to be inside the lock, not in front of it.
       if (!character || !chat) return
       const { active: speaker } = resolveSpeaker(opts?.speakerId)
       if (!speaker) return
@@ -1825,152 +1855,163 @@ export function useChatSession(chatId: string | null) {
 
   const sendUserMessage = useCallback(
     async (text: string, attachments: PendingAttachment[] = [], opts?: { choice?: ChoiceOption; intent?: MessageIntent }) => {
-      if (!chatId || isGenerating) return
-      // Read fresh rather than trusting the hook's own (possibly one-render-stale) `chat` — both
-      // the gift block below and the scene-policy resolution after it need this, so it's fetched
-      // once here instead of twice.
-      const freshChat = await chatsApi.get(chatId)
-      if (!freshChat) return
-      // Resolved once, up front, and reused below for who the gift goes to — multi-character
-      // relationship tracking's gift half: giving a gift moves *this* target's own track, not
-      // always the primary's, using the exact same "reply as" choice the composer already exposes
-      // for a group chat rather than adding a second, separate "give to" picker. Deliberately
-      // independent of the scene's turn policy below: a deliberate "give this to them" action
-      // shouldn't get silently redirected by round-robin or an AI director.
-      const { active: giftTarget } = resolveSpeaker(replyAsCharacterId)
-      let giftId: string | undefined
-      if (opts?.choice?.kind === 'gift' && opts.choice.giftId && giftTarget) {
-        const inventory = { ...(freshChat.giftInventory ?? defaultGiftInventory(world)) }
-        const inStock = inventory[opts.choice.giftId] ?? 0
-        if (inStock <= 0) {
-          toastError('That gift is out of stock. Buy another from the relationship panel.')
-          return
-        }
-        inventory[opts.choice.giftId] = inStock - 1
-        if (inventory[opts.choice.giftId] <= 0) delete inventory[opts.choice.giftId]
-        const gift = giftById(opts.choice.giftId, world)
-        const preferenceScore = Math.max(-2, Math.min(3, Number(giftTarget.giftPreferences?.[opts.choice.giftId] ?? 0)))
-        const giftDelta = Math.round(giftImpactBase(opts.choice.giftId, world) + preferenceScore)
-        const track = getRelationshipTrack(freshChat, giftTarget.id)
-        const affection = clampAffection((track.affection ?? 0) + giftDelta)
-        const warmth = computeWarmth(affection, getRelationshipStats(track))
-        const giftsGiven = { ...(track.giftsGiven ?? {}) }
-        giftsGiven[opts.choice.giftId] = (giftsGiven[opts.choice.giftId] ?? 0) + 1
-        await chatsApi.update(chatId, {
-          ...patchRelationshipTrack(freshChat, giftTarget.id, {
-            affection,
-            relationshipStage: relationshipStageForWarmth(warmth, relationshipMilestonesFor(world?.relationshipThresholds)),
-            giftsGiven,
-          }),
-          // The owned-stock side of a gift stays a shared wallet, not tied to one relationship.
-          giftInventory: inventory,
-        })
-        giftId = opts.choice.giftId
-        if (gift) {
-          text = `*I give ${giftTarget.card.name} ${gift.name}.* ${text}`
-        }
-      }
-      // Normalise the player's own markup the same way the model's is on store: `<i>` and `**` both
-      // become `*action*`, so stored text, prompt history, and display all agree. Only the typed
-      // line, never `composeMessageText`'s appended file contents.
-      const composedText = composeMessageText(normalizeRpMarkup(text), attachments).trim()
-      const apiImages = collectImageBase64(attachments)
-      if (!composedText && apiImages.length === 0) return
-      if (!reducedAudio) playSendBlip()
-
-      // Stored as full data: URLs (renderable as-is); the API only ever sees the base64 payload.
-      const storedImages = attachments.filter((a) => a.kind === 'image').map((a) => a.dataUrl)
-
-      const now = Date.now()
-      const userMsg: StoredMessage = {
-        id: newId(),
-        chatId,
-        role: 'user',
-        name: persona?.name || 'You',
-        text: composedText,
-        giftId,
-        intent: opts?.intent,
-        images: storedImages.length ? storedImages : undefined,
-        createdAt: now,
-      }
-      await messagesApi.create(userMsg)
-
-      // Section 4/12's "proper Scene entity": who actually replies, per the chat's turn policy —
-      // `'manual'` (or no scene at all) keeps today's exact behavior, the same "reply as" choice
-      // gifting uses above. The other three only ever engage once there's an actual roster to
-      // choose among; each falls back to `giftTarget` (manual resolution) on its own terms rather
-      // than ever leaving `speaker` unset.
-      let speaker = giftTarget
-      const turnPolicy = freshChat.scene?.turnPolicy ?? 'manual'
-      if (turnPolicy !== 'manual' && character && participantCharacters.length > 0) {
-        const roster = rosterFrom(character, participantCharacters)
-        if (turnPolicy === 'round_robin') {
-          const next = nextRoundRobinSpeaker(roster, freshChat.scene?.roundRobinIndex)
-          if (next) {
-            speaker = resolveSpeaker(next.id).active
-            // Advanced immediately rather than after the reply lands, so the bookkeeping can't be
-            // reused by a rapid second send while this one is still generating.
-            await chatsApi.update(chatId, { scene: { ...freshChat.scene!, roundRobinIndex: next.nextIndex } })
+      if (!chatId || !beginGeneration()) return
+      try {
+        // Read fresh rather than trusting the hook's own (possibly one-render-stale) `chat` — both
+        // the gift block below and the scene-policy resolution after it need this, so it's fetched
+        // once here instead of twice.
+        const freshChat = await chatsApi.get(chatId)
+        if (!freshChat) return
+        // Resolved once, up front, and reused below for who the gift goes to — multi-character
+        // relationship tracking's gift half: giving a gift moves *this* target's own track, not
+        // always the primary's, using the exact same "reply as" choice the composer already exposes
+        // for a group chat rather than adding a second, separate "give to" picker. Deliberately
+        // independent of the scene's turn policy below: a deliberate "give this to them" action
+        // shouldn't get silently redirected by round-robin or an AI director.
+        const { active: giftTarget } = resolveSpeaker(replyAsCharacterId)
+        let giftId: string | undefined
+        if (opts?.choice?.kind === 'gift' && opts.choice.giftId && giftTarget) {
+          const inventory = { ...(freshChat.giftInventory ?? defaultGiftInventory(world)) }
+          const inStock = inventory[opts.choice.giftId] ?? 0
+          if (inStock <= 0) {
+            toastError('That gift is out of stock. Buy another from the relationship panel.')
+            return
           }
-        } else if (turnPolicy === 'mention') {
-          const mention = parseMention(text, roster)
-          if (mention) speaker = resolveSpeaker(mention.id).active
-        } else if (turnPolicy === 'director') {
-          const historyForDirector: ChatMessage[] = messages.map((m) => ({ id: m.id, role: m.role, name: m.name, text: m.text }))
-          const pickedId = await pickDirectorSpeaker(client, {
-            roster,
-            history: historyForDirector,
-            userName: persona?.name || 'You',
-            sceneLocation: freshChat.scene?.location ?? undefined,
+          inventory[opts.choice.giftId] = inStock - 1
+          if (inventory[opts.choice.giftId] <= 0) delete inventory[opts.choice.giftId]
+          const gift = giftById(opts.choice.giftId, world)
+          const preferenceScore = Math.max(-2, Math.min(3, Number(giftTarget.giftPreferences?.[opts.choice.giftId] ?? 0)))
+          const giftDelta = Math.round(giftImpactBase(opts.choice.giftId, world) + preferenceScore)
+          const track = getRelationshipTrack(freshChat, giftTarget.id)
+          const affection = clampAffection((track.affection ?? 0) + giftDelta)
+          const warmth = computeWarmth(affection, getRelationshipStats(track))
+          const giftsGiven = { ...(track.giftsGiven ?? {}) }
+          giftsGiven[opts.choice.giftId] = (giftsGiven[opts.choice.giftId] ?? 0) + 1
+          await chatsApi.update(chatId, {
+            ...patchRelationshipTrack(freshChat, giftTarget.id, {
+              affection,
+              relationshipStage: relationshipStageForWarmth(warmth, relationshipMilestonesFor(world?.relationshipThresholds)),
+              giftsGiven,
+            }),
+            // The owned-stock side of a gift stays a shared wallet, not tied to one relationship.
+            giftInventory: inventory,
           })
-          if (pickedId) speaker = resolveSpeaker(pickedId).active
+          giftId = opts.choice.giftId
+          if (gift) {
+            text = `*I give ${giftTarget.card.name} ${withIndefiniteArticle(gift.name)}.* ${text}`
+          }
         }
-      }
+        // Normalise the player's own markup the same way the model's is on store: `<i>` and `**` both
+        // become `*action*`, so stored text, prompt history, and display all agree. Only the typed
+        // line, never `composeMessageText`'s appended file contents.
+        const composedText = composeMessageText(normalizeRpMarkup(text), attachments).trim()
+        const apiImages = collectImageBase64(attachments)
+        if (!composedText && apiImages.length === 0) return
+        if (!reducedAudio) playSendBlip()
 
-      // createdAt is offset by 1ms and sent explicitly so this reply always sorts after the
-      // user's turn even though both are created in the same synchronous burst.
-      const charMsg: StoredMessage = {
-        id: newId(),
-        chatId,
-        role: 'char',
-        name: speaker?.card.name || character?.card.name || 'Character',
-        speakerId: speaker && speaker.id !== character?.id ? speaker.id : undefined,
-        text: '',
-        createdAt: now + 1,
-        swipes: [],
-        activeSwipe: 0,
-      }
-      await messagesApi.create(charMsg)
+        // Stored as full data: URLs (renderable as-is); the API only ever sees the base64 payload.
+        const storedImages = attachments.filter((a) => a.kind === 'image').map((a) => a.dataUrl)
 
-      const historyForPrompt: ChatMessage[] = [...messages, userMsg].map((m) => ({
-        id: m.id,
-        role: m.role,
-        name: m.name,
-        text: m.text,
-      }))
-      await runGeneration(historyForPrompt, charMsg.id, apiImages, { speakerId: speaker?.id ?? null, intent: opts?.intent })
+        const now = Date.now()
+        const userMsg: StoredMessage = {
+          id: newId(),
+          chatId,
+          role: 'user',
+          name: persona?.name || 'You',
+          text: composedText,
+          giftId,
+          intent: opts?.intent,
+          images: storedImages.length ? storedImages : undefined,
+          createdAt: now,
+        }
+        await messagesApi.create(userMsg)
+
+        // Section 4/12's "proper Scene entity": who actually replies, per the chat's turn policy —
+        // `'manual'` (or no scene at all) keeps today's exact behavior, the same "reply as" choice
+        // gifting uses above. The other three only ever engage once there's an actual roster to
+        // choose among; each falls back to `giftTarget` (manual resolution) on its own terms rather
+        // than ever leaving `speaker` unset.
+        let speaker = giftTarget
+        const turnPolicy = freshChat.scene?.turnPolicy ?? 'manual'
+        if (turnPolicy !== 'manual' && character && participantCharacters.length > 0) {
+          const roster = rosterFrom(character, participantCharacters)
+          if (turnPolicy === 'round_robin') {
+            const next = nextRoundRobinSpeaker(roster, freshChat.scene?.roundRobinIndex)
+            if (next) {
+              speaker = resolveSpeaker(next.id).active
+              // Advanced immediately rather than after the reply lands, so the bookkeeping can't be
+              // reused by a rapid second send while this one is still generating.
+              await chatsApi.update(chatId, { scene: { ...freshChat.scene!, roundRobinIndex: next.nextIndex } })
+            }
+          } else if (turnPolicy === 'mention') {
+            const mention = parseMention(text, roster)
+            if (mention) speaker = resolveSpeaker(mention.id).active
+          } else if (turnPolicy === 'director') {
+            const historyForDirector: ChatMessage[] = messages.map((m) => ({ id: m.id, role: m.role, name: m.name, text: m.text }))
+            const pickedId = await pickDirectorSpeaker(client, {
+              roster,
+              history: historyForDirector,
+              userName: persona?.name || 'You',
+              sceneLocation: freshChat.scene?.location ?? undefined,
+            })
+            if (pickedId) speaker = resolveSpeaker(pickedId).active
+          }
+        }
+
+        // createdAt is offset by 1ms and sent explicitly so this reply always sorts after the
+        // user's turn even though both are created in the same synchronous burst.
+        const charMsg: StoredMessage = {
+          id: newId(),
+          chatId,
+          role: 'char',
+          name: speaker?.card.name || character?.card.name || 'Character',
+          speakerId: speaker && speaker.id !== character?.id ? speaker.id : undefined,
+          text: '',
+          createdAt: now + 1,
+          swipes: [],
+          activeSwipe: 0,
+        }
+        await messagesApi.create(charMsg)
+
+        const historyForPrompt: ChatMessage[] = [...messages, userMsg].map((m) => ({
+          id: m.id,
+          role: m.role,
+          name: m.name,
+          text: m.text,
+        }))
+        await runGeneration(historyForPrompt, charMsg.id, apiImages, { speakerId: speaker?.id ?? null, intent: opts?.intent })
+      } finally {
+        endGeneration()
+      }
     },
-    [character, chatId, client, isGenerating, messages, participantCharacters, persona, reducedAudio, replyAsCharacterId, resolveSpeaker, runGeneration, world],
+    [beginGeneration, character, chatId, client, endGeneration, messages, participantCharacters, persona, reducedAudio, replyAsCharacterId, resolveSpeaker, runGeneration, world],
   )
 
   const regenerate = useCallback(
     async (messageId: string) => {
-      if (isGenerating) return
       const idx = messages.findIndex((m) => m.id === messageId)
       if (idx === -1) return
-      const priorMessages = messages.slice(0, idx)
-      const historyForPrompt: ChatMessage[] = priorMessages.map((m) => ({
-        id: m.id,
-        role: m.role,
-        name: m.name,
-        text: m.text,
-      }))
-      await messagesApi.update(messageId, { text: '', failed: false })
-      // Regenerating keeps whoever originally said it, rather than letting a regenerate silently
-      // switch the speaker — that's a distinct, explicit action (editing the message).
-      await runGeneration(historyForPrompt, messageId, latestImages(priorMessages), { speakerId: messages[idx].speakerId })
+      // Claimed after the lookup, so a regenerate aimed at a message that no longer exists never
+      // takes the lock — and before the blanking write below, which a second rapid click would
+      // otherwise land on top of a run already streaming into that same row.
+      if (!beginGeneration()) return
+      try {
+        const priorMessages = messages.slice(0, idx)
+        const historyForPrompt: ChatMessage[] = priorMessages.map((m) => ({
+          id: m.id,
+          role: m.role,
+          name: m.name,
+          text: m.text,
+        }))
+        await messagesApi.update(messageId, { text: '', failed: false })
+        // Regenerating keeps whoever originally said it, rather than letting a regenerate silently
+        // switch the speaker — that's a distinct, explicit action (editing the message).
+        await runGeneration(historyForPrompt, messageId, latestImages(priorMessages), { speakerId: messages[idx].speakerId })
+      } finally {
+        endGeneration()
+      }
     },
-    [isGenerating, messages, runGeneration],
+    [beginGeneration, endGeneration, messages, runGeneration],
   )
 
   const swipe = useCallback(
@@ -1980,23 +2021,30 @@ export function useChatSession(chatId: string | null) {
       const swipes = msg.swipes ?? [msg.text]
       const current = msg.activeSwipe ?? 0
       if (direction === 'right' && current === swipes.length - 1) {
-        if (isGenerating) return
-        // generate a brand new swipe
-        const idx = messages.findIndex((m) => m.id === messageId)
-        const priorMessages = messages.slice(0, idx)
-        const historyForPrompt: ChatMessage[] = priorMessages.map((m) => ({
-          id: m.id,
-          role: m.role,
-          name: m.name,
-          text: m.text,
-        }))
-        const newSwipes = [...swipes, '']
-        await messagesApi.update(messageId, {
-          swipes: newSwipes,
-          activeSwipe: newSwipes.length - 1,
-          text: '',
-        })
-        await runGeneration(historyForPrompt, messageId, latestImages(priorMessages), { speakerId: msg.speakerId })
+        // Only this branch generates; stepping between existing swipes is a pure read and stays
+        // usable while a reply is in flight, exactly as before. The lock covers the `swipes`
+        // append too — two fast clicks used to push two empty swipes and generate into only one,
+        // leaving a permanently blank swipe stranded in the message.
+        if (!beginGeneration()) return
+        try {
+          const idx = messages.findIndex((m) => m.id === messageId)
+          const priorMessages = messages.slice(0, idx)
+          const historyForPrompt: ChatMessage[] = priorMessages.map((m) => ({
+            id: m.id,
+            role: m.role,
+            name: m.name,
+            text: m.text,
+          }))
+          const newSwipes = [...swipes, '']
+          await messagesApi.update(messageId, {
+            swipes: newSwipes,
+            activeSwipe: newSwipes.length - 1,
+            text: '',
+          })
+          await runGeneration(historyForPrompt, messageId, latestImages(priorMessages), { speakerId: msg.speakerId })
+        } finally {
+          endGeneration()
+        }
         return
       }
       const nextIndex = direction === 'left' ? Math.max(0, current - 1) : Math.min(swipes.length - 1, current + 1)
@@ -2007,20 +2055,25 @@ export function useChatSession(chatId: string | null) {
         rawText: msg.swipeRawTexts?.[nextIndex],
       })
     },
-    [isGenerating, messages, runGeneration],
+    [beginGeneration, endGeneration, messages, runGeneration],
   )
 
   const continueMessage = useCallback(async () => {
     const last = messages[messages.length - 1]
-    if (!last || last.role !== 'char' || !last.text.trim() || isGenerating) return
-    const historyForPrompt: ChatMessage[] = messages.map((m) => ({
-      id: m.id,
-      role: m.role,
-      name: m.name,
-      text: m.text,
-    }))
-    await runGeneration(historyForPrompt, last.id, latestImages(messages), { continuing: true, speakerId: last.speakerId })
-  }, [isGenerating, messages, runGeneration])
+    if (!last || last.role !== 'char' || !last.text.trim()) return
+    if (!beginGeneration()) return
+    try {
+      const historyForPrompt: ChatMessage[] = messages.map((m) => ({
+        id: m.id,
+        role: m.role,
+        name: m.name,
+        text: m.text,
+      }))
+      await runGeneration(historyForPrompt, last.id, latestImages(messages), { continuing: true, speakerId: last.speakerId })
+    } finally {
+      endGeneration()
+    }
+  }, [beginGeneration, endGeneration, messages, runGeneration])
 
   const canContinue =
     messages.length > 0 &&
@@ -2130,6 +2183,7 @@ export function useChatSession(chatId: string | null) {
       worldDescription: world?.description,
       availableBackgrounds,
       affection: chat.affection ?? 0,
+      commitmentStatus: chat.commitmentStatus ?? 'none',
     })
   }, [character, chat, client, persona?.name, world])
 
@@ -2220,33 +2274,42 @@ export function useChatSession(chatId: string | null) {
         // streaming-text state) genuinely can't run two at once — skip rather than corrupt that
         // state, but say so, since silently skipping would recreate the exact "empty composer,
         // waiting on the player" gap this feature exists to close.
-        if (isGenerating) {
+        //
+        // The claim doubles as that check (it fails exactly when something else holds the lock),
+        // which also closes the gap the old `isGenerating` read left: everything above this point
+        // awaits, so by the time the branch was reached the captured state could be several
+        // renders stale — precisely the case a scene opener firing next to a live reply hits.
+        if (!beginGeneration()) {
           toastInfo(`${event.title} has started — ${character.card.name} will pick it up as soon as the current reply finishes, or send a message yourself.`)
         } else {
-          const openerId = newId()
-          await messagesApi.create({
-            id: openerId,
-            chatId,
-            role: 'char',
-            name: character.card.name,
-            text: '',
-            createdAt: Date.now(),
-            swipes: [],
-            activeSwipe: 0,
-          })
-          const historyForPrompt: ChatMessage[] = messages.map((m) => ({ id: m.id, role: m.role, name: m.name, text: m.text }))
-          await runGeneration(historyForPrompt, openerId, [], {
-            extraStyleGuidance: [
-              `This is the very start of the ${sceneNoun} — ${character.card.name} arrives and opens the moment themselves (a greeting, a glance, a first line or gesture), rather than waiting for ${persona?.name || 'them'} to speak first. Do not narrate that you are waiting, and do not ask what happens next.`,
-              openingMomentNote,
-            ]
-              .filter(Boolean)
-              .join(' '),
-          })
+          try {
+            const openerId = newId()
+            await messagesApi.create({
+              id: openerId,
+              chatId,
+              role: 'char',
+              name: character.card.name,
+              text: '',
+              createdAt: Date.now(),
+              swipes: [],
+              activeSwipe: 0,
+            })
+            const historyForPrompt: ChatMessage[] = messages.map((m) => ({ id: m.id, role: m.role, name: m.name, text: m.text }))
+            await runGeneration(historyForPrompt, openerId, [], {
+              extraStyleGuidance: [
+                `This is the very start of the ${sceneNoun} — ${character.card.name} arrives and opens the moment themselves (a greeting, a glance, a first line or gesture), rather than waiting for ${persona?.name || 'them'} to speak first. Do not narrate that you are waiting, and do not ask what happens next.`,
+                openingMomentNote,
+              ]
+                .filter(Boolean)
+                .join(' '),
+            })
+          } finally {
+            endGeneration()
+          }
         }
       }
     },
-    [character, chat?.affection, chat?.relationshipStats, chatId, client, createObjective, isGenerating, messages, persona?.name, runGeneration, world],
+    [beginGeneration, character, chat?.affection, chat?.relationshipStats, chatId, client, createObjective, endGeneration, messages, persona?.name, runGeneration, world],
   )
 
   /**

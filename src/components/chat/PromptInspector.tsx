@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { RotateCcw } from 'lucide-react'
 import type { PromptBuildResult } from '@/lib/prompt/builder'
+import { describeEntry } from '@/lib/worldinfo/activation'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 
@@ -112,13 +113,13 @@ export function PromptInspector({
             {result.droppedForBudget.length > 0 && (
               <p className="mb-5 text-xs text-danger">
                 {result.droppedForBudget.length} entr{result.droppedForBudget.length === 1 ? 'y' : 'ies'} matched but
-                didn't fit the lorebook's token budget: {result.droppedForBudget.map((e) => e.keys[0] ?? e.comment).join(', ')}
+                didn't fit the lorebook's token budget: {result.droppedForBudget.map(describeEntry).join(', ')}
               </p>
             )}
             {result.droppedForGroup.length > 0 && (
               <p className="mb-5 text-xs text-text-muted">
                 {result.droppedForGroup.length} entr{result.droppedForGroup.length === 1 ? 'y' : 'ies'} lost to a
-                higher-priority entry in the same inclusion group: {result.droppedForGroup.map((e) => e.keys[0] ?? e.comment).join(', ')}
+                higher-priority entry in the same inclusion group: {result.droppedForGroup.map(describeEntry).join(', ')}
               </p>
             )}
 

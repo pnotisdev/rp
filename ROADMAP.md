@@ -976,6 +976,66 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
       strip as "Reading the scene"; a genuinely fresh page load throws zero console errors.
 
 ## 9. Technical quality / security
+- [x] **Playthrough-tail pass: the confirmed defects `PLAYTHROUGH_REPORT.md` left open.** The
+      report's five ranked bugs were fixed as it was written; these are the ones below that line,
+      each re-confirmed in the source before being touched rather than taken on the report's word.
+      - **The concurrent-generation race, which the report could only flag as unconfirmed** ("might
+        need unnaturally fast clicking") — it is real and needs no unusual timing. `isGenerating`
+        is React state, so every entry point in `useChatSession` (`sendUserMessage`, `regenerate`,
+        `swipe`, `continueMessage`, and `startDateEvent`'s scene opener) guarded on the value
+        captured in its own closure, while the claim only happened via `setIsGenerating(true)`
+        inside `runGeneration` — which doesn't land until the next render. Two calls in one tick
+        both read `false` and both proceeded. `genKeyRef` never helped; it exists only for abort.
+        `sendUserMessage` had the worst version: every `messagesApi.create` there runs before the
+        first `await`, so a double send wrote two user messages *and* two placeholder replies
+        before either generation began; `swipe` stranded a permanently blank swipe the same way.
+        Fixed with a synchronous test-and-set lock (`src/lib/chat/generationLock.ts`), claimed by
+        the **entry point** and released in a `finally` around its whole awaited body — not by
+        `runGeneration`, since several callers do their own writes on the way in and those need to
+        sit inside the lock rather than in front of it. `isGenerating` stays exactly as it was for
+        the UI; it's now the render-visible mirror, not the guard. Extracted rather than left
+        inline because this repo has no React test harness (`environment: 'node'`, every test
+        targets pure `src/lib` logic) — 8 tests cover exclusion, re-claim after release, release
+        on throw, that a mid-`await` holder still owns it, and the same-tick double-dispatch case
+        itself.
+      - **A hangout could still set `first_date`.** `assessDateOutcome` handed the classifier the
+        full flag set regardless of `sceneKind`; the glossary asked it to exclude hangouts, and it
+        fired on a scene explicitly started and scored as one anyway. A prose bar is a request,
+        not a gate — and this app's premise is that outcomes are *judged* by the model but
+        *applied* deterministically. `first_date` is now withheld from a hangout's menu and
+        dropped on the way back in if returned regardless. **Writing the test caught a leak that
+        would otherwise have shipped**: the prompt's own hardcoded example JSON still demonstrated
+        `"newFlags":["first_date"]`, handing the flag back in the most suggestive line of the
+        whole prompt — the example is now scene-kind-aware too. Built-in flags only; a world's
+        `CustomSceneFlag`s have no date/hangout marker to key off, so they keep relying on their
+        own `description`.
+      - **`suggestDateEvent` was blind to the commitment ladder** — its params carried `affection`
+        but not `commitmentStatus`, so an officially-dating couple kept being handed tentative
+        "hangout" cards. Affection alone can't separate "very fond" from "actually together",
+        which is the distinction that decides date vs. get-together. Optional, so a
+        not-yet-official chat keeps the exact prompt it had.
+      - **The lorebook overflow list rendered one blank slot per entry.** `keys[0] ?? comment` —
+        `??` catches a *missing* comment, never an empty one, and the synthetic "Remembered facts"
+        book (`facts.ts`) builds every entry with `keys: []` and no comment at all. New
+        `describeEntry` in `activation.ts` falls through keys → comment → a collapsed content
+        snippet → a placeholder, so a label is never blank. **Verified against the real database
+        rather than a fixture**: the open chat's 129 remembered facts rendered 129/129 blank under
+        the old logic (the line was literally a run of commas) and 0/129 under the new one.
+      - **Gift line grammar** — "I give Sumire Pressed Flower Bookmark." New
+        `withIndefiniteArticle` (`src/lib/text/article.ts`), deliberately biased toward *not*
+        inserting an article, since gift names come from a world's own authored catalog: a missing
+        "a" reads as clipped, a wrong one ("a Chocolates", "a a Cup of Tea") reads as broken. Takes
+        number from the last word ("Box of Chocolates" is one box), skips existing determiners and
+        counts, and handles the silent-h / "a university" cases.
+      - **Intent chips had no `aria-pressed`** — armed state was carried by background color alone.
+        Live-verified in the browser: all five expose `false`, only the armed one flips to `true`,
+        and it clears on disarm.
+      **Found while verifying, not fixed (out of this pass's scope)**: with the configured backend
+      unreachable, opening the Prompt Inspector fires one `/api/extra/tokencount` request *per
+      item* — 1,600+ observed on a chat with 129 facts — each failing with `ERR_CONNECTION_REFUSED`
+      before falling back to `estimateTokens`, leaving the panel stuck on "Building…" indefinitely.
+      `countTokens` has no circuit breaker: one failure should be enough to estimate the rest for
+      that build. Worth its own item.
 - [x] **SQLite backend swapped from `better-sqlite3` to Node's built-in `node:sqlite`**
       (`server/db.ts`) — the `better-sqlite3` prebuilt native binary crashed the process outright
       (STATUS_ACCESS_VIOLATION) on this dev machine, reproducing even in total isolation

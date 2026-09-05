@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { activateWorldInfo, recentMessagesText } from './activation'
+import { activateWorldInfo, describeEntry, recentMessagesText } from './activation'
 import type { Lorebook, LorebookEntry } from '@/lib/characters/cardSpec'
 
 let nextId = 1
@@ -414,5 +414,37 @@ describe('recentMessagesText', () => {
 
   it('returns an empty string for no messages', () => {
     expect(recentMessagesText([], 5)).toBe('')
+  })
+})
+
+describe('describeEntry', () => {
+  it('prefers the first non-blank key', () => {
+    expect(describeEntry({ keys: ['sakura', 'cherry blossom'], content: 'x' })).toBe('sakura')
+    expect(describeEntry({ keys: ['  ', 'cherry blossom'], content: 'x' })).toBe('cherry blossom')
+    expect(describeEntry({ keys: ['  sakura  '], content: 'x' })).toBe('sakura')
+  })
+
+  it('falls back to the comment when there are no keys', () => {
+    expect(describeEntry({ keys: [], comment: 'Campus layout', content: 'x' })).toBe('Campus layout')
+  })
+
+  it('falls back past an EMPTY comment, not just a missing one', () => {
+    // The actual bug: an always-active entry needs no keys, and `keys[0] ?? comment` returns the
+    // empty string rather than falling through it — so the inspector rendered one blank slot per
+    // entry (96 of them, in the world that surfaced this).
+    expect(describeEntry({ keys: [], comment: '', content: 'The university sits on a hill.' })).toBe('The university sits on a hill.')
+    expect(describeEntry({ keys: [], comment: '   ', content: 'The university sits on a hill.' })).toBe('The university sits on a hill.')
+  })
+
+  it('uses a collapsed, truncated content snippet as the third fallback', () => {
+    const long = describeEntry({ keys: [], content: 'a'.repeat(120) })
+    expect(long).toHaveLength(41)
+    expect(long.endsWith('…')).toBe(true)
+    expect(describeEntry({ keys: [], content: '  spread\n  over\tlines  ' })).toBe('spread over lines')
+  })
+
+  it('never returns a blank label, even for a completely empty entry', () => {
+    expect(describeEntry({ keys: [], content: '' })).toBe('(untitled entry)')
+    expect(describeEntry({ keys: ['  '], comment: '  ', content: '  ' })).toBe('(untitled entry)')
   })
 })

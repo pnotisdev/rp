@@ -35,6 +35,11 @@ export function IntentChips({
             key={spec.id}
             type="button"
             title={spec.hint}
+            // A chip is a toggle, not a command: arming one holds it until the next message is
+            // sent. That state was carried by background color alone, which says nothing to a
+            // screen reader — `aria-pressed` is what makes "armed" audible rather than just
+            // visible, and it's what turns the control into a toggle button semantically.
+            aria-pressed={active}
             onClick={() => onArm(active ? null : spec.id)}
             className={`rounded-full px-2.5 py-1 text-[11px] leading-none transition-colors ${
               active
