@@ -7,13 +7,15 @@ import { chatFactsApi, chatsApi, relationshipEventsApi } from '@/lib/api/client'
 import { getGiftCatalog } from '@/lib/dating/gifts'
 import { getItemCatalog } from '@/lib/dating/items'
 import {
-  canAskForCommitment,
+  canActuallyAskForCommitment,
   canInitiateFirstTime,
+  commitmentLockReason,
   commitmentTierThreshold,
   computeWarmth,
   formatCommitmentStatus,
   formatRelationshipStage,
   combinedSceneFlags,
+  FIRST_KISS_FLAG,
   getRelationshipStats,
   getRelationshipTrack,
   nextCommitmentTier,
@@ -153,7 +155,15 @@ export function RelationshipPanel({
   const knownFlags = combinedSceneFlags(world?.customSceneFlags)
   const commitmentStatus = track.commitmentStatus ?? 'none'
   const nextTier = nextCommitmentTier(commitmentStatus)
-  const eligibleForNextTier = nextTier ? canAskForCommitment(nextTier, warmth, milestones) : false
+  // The commitment ladder used to be gated on warmth alone — a real playthrough reached "married"
+  // without the characters ever having kissed. `physical` folds in the two signals
+  // `commitmentLockReason`/`canActuallyAskForCommitment` (`stage.ts`) gate on top of warmth:
+  // whether they've kissed (the built-in `first_kiss` scene flag — set either by the deterministic
+  // kissing_spot button or the AI classifier noticing one in freeform prose) and whether they've
+  // already shared their "first time together" (`track.firstIntimateSceneAt`).
+  const physical = { hasKissed: flags.has(FIRST_KISS_FLAG), firstIntimateSceneAt: track.firstIntimateSceneAt }
+  const nextTierLockReason = nextTier ? commitmentLockReason(nextTier, warmth, physical, milestones) : undefined
+  const eligibleForNextTier = nextTier ? canActuallyAskForCommitment(nextTier, warmth, physical, milestones) : false
   const [asking, setAsking] = useState(false)
   const [ending, setEnding] = useState(false)
   const [initiatingFirstTime, setInitiatingFirstTime] = useState(false)
@@ -388,7 +398,15 @@ export function RelationshipPanel({
                   </Button>
                 ) : (
                   <div className="text-right text-xs text-text-muted">
-                    {formatCommitmentStatus(nextTier)} unlocks at {commitmentTierThreshold(nextTier, milestones)} warmth
+                    {/* Warmth alone can't tell a player what to actually do next — once it's met,
+                        the lock is physical (haven't kissed yet, or haven't shared a first time
+                        together yet) and the hint needs to say so instead of repeating a warmth
+                        number they've already cleared. */}
+                    {nextTierLockReason === 'kiss'
+                      ? `Kiss ${viewingCharacter?.card.name ?? 'them'} first`
+                      : nextTierLockReason === 'first_time'
+                        ? 'Share a first time together first'
+                        : `${formatCommitmentStatus(nextTier)} unlocks at ${commitmentTierThreshold(nextTier, milestones)} warmth`}
                   </div>
                 ))}
             </div>

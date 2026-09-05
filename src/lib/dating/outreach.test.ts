@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { evaluateOutreach, truncateAtStrayTurnMarker, type EvaluateOutreachOptions } from './outreach'
+import { evaluateOutreach, outreachReasonHint, truncateAtStrayTurnMarker, type EvaluateOutreachOptions } from './outreach'
 
 const HOUR_MS = 3_600_000
 const NOW = 1_000_000_000_000
@@ -232,5 +232,86 @@ describe('truncateAtStrayTurnMarker', () => {
   it('safely escapes regex-special characters in names', () => {
     const raw = 'Hey!\nMr. O\'Brien (Jr.): fake turn'
     expect(truncateAtStrayTurnMarker(raw, "Mr. O'Brien (Jr.)", 'You')).toBe('Hey!')
+  })
+})
+
+describe('evaluateOutreach — life_event reason (ambient hooks, world/ambientEvents.ts)', () => {
+  it('reports "life_event", overriding schedule/warmth/silence, whenever an ambient hook is available', () => {
+    let found = false
+    for (let i = 0; i < 200; i++) {
+      const character = {
+        id: `char-${i}`,
+        outreach: { frequency: 'eager' as const },
+        schedule: undefined,
+        goals: ["Finish her senior thesis on time"],
+      }
+      const result = evaluateOutreach(baseOpts({ character, chat: { id: 'chat-1', affection: 30, relationshipStats: {} } }))
+      if (result.status === 'rolled' && result.eligible) {
+        expect(result.reason).toBe('life_event')
+        found = true
+        break
+      }
+    }
+    expect(found).toBe(true)
+  })
+
+  it('a holiday alone is enough to produce life_event, with no other authored field at all', () => {
+    // Day 13 -> getCalendarInfo -> spring, dayOfSeason 14 -> 'First Bloom' (calendar.ts's HOLIDAYS).
+    let found = false
+    for (let i = 0; i < 200; i++) {
+      const character = { id: `char-${i}`, outreach: { frequency: 'eager' as const }, schedule: undefined }
+      const result = evaluateOutreach(
+        baseOpts({ character, world: { currentDay: 13, currentPhaseIndex: 0 }, chat: { id: 'chat-1', affection: 30, relationshipStats: {} } }),
+      )
+      if (result.status === 'rolled' && result.eligible) {
+        expect(result.reason).toBe('life_event')
+        found = true
+        break
+      }
+    }
+    expect(found).toBe(true)
+  })
+
+  it('still falls back to the original schedule/warmth/silence cascade when no ambient hook is authored (unchanged by this feature)', () => {
+    let found = false
+    for (let i = 0; i < 200; i++) {
+      const character = { id: `char-${i}`, outreach: { frequency: 'eager' as const }, schedule: undefined }
+      const result = evaluateOutreach(
+        baseOpts({ character, lastMessage: { createdAt: NOW - 20 * HOUR_MS }, chat: { id: 'chat-1', affection: 90, relationshipStats: {} } }),
+      )
+      if (result.status === 'rolled' && result.eligible) {
+        expect(result.reason).toBe('silence')
+        found = true
+        break
+      }
+    }
+    expect(found).toBe(true)
+  })
+})
+
+describe('outreachReasonHint', () => {
+  it('interpolates the real user name for each generic reason, never a {{user}} macro', () => {
+    for (const reason of ['silence', 'schedule', 'warmth'] as const) {
+      const hint = outreachReasonHint(reason, { charName: 'Sumire', userName: 'Kai' })
+      expect(hint).toContain('Kai')
+      expect(hint).not.toContain('{{')
+    }
+  })
+
+  it('life_event weaves in the concrete ambient event detail when one is given', () => {
+    const hint = outreachReasonHint('life_event', {
+      charName: 'Sumire',
+      userName: 'Kai',
+      ambientEvent: { kind: 'goal_on_mind', detail: 'finishing her senior thesis' },
+    })
+    expect(hint).toContain('finishing her senior thesis')
+    expect(hint).toContain('Kai')
+    expect(hint).not.toContain('{{')
+  })
+
+  it('life_event falls back to a silence-style hint with no ambient event on hand', () => {
+    const hint = outreachReasonHint('life_event', { charName: 'Sumire', userName: 'Kai' })
+    expect(hint).toContain('Kai')
+    expect(hint).not.toContain('{{')
   })
 })

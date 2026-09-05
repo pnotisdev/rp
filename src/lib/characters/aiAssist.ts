@@ -1,5 +1,6 @@
 import { normalizeCardJson, type CharacterCardData, type LorebookEntry } from './cardSpec'
 import type { ChatBackend } from '@/lib/api/chatBackend'
+import { generateWithTimeout } from '@/lib/api/generateWithTimeout'
 import { parseLenientJson } from '@/lib/jsonRepair'
 
 const FIELD_LABELS: Record<string, string> = {
@@ -30,6 +31,12 @@ function contextSummary(subject: AiLoreSubject, omitField?: string): string {
   return lines.join('\n')
 }
 
+// Every `client.generate` call in this file goes through `generateWithTimeout` rather than a bare
+// call — a slow/rate-limited backend that simply never responds otherwise leaves the caller (the
+// "Regenerate" field button, `GenerateCharacterDialog`, the lore-entry suggester) stuck forever:
+// its `busy` state is only ever cleared in a `finally` after the awaited call settles, so a hang
+// reads as the button stuck spinning with no error and no way to retry.
+
 /** Rewrites a single card field (keeping it consistent with the rest), rather than the whole card. */
 export async function regenerateCardField(
   client: ChatBackend,
@@ -50,22 +57,26 @@ export async function regenerateCardField(
     `${label}:`,
   ].join('\n\n')
 
-  const text = await client.generate({
-    prompt,
-    max_length: 300,
-    max_context_length: await client.getEffectiveMaxContext(),
-    temperature: 0.85,
-    top_p: 0.95,
-    top_k: 0,
-    min_p: 0.05,
-    typical: 1,
-    tfs: 1,
-    rep_pen: 1.1,
-    rep_pen_range: 1024,
-    rep_pen_slope: 0.7,
-    stop_sequence: ['\n\n\n'],
-    trim_stop: true,
-  })
+  const text = await generateWithTimeout(
+    client,
+    {
+      prompt,
+      max_length: 300,
+      max_context_length: await client.getEffectiveMaxContext(),
+      temperature: 0.85,
+      top_p: 0.95,
+      top_k: 0,
+      min_p: 0.05,
+      typical: 1,
+      tfs: 1,
+      rep_pen: 1.1,
+      rep_pen_range: 1024,
+      rep_pen_slope: 0.7,
+      stop_sequence: ['\n\n\n'],
+      trim_stop: true,
+    },
+    'Regenerate field',
+  )
   return text.trim()
 }
 
@@ -98,23 +109,27 @@ export async function draftCharacterFromPortrait(
     .filter(Boolean)
     .join('\n\n')
 
-  const text = await client.generate({
-    prompt,
-    images: [portraitBase64],
-    max_length: 1024,
-    max_context_length: await client.getEffectiveMaxContext(),
-    temperature: 0.8,
-    top_p: 0.95,
-    top_k: 0,
-    min_p: 0.05,
-    typical: 1,
-    tfs: 1,
-    rep_pen: 1.1,
-    rep_pen_range: 1024,
-    rep_pen_slope: 0.7,
-    stop_sequence: ['\n\n\n', '```'],
-    trim_stop: true,
-  })
+  const text = await generateWithTimeout(
+    client,
+    {
+      prompt,
+      images: [portraitBase64],
+      max_length: 1024,
+      max_context_length: await client.getEffectiveMaxContext(),
+      temperature: 0.8,
+      top_p: 0.95,
+      top_k: 0,
+      min_p: 0.05,
+      typical: 1,
+      tfs: 1,
+      rep_pen: 1.1,
+      rep_pen_range: 1024,
+      rep_pen_slope: 0.7,
+      stop_sequence: ['\n\n\n', '```'],
+      trim_stop: true,
+    },
+    'Draft character from portrait',
+  )
   const card = normalizeCardJson(parseLenientJson(text))
   return { card, rawOutput: text }
 }
@@ -144,22 +159,26 @@ export async function suggestLoreEntries(
     .filter(Boolean)
     .join('\n\n')
 
-  const text = await client.generate({
-    prompt,
-    max_length: 600,
-    max_context_length: await client.getEffectiveMaxContext(),
-    temperature: 0.8,
-    top_p: 0.95,
-    top_k: 0,
-    min_p: 0.05,
-    typical: 1,
-    tfs: 1,
-    rep_pen: 1.1,
-    rep_pen_range: 1024,
-    rep_pen_slope: 0.7,
-    stop_sequence: ['\n\n\n', '```'],
-    trim_stop: true,
-  })
+  const text = await generateWithTimeout(
+    client,
+    {
+      prompt,
+      max_length: 600,
+      max_context_length: await client.getEffectiveMaxContext(),
+      temperature: 0.8,
+      top_p: 0.95,
+      top_k: 0,
+      min_p: 0.05,
+      typical: 1,
+      tfs: 1,
+      rep_pen: 1.1,
+      rep_pen_range: 1024,
+      rep_pen_slope: 0.7,
+      stop_sequence: ['\n\n\n', '```'],
+      trim_stop: true,
+    },
+    'Suggest lore entries',
+  )
 
   const parsed = parseLenientJson(text)
   if (!Array.isArray(parsed)) throw new Error('Model did not return a JSON array of lore entries')

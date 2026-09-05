@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { KoboldClient } from '@/lib/api/kobold'
 import type { ChatMessage } from '@/lib/prompt/builder'
 import { RAPPORT_READS, RAPPORT_TRAJECTORIES, assessRapport, isRapportTrajectory } from './rapport'
@@ -128,5 +128,27 @@ describe('assessRapport', () => {
     expect(sentPrompt).toContain('line 19')
     expect(sentPrompt).toContain('line 12')
     expect(sentPrompt).not.toContain('line 11')
+  })
+
+  describe('when the backend never responds', () => {
+    // Before `generateWithTimeout` was wired in here, this awaited promise never settled either
+    // way — a live date stuck on "Reading the room…" forever under a slow/rate-limited backend.
+    beforeEach(() => vi.useFakeTimers())
+    afterEach(() => vi.useRealTimers())
+
+    it('resolves to null after 45s instead of hanging forever', async () => {
+      const hanging = {
+        generate: (_p: unknown, signal?: AbortSignal) =>
+          new Promise<string>((_resolve, reject) => {
+            signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
+          }),
+        getEffectiveMaxContext: async () => 4096,
+      } as unknown as KoboldClient
+
+      const pending = assessRapport(hanging, { transcript: TRANSCRIPT, charName: 'Sumire', userName: 'Kai' })
+      const assertion = expect(pending).resolves.toBeNull()
+      await vi.advanceTimersByTimeAsync(45_000)
+      await assertion
+    })
   })
 })

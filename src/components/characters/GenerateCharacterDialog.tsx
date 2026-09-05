@@ -3,6 +3,7 @@ import { useChatBackendClient } from '@/lib/hooks/useChatBackendClient'
 import { normalizeCardJson, type CharacterCardData } from '@/lib/characters/cardSpec'
 import { draftCharacterFromPortrait } from '@/lib/characters/aiAssist'
 import { fileToDataUrl } from '@/lib/characters/importExport'
+import { generateWithTimeout } from '@/lib/api/generateWithTimeout'
 import { parseLenientJson } from '@/lib/jsonRepair'
 import { errorMessage, toastError } from '@/lib/store/useToastStore'
 import { Button } from '@/components/ui/Button'
@@ -57,22 +58,28 @@ export function GenerateCharacterDialog({
         text = result.rawOutput
       } else {
         const prompt = `${SYSTEM_INSTRUCTION}\n\nBrief: ${brief.trim()}\n\nJSON:`
-        text = await client.generate({
-          prompt,
-          max_length: 1024,
-          max_context_length: await client.getEffectiveMaxContext(),
-          temperature: 0.8,
-          top_p: 0.95,
-          top_k: 0,
-          min_p: 0.05,
-          typical: 1,
-          tfs: 1,
-          rep_pen: 1.1,
-          rep_pen_range: 1024,
-          rep_pen_slope: 0.7,
-          stop_sequence: ['\n\n\n', '```'],
-          trim_stop: true,
-        })
+        // A hang here (backend never responds) used to leave "Generate" spinning forever with no
+        // error and no way to retry, since `busy` only clears in this function's own `finally`.
+        text = await generateWithTimeout(
+          client,
+          {
+            prompt,
+            max_length: 1024,
+            max_context_length: await client.getEffectiveMaxContext(),
+            temperature: 0.8,
+            top_p: 0.95,
+            top_k: 0,
+            min_p: 0.05,
+            typical: 1,
+            tfs: 1,
+            rep_pen: 1.1,
+            rep_pen_range: 1024,
+            rep_pen_slope: 0.7,
+            stop_sequence: ['\n\n\n', '```'],
+            trim_stop: true,
+          },
+          'Generate character',
+        )
         card = normalizeCardJson(parseLenientJson(text))
       }
       setRawOutput(text)

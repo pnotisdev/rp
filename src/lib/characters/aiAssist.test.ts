@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from 'vitest'
-import { draftCharacterFromPortrait } from './aiAssist'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { draftCharacterFromPortrait, regenerateCardField, suggestLoreEntries } from './aiAssist'
 import type { ChatBackend } from '@/lib/api/chatBackend'
 
 function mockClient(response: string): ChatBackend {
@@ -12,6 +12,26 @@ function mockClient(response: string): ChatBackend {
     getChatTemplate: vi.fn().mockResolvedValue(null),
   }
 }
+
+/** Never resolves or rejects on its own — only reacts to the caller's abort signal. */
+function hangingClient(onAbort: () => void): ChatBackend {
+  return {
+    generate: (_p, signal) =>
+      new Promise<string>((_resolve, reject) => {
+        signal?.addEventListener('abort', () => {
+          onAbort()
+          reject(new DOMException('aborted', 'AbortError'))
+        })
+      }),
+    generateStream: vi.fn(),
+    getEffectiveMaxContext: vi.fn().mockResolvedValue(4096),
+    tokenCount: vi.fn(),
+    abort: vi.fn(),
+    getChatTemplate: vi.fn().mockResolvedValue(null),
+  }
+}
+
+const CHARACTER = { name: 'Mira', description: 'A tall scientist.', personality: 'Blunt.', scenario: '', first_mes: '', mes_example: '' } as never
 
 const VALID_CARD_JSON = JSON.stringify({
   name: 'Mira',
@@ -71,5 +91,70 @@ describe('draftCharacterFromPortrait', () => {
   it('propagates a parse failure rather than silently returning a blank card', async () => {
     const client = mockClient('not json at all, sorry')
     await expect(draftCharacterFromPortrait(client, 'b64')).rejects.toThrow()
+  })
+})
+
+describe('regenerateCardField', () => {
+  it('returns the rewritten field, trimmed', async () => {
+    const client = mockClient('  A tall woman with short silver hair.  ')
+    const text = await regenerateCardField(client, CHARACTER, 'description')
+    expect(text).toBe('A tall woman with short silver hair.')
+  })
+
+  it('includes the requested field label and any hint in the prompt', async () => {
+    const client = mockClient('text')
+    await regenerateCardField(client, CHARACTER, 'personality', 'Make her warmer')
+    const call = (client.generate as ReturnType<typeof vi.fn>).mock.calls[0][0]
+    expect(call.prompt).toContain('Personality')
+    expect(call.prompt).toContain('Make her warmer')
+  })
+})
+
+describe('suggestLoreEntries', () => {
+  it('parses proposed entries into keys + content', async () => {
+    const client = mockClient('[{"keys":["lab","equipment"],"content":"The lab is off-limits after hours."}]')
+    const entries = await suggestLoreEntries(client, CHARACTER, [])
+    expect(entries).toEqual([{ keys: ['lab', 'equipment'], content: 'The lab is off-limits after hours.' }])
+  })
+
+  it('drops entries with no keys or no content', async () => {
+    const client = mockClient('[{"keys":[],"content":"x"},{"keys":["a"],"content":""},{"keys":["a"],"content":"real"}]')
+    const entries = await suggestLoreEntries(client, CHARACTER, [])
+    expect(entries).toEqual([{ keys: ['a'], content: 'real' }])
+  })
+
+  it('throws when the model does not return a JSON array', async () => {
+    const client = mockClient('{"not": "an array"}')
+    await expect(suggestLoreEntries(client, CHARACTER, [])).rejects.toThrow('Model did not return a JSON array of lore entries')
+  })
+})
+
+describe('timeout handling', () => {
+  // Same live-confirmed failure mode `generateWithTimeout` exists for: a provider response that
+  // simply never resolves used to leave every one of this file's callers — the field "Regenerate"
+  // button, `GenerateCharacterDialog`, the lore-entry suggester — stuck forever with no error and
+  // no way to retry.
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  it('regenerateCardField times out with a labelled message', async () => {
+    const pending = regenerateCardField(hangingClient(() => {}), CHARACTER, 'description')
+    const assertion = expect(pending).rejects.toThrow(/Regenerate field timed out after 45s/)
+    await vi.advanceTimersByTimeAsync(45_000)
+    await assertion
+  })
+
+  it('draftCharacterFromPortrait times out with a labelled message', async () => {
+    const pending = draftCharacterFromPortrait(hangingClient(() => {}), 'b64')
+    const assertion = expect(pending).rejects.toThrow(/Draft character from portrait timed out after 45s/)
+    await vi.advanceTimersByTimeAsync(45_000)
+    await assertion
+  })
+
+  it('suggestLoreEntries times out with a labelled message', async () => {
+    const pending = suggestLoreEntries(hangingClient(() => {}), CHARACTER, [])
+    const assertion = expect(pending).rejects.toThrow(/Suggest lore entries timed out after 45s/)
+    await vi.advanceTimersByTimeAsync(45_000)
+    await assertion
   })
 })

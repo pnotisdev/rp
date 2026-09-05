@@ -21,6 +21,7 @@
  */
 
 import type { ChatBackend } from '@/lib/api/chatBackend'
+import { generateWithTimeout } from '@/lib/api/generateWithTimeout'
 import { parseLenientJson } from '@/lib/jsonRepair'
 import type { SceneTag } from '@/lib/vn/sceneTag'
 
@@ -100,12 +101,15 @@ export async function detectExpressionFromSprites(
 
   let text: string
   try {
-    text = await client.generate({
-      ...VISION_PARAMS,
-      max_context_length: await client.getEffectiveMaxContext(),
-      prompt,
-      images: sprites.map((s) => s.base64),
-    })
+    // Every call in this file is a non-blocking backup that only ever overrides the model's own
+    // tag on a valid answer (see the file header) — a hang here used to mean the caller waited
+    // forever for a "best-effort" pass that was supposed to be cheap; `generateWithTimeout` bounds
+    // it to 45s, after which the catch below falls back the same as any other read/parse failure.
+    text = await generateWithTimeout(
+      client,
+      { ...VISION_PARAMS, max_context_length: await client.getEffectiveMaxContext(), prompt, images: sprites.map((s) => s.base64) },
+      'Detect expression',
+    )
   } catch {
     return null
   }
@@ -163,12 +167,11 @@ export async function shortlistExpressions(
 
   let text: string
   try {
-    text = await client.generate({
-      ...VISION_PARAMS,
-      max_length: 80,
-      max_context_length: await client.getEffectiveMaxContext(),
-      prompt,
-    })
+    text = await generateWithTimeout(
+      client,
+      { ...VISION_PARAMS, max_length: 80, max_context_length: await client.getEffectiveMaxContext(), prompt },
+      'Shortlist expressions',
+    )
   } catch {
     return fallback()
   }
@@ -224,13 +227,11 @@ export async function classifyAttachedImageScene(
 
   let text: string
   try {
-    text = await client.generate({
-      ...VISION_PARAMS,
-      max_length: 40,
-      max_context_length: await client.getEffectiveMaxContext(),
-      prompt,
-      images,
-    })
+    text = await generateWithTimeout(
+      client,
+      { ...VISION_PARAMS, max_length: 40, max_context_length: await client.getEffectiveMaxContext(), prompt, images },
+      'Classify attached image',
+    )
   } catch {
     return {}
   }
@@ -286,7 +287,11 @@ export async function detectGreetingScene(
 
   let raw: string
   try {
-    raw = await client.generate({ ...GREETING_SCENE_PARAMS, max_context_length: await client.getEffectiveMaxContext(), prompt })
+    raw = await generateWithTimeout(
+      client,
+      { ...GREETING_SCENE_PARAMS, max_context_length: await client.getEffectiveMaxContext(), prompt },
+      'Detect greeting scene',
+    )
   } catch {
     return null
   }

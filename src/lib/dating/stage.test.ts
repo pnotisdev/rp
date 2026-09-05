@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
   applyBreakupScar,
+  canActuallyAskForCommitment,
   canAskForCommitment,
   canInitiateFirstTime,
   combinedSceneFlags,
+  commitmentLockReason,
   commitmentTierThreshold,
   crossedMilestone,
   evaluateRelationshipRisk,
@@ -53,15 +55,16 @@ describe('isLiveScene', () => {
 })
 
 describe('combinedSceneFlags', () => {
-  it('returns just the 4 built-in defaults when no custom flags are given', () => {
+  it('returns just the 5 built-in defaults when no custom flags are given', () => {
     const result = combinedSceneFlags()
-    expect(result.map((f) => f.id)).toEqual(['first_date', 'confession', 'jealousy', 'promise'])
+    expect(result.map((f) => f.id)).toEqual(['first_date', 'confession', 'jealousy', 'promise', 'first_kiss'])
     expect(result.find((f) => f.id === 'first_date')?.label).toBe('first date')
+    expect(result.find((f) => f.id === 'first_kiss')?.label).toBe('first kiss')
   })
 
   it('appends a world\'s custom flags after the built-in defaults, using their own label', () => {
     const result = combinedSceneFlags([{ id: 'moved-in', label: 'Moved in together', description: 'they now share a home' }])
-    expect(result.map((f) => f.id)).toEqual(['first_date', 'confession', 'jealousy', 'promise', 'moved-in'])
+    expect(result.map((f) => f.id)).toEqual(['first_date', 'confession', 'jealousy', 'promise', 'first_kiss', 'moved-in'])
     expect(result.find((f) => f.id === 'moved-in')?.label).toBe('Moved in together')
   })
 
@@ -166,6 +169,86 @@ describe('canAskForCommitment', () => {
     expect(canAskForCommitment('dating', 54)).toBe(false)
     expect(canAskForCommitment('dating', 55)).toBe(true)
     expect(canAskForCommitment('dating', 100)).toBe(true)
+  })
+})
+
+// Gap the user's own playthrough surfaced: warmth alone let a couple reach "married" without ever
+// having kissed. `commitmentLockReason`/`canActuallyAskForCommitment` compose the existing warmth
+// gate with two physical-reality checks — these tests cover both directions the task called out:
+// warmth met but not the physical gate (still locked), the physical gate met but not warmth (still
+// locked), and both met together (unlocked).
+describe('commitmentLockReason', () => {
+  const kissed = { hasKissed: true, firstIntimateSceneAt: undefined }
+  const notKissed = { hasKissed: false, firstIntimateSceneAt: undefined }
+  const firstTimeHappened = { hasKissed: true, firstIntimateSceneAt: 12345 }
+  const firstTimeNotYet = { hasKissed: true, firstIntimateSceneAt: undefined }
+
+  it('is "warmth" below the threshold regardless of the physical state', () => {
+    expect(commitmentLockReason('dating', 54, kissed)).toBe('warmth')
+    expect(commitmentLockReason('dating', 54, notKissed)).toBe('warmth')
+  })
+
+  it('is "kiss" for dating once warmth is met but they have not kissed', () => {
+    expect(commitmentLockReason('dating', 55, notKissed)).toBe('kiss')
+    expect(commitmentLockReason('dating', 100, notKissed)).toBe('kiss')
+  })
+
+  it('is undefined for dating once warmth is met and they have kissed', () => {
+    expect(commitmentLockReason('dating', 55, kissed)).toBeUndefined()
+  })
+
+  it('does not add its own physical check for exclusive — warmth alone is enough', () => {
+    expect(commitmentLockReason('exclusive', 75, notKissed)).toBeUndefined()
+  })
+
+  it('is "first_time" for living_together and married once warmth is met but no first time together yet', () => {
+    expect(commitmentLockReason('living_together', 90, firstTimeNotYet)).toBe('first_time')
+    expect(commitmentLockReason('married', 90, firstTimeNotYet)).toBe('first_time')
+  })
+
+  it('is undefined for living_together and married once warmth and first time together are both met', () => {
+    expect(commitmentLockReason('living_together', 90, firstTimeHappened)).toBeUndefined()
+    expect(commitmentLockReason('married', 90, firstTimeHappened)).toBeUndefined()
+  })
+
+  it('is "warmth" for living_together even with first time together already set, if warmth is not met', () => {
+    expect(commitmentLockReason('living_together', 89, firstTimeHappened)).toBe('warmth')
+  })
+
+  it('honors custom milestone overrides for the warmth half of the check', () => {
+    const custom = [
+      { stage: 'near_strangers' as const, at: 0 },
+      { stage: 'getting_close' as const, at: 40 },
+    ]
+    expect(commitmentLockReason('dating', 39, notKissed, custom)).toBe('warmth')
+    expect(commitmentLockReason('dating', 40, notKissed, custom)).toBe('kiss')
+    expect(commitmentLockReason('dating', 40, kissed, custom)).toBeUndefined()
+  })
+})
+
+describe('canActuallyAskForCommitment', () => {
+  it('is false when warmth is met but they have not kissed (dating)', () => {
+    expect(canActuallyAskForCommitment('dating', 55, { hasKissed: false })).toBe(false)
+  })
+
+  it('is false when they have kissed but warmth is not met (dating)', () => {
+    expect(canActuallyAskForCommitment('dating', 54, { hasKissed: true })).toBe(false)
+  })
+
+  it('is true once both warmth and the kiss are met (dating)', () => {
+    expect(canActuallyAskForCommitment('dating', 55, { hasKissed: true })).toBe(true)
+  })
+
+  it('is false when warmth is met but there was no first time together (married)', () => {
+    expect(canActuallyAskForCommitment('married', 90, { hasKissed: true, firstIntimateSceneAt: undefined })).toBe(false)
+  })
+
+  it('is false when there was a first time together but warmth is not met (married)', () => {
+    expect(canActuallyAskForCommitment('married', 89, { hasKissed: true, firstIntimateSceneAt: 999 })).toBe(false)
+  })
+
+  it('is true once both warmth and a first time together are met (married)', () => {
+    expect(canActuallyAskForCommitment('married', 90, { hasKissed: true, firstIntimateSceneAt: 999 })).toBe(true)
   })
 })
 

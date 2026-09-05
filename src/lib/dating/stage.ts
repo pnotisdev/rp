@@ -34,7 +34,18 @@ export const RELATIONSHIP_MILESTONES: { stage: RelationshipStage; at: number }[]
 ]
 
 /** Canonical set of built-in branching scene-memory flags the AI classifier can detect — always available, regardless of world. See `combinedSceneFlags` for the full set including a world's own custom ones. */
-export const SCENE_FLAGS: SceneFlag[] = ['first_date', 'confession', 'jealousy', 'promise']
+export const SCENE_FLAGS: SceneFlag[] = ['first_date', 'confession', 'jealousy', 'promise', 'first_kiss']
+
+/**
+ * The built-in flag marking "these two have actually kissed" — the physical-reality signal
+ * `canActuallyAskForCommitment` gates the `dating` tier on (see its own doc comment for the full
+ * "married with zero kisses" bug this exists to fix). Set two ways, so it fires whichever way a
+ * kiss actually happens: deterministically the instant a `kissing_spot`-category intimacy action is
+ * sent (`useChatSession.ts`'s `sendUserMessage`), or by the AI classifier noticing one written out
+ * in freeform roleplay instead (`relationshipAssist.ts`'s `FLAG_GLOSSARY` entry for this flag).
+ * Exported so every site that needs the literal agrees on one spelling rather than retyping it.
+ */
+export const FIRST_KISS_FLAG: SceneFlag = 'first_kiss'
 
 /** The 4 built-in flags plus whatever a world has authored on top, as {id, label} pairs — the one place both the UI (Relationship panel checklist, item "set flag" picker) and the AI classifier (relationshipAssist.ts) should read the full available set from, so they can never drift apart. */
 export function combinedSceneFlags(customFlags?: CustomSceneFlag[]): { id: string; label: string }[] {
@@ -95,6 +106,47 @@ export function canAskForCommitment(
   milestones: { stage: RelationshipStage; at: number }[] = RELATIONSHIP_MILESTONES,
 ): boolean {
   return warmth >= commitmentTierThreshold(tier, milestones)
+}
+
+/** Why `tier` isn't askable right now — `undefined` means it actually is. See `canActuallyAskForCommitment`, which this backs. */
+export type CommitmentLockReason = 'warmth' | 'kiss' | 'first_time'
+
+/**
+ * A live playthrough reached "married" on warmth alone, the two characters never having so much as
+ * kissed — `canAskForCommitment`'s threshold says nothing about physical reality. This is the one
+ * place that decides *why* `tier` is locked, composing the existing warmth gate with two new
+ * physical-reality checks: `RelationshipPanel`'s locked-hint copy reads this directly (`canAskFor
+ * Commitment` alone can't tell "not warm enough yet" apart from "warm enough, but they haven't
+ * kissed", and a player can only act on the second kind of hint if it says so).
+ * - `dating` additionally needs `physical.hasKissed` — the built-in `first_kiss` scene flag
+ *   (`FIRST_KISS_FLAG`) having been set.
+ * - `living_together` and `married` additionally need `physical.firstIntimateSceneAt` to be set
+ *   (the "first time together" milestone, see `canInitiateFirstTime`) — checked at *both* tiers
+ *   independently, as defense in depth, even though ladder order alone already implies it (you
+ *   can't ask for `married` without already being `living_together`, which already required it).
+ * `exclusive` gets no additional check of its own: by the time it's askable the pair is already
+ * `dating`, which already required a kiss, and flags are never removed once set.
+ */
+export function commitmentLockReason(
+  tier: Exclude<CommitmentStatus, 'none'>,
+  warmth: number,
+  physical: { hasKissed: boolean; firstIntimateSceneAt?: number },
+  milestones: { stage: RelationshipStage; at: number }[] = RELATIONSHIP_MILESTONES,
+): CommitmentLockReason | undefined {
+  if (!canAskForCommitment(tier, warmth, milestones)) return 'warmth'
+  if (tier === 'dating' && !physical.hasKissed) return 'kiss'
+  if ((tier === 'living_together' || tier === 'married') && !physical.firstIntimateSceneAt) return 'first_time'
+  return undefined
+}
+
+/** True once `tier` is actually askable right now — warmth *and* the physical-reality gates above. Asking still doesn't mean the character will say yes. */
+export function canActuallyAskForCommitment(
+  tier: Exclude<CommitmentStatus, 'none'>,
+  warmth: number,
+  physical: { hasKissed: boolean; firstIntimateSceneAt?: number },
+  milestones: { stage: RelationshipStage; at: number }[] = RELATIONSHIP_MILESTONES,
+): boolean {
+  return commitmentLockReason(tier, warmth, physical, milestones) === undefined
 }
 
 /**

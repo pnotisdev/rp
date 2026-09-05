@@ -239,5 +239,5 @@ export function intimacyOptionsGuidance(unlocked: IntimacyUnlockable[], intimacy
   }
 
   if (parts.length === 0) return ''
-  return `${parts.join(' ')} Use whichever, if any, genuinely fits this exact moment — never force one in just because it's unlocked.`
+  return `${parts.join(' ')} Use whichever, if any, genuinely fits this exact moment — never force one in just because it's unlocked. This isn't only something to wait for either: it's just as natural for your character to be the one who leans in, reaches out, or makes the first move themselves, instead of only responding once it's suggested to them.`
 }

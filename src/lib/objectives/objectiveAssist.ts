@@ -1,6 +1,14 @@
 import type { ChatBackend } from '@/lib/api/chatBackend'
+import { generateWithTimeout } from '@/lib/api/generateWithTimeout'
 import { parseLenientJson } from '@/lib/jsonRepair'
 import type { AiLoreSubject } from '@/lib/characters/aiAssist'
+
+// None of this file's `client.generate` calls ever passed a `signal`, so a slow or hanging
+// provider response (the live-confirmed failure mode `generateWithTimeout` exists for: a
+// rate-limited free OpenRouter model that simply never resolves) left the caller stuck forever
+// too — "Suggest one for me" / "Generate tasks with AI" in `ObjectivePanel` set `busy` and only
+// clear it in a `finally` after the awaited call settles, so a hang there reads as the button
+// stuck on "Thinking…"/"Generating…" forever, with no error and no way to retry.
 
 const GENERATE_PARAMS = {
   max_length: 400,
@@ -34,7 +42,11 @@ export async function generateTasks(
     'JSON:',
   ].join('\n\n')
 
-  const text = await client.generate({ ...GENERATE_PARAMS, max_context_length: await client.getEffectiveMaxContext(), prompt })
+  const text = await generateWithTimeout(
+    client,
+    { ...GENERATE_PARAMS, max_context_length: await client.getEffectiveMaxContext(), prompt },
+    'Generate tasks',
+  )
   const parsed = parseLenientJson(text)
   if (!Array.isArray(parsed)) throw new Error('Model did not return a JSON array of tasks')
   return parsed.filter((t): t is string => typeof t === 'string' && t.trim().length > 0)
@@ -55,7 +67,11 @@ export async function suggestObjective(
     'JSON:',
   ].join('\n\n')
 
-  const text = await client.generate({ ...GENERATE_PARAMS, max_context_length: await client.getEffectiveMaxContext(), prompt })
+  const text = await generateWithTimeout(
+    client,
+    { ...GENERATE_PARAMS, max_context_length: await client.getEffectiveMaxContext(), prompt },
+    'Suggest objective',
+  )
   const parsed = parseLenientJson(text)
   if (!parsed || typeof parsed !== 'object') throw new Error('Model did not return a JSON object')
   const obj = parsed as Record<string, unknown>
@@ -86,13 +102,17 @@ export async function detectCompletedTasks(
     'JSON:',
   ].join('\n\n')
 
-  const text = await client.generate({
-    ...GENERATE_PARAMS,
-    max_length: 60,
-    temperature: 0.2,
-    max_context_length: await client.getEffectiveMaxContext(),
-    prompt,
-  })
+  const text = await generateWithTimeout(
+    client,
+    {
+      ...GENERATE_PARAMS,
+      max_length: 60,
+      temperature: 0.2,
+      max_context_length: await client.getEffectiveMaxContext(),
+      prompt,
+    },
+    'Detect completed tasks',
+  )
   const parsed = parseLenientJson(text)
   if (!Array.isArray(parsed)) return []
   return parsed.filter((i): i is number => typeof i === 'number' && Number.isInteger(i) && i >= 0 && i < pendingTasks.length)

@@ -1,6 +1,17 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { KoboldClient } from '@/lib/api/kobold'
 import { classifyAttachedImageScene, detectExpressionFromSprites, detectGreetingScene, shortlistExpressions } from './sceneVision'
+
+/** Never resolves or rejects on its own — only reacts to the caller's abort signal. */
+function hangingClient(): KoboldClient {
+  return {
+    generate: (_p: unknown, signal?: AbortSignal) =>
+      new Promise<string>((_resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
+      }),
+    getEffectiveMaxContext: async () => 4096,
+  } as unknown as KoboldClient
+}
 
 /** Minimal stand-in: the two calls sceneVision actually makes on a client. */
 function stubClient(reply: string, spy?: (params: Record<string, unknown>) => void): KoboldClient {
@@ -300,5 +311,44 @@ describe('detectGreetingScene', () => {
     expect(
       await detectGreetingScene(throwing, { text: GREETING, expressionIds: ['neutral'], backgroundIds: ['classroom'] }),
     ).toBeNull()
+  })
+})
+
+describe('when the backend never responds', () => {
+  // Every pass in this file is documented as a non-blocking backup (see the file header) — before
+  // `generateWithTimeout` was wired in, a hang here meant the caller waited forever for what was
+  // supposed to be a cheap, best-effort assist. Each one now falls back the same as any other
+  // read/parse failure after 45s instead of hanging indefinitely.
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  it('detectExpressionFromSprites falls back to null after 45s', async () => {
+    const pending = detectExpressionFromSprites(hangingClient(), { charName: 'X', replyText: 'hi', sprites: SPRITES })
+    const assertion = expect(pending).resolves.toBeNull()
+    await vi.advanceTimersByTimeAsync(45_000)
+    await assertion
+  })
+
+  it('shortlistExpressions falls back to the head of the list after 45s', async () => {
+    const many = Array.from({ length: 12 }, (_, i) => ({ id: `e${i}`, label: `Expr ${i}` }))
+    const pending = shortlistExpressions(hangingClient(), { charName: 'X', replyText: 'a long line', candidates: many, limit: 6 })
+    const assertion = expect(pending).resolves.toEqual(many.slice(0, 6).map((c) => c.id))
+    await vi.advanceTimersByTimeAsync(45_000)
+    await assertion
+  })
+
+  it('classifyAttachedImageScene falls back to {} after 45s', async () => {
+    const pending = classifyAttachedImageScene(hangingClient(), { images: ['AAAA'], backgroundIds: ['beach'], moodIds: ['cheerful'] })
+    const assertion = expect(pending).resolves.toEqual({})
+    await vi.advanceTimersByTimeAsync(45_000)
+    await assertion
+  })
+
+  it('detectGreetingScene falls back to null after 45s', async () => {
+    const greeting = 'She is at the usual table, second floor of the library, half behind a book.'
+    const pending = detectGreetingScene(hangingClient(), { text: greeting, expressionIds: ['neutral'], backgroundIds: ['classroom'] })
+    const assertion = expect(pending).resolves.toBeNull()
+    await vi.advanceTimersByTimeAsync(45_000)
+    await assertion
   })
 })

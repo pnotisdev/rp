@@ -1,5 +1,6 @@
 import type { ChatMessage } from '@/lib/prompt/builder'
 import type { ChatBackend } from '@/lib/api/chatBackend'
+import { generateWithTimeout } from '@/lib/api/generateWithTimeout'
 import { parseLenientJson } from '@/lib/jsonRepair'
 import type { ChoiceOption } from '@/lib/types'
 
@@ -54,7 +55,14 @@ export async function generateChoices(
     'JSON:',
   ].join('\n\n')
 
-  const text = await client.generate({ ...GENERATE_PARAMS, max_context_length: await client.getEffectiveMaxContext(), prompt })
+  // A hang here (backend never responds) used to leave the "choices" background-assist indicator
+  // stuck forever with nothing to show for it — `generateWithTimeout` bounds it to 45s, after which
+  // the caller's own catch-everything wrapper clears the indicator same as any other failure.
+  const text = await generateWithTimeout(
+    client,
+    { ...GENERATE_PARAMS, max_context_length: await client.getEffectiveMaxContext(), prompt },
+    'Suggest choices',
+  )
   const parsed = parseLenientJson(text)
   if (!Array.isArray(parsed)) return []
   const options: ChoiceOption[] = []

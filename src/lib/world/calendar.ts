@@ -90,7 +90,8 @@ export function seededFraction(seed: string): number {
   return ((h >>> 0) % 100000) / 100000
 }
 
-function pickFrom<T>(options: T[], seed: string): T {
+/** Exported for `world/ambientEvents.ts` — the same "deterministic seeded pick" primitive, shared rather than re-implemented. */
+export function pickFrom<T>(options: T[], seed: string): T {
   const idx = Math.min(options.length - 1, Math.floor(seededFraction(seed) * options.length))
   return options[idx]
 }

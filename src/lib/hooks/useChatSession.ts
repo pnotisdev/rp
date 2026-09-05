@@ -38,6 +38,7 @@ import {
   computeWarmth,
   crossedMilestone,
   evaluateRelationshipRisk,
+  FIRST_KISS_FLAG,
   formatCommitmentStatus,
   formatRelationshipStage,
   getRelationshipStats,
@@ -52,6 +53,7 @@ import {
 } from '@/lib/dating/stage'
 import { defaultGiftInventory, getGiftCatalog, giftById, giftImpactBase } from '@/lib/dating/gifts'
 import { createGenerationLock, type GenerationLock } from '@/lib/chat/generationLock'
+import { getCoinMutex } from '@/lib/chat/coinMutex'
 import { nextRoundRobinSpeaker, parseMention, pickDirectorSpeaker, rosterFrom } from '@/lib/chat/scene'
 import { itemById } from '@/lib/dating/items'
 import { buildRelationshipDescription } from '@/lib/dating/relationshipDescription'
@@ -148,23 +150,60 @@ function latestImages(history: StoredMessage[]): string[] {
 }
 
 /**
+ * Coins granted the moment warmth actually crosses into a new relationship stage (see
+ * `announceMilestone`) — comparable to a mid-tier gift (`gifts.ts`'s catalog runs roughly 6-28
+ * coins). There are only 6 stages total (`RELATIONSHIP_MILESTONES`), so this can fire at most 5
+ * times in a relationship's entire lifetime — a genuine occasional high point, not the "constant
+ * noise" a per-turn trickle would be.
+ */
+const STAGE_MILESTONE_COIN_BONUS = 15
+
+/**
+ * Coins granted the moment a Define-the-Relationship ask is actually accepted (`askForCommitment`)
+ * — bigger than `STAGE_MILESTONE_COIN_BONUS` since only 4 commitment tiers exist total
+ * (`COMMITMENT_ORDER`), rarer and more significant than an ordinary warmth-band crossing.
+ * Comparable to the priciest end of the gift/toy catalogs (`gifts.ts`/`intimacyCatalog.ts` top out
+ * around 28-30 coins).
+ */
+const COMMITMENT_ACCEPTED_COIN_BONUS = 25
+
+/**
+ * Coins granted the moment a chat's own objective — not a formal date/hangout, which already earns
+ * its own affection-scaled payout via `endDateEvent` — is marked complete (`setObjectiveStatus`).
+ * Comparable to a common-to-uncommon gift (`gifts.ts`): this is the one earning moment available to
+ * a player who mostly just talks and works toward ordinary objectives instead of deliberately
+ * starting dates.
+ */
+const OBJECTIVE_COMPLETE_COIN_BONUS = 12
+
+/**
  * Fires the player-facing toast for a warmth-band crossing (10c's "Milestones" — the banner half;
  * a next-morning text and a social-circle ripple stay open, both needing machinery this doesn't
- * have yet) and, new here, records it as a `ChatFact` "keepsake memory" — so the model actually
- * knows the relationship deepened rather than only the unlock gates silently changing underneath
- * it. Reuses the exact same synthetic-lorebook plumbing every other fact already rides through.
+ * have yet), records it as a `ChatFact` "keepsake memory" — so the model actually knows the
+ * relationship deepened rather than only the unlock gates silently changing underneath it — and
+ * grants a one-time coin bonus (10a's "Economy" bullet): reaching a new relationship high is
+ * exactly the kind of discrete, occasional, meaningful moment worth a real, noticed reward, unlike
+ * a flat per-turn trickle (see the comment in `updateAffectionFromReply` this replaced). Runs the
+ * coin write inside the coin mutex like every other `giftCoins` touch in this file (`coinMutex.ts`),
+ * re-reading the live balance rather than trusting a caller's possibly-stale snapshot.
  */
-function announceMilestone(opts: {
+async function announceMilestone(opts: {
   charName: string
   personaName: string
   chatId: string
   previousStage: RelationshipStage
   relationshipStage: RelationshipStage
   sourceMessageId?: string
-}): void {
+}): Promise<void> {
   if (!crossedMilestone(opts.previousStage, opts.relationshipStage)) return
   const label = formatRelationshipStage(opts.relationshipStage)
-  toastSuccess(`${opts.charName}'s relationship with you is now "${label}"`, { chime: true })
+  const coinsGranted = await getCoinMutex(opts.chatId).run(async () => {
+    const liveChat = await chatsApi.get(opts.chatId)
+    if (!liveChat) return 0
+    await chatsApi.update(opts.chatId, { giftCoins: Math.max(0, (liveChat.giftCoins ?? 0) + STAGE_MILESTONE_COIN_BONUS) })
+    return STAGE_MILESTONE_COIN_BONUS
+  })
+  toastSuccess(`${opts.charName}'s relationship with you is now "${label}"${coinsGranted ? ` — +${coinsGranted} coins` : ''}`, { chime: true })
   chatFactsApi
     .create({
       chatId: opts.chatId,
@@ -616,14 +655,25 @@ export function useChatSession(chatId: string | null) {
       // from their `replyLength` override or measured from their own example dialogue. The matching
       // hard token cap lives in `runGeneration` so brevity survives a model that ignores the line.
       const replyLengthInstruction = resolveReplyLength(speaker.replyLength, speaker.card).instruction
+      // The user's own direct feedback from a live playthrough: the character (and the suggested
+      // choices around them) only ever reacted, never proposed anything themselves, so a session
+      // could sit at "waiting for {{user}} to make every move" indefinitely. Deliberately generic
+      // and always-on (not gated behind relationship tracking) — having opinions about what to do
+      // next is basic characterization, not a dating-sim-only concern. The character's own likes/
+      // frequented locations already reach the model every turn via `buildCharacterProfileNote`;
+      // this just tells the model it's allowed to volunteer from that material instead of only
+      // answering when asked.
+      const activityInitiativeGuidance =
+        "Your character doesn't only answer what's put in front of them. Every so often, especially once things feel comfortable, let them bring up an idea of their own: something to do together, a place to go, a topic they're curious about, drawing on their own interests and routine rather than only reacting to what's proposed to them."
       const styleGuidance =
         [
           avoidEmDashes ? 'Never use em dashes (the — character) in your writing. Use a comma, period, or parentheses instead.' : '',
           slowBurnPacing
-            ? "Pace intimacy like a slow burn. Earn it through many small moments; don't grant it just because it was asked for. If pushed toward more affection, a kiss, or closeness faster than the relationship has earned, react the way your character actually would. Hesitation, deflection, or a flat no are often the right call, especially early on. Don't cave just to be agreeable."
+            ? "Pace intimacy like a slow burn. Earn it through many small moments; don't grant it just because it was asked for. If pushed toward more affection, a kiss, or closeness faster than the relationship has earned, react the way your character actually would. Hesitation, deflection, or a flat no are often the right call, especially early on. Don't cave just to be agreeable. None of this makes your character passive, though: once something is genuinely earned, don't just sit and wait for it to be asked for either. Let your character be the one who closes the distance, reaches for a hand, or leans in first sometimes, the same way a real person catching feelings would."
             : '',
           intimacyGuidance(intimacyLevel),
           intimacyOptions,
+          activityInitiativeGuidance,
           afterglowLine,
           moodLine,
           needLine,
@@ -900,10 +950,6 @@ export function useChatSession(chatId: string | null) {
         })
         unlockedIds.forEach((id) => unlockedSet.add(id))
       }
-      // Coins are a shared, chat-wide wallet — the player's own spending money, not owed by any one
-      // character — so they only ever accrue from the primary's own conversation, same as before
-      // this pass; a non-primary's turn still scores their own affection/stats/gallery for real.
-      const nextCoins = isPrimary ? Math.max(0, (freshChat.giftCoins ?? 0) + 2) : (freshChat.giftCoins ?? 0)
       // Author-defined world rules (`world/triggers.ts`), evaluated against the state this turn
       // just produced rather than the state it started from — a trigger keyed on "trust >= 70"
       // should fire on the turn trust actually reaches 70, not one turn later. Only for the
@@ -938,6 +984,16 @@ export function useChatSession(chatId: string | null) {
         (!mood || mood === track.mood) &&
         (!currentNeed || currentNeed === track.currentNeed) &&
         (!characterIntent || characterIntent === track.characterIntent)
+      // Coins are NOT granted here — a flat per-turn trickle was tried and deliberately removed
+      // (see the "Quiet, player-facing rewards" comment a few lines down): it was silent (no toast)
+      // and gated only on `isPrimary`, nothing about whether this turn was actually eventful, so it
+      // fired on literally every ordinary reply — exactly the "constant noise" this file already
+      // argues against for stat deltas and scene flags. Coins are instead granted at discrete,
+      // toasted moments elsewhere — `announceMilestone` (a warmth stage actually crossed),
+      // `askForCommitment`'s accept branch (a commitment tier actually accepted),
+      // `setObjectiveStatus` (an objective actually completed), and `endDateEvent`'s existing
+      // affection-scaled date/hangout payout — so money always reads as a noticed, earned event
+      // rather than a number quietly climbing in the background.
       if (
         noStatChange &&
         noRiskChange &&
@@ -949,8 +1005,7 @@ export function useChatSession(chatId: string | null) {
         // that scored no relationship movement at all.
         !triggerResult?.fired.length &&
         newFlags.length === 0 &&
-        unlockedSet.size === (track.unlockedGalleryIds ?? []).length &&
-        nextCoins === (freshChat.giftCoins ?? 0)
+        unlockedSet.size === (track.unlockedGalleryIds ?? []).length
       ) {
         // Nothing relationship-related moved, but a task can still have completed on a turn that
         // otherwise scored flat — the caller still needs these indices either way.
@@ -979,7 +1034,6 @@ export function useChatSession(chatId: string | null) {
           afterglow: resolvedAftercare ? null : (track.afterglow ?? null),
         }),
         sceneFlags: [...existingFlags],
-        giftCoins: nextCoins,
       })
       if (resolvedAftercare) {
         const changed = Object.fromEntries(
@@ -1020,7 +1074,7 @@ export function useChatSession(chatId: string | null) {
       }
       // Quiet, player-facing rewards — these are milestones worth surfacing, unlike the raw
       // scene flags (internal bookkeeping) or per-turn stat deltas (would be constant noise).
-      announceMilestone({
+      await announceMilestone({
         charName: speaker.card.name,
         personaName: persona?.name || 'You',
         chatId: chatIdForRelationship,
@@ -1038,20 +1092,32 @@ export function useChatSession(chatId: string | null) {
     [activeFacts, client, persona?.name, relationshipDifficulty, world],
   )
 
+  // buyGift/buyItem/buyToy/useItem's currency branch, plus the coin writes in
+  // `updateAffectionFromReply` and `endDateEvent`, all follow the same GET-compute-PUT shape
+  // against the one shared `Chat.giftCoins` wallet. None of that round-trip is atomic on its own,
+  // so two of these firing close together (two Shop purchases clicked back-to-back is all it
+  // takes) can race: the second's GET reads the balance from *before* the first's PUT committed,
+  // and whichever PUT lands last silently overwrites the other's coin delta while both purchases'
+  // inventory writes (a different field each) still land — a real item, but its cost evaporates.
+  // `getCoinMutex(chatId).run(...)` below serializes every one of these against the others for this
+  // chat, so each one's "fresh" read is guaranteed to see the previous one's write. See
+  // `coinMutex.ts` for the full repro this was found with.
   const buyGift = useCallback(
     async (giftId: string) => {
       if (!chatId) return
       const item = giftById(giftId, world)
       if (!item) return
-      const freshChat = await chatsApi.get(chatId)
-      if (!freshChat) return
-      const coins = freshChat.giftCoins ?? 0
-      if (coins < item.price) return
-      const inventory = { ...(freshChat.giftInventory ?? defaultGiftInventory(world)) }
-      inventory[giftId] = (inventory[giftId] ?? 0) + 1
-      await chatsApi.update(chatId, {
-        giftCoins: coins - item.price,
-        giftInventory: inventory,
+      await getCoinMutex(chatId).run(async () => {
+        const freshChat = await chatsApi.get(chatId)
+        if (!freshChat) return
+        const coins = freshChat.giftCoins ?? 0
+        if (coins < item.price) return
+        const inventory = { ...(freshChat.giftInventory ?? defaultGiftInventory(world)) }
+        inventory[giftId] = (inventory[giftId] ?? 0) + 1
+        await chatsApi.update(chatId, {
+          giftCoins: coins - item.price,
+          giftInventory: inventory,
+        })
       })
     },
     [chatId, world],
@@ -1062,15 +1128,17 @@ export function useChatSession(chatId: string | null) {
       if (!chatId) return
       const def = itemById(itemId, world)
       if (!def) return
-      const freshChat = await chatsApi.get(chatId)
-      if (!freshChat) return
-      const coins = freshChat.giftCoins ?? 0
-      if (coins < def.price) return
-      const inventory = { ...(freshChat.itemInventory ?? {}) }
-      inventory[itemId] = (inventory[itemId] ?? 0) + 1
-      await chatsApi.update(chatId, {
-        giftCoins: coins - def.price,
-        itemInventory: inventory,
+      await getCoinMutex(chatId).run(async () => {
+        const freshChat = await chatsApi.get(chatId)
+        if (!freshChat) return
+        const coins = freshChat.giftCoins ?? 0
+        if (coins < def.price) return
+        const inventory = { ...(freshChat.itemInventory ?? {}) }
+        inventory[itemId] = (inventory[itemId] ?? 0) + 1
+        await chatsApi.update(chatId, {
+          giftCoins: coins - def.price,
+          itemInventory: inventory,
+        })
       })
     },
     [chatId, world],
@@ -1082,15 +1150,18 @@ export function useChatSession(chatId: string | null) {
       if (!chatId) return
       const def = intimacyItemById(toyId, world)
       if (!def?.price) return
-      const freshChat = await chatsApi.get(chatId)
-      if (!freshChat) return
-      const coins = freshChat.giftCoins ?? 0
-      if (coins < def.price) return
-      const inventory = { ...(freshChat.toyInventory ?? {}) }
-      inventory[toyId] = (inventory[toyId] ?? 0) + 1
-      await chatsApi.update(chatId, {
-        giftCoins: coins - def.price,
-        toyInventory: inventory,
+      const price = def.price
+      await getCoinMutex(chatId).run(async () => {
+        const freshChat = await chatsApi.get(chatId)
+        if (!freshChat) return
+        const coins = freshChat.giftCoins ?? 0
+        if (coins < price) return
+        const inventory = { ...(freshChat.toyInventory ?? {}) }
+        inventory[toyId] = (inventory[toyId] ?? 0) + 1
+        await chatsApi.update(chatId, {
+          giftCoins: coins - price,
+          toyInventory: inventory,
+        })
       })
     },
     [chatId, world],
@@ -1105,39 +1176,60 @@ export function useChatSession(chatId: string | null) {
       if (!chatId || !character) return
       const def = itemById(itemId, world)
       if (!def) return
-      const freshChat = await chatsApi.get(chatId)
-      if (!freshChat) return
-      const inStock = freshChat.itemInventory?.[itemId] ?? 0
-      if (inStock <= 0) return
-      const inventory = { ...freshChat.itemInventory }
-      inventory[itemId] = inStock - 1
-      if (inventory[itemId] <= 0) delete inventory[itemId]
+      // Only the 'currency' branch touches `giftCoins`, but the whole read-modify-write still runs
+      // inside the mutex (see the note above `buyGift`) — cheap to serialize, and it means a coin
+      // item used back-to-back with a Shop purchase can't race either.
+      await getCoinMutex(chatId).run(async () => {
+        const freshChat = await chatsApi.get(chatId)
+        if (!freshChat) return
+        const inStock = freshChat.itemInventory?.[itemId] ?? 0
+        if (inStock <= 0) return
+        const inventory = { ...freshChat.itemInventory }
+        inventory[itemId] = inStock - 1
+        if (inventory[itemId] <= 0) delete inventory[itemId]
 
-      const patch: Record<string, unknown> = { itemInventory: inventory }
-      let toastMessage = `Used ${def.name}.`
-      if (def.effect.kind === 'currency') {
-        patch.giftCoins = Math.max(0, (freshChat.giftCoins ?? 0) + def.effect.amount)
-        toastMessage = `Used ${def.name} — gained ${def.effect.amount} coins.`
-      } else if (def.effect.kind === 'flag') {
-        const flags = new Set((freshChat.sceneFlags ?? []) as SceneFlag[])
-        flags.add(def.effect.flag)
-        patch.sceneFlags = [...flags]
-        toastMessage = `Used ${def.name}.`
-      } else {
-        const dim = def.effect.dimension
-        if (dim === 'affection') {
-          patch.affection = clampAffection((freshChat.affection ?? 0) + def.effect.amount)
+        const patch: Record<string, unknown> = { itemInventory: inventory }
+        let toastMessage = `Used ${def.name}.`
+        if (def.effect.kind === 'currency') {
+          patch.giftCoins = Math.max(0, (freshChat.giftCoins ?? 0) + def.effect.amount)
+          toastMessage = `Used ${def.name} — gained ${def.effect.amount} coins.`
+        } else if (def.effect.kind === 'flag') {
+          const flags = new Set((freshChat.sceneFlags ?? []) as SceneFlag[])
+          flags.add(def.effect.flag)
+          patch.sceneFlags = [...flags]
+          toastMessage = `Used ${def.name}.`
         } else {
-          const stats = getRelationshipStats(freshChat)
-          patch.relationshipStats = { ...stats, [dim]: clampStat(stats[dim] + def.effect.amount) }
+          const dim = def.effect.dimension
+          if (dim === 'affection') {
+            patch.affection = clampAffection((freshChat.affection ?? 0) + def.effect.amount)
+          } else {
+            const stats = getRelationshipStats(freshChat)
+            patch.relationshipStats = { ...stats, [dim]: clampStat(stats[dim] + def.effect.amount) }
+          }
+          toastMessage = `Used ${def.name} — ${def.effect.amount > 0 ? '+' : ''}${def.effect.amount} ${dim}.`
         }
-        toastMessage = `Used ${def.name} — ${def.effect.amount > 0 ? '+' : ''}${def.effect.amount} ${dim}.`
-      }
-      await chatsApi.update(chatId, patch)
-      toastSuccess(toastMessage)
+        await chatsApi.update(chatId, patch)
+        toastSuccess(toastMessage)
+      })
     },
     [character, chatId, world],
   )
+
+  // `askForCommitment` (just below) needs to call `startDateEvent` for its married/living_together
+  // auto-drafted milestone scene, but `startDateEvent` is declared much further down this same hook
+  // body (it depends on `runGeneration`/`createObjective`, both defined later still) — a direct
+  // reference would be a genuine TypeScript "used before its declaration" error, since the compiler
+  // can't see that the closure referencing it is only ever *called* well after the whole hook body
+  // has finished evaluating for this render. A plain variable reassigned each render wouldn't be
+  // enough on its own: if `askForCommitment`'s *own* memoized closure survives from an earlier
+  // render (its dependency array not having changed) while `startDateEvent`'s identity moved on
+  // (e.g. `chat?.affection` changed), that stale closure would keep calling whatever
+  // `startDateEvent` looked like back when it was created. A ref sidesteps both problems: declared
+  // here (before `askForCommitment`, so no ordering error), its `.current` reassigned to the real
+  // function on every render right after `startDateEvent`'s own declaration — and because a
+  // `useRef` object's identity never changes across renders, even a stale `askForCommitment`
+  // closure reading `.current` at call time always sees the *latest* render's `startDateEvent`.
+  const startDateEventRef = useRef<(event: DateEventCard) => Promise<void>>(async () => {})
 
   /**
    * A single Define-the-Relationship ask (10c) — whichever tier the button offers is already
@@ -1213,19 +1305,62 @@ export function useChatSession(chatId: string | null) {
         .catch(() => {})
 
       if (outcome.decision === 'accept') {
-        toastSuccess(`${target.card.name} said yes — you're ${formatCommitmentStatus(tier)} now. ${outcome.reason}`, { chime: true })
+        // 10a's "Economy" bullet: a real commitment tier accepted is a discrete, rare, meaningful
+        // moment worth a real reward (see `COMMITMENT_ACCEPTED_COIN_BONUS`'s own doc comment) —
+        // granted inside the coin mutex like every other `giftCoins` touch (`coinMutex.ts`), and
+        // folded into this same toast rather than firing a second one right on top of it.
+        const coinsGranted = await getCoinMutex(chatId).run(async () => {
+          const liveChat = await chatsApi.get(chatId)
+          if (!liveChat) return 0
+          await chatsApi.update(chatId, { giftCoins: Math.max(0, (liveChat.giftCoins ?? 0) + COMMITMENT_ACCEPTED_COIN_BONUS) })
+          return COMMITMENT_ACCEPTED_COIN_BONUS
+        })
+        toastSuccess(
+          `${target.card.name} said yes — you're ${formatCommitmentStatus(tier)} now. ${outcome.reason}${coinsGranted ? ` (+${coinsGranted} coins)` : ''}`,
+          { chime: true },
+        )
         chatFactsApi
           .create({
             chatId,
             text: `${persona?.name || 'You'} and ${target.card.name} are officially ${formatCommitmentStatus(tier)}.`,
           })
           .catch(() => {})
+        // A married/living_together accept is big enough to deserve an actual scene, not just a
+        // status label flipping with nothing generated — a wedding day, or a moving-in day. Reuses
+        // the exact same date-event machinery a normal "Suggest event with AI" click already goes
+        // through (`suggestDateEvent` → `startDateEvent`), so this surfaces through the identical
+        // path `DateEventPanel` already reads (`Chat.activeEvent`) rather than inventing a parallel
+        // one. Primary-only: `startDateEvent`/its auto-opening `runGeneration` call are written
+        // against this hook's own `character`/`world`, not an arbitrary tracked participant, so a
+        // non-primary's accepted proposal still lands the status change above but doesn't try to
+        // stage a scene in the wrong character's body/world.
+        //
+        // Deliberately NOT awaited: drafting a card and then starting its live opening scene is two
+        // real model round-trips, and this ask's own promise (what `RelationshipPanel`'s "Asking…"
+        // button waits on) should resolve as soon as the ask itself is settled, not block on a
+        // best-effort scene that can fail or run long without that reading as the ask having failed.
+        if ((tier === 'married' || tier === 'living_together') && target.id === character?.id) {
+          suggestDateEvent(client, {
+            characterName: target.card.name,
+            characterDescription: target.card.description,
+            personaName: persona?.name || 'You',
+            worldDescription: world?.description,
+            availableBackgrounds: getUnlockedBackgroundIds(world, affection),
+            affection,
+            commitmentStatus: tier,
+            milestoneOccasion: tier,
+          })
+            .then((milestoneEvent) => (milestoneEvent ? startDateEventRef.current(milestoneEvent) : undefined))
+            .catch((e) =>
+              toastError(`Accepted, but couldn't put together the ${tier === 'married' ? 'wedding' : 'moving-in'} scene: ${errorMessage(e)}`),
+            )
+        }
       } else if (outcome.decision === 'backfire') {
         toastError(`That didn't land well. ${outcome.reason}`)
       } else {
         toastInfo(`Not the right moment. ${outcome.reason}`)
       }
-      announceMilestone({
+      await announceMilestone({
         charName: target.card.name,
         personaName: persona?.name || 'You',
         chatId,
@@ -1233,7 +1368,7 @@ export function useChatSession(chatId: string | null) {
         relationshipStage,
       })
     },
-    [chatId, client, messages, persona?.name, relationshipDifficulty, resolveSpeaker, world],
+    [character, chatId, client, messages, persona?.name, relationshipDifficulty, resolveSpeaker, world],
   )
 
   /**
@@ -1328,7 +1463,7 @@ export function useChatSession(chatId: string | null) {
       } else {
         toastInfo(`Not the right moment. ${outcome.reason}`)
       }
-      announceMilestone({
+      await announceMilestone({
         charName: target.card.name,
         personaName: persona?.name || 'You',
         chatId,
@@ -2092,6 +2227,16 @@ export function useChatSession(chatId: string | null) {
             }),
           })
         }
+        // A `kissing_spot` action is a deterministic, player-initiated kiss — the commitment
+        // ladder's physical-reality gate (`stage.ts`'s `commitmentLockReason`/`FIRST_KISS_FLAG`)
+        // should unlock the instant this is clicked, not wait on next turn's AI classifier to
+        // (maybe) notice it in prose. That classifier still separately covers a kiss written out in
+        // freeform roleplay instead of through this button — see `assessRelationshipMoment`'s own
+        // `first_kiss` glossary entry in `relationshipAssist.ts`. `kissing_spot` never satisfies
+        // `isExplicitCategory`, so this never overlaps with the `startsIntimateScene` branch above.
+        if (usedIntimacyOption?.category === 'kissing_spot' && !(freshChat.sceneFlags ?? []).includes(FIRST_KISS_FLAG)) {
+          await chatsApi.update(chatId, { sceneFlags: [...(freshChat.sceneFlags ?? []), FIRST_KISS_FLAG] })
+        }
 
         const now = Date.now()
         const userMsg: StoredMessage = {
@@ -2341,6 +2486,20 @@ export function useChatSession(chatId: string | null) {
       // `null`, not `undefined` — JSON.stringify drops undefined-valued keys entirely, so the
       // server would never see this field in the PATCH body and the stale activeEvent would stick.
       if (chatId) await chatsApi.update(chatId, { activeEvent: null })
+      // 10a's "Economy" bullet: completing an objective is the one earning moment available to a
+      // player who mostly just talks through ordinary roleplay instead of deliberately starting
+      // formal dates/hangouts (which already earn their own payout via `endDateEvent`). Only a
+      // deliberate 'completed' grants this — 'abandoned' earns nothing. See
+      // `OBJECTIVE_COMPLETE_COIN_BONUS`'s own doc comment for why this amount.
+      if (status === 'completed' && chatId) {
+        const coinsGranted = await getCoinMutex(chatId).run(async () => {
+          const liveChat = await chatsApi.get(chatId)
+          if (!liveChat) return 0
+          await chatsApi.update(chatId, { giftCoins: Math.max(0, (liveChat.giftCoins ?? 0) + OBJECTIVE_COMPLETE_COIN_BONUS) })
+          return OBJECTIVE_COMPLETE_COIN_BONUS
+        })
+        if (coinsGranted) toastSuccess(`Objective complete — +${coinsGranted} coins`, { chime: true })
+      }
     },
     [activeObjective, chatId],
   )
@@ -2493,6 +2652,8 @@ export function useChatSession(chatId: string | null) {
     },
     [beginGeneration, character, chat?.affection, chat?.relationshipStats, chatId, client, createObjective, endGeneration, messages, persona?.name, runGeneration, world],
   )
+  // Kept current every render — see `startDateEventRef`'s own doc comment, above `askForCommitment`.
+  startDateEventRef.current = startDateEvent
 
   /**
    * Ends an active live scene (`kind: 'date'` or its `'hangout'` sibling) with a single validated
@@ -2584,19 +2745,26 @@ export function useChatSession(chatId: string | null) {
     // handed out flat — a date that lands earns real money, a flat or hurtful one earns none.
     // Still chat-scoped (`Chat.giftCoins`) like every other coin flow today, not the shared
     // per-world wallet the roadmap ultimately wants — that's a bigger migration, left open.
+    //
+    // The payout write runs inside the coin mutex, re-reading the balance *inside* the lock rather
+    // than the `freshChat` snapshot fetched before `assessDateOutcome`'s AI call — by the time a
+    // multi-turn date ends, that snapshot is easily stale enough for a Shop purchase made mid-date
+    // to race it and lose its deduction. See `coinMutex.ts`.
     const coinsEarned = Math.max(0, Math.round(deltas.affection * 2))
-    const nextCoins = (freshChat.giftCoins ?? 0) + coinsEarned
-
-    await chatsApi.update(chatId, {
-      affection,
-      relationshipStats: nextStats,
-      relationshipStage,
-      sceneFlags: [...existingFlags],
-      unlockedGalleryIds: [...unlockedSet],
-      giftCoins: nextCoins,
-      commitmentStatus: risk.commitmentStatus,
-      relationshipWarning: risk.relationshipWarning ?? null,
-      breakupCount: risk.breakupCount,
+    await getCoinMutex(chatId).run(async () => {
+      const liveChat = (await chatsApi.get(chatId)) ?? freshChat
+      const nextCoins = (liveChat.giftCoins ?? 0) + coinsEarned
+      await chatsApi.update(chatId, {
+        affection,
+        relationshipStats: nextStats,
+        relationshipStage,
+        sceneFlags: [...existingFlags],
+        unlockedGalleryIds: [...unlockedSet],
+        giftCoins: nextCoins,
+        commitmentStatus: risk.commitmentStatus,
+        relationshipWarning: risk.relationshipWarning ?? null,
+        breakupCount: risk.breakupCount,
+      })
     })
     await closeOutEvent()
 
@@ -2616,7 +2784,7 @@ export function useChatSession(chatId: string | null) {
     if (opts?.walkedOut) toastError(outcome.recap)
     else toastSuccess(outcome.recap)
     if (coinsEarned > 0) toastSuccess(`Earned ${coinsEarned} coins from the ${event.kind === 'hangout' ? 'hangout' : 'date'}`)
-    announceMilestone({
+    await announceMilestone({
       charName: character.card.name,
       personaName: persona?.name || 'You',
       chatId,

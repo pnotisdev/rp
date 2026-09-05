@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest'
-import { nextRoundRobinSpeaker, parseMention, rosterFrom, type SceneRoster } from './scene'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { nextRoundRobinSpeaker, parseMention, pickDirectorSpeaker, rosterFrom, type SceneRoster } from './scene'
 import type { Character } from '@/lib/characters/cardSpec'
+import type { ChatBackend } from '@/lib/api/chatBackend'
+import type { ChatMessage } from '@/lib/prompt/builder'
 
 const roster: SceneRoster = [
   { id: 'a', name: 'Aria' },
@@ -64,5 +66,96 @@ describe('rosterFrom', () => {
 
   it('handles no primary (falls back to just participants)', () => {
     expect(rosterFrom(undefined, [char('x', 'X')])).toEqual([{ id: 'x', name: 'X' }])
+  })
+})
+
+describe('pickDirectorSpeaker', () => {
+  const groupRoster: SceneRoster = [
+    { id: 'a', name: 'Aria' },
+    { id: 'b', name: 'Kestrel' },
+  ]
+  const history: ChatMessage[] = [{ id: '1', role: 'user', name: 'Kai', text: 'Hey Kestrel, you there?' }]
+
+  function stubClient(reply: string): ChatBackend {
+    return {
+      generate: async () => reply,
+      generateStream: async () => '',
+      getEffectiveMaxContext: async () => 4096,
+      tokenCount: async () => ({ count: 0 }),
+      abort: async () => {},
+      getChatTemplate: async () => null,
+    }
+  }
+
+  it('returns the sole participant without calling the model when the roster has one or none', async () => {
+    let called = false
+    const client: ChatBackend = {
+      generate: async () => {
+        called = true
+        return 'Aria'
+      },
+      generateStream: async () => '',
+      getEffectiveMaxContext: async () => 4096,
+      tokenCount: async () => ({ count: 0 }),
+      abort: async () => {},
+      getChatTemplate: async () => null,
+    }
+    expect(await pickDirectorSpeaker(client, { roster: [{ id: 'a', name: 'Aria' }], history, userName: 'Kai' })).toBe('a')
+    expect(await pickDirectorSpeaker(client, { roster: [], history, userName: 'Kai' })).toBeUndefined()
+    expect(called).toBe(false)
+  })
+
+  it('matches the model\'s exact name answer to the right id', async () => {
+    expect(await pickDirectorSpeaker(stubClient('Kestrel'), { roster: groupRoster, history, userName: 'Kai' })).toBe('b')
+  })
+
+  it('loosely matches a name embedded in extra text', async () => {
+    expect(await pickDirectorSpeaker(stubClient('I think Aria would respond.'), { roster: groupRoster, history, userName: 'Kai' })).toBe(
+      'a',
+    )
+  })
+
+  it('returns undefined when the answer names nobody in the roster', async () => {
+    expect(await pickDirectorSpeaker(stubClient('Someone Else'), { roster: groupRoster, history, userName: 'Kai' })).toBeUndefined()
+  })
+
+  it('falls back to undefined on a thrown client error, rather than blocking the turn', async () => {
+    const throwing: ChatBackend = {
+      generate: async () => {
+        throw new Error('offline')
+      },
+      generateStream: async () => '',
+      getEffectiveMaxContext: async () => 4096,
+      tokenCount: async () => ({ count: 0 }),
+      abort: async () => {},
+      getChatTemplate: async () => null,
+    }
+    expect(await pickDirectorSpeaker(throwing, { roster: groupRoster, history, userName: 'Kai' })).toBeUndefined()
+  })
+
+  describe('when the backend never responds', () => {
+    // A hang here used to block the whole group-scene turn forever — nobody's reply could be
+    // generated until this pick landed. `generateWithTimeout` bounds it to 45s, after which this
+    // falls back to undefined (primary) the same as any other failure.
+    beforeEach(() => vi.useFakeTimers())
+    afterEach(() => vi.useRealTimers())
+
+    it('falls back to undefined after 45s instead of hanging forever', async () => {
+      const hanging: ChatBackend = {
+        generate: (_p, signal) =>
+          new Promise<string>((_resolve, reject) => {
+            signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
+          }),
+        generateStream: async () => '',
+        getEffectiveMaxContext: async () => 4096,
+        tokenCount: async () => ({ count: 0 }),
+        abort: async () => {},
+        getChatTemplate: async () => null,
+      }
+      const pending = pickDirectorSpeaker(hanging, { roster: groupRoster, history, userName: 'Kai' })
+      const assertion = expect(pending).resolves.toBeUndefined()
+      await vi.advanceTimersByTimeAsync(45_000)
+      await assertion
+    })
   })
 })

@@ -1,4 +1,5 @@
 import type { ChatBackend } from '@/lib/api/chatBackend'
+import type { GenerateRequest } from '@/lib/api/types'
 import { parseLenientJson } from '@/lib/jsonRepair'
 import type { Character } from '@/lib/characters/cardSpec'
 import type { CommitmentStatus, CustomSceneFlag, DateEventCard, RelationshipDimension, SceneFlag } from '@/lib/types'
@@ -30,6 +31,35 @@ const EVENT_PARAMS = {
   max_length: 360,
   temperature: 0.7,
   min_p: 0.05,
+}
+
+// None of this file's `client.generate` calls ever passed a `signal`, so a slow or hanging
+// provider response (confirmed live against a rate-limited free OpenRouter model: a request that
+// simply never resolved) left the *caller* stuck forever too — worst-observed case was "End
+// hangout"/"End date", whose button reads "Ending…" with no way to cancel or retry, because
+// `endDateEvent` awaits `assessDateOutcome` directly and its promise never settles either way.
+// Every one of this file's assist calls shares the same shape (build prompt, `generate`, parse),
+// so the fix lives once, here: race the call against a timeout that aborts the underlying request
+// (via the `signal` every backend's `generate` already accepts) and rejects with a message the
+// caller's existing catch/toastError path already knows how to surface.
+// Exported for `relationshipAssist.test.ts` — every other symbol here is a small pure helper this
+// file uses internally, but this one has real timing behavior worth locking in directly rather
+// than only indirectly through whichever exported function happens to call it.
+export const ASSIST_TIMEOUT_MS = 45_000
+
+export async function generateWithTimeout(client: ChatBackend, params: GenerateRequest, label: string): Promise<string> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), ASSIST_TIMEOUT_MS)
+  try {
+    return await client.generate(params, controller.signal)
+  } catch (e) {
+    if (controller.signal.aborted) {
+      throw new Error(`${label} timed out after ${Math.round(ASSIST_TIMEOUT_MS / 1000)}s — the model backend didn't respond in time.`)
+    }
+    throw e
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 function recentText(history: ChatMessage[], charName: string, userName: string, depth = 6): string {
@@ -65,6 +95,7 @@ const FLAG_GLOSSARY: Record<SceneFlag, string> = {
   confession: 'one of them stated real romantic feelings out loud, not just flirted or hinted',
   jealousy: 'clear jealousy or possessiveness was shown over a rival or another relationship',
   promise: 'a specific, meaningful promise was made that the story should remember later',
+  first_kiss: 'they actually kissed — lips meeting mouth, forehead, cheek, hand, or anywhere else — not just closeness, a lingering look, or an almost-kiss that did not quite happen',
 }
 
 /**
@@ -223,7 +254,11 @@ export async function assessRelationshipMoment(
     .filter(Boolean)
     .join('\n\n')
 
-  const text = await client.generate({ ...REL_PARAMS, max_length: 340, max_context_length: await client.getEffectiveMaxContext(), prompt })
+  const text = await generateWithTimeout(
+    client,
+    { ...REL_PARAMS, max_length: 340, max_context_length: await client.getEffectiveMaxContext(), prompt },
+    'Relationship check-in',
+  )
   const parsed = parseLenientJson(text)
   const obj = (parsed && typeof parsed === 'object' ? parsed : {}) as Record<string, unknown>
   const deltasObj = (obj.deltas && typeof obj.deltas === 'object' ? obj.deltas : {}) as Record<string, unknown>
@@ -283,7 +318,11 @@ export async function detectGalleryUnlocks(
     'JSON:',
   ].join('\n\n')
 
-  const text = await client.generate({ ...REL_PARAMS, max_length: 120, max_context_length: await client.getEffectiveMaxContext(), prompt })
+  const text = await generateWithTimeout(
+    client,
+    { ...REL_PARAMS, max_length: 120, max_context_length: await client.getEffectiveMaxContext(), prompt },
+    'Gallery unlock check',
+  )
   const parsed = parseLenientJson(text)
   if (!Array.isArray(parsed)) return []
   const valid = new Set(candidates.map((c) => c.slice(0, c.indexOf(':'))))
@@ -372,7 +411,11 @@ export async function assessDateOutcome(
     .filter(Boolean)
     .join('\n\n')
 
-  const text = await client.generate({ ...REL_PARAMS, max_length: 420, max_context_length: await client.getEffectiveMaxContext(), prompt })
+  const text = await generateWithTimeout(
+    client,
+    { ...REL_PARAMS, max_length: 420, max_context_length: await client.getEffectiveMaxContext(), prompt },
+    'Date/hangout outcome',
+  )
   const parsed = parseLenientJson(text)
   const obj = (parsed && typeof parsed === 'object' ? parsed : {}) as Record<string, unknown>
   const deltasObj = (obj.deltas && typeof obj.deltas === 'object' ? obj.deltas : {}) as Record<string, unknown>
@@ -413,29 +456,52 @@ export async function suggestDateEvent(
      * not-yet-official chat keeps the prompt it always had, unchanged.
      */
     commitmentStatus?: CommitmentStatus
+    /**
+     * Set only when this card is being drafted for one specific ladder-crossing occasion — a
+     * wedding for `married`, a moving-in day for `living_together` — right after `useChatSession.ts`'s
+     * `askForCommitment` sees that tier accepted, rather than an ordinary "Suggest event with AI"
+     * click. Overrides the generic `commitmentStatus`-aware framing below with a much more specific
+     * ask, and forces the returned card's `kind` to `'date'` regardless of what the model answers,
+     * so this milestone always surfaces as a real, live, played-out scene (`stage.ts`'s `isLiveScene`)
+     * instead of risking a `hangout`/`gift`/`milestone` card that never goes live at all.
+     */
+    milestoneOccasion?: Extract<CommitmentStatus, 'married' | 'living_together'>
   },
 ): Promise<DateEventCard | null> {
   const official = params.commitmentStatus && params.commitmentStatus !== 'none' ? params.commitmentStatus : null
+  const occasionLine =
+    params.milestoneOccasion === 'married'
+      ? 'This card is specifically for the day they get married — draft their actual wedding (the ceremony, the vows, or the moments right around it), not a generic date or anniversary dinner. It should read as the real, once-in-a-relationship milestone it is.'
+      : params.milestoneOccasion === 'living_together'
+        ? 'This card is specifically for the day they move in together — draft the actual moving-in day itself (unpacking boxes, the first night in a shared home, making it feel real), not a generic date. It should read as the real, once-in-a-relationship milestone it is.'
+        : ''
   const prompt = [
     'You design a lightweight dating-sim style event card for a roleplay chat.',
     `Character: ${params.characterName}${params.characterDescription ? `. ${params.characterDescription}` : ''}`,
     `User persona: ${params.personaName}`,
     params.worldDescription ? `World context: ${params.worldDescription}` : '',
     `Current affection: ${params.affection}/100`,
-    official
-      ? `They are already officially ${formatCommitmentStatus(official)}. Suggest something that fits a couple at that stage — an actual date, or something they'd plausibly do together now that it's established — rather than a tentative, getting-to-know-you outing.`
-      : 'They are not officially together.',
+    occasionLine ||
+      (official
+        ? `They are already officially ${formatCommitmentStatus(official)}. Suggest something that fits a couple at that stage — an actual date, or something they'd plausibly do together now that it's established — rather than a tentative, getting-to-know-you outing.`
+        : 'They are not officially together.'),
     `Available background ids: ${params.availableBackgrounds.join(', ')}`,
     'Return ONLY one minified JSON object:',
     '{"title":"...","description":"...","objectiveTitle":"...","objectiveDescription":"...","backgroundId":"...","kind":"date|hangout|gift|milestone"}',
-    '"date" is a real, romantically-charged date. "hangout" is a lower-stakes, casual get-together — friendly, no romantic stakes riding on it, fitting for earlier affection or a deliberately relaxed scene. Pick whichever actually fits the current relationship and mood.',
+    occasionLine
+      ? 'This is a milestone occasion, so "kind" should be "date" — treat it as the real, live scene it is.'
+      : '"date" is a real, romantically-charged date. "hangout" is a lower-stakes, casual get-together — friendly, no romantic stakes riding on it, fitting for earlier affection or a deliberately relaxed scene. Pick whichever actually fits the current relationship and mood.',
     'Make it plausible for the current affection level, with a clear scene objective.',
     'JSON:',
   ]
     .filter(Boolean)
     .join('\n\n')
 
-  const text = await client.generate({ ...EVENT_PARAMS, max_context_length: await client.getEffectiveMaxContext(), prompt })
+  const text = await generateWithTimeout(
+    client,
+    { ...EVENT_PARAMS, max_context_length: await client.getEffectiveMaxContext(), prompt },
+    'Event suggestion',
+  )
   const parsed = parseLenientJson(text)
   if (!parsed || typeof parsed !== 'object') return null
   const obj = parsed as Record<string, unknown>
@@ -450,7 +516,9 @@ export async function suggestDateEvent(
     objectiveTitle,
     objectiveDescription: typeof obj.objectiveDescription === 'string' ? obj.objectiveDescription.trim() : '',
     backgroundId,
-    kind: obj.kind === 'gift' || obj.kind === 'milestone' || obj.kind === 'hangout' ? obj.kind : 'date',
+    // A milestone occasion never trusts the model's own `kind` choice — this must always be a live
+    // scene (see the param's own doc comment), not left to chance.
+    kind: params.milestoneOccasion ? 'date' : obj.kind === 'gift' || obj.kind === 'milestone' || obj.kind === 'hangout' ? obj.kind : 'date',
     affectionRequirement: params.affection,
   }
 }
@@ -491,7 +559,11 @@ export async function draftHiddenAgenda(
 
   let text: string
   try {
-    text = await client.generate({ ...REL_PARAMS, max_length: 60, max_context_length: await client.getEffectiveMaxContext(), prompt })
+    text = await generateWithTimeout(
+      client,
+      { ...REL_PARAMS, max_length: 60, max_context_length: await client.getEffectiveMaxContext(), prompt },
+      'Hidden agenda draft',
+    )
   } catch {
     return null
   }
@@ -543,7 +615,11 @@ export async function assessCommitmentAsk(
     .filter(Boolean)
     .join('\n\n')
 
-  const text = await client.generate({ ...REL_PARAMS, max_length: 260, max_context_length: await client.getEffectiveMaxContext(), prompt })
+  const text = await generateWithTimeout(
+    client,
+    { ...REL_PARAMS, max_length: 260, max_context_length: await client.getEffectiveMaxContext(), prompt },
+    'Commitment ask',
+  )
   const parsed = parseLenientJson(text)
   const obj = (parsed && typeof parsed === 'object' ? parsed : {}) as Record<string, unknown>
   const decision = obj.decision === 'accept' || obj.decision === 'backfire' ? obj.decision : 'deflect'
@@ -594,7 +670,11 @@ export async function assessIntimacyMilestone(
     .filter(Boolean)
     .join('\n\n')
 
-  const text = await client.generate({ ...REL_PARAMS, max_length: 260, max_context_length: await client.getEffectiveMaxContext(), prompt })
+  const text = await generateWithTimeout(
+    client,
+    { ...REL_PARAMS, max_length: 260, max_context_length: await client.getEffectiveMaxContext(), prompt },
+    'Intimacy milestone ask',
+  )
   const parsed = parseLenientJson(text)
   const obj = (parsed && typeof parsed === 'object' ? parsed : {}) as Record<string, unknown>
   const decision = obj.decision === 'accept' || obj.decision === 'backfire' ? obj.decision : 'deflect'

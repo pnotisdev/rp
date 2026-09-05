@@ -1,11 +1,14 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { KoboldClient } from '@/lib/api/kobold'
+import type { ChatBackend } from '@/lib/api/chatBackend'
 import type { ChatMessage } from '@/lib/prompt/builder'
 import {
+  ASSIST_TIMEOUT_MS,
   assessDateOutcome,
   assessIntimacyMilestone,
   assessRelationshipMoment,
   draftHiddenAgenda,
+  generateWithTimeout,
   scaleDeltasForDifficulty,
   suggestDateEvent,
   type RelationshipDeltas,
@@ -164,6 +167,36 @@ describe('assessRelationshipMoment: task-detection merge', () => {
       baseParams,
     )
     expect(moment.completedTaskIndices).toEqual([])
+  })
+})
+
+// Gap 1: `first_kiss` covers a kiss written out in freeform roleplay, not sent through the
+// Relationship panel's deterministic kissing_spot button (that path is `useChatSession.ts`'s own
+// `sendUserMessage`, not this classifier).
+describe('assessRelationshipMoment: first_kiss flag', () => {
+  const baseParams = { history: TRANSCRIPT, latestReply: 'He kissed her, soft and unhurried.', charName: 'Sumire', userName: 'Kai', current: currentStats }
+
+  it('offers first_kiss with a glossary bar to clear, same as every other built-in flag', async () => {
+    let sentPrompt = ''
+    await assessRelationshipMoment(
+      stubClient('{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[]}', (p) => {
+        sentPrompt = p.prompt as string
+      }),
+      baseParams,
+    )
+    expect(sentPrompt).toContain('first_kiss')
+    // The glossary line, not just the bare name — same bar-to-clear idea as the other 4 flags.
+    expect(sentPrompt).toContain('they actually kissed')
+  })
+
+  it('accepts first_kiss when the model reports it', async () => {
+    const moment = await assessRelationshipMoment(
+      stubClient(
+        '{"deltas":{"affection":2,"trust":0,"chemistry":1,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":["first_kiss"],"reason":"Their first kiss","newFacts":[]}',
+      ),
+      baseParams,
+    )
+    expect(moment.newFlags).toEqual(['first_kiss'])
   })
 })
 
@@ -331,6 +364,18 @@ describe('assessDateOutcome', () => {
     expect(sentPrompt).toContain('confession')
     expect(sentPrompt).toContain('jealousy')
     expect(sentPrompt).toContain('promise')
+    // Unlike `first_date`, a kiss isn't structurally date-only — a hangout can still establish it.
+    expect(sentPrompt).toContain('first_kiss')
+  })
+
+  it('allows a hangout to establish first_kiss (kissing is not date-only)', async () => {
+    const outcome = await assessDateOutcome(
+      stubClient(
+        '{"deltas":{"affection":2,"trust":0,"chemistry":1,"comfort":1,"respect":0,"curiosity":0,"tension":0},"newFlags":["first_kiss"],"recap":"nice","newFacts":[]}',
+      ),
+      { transcript: TRANSCRIPT, eventTitle: 'Walk', charName: 'Sumire', userName: 'Kai', current: currentStats, sceneKind: 'hangout' },
+    )
+    expect(outcome.newFlags).toEqual(['first_kiss'])
   })
 
   it('drops a first_date a hangout returned anyway, and keeps its other flags', async () => {
@@ -450,6 +495,57 @@ describe('suggestDateEvent', () => {
     )
     expect(sentPrompt).toContain('not officially together')
   })
+
+  // Gap 2's "auto-draft a real milestone event" ask: `askForCommitment` (`useChatSession.ts`) calls
+  // this with `milestoneOccasion` set right after a married/living_together accept, wanting an
+  // actual wedding-day/moving-in-day scene rather than a generic date the commitment-status framing
+  // alone would produce.
+  describe('milestoneOccasion', () => {
+    it('asks specifically for a wedding, not the generic officially-together framing', async () => {
+      let sentPrompt = ''
+      await suggestDateEvent(
+        stubClient('{"title":"The Wedding","objectiveTitle":"Say I do","kind":"hangout"}', (p) => {
+          sentPrompt = p.prompt as string
+        }),
+        { ...baseParams, affection: 95, commitmentStatus: 'married', milestoneOccasion: 'married' },
+      )
+      expect(sentPrompt).toContain('day they get married')
+      expect(sentPrompt).toContain('their actual wedding')
+      expect(sentPrompt).not.toContain('already officially married')
+      expect(sentPrompt).not.toContain('not officially together')
+    })
+
+    it('asks specifically for a moving-in day for living_together', async () => {
+      let sentPrompt = ''
+      await suggestDateEvent(
+        stubClient('{"title":"Moving Day","objectiveTitle":"Unpack the boxes","kind":"gift"}', (p) => {
+          sentPrompt = p.prompt as string
+        }),
+        { ...baseParams, affection: 90, commitmentStatus: 'living_together', milestoneOccasion: 'living_together' },
+      )
+      expect(sentPrompt).toContain('day they move in together')
+      expect(sentPrompt).toContain('actual moving-in day')
+    })
+
+    it('forces kind to date even when the model answers something else', async () => {
+      const marriedEvent = await suggestDateEvent(
+        stubClient('{"title":"The Wedding","objectiveTitle":"Say I do","kind":"hangout"}'),
+        { ...baseParams, milestoneOccasion: 'married' },
+      )
+      expect(marriedEvent?.kind).toBe('date')
+
+      const movingInEvent = await suggestDateEvent(
+        stubClient('{"title":"Moving Day","objectiveTitle":"Unpack the boxes","kind":"gift"}'),
+        { ...baseParams, milestoneOccasion: 'living_together' },
+      )
+      expect(movingInEvent?.kind).toBe('date')
+    })
+
+    it('still returns null when the model gives no usable title, milestone or not', async () => {
+      const event = await suggestDateEvent(stubClient('{"title":"","objectiveTitle":""}'), { ...baseParams, milestoneOccasion: 'married' })
+      expect(event).toBeNull()
+    })
+  })
 })
 
 describe('assessRelationshipMoment — aftercare', () => {
@@ -525,5 +621,62 @@ describe('assessRelationshipMoment — aftercare', () => {
     })
     expect(sent).toContain('I have to run.')
     expect(sent).toContain('Oh. Right.')
+  })
+})
+
+describe('generateWithTimeout', () => {
+  // The live repro this exists for: "End hangout"/"End date" awaits `assessDateOutcome` (which
+  // calls this) directly, with no timeout of its own — a provider response that simply never
+  // resolves (confirmed against a rate-limited free OpenRouter model) left the button reading
+  // "Ending…" forever, with no error and no way to retry, because the awaited promise never
+  // settled either way.
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('resolves normally when the backend answers before the timeout', async () => {
+    const client = { generate: async () => 'real answer', getEffectiveMaxContext: async () => 4096 } as unknown as ChatBackend
+    await expect(generateWithTimeout(client, { prompt: 'x' } as never, 'Test call')).resolves.toBe('real answer')
+  })
+
+  it('aborts the request and rejects with a clear message once the backend never responds', async () => {
+    let sawAbort = false
+    const client = {
+      generate: (_p: unknown, signal?: AbortSignal) =>
+        new Promise<string>((_resolve, reject) => {
+          signal?.addEventListener('abort', () => {
+            sawAbort = true
+            reject(new DOMException('aborted', 'AbortError'))
+          })
+        }),
+      getEffectiveMaxContext: async () => 4096,
+    } as unknown as ChatBackend
+
+    const pending = generateWithTimeout(client, { prompt: 'x' } as never, 'Test call')
+    // Attach the rejection assertion before advancing any timers, so the promise never has a tick
+    // where it's rejected but nothing is listening yet (fake timers otherwise make that window
+    // land as a real unhandled-rejection warning even though the test itself is correct).
+    const assertion = expect(pending).rejects.toThrow(/Test call timed out after 45s/)
+
+    // Nothing has happened yet — still well within the timeout window.
+    await vi.advanceTimersByTimeAsync(ASSIST_TIMEOUT_MS - 1000)
+    expect(sawAbort).toBe(false)
+
+    await vi.advanceTimersByTimeAsync(1000)
+    await assertion
+    expect(sawAbort).toBe(true)
+  })
+
+  it('still surfaces a real (non-timeout) error as itself, not a misleading timeout message', async () => {
+    const client = {
+      generate: async () => {
+        throw new Error('Chat completion failed (429): Provider returned error')
+      },
+      getEffectiveMaxContext: async () => 4096,
+    } as unknown as ChatBackend
+    await expect(generateWithTimeout(client, { prompt: 'x' } as never, 'Test call')).rejects.toThrow(/429/)
   })
 })

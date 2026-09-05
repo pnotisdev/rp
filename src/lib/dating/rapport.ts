@@ -9,6 +9,7 @@
  */
 
 import type { ChatBackend } from '@/lib/api/chatBackend'
+import { generateWithTimeout } from '@/lib/api/generateWithTimeout'
 import { parseLenientJson } from '@/lib/jsonRepair'
 import type { ChatMessage } from '@/lib/prompt/builder'
 import type { RapportRead, RapportTrajectory } from '@/lib/types'
@@ -112,11 +113,15 @@ export async function assessRapport(
 
   let text: string
   try {
-    text = await client.generate({
-      ...RAPPORT_PARAMS,
-      max_context_length: await client.getEffectiveMaxContext(),
-      prompt,
-    })
+    // A hang here (a slow/rate-limited backend that never responds) used to mean this promise
+    // never settled either way — `generateWithTimeout` turns that into an ordinary error after
+    // 45s, which the catch below already treats the same as any other read failure: keep showing
+    // the previous rapport read rather than spending a whole live date stuck on "Reading the room…".
+    text = await generateWithTimeout(
+      client,
+      { ...RAPPORT_PARAMS, max_context_length: await client.getEffectiveMaxContext(), prompt },
+      'Reading the room',
+    )
   } catch {
     return null
   }

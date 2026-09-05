@@ -1,4 +1,5 @@
 import type { ChatBackend } from '@/lib/api/chatBackend'
+import { generateWithTimeout } from '@/lib/api/generateWithTimeout'
 import type { Character } from '@/lib/characters/cardSpec'
 import type { ChatMessage } from '@/lib/prompt/builder'
 import type { Scene } from '@/lib/types'
@@ -92,11 +93,15 @@ export async function pickDirectorSpeaker(
     .join('\n')
 
   try {
-    const text = await client.generate({
-      ...DIRECTOR_PARAMS,
-      max_context_length: await client.getEffectiveMaxContext(4096),
-      prompt,
-    })
+    // A hang here (backend never responds) used to block the whole group-scene turn forever,
+    // since this pick has to land before anyone's reply can be generated — `generateWithTimeout`
+    // bounds it to 45s, after which the catch below falls back to the primary, same as any other
+    // parse/network failure.
+    const text = await generateWithTimeout(
+      client,
+      { ...DIRECTOR_PARAMS, max_context_length: await client.getEffectiveMaxContext(4096), prompt },
+      'Pick next speaker',
+    )
     const answer = text.trim().toLowerCase()
     // Exact match first, then "the answer starts with/contains a real name" as a looser fallback
     // for a model that adds punctuation or a stray word despite the instruction.

@@ -2,6 +2,7 @@ import type { Character, OutreachFrequency } from '@/lib/characters/cardSpec'
 import { buildCharacterProfileNote } from '@/lib/characters/profile'
 import type { Chat, StoredMessage, WorldCard } from '@/lib/types'
 import { describePresence, describeWorldMoment, getCurrentActivity, seededFraction } from '@/lib/world/calendar'
+import { describeAmbientEvent, selectAmbientEvent, type AmbientEvent } from '@/lib/world/ambientEvents'
 import { computeWarmth, getRelationshipStats } from '@/lib/dating/stage'
 import { buildRelationshipDescription } from '@/lib/dating/relationshipDescription'
 import { buildPrompt, estimateTokens, type ChatMessage } from '@/lib/prompt/builder'
@@ -41,7 +42,7 @@ const BASE_CHANCE: Record<Exclude<OutreachFrequency, 'never'>, number> = {
 /** How much a maxed-out relationship warmth (100) adds to the base roll chance. */
 const MAX_WARMTH_BONUS = 0.2
 
-export type OutreachReason = 'silence' | 'schedule' | 'warmth'
+export type OutreachReason = 'silence' | 'schedule' | 'warmth' | 'life_event'
 
 export interface OutreachCheck {
   /**
@@ -59,10 +60,16 @@ export interface OutreachCheck {
 }
 
 export interface EvaluateOutreachOptions {
-  character: Pick<Character, 'id' | 'outreach' | 'schedule'>
+  character: Pick<Character, 'id' | 'outreach' | 'schedule' | 'likes' | 'goals' | 'frequentedLocations' | 'weatherPreferences'>
   chat: Pick<Chat, 'id' | 'affection' | 'relationshipStats' | 'activeEvent' | 'participants' | 'lastOutreachCheckedAt'>
   lastMessage: Pick<StoredMessage, 'createdAt'> | undefined
-  world: Pick<WorldCard, 'currentDay' | 'currentPhaseIndex'> | undefined
+  /**
+   * `id` is optional here — unlike the rest of `WorldCard` — purely so `world/ambientEvents.ts`'s
+   * weather-based hooks have a stable per-world seed to key off. Omit it (or omit `world` entirely)
+   * and those specific hooks are simply skipped, exactly as if there were no world at all; every
+   * other ambient-event kind still works with no `id` present.
+   */
+  world: (Pick<WorldCard, 'currentDay' | 'currentPhaseIndex'> & { id?: string }) | undefined
   now: number
 }
 
@@ -99,18 +106,60 @@ export function evaluateOutreach(opts: EvaluateOutreachOptions): OutreachCheck {
   const roll = seededFraction(`outreach:${opts.character.id}:${opts.chat.id}:${hourBucket}`)
   if (roll >= chance) return { status: 'rolled', eligible: false }
 
-  const reason: OutreachReason =
-    elapsedSinceMessage >= thresholdMs * 2 ? 'silence' : presence.activity ? 'schedule' : warmth >= 60 ? 'warmth' : 'silence'
+  // A concrete "something's actually going on in their world" hook (`world/ambientEvents.ts`) beats
+  // every generic reason below whenever one is available — the model gets something real to text
+  // about instead of generic "thinking of you" filler. Seeded off the world day/phase, not the hour
+  // bucket above: what the hook actually IS shouldn't change every single silent hour, only as the
+  // (fictional) day genuinely moves on.
+  const ambientEvent = selectAmbientEvent({
+    worldId: opts.world?.id,
+    characterId: opts.character.id,
+    day: opts.world?.currentDay ?? 0,
+    phaseIndex: opts.world?.currentPhaseIndex ?? 0,
+    schedule: opts.character.schedule,
+    likes: opts.character.likes,
+    goals: opts.character.goals,
+    frequentedLocations: opts.character.frequentedLocations,
+    weatherPreferences: opts.character.weatherPreferences,
+  })
+  const reason: OutreachReason = ambientEvent
+    ? 'life_event'
+    : elapsedSinceMessage >= thresholdMs * 2
+      ? 'silence'
+      : presence.activity
+        ? 'schedule'
+        : warmth >= 60
+          ? 'warmth'
+          : 'silence'
   return { status: 'rolled', eligible: true, reason }
 }
 
-const REASON_HINTS: Record<OutreachReason, string> = {
-  silence:
-    "You haven't heard from {{user}} in a while and decided to reach out first, unprompted — a short, casual check-in, the kind of thing you'd actually text someone.",
-  schedule:
-    "Given what you're currently doing right now, you decided to text {{user}} first, unprompted — casual and brief, mentioning what's going on with you only if it comes up naturally.",
-  warmth:
-    'Things have been going well between you and {{user}} lately, and you found yourself wanting to reach out first, unprompted — just a short, warm text because you were thinking of them.',
+/**
+ * The natural-language reason fed into the outreach message's `styleGuidance` — pure and directly
+ * testable, unlike the async `generateOutreachMessage` it feeds into. Interpolates real names
+ * directly rather than `{{user}}`/`{{char}}` macros: `styleGuidance` is never macro-substituted (only
+ * specific named `buildPrompt` fields are — see `prompt/mindGuidance.ts`'s own note on the same
+ * point), which the three original reasons here got wrong until this pass fixed it in place.
+ */
+export function outreachReasonHint(
+  reason: OutreachReason,
+  opts: { charName: string; userName: string; ambientEvent?: AmbientEvent },
+): string {
+  switch (reason) {
+    case 'silence':
+      return `You haven't heard from ${opts.userName} in a while and decided to reach out first, unprompted — a short, casual check-in, the kind of thing you'd actually text someone.`
+    case 'schedule':
+      return `Given what you're currently doing right now, you decided to text ${opts.userName} first, unprompted — casual and brief, mentioning what's going on with you only if it comes up naturally.`
+    case 'warmth':
+      return `Things have been going well between you and ${opts.userName} lately, and you found yourself wanting to reach out first, unprompted — just a short, warm text because you were thinking of them.`
+    case 'life_event':
+      // Falls back to the same text as 'silence' if somehow called with no event on hand — should
+      // not happen in practice (evaluateOutreach only ever picks 'life_event' once selectAmbientEvent
+      // already found one), but keeps this exhaustive and safe against a future caller doing so.
+      return opts.ambientEvent
+        ? `Something concrete just gave you a real reason to text ${opts.userName} first, unprompted: ${describeAmbientEvent(opts.charName, opts.ambientEvent)} Let that actually shape what you say — specific, not a generic "thinking of you" text — the way a real text message would bring it up.`
+        : `You haven't heard from ${opts.userName} in a while and decided to reach out first, unprompted — a short, casual check-in, the kind of thing you'd actually text someone.`
+  }
 }
 
 export interface GenerateOutreachParams {
@@ -160,8 +209,25 @@ export async function generateOutreachMessage(client: ChatBackend, params: Gener
   ]
 
   const relationshipDescription = buildRelationshipDescription(chat, world, character)
+  // Recomputed rather than threaded through from evaluateOutreach's own OutreachCheck: both calls
+  // are pure and take the same character/world state, so recomputing here is cheap and means the
+  // caller (`useOutreachTick.ts`) only ever has to pass the reason through, not a second bespoke field.
+  const ambientEvent =
+    params.reason === 'life_event'
+      ? selectAmbientEvent({
+          worldId: world?.id,
+          characterId: character.id,
+          day: world?.currentDay ?? 0,
+          phaseIndex: world?.currentPhaseIndex ?? 0,
+          schedule: character.schedule,
+          likes: character.likes,
+          goals: character.goals,
+          frequentedLocations: character.frequentedLocations,
+          weatherPreferences: character.weatherPreferences,
+        })
+      : undefined
   const styleGuidance = [
-    REASON_HINTS[params.reason],
+    outreachReasonHint(params.reason, { charName: character.card.name, userName: params.personaName || 'You', ambientEvent }),
     'Write only the text message itself — no narration, no action asterisks, no scene-setting, no "<START>" or other scene-break marker, and no line written as or on behalf of anyone else. One to three short sentences, exactly how a real text message reads, then stop completely.',
   ].join(' ')
 
