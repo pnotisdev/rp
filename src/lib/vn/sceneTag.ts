@@ -6,25 +6,37 @@ export interface SceneTag {
 }
 
 const TAG_PREFIX = '<<scene:'
-const TAG_RE = /\n?<<scene:([^>]*)>>\s*$/i
+// Deliberately NOT anchored to end-of-string (a global match instead) — seen live: a model that
+// emits one tag mid-reply, keeps writing dialogue, then emits a second one at the end. Anchoring to
+// `$` only ever found and removed the second tag; the first was left as literal, unstripped text,
+// which `cleanModelOutput`'s later `normalizeRpMarkup` step then mangled trying to treat `<<scene:
+// ...>>` as an HTML tag (its `<tag>` pattern only ever expects ONE leading `<`) — stripping the
+// inside but leaving the outer `<`/`>` behind as garbage (a real reply reduced to literally `"<>"`).
+const TAG_RE = /\n?<<scene:([^>]*)>>/gi
 
-/** Pulls the trailing <<scene:...>> directive off a completed generation, if present. */
+/**
+ * Pulls every `<<scene:...>>` directive out of a completed generation, if any — using the LAST one
+ * found for the actual expression/background/mood (a model updating the tag partway through a
+ * reply presumably means the later one to be its final, intended state) while removing ALL of them
+ * from the returned text, not just the one that supplied the metadata.
+ */
 export function extractSceneTag(raw: string): { text: string; scene?: SceneTag } {
-  const match = raw.match(TAG_RE)
-  if (!match) {
+  let lastMatch: RegExpMatchArray | undefined
+  for (const match of raw.matchAll(TAG_RE)) lastMatch = match
+  if (!lastMatch) {
     // Generation can get cut off (max tokens, or the model just never emits `>>`) before the tag
     // closes — there's no usable expression/background then, but the raw, unterminated fragment
     // must never end up saved as if it were part of the character's actual dialogue.
     return { text: stripSceneTagForDisplay(raw).trimEnd() }
   }
   const scene: SceneTag = {}
-  for (const pair of match[1].split(',')) {
+  for (const pair of lastMatch[1].split(',')) {
     const [key, value] = pair.split('=').map((s) => s.trim().toLowerCase())
     if (key === 'expression' && value) scene.expression = value
     if (key === 'background' && value) scene.background = value
     if (key === 'mood' && value) scene.mood = value
   }
-  return { text: raw.slice(0, match.index).trimEnd(), scene: Object.keys(scene).length ? scene : undefined }
+  return { text: raw.replace(TAG_RE, '').trim(), scene: Object.keys(scene).length ? scene : undefined }
 }
 
 /** Hides an in-progress (or just-completed) scene tag from what's shown mid-stream, so it never flashes as visible dialogue. */

@@ -261,3 +261,45 @@ describe('NovelAIClient — fallback surface', () => {
     expect(await new NovelAIClient('sk-test', 'kayra-v1').getChatTemplate()).toBeNull()
   })
 })
+
+// Settings → Connection's "does this actually work" check (also the header status dot for this
+// backend) — hits the same endpoint SillyTavern's own current backend uses to verify a key
+// (GET /user/subscription), never a real generation, so it costs no subscription quota.
+describe('checkConnection', () => {
+  it('treats a 200 from /user/subscription as ok, with the right auth header', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { tier: 3, active: true }))
+    vi.stubGlobal('fetch', fetchMock)
+    const result = await new NovelAIClient('sk-real', 'kayra-v1').checkConnection()
+    expect(result).toEqual({ ok: true })
+    expect(fetchMock).toHaveBeenCalledWith('https://api.novelai.net/user/subscription', expect.objectContaining({ headers: expect.any(Object) }))
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer sk-real')
+  })
+
+  it('reports a rejected key distinctly on 401', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(401, {})))
+    const result = await new NovelAIClient('sk-bad', 'kayra-v1').checkConnection()
+    expect(result).toEqual({ ok: false, detail: 'The API key was rejected.' })
+  })
+
+  it('reports unreachable (not a key problem) when the fetch itself fails', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')))
+    const result = await new NovelAIClient('sk-real', 'kayra-v1').checkConnection()
+    expect(result.ok).toBe(false)
+    expect(result.detail).toContain('Could not reach')
+  })
+
+  it('reports a generic error for any other non-ok status', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(500, {})))
+    const result = await new NovelAIClient('sk-real', 'kayra-v1').checkConnection()
+    expect(result).toEqual({ ok: false, detail: 'Unexpected response (500).' })
+  })
+
+  it('refuses to check with no API key set, without making a request', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const result = await new NovelAIClient('', 'kayra-v1').checkConnection()
+    expect(result).toEqual({ ok: false, detail: 'No API key set.' })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+})

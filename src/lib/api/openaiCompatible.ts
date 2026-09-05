@@ -1,7 +1,7 @@
 import type { GenerateRequest } from './types'
 import { KoboldApiError } from './types'
 import { estimateTokens } from '@/lib/tokenEstimate'
-import type { ChatBackend } from './chatBackend'
+import type { ChatBackend, ConnectionCheckResult } from './chatBackend'
 
 /**
  * Section 8's "additional model backends" — a single client for any provider that speaks the
@@ -191,5 +191,52 @@ export class OpenAICompatibleClient implements ChatBackend {
   /** Not a locally-loaded GGUF — nothing to compare the active instruct template against. */
   async getChatTemplate(): Promise<string | null> {
     return null
+  }
+
+  /**
+   * Settings → Connection's "does this actually work" check — deliberately not a real chat
+   * completion (costs real money/quota on a paid provider for no reason). `GET {baseUrl}/models`
+   * is the one endpoint essentially every OpenAI-compatible provider implements, and for most of
+   * them (OpenAI, Groq, Together, Mistral, DeepSeek, Fireworks, ...) it genuinely validates the key
+   * too — a bad one comes back 401/403. OpenRouter is the one confirmed exception: its own `/models`
+   * is public and returns 200 for anyone, key or no key, so it wouldn't catch a bad key at all —
+   * its own `/key` endpoint (rate-limit/credit info for the calling key, always auth-required) is
+   * used there instead, and its usage/limit numbers double as a genuinely useful success detail.
+   */
+  async checkConnection(): Promise<ConnectionCheckResult> {
+    const trimmed = this.baseUrl.replace(/\/+$/, '')
+    if (!trimmed) return { ok: false, detail: 'No base URL set.' }
+    const isOpenRouter = trimmed.includes('openrouter.ai')
+    const url = isOpenRouter ? `${trimmed}/key` : `${trimmed}/models`
+    let res: Response
+    try {
+      res = await fetch(url, { headers: this.headers() })
+    } catch {
+      return { ok: false, detail: `Could not reach ${this.baseUrl}.` }
+    }
+    if (res.status === 401 || res.status === 403) {
+      return { ok: false, detail: 'The API key was rejected.' }
+    }
+    if (!res.ok) {
+      return { ok: false, detail: `Unexpected response (${res.status}).` }
+    }
+    if (isOpenRouter) {
+      try {
+        const data = (await res.json()) as {
+          data?: { is_free_tier?: boolean; usage?: number; limit?: number | null }
+        }
+        const key = data.data
+        if (key) {
+          const spent = typeof key.usage === 'number' ? `$${key.usage.toFixed(2)} used` : undefined
+          const cap = typeof key.limit === 'number' ? ` of $${key.limit} limit` : ''
+          const tier = key.is_free_tier ? 'Free-tier key' : undefined
+          return { ok: true, detail: spent ? `${spent}${cap}` : tier }
+        }
+      } catch {
+        // Reached and authenticated either way (status already checked above) — a body we can't
+        // parse just means no bonus detail, not a failure.
+      }
+    }
+    return { ok: true }
   }
 }

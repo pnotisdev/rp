@@ -268,3 +268,71 @@ describe('OpenAICompatibleClient — no-op / fallback surface', () => {
     expect(await client.getChatTemplate()).toBeNull()
   })
 })
+
+// Settings → Connection's "does this actually work" check (also the header status dot for this
+// backend) — a GET, never a real chat completion, so it costs nothing on a paid provider.
+describe('checkConnection', () => {
+  it("hits GET {baseUrl}/models for a non-OpenRouter provider, and treats 200 as ok", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { data: [{ id: 'gpt-4o-mini' }] }))
+    vi.stubGlobal('fetch', fetchMock)
+    const client = new OpenAICompatibleClient('https://api.openai.com/v1', 'sk-real', 'gpt-4o-mini')
+    const result = await client.checkConnection()
+    expect(result).toEqual({ ok: true })
+    expect(fetchMock).toHaveBeenCalledWith('https://api.openai.com/v1/models', expect.objectContaining({ headers: expect.any(Object) }))
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer sk-real')
+  })
+
+  it('reports a rejected key distinctly on 401/403, for a non-OpenRouter provider', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(401, {})))
+    const client = new OpenAICompatibleClient('https://api.openai.com/v1', 'sk-bad', 'gpt-4o-mini')
+    expect(await client.checkConnection()).toEqual({ ok: false, detail: 'The API key was rejected.' })
+  })
+
+  it('reports unreachable (not a key problem) when the fetch itself fails', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')))
+    const client = new OpenAICompatibleClient('https://api.example.com/v1', 'sk-real', 'gpt-4o-mini')
+    const result = await client.checkConnection()
+    expect(result.ok).toBe(false)
+    expect(result.detail).toContain('Could not reach')
+  })
+
+  it('refuses to check with no base URL set, without making a request', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const client = new OpenAICompatibleClient('', 'sk-real', 'gpt-4o-mini')
+    expect(await client.checkConnection()).toEqual({ ok: false, detail: 'No base URL set.' })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it("uses OpenRouter's own /key endpoint instead of /models, since /models there is public and would never catch a bad key", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, { data: { is_free_tier: true, usage: 0, limit: null } }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    const client = new OpenAICompatibleClient('https://openrouter.ai/api/v1', 'sk-or-real', 'minimax/minimax-m3:free')
+    await client.checkConnection()
+    expect(fetchMock).toHaveBeenCalledWith('https://openrouter.ai/api/v1/key', expect.anything())
+  })
+
+  it("surfaces OpenRouter's usage/limit as the success detail", async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(jsonResponse(200, { data: { is_free_tier: false, usage: 25.5, limit: 100 } })),
+    )
+    const client = new OpenAICompatibleClient('https://openrouter.ai/api/v1', 'sk-or-real', 'anthropic/claude-3.5-sonnet')
+    expect(await client.checkConnection()).toEqual({ ok: true, detail: '$25.50 used of $100 limit' })
+  })
+
+  it('falls back to noting a free-tier key when OpenRouter reports no usage yet', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, { data: { is_free_tier: true, limit: null } })))
+    const client = new OpenAICompatibleClient('https://openrouter.ai/api/v1', 'sk-or-real', 'minimax/minimax-m3:free')
+    expect(await client.checkConnection()).toEqual({ ok: true, detail: 'Free-tier key' })
+  })
+
+  it("still reports a rejected key on OpenRouter's /key endpoint", async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(401, {})))
+    const client = new OpenAICompatibleClient('https://openrouter.ai/api/v1', 'sk-or-bad', 'minimax/minimax-m3:free')
+    expect(await client.checkConnection()).toEqual({ ok: false, detail: 'The API key was rejected.' })
+  })
+})

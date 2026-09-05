@@ -22,6 +22,43 @@ describe('extractSceneTag', () => {
   it('lower-cases tag values', () => {
     expect(extractSceneTag('X\n<<scene:mood=Tender>>').scene).toEqual({ mood: 'tender' })
   })
+
+  // `useChatSession.ts`'s `runGeneration` treats an empty `text` here (once `cleanModelOutput`,
+  // itself a no-op on '', runs over it too) as a real generation failure rather than a successful
+  // empty reply — see its `isUsableReply` check. A model occasionally emits nothing but the tag
+  // with no dialogue at all; this is the exact shape that scenario reduces to.
+  it('returns empty text when the model emits nothing but the scene tag', () => {
+    const { text, scene } = extractSceneTag('<<scene:expression=blush,background=school-hallway>>')
+    expect(text).toBe('')
+    expect(scene).toEqual({ expression: 'blush', background: 'school-hallway' })
+  })
+
+  // Seen live: a model emitting one tag mid-reply (still followed by real dialogue) and a second
+  // one at the very end, rather than exactly one trailing tag as `buildSceneInstruction` asks for.
+  // Before this was handled, the mid-reply tag survived `extractSceneTag` untouched (its own match
+  // is anchored to end-of-string) and `cleanModelOutput`'s later HTML-tag cleanup then mangled it —
+  // stripping the inside but leaving the outer angle brackets, reducing a real reply to literally
+  // `"<>"`. Both tags must come out, and the LAST one's values are what actually get used, on the
+  // reasoning that a tag the model updates partway through is meant to reflect its final state.
+  it('strips every scene tag when the model emits more than one, using the last for the actual scene', () => {
+    const { text, scene } = extractSceneTag(
+      '<<scene:expression=neutral,background=living-room>>\n' +
+        'Sumire: "Five minutes." Her voice is flat.\n' +
+        '<<scene:expression=annoyed,background=kitchen>>\n' +
+        'Sumire: She goes to put the kettle on.',
+    )
+    expect(text).not.toContain('<')
+    expect(text).not.toContain('>')
+    expect(text).toContain('Five minutes')
+    expect(text).toContain('kettle')
+    expect(scene).toEqual({ expression: 'annoyed', background: 'kitchen' })
+  })
+
+  it('still returns the single tag correctly when there is only one, even mid-text rather than trailing', () => {
+    const { text, scene } = extractSceneTag('<<scene:expression=happy,background=cafe>>\nShe smiles.')
+    expect(text).toBe('She smiles.')
+    expect(scene).toEqual({ expression: 'happy', background: 'cafe' })
+  })
 })
 
 describe('buildSceneInstruction', () => {

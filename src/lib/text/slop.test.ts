@@ -5,6 +5,7 @@ import {
   findRepeatedPhrases,
   findSlop,
   findSlopAcross,
+  isVerbatimEcho,
   trimToLastSentence,
 } from './slop'
 
@@ -138,5 +139,44 @@ describe('trimToLastSentence', () => {
   it('bails rather than gut a reply that is one long unpunctuated run', () => {
     const text = 'she kept walking and did not look back even once as the rain started to come down harder'
     expect(trimToLastSentence(text)).toBe(text)
+  })
+})
+
+describe('isVerbatimEcho', () => {
+  const priorText = "I keep thinking about how much of my week is just built around when I get to see you next."
+
+  it('catches a bare echo of the immediately-preceding message', () => {
+    expect(isVerbatimEcho(priorText, priorText)).toBe(true)
+  })
+
+  it('catches the same echo with a stray one-word speaker label glued on the front', () => {
+    expect(isVerbatimEcho(`Kai: ${priorText}`, priorText)).toBe(true)
+  })
+
+  it('catches it with a two-word speaker label too', () => {
+    expect(isVerbatimEcho(`Kai Tanaka: ${priorText}`, priorText)).toBe(true)
+  })
+
+  it('is insensitive to surrounding whitespace on either side', () => {
+    expect(isVerbatimEcho(`  ${priorText}  \n`, `\n${priorText}  `)).toBe(true)
+  })
+
+  it('does not flag a genuinely new reply', () => {
+    expect(isVerbatimEcho('"You can\'t just say that." Her voice cracks once before she steadies it.', priorText)).toBe(false)
+  })
+
+  it('does not flag a short reply that legitimately starts with a capitalized clause before a colon', () => {
+    // The exact failure mode this is narrow on purpose to avoid: stripping the opening clause of a
+    // real sentence that happens to contain an early colon, rather than an actual speaker label.
+    expect(isVerbatimEcho('Chapter One: this is not an echo at all.', priorText)).toBe(false)
+  })
+
+  it('returns false with no prior message to compare against (e.g. the very first line of a chat)', () => {
+    expect(isVerbatimEcho(priorText, undefined)).toBe(false)
+    expect(isVerbatimEcho(priorText, '')).toBe(false)
+  })
+
+  it('does not flag a reply that merely starts the same way as the prior message but genuinely continues differently', () => {
+    expect(isVerbatimEcho(`${priorText} That's not a complaint.`, priorText)).toBe(false)
   })
 })

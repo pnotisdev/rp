@@ -21,6 +21,21 @@ export interface ChatBackend {
   getChatTemplate(): Promise<string | null>
 }
 
+/**
+ * A lightweight, no-generation-cost reachability+auth probe — deliberately not part of
+ * `ChatBackend` itself (same reasoning as the doc comment above: KoboldCpp's rich status lives
+ * directly on `KoboldClient`, not the shared interface). Unlike that richer status, "is this
+ * endpoint reachable and is the key accepted" genuinely does have an answer for every backend, just
+ * a much thinner one — `OpenAICompatibleClient` and `NovelAIClient` each implement `checkConnection()`
+ * with this same return shape so Settings → Connection and the header status dot can treat every
+ * non-KoboldCpp backend identically.
+ */
+export interface ConnectionCheckResult {
+  ok: boolean
+  /** A short, specific reason for a failure (bad key, unreachable host, ...) — undefined for a bare/unexplained failure, and for any success. */
+  detail?: string
+}
+
 export type ChatBackendId = 'koboldcpp' | 'openai-compatible' | 'novelai'
 
 export const CHAT_BACKEND_LABELS: Record<ChatBackendId, string> = {

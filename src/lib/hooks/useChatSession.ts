@@ -56,7 +56,7 @@ import { getInstructTemplate, resolveInstructTemplate } from '@/lib/prompt/instr
 import { intimacyGuidance } from '@/lib/prompt/intimacyGuidance'
 import { chatCompletionSamplerToRequest } from '@/lib/api/chatCompletionSampler'
 import { extractSceneTag, stripSceneTagForDisplay, type SceneTag } from '@/lib/vn/sceneTag'
-import { buildSlopAvoidanceNote, cleanModelOutput, trimToLastSentence } from '@/lib/text/slop'
+import { buildSlopAvoidanceNote, cleanModelOutput, isVerbatimEcho, trimToLastSentence } from '@/lib/text/slop'
 import { normalizeRpMarkup } from '@/lib/text/messageSegments'
 import { replyMaxTokens, resolveReplyLength } from '@/lib/characters/voice'
 import { SCENE_MOOD_IDS } from '@/lib/vn/moods'
@@ -1019,9 +1019,19 @@ export function useChatSession(chatId: string | null) {
       const track = getRelationshipTrack(freshChat, target.id)
       if ((track.commitmentStatus ?? 'none') === 'none') return
       const scarredStats = applyBreakupScar(getRelationshipStats(track))
+      // The scar can drop warmth enough to cross back over a milestone boundary (e.g. sweethearts
+      // → close) — every other write path in this file (`updateAffectionFromReply`,
+      // `askForCommitment`, `endDateEvent`'s close-out) recomputes and saves `relationshipStage`
+      // alongside a stats change for exactly this reason; this one didn't, leaving the stored stage
+      // stale at whatever it was before the breakup. Affection itself is untouched by a breakup —
+      // only trust/chemistry/comfort take the scar — so it's `track.affection` unchanged, not a
+      // separately computed value.
+      const warmth = computeWarmth(track.affection ?? 0, scarredStats)
+      const relationshipStage = relationshipStageForWarmth(warmth, relationshipMilestonesFor(world?.relationshipThresholds))
       await chatsApi.update(chatId, patchRelationshipTrack(freshChat, target.id, {
         commitmentStatus: 'none',
         relationshipStats: scarredStats,
+        relationshipStage,
         relationshipWarning: null,
         breakupCount: (track.breakupCount ?? 0) + 1,
       }))
@@ -1030,7 +1040,7 @@ export function useChatSession(chatId: string | null) {
         .catch(() => {})
       toastInfo(`You and ${target.card.name} are no longer together.`)
     },
-    [chatId, persona?.name, resolveSpeaker],
+    [chatId, persona?.name, resolveSpeaker, world],
   )
 
   const previewPrompt = useCallback(async () => {
@@ -1403,6 +1413,19 @@ export function useChatSession(chatId: string | null) {
           // Prompt Inspector's raw/processed toggle.
           combined = cleanModelOutput(extractedText, { charName: speaker.card.name, personaName: persona?.name || 'You' })
           scene = sanitizeSceneTag(parsedScene, unlockedExpressions, unlockedBackgrounds)
+          // A reply that's nothing but a recognized `<<scene:>>` tag (or otherwise scrubs down to
+          // nothing), or that's just the immediately-preceding message parroted back (bare, or with
+          // a stray speaker label glued on — see `isVerbatimEcho`), is a real generation failure,
+          // not a success with an empty or repeated message — without this, it saved as
+          // `failed: false` and rendered as a blank or duplicate-looking bubble with no "Generation
+          // failed" affordance, while still feeding the bad text to the choice/relationship assists
+          // below as the latest reply. `historyForPrompt`'s last entry (not `currentHistory`, which
+          // an auto-continue round has already overwritten with this same reply's own earlier text)
+          // is always whatever genuinely came before this generation attempt started, whoever said
+          // it. `combined` only ever grows round to round (each round re-derives it from the full
+          // accumulated text, never just its own delta), so once a round produces real, non-echoed
+          // text this can't flip back on a later round.
+          const isUsableReply = combined.trim().length > 0 && !isVerbatimEcho(combined, historyForPrompt[historyForPrompt.length - 1]?.text)
 
           if (continuing) {
             const freshMsg = await messagesApi.get(targetMessageId)
@@ -1422,7 +1445,7 @@ export function useChatSession(chatId: string | null) {
               activeSwipe,
               scene,
               tokenCount: await countTokens(combined),
-              failed: false,
+              failed: !isUsableReply,
             })
           } else {
             const freshMsg = await messagesApi.get(targetMessageId)
@@ -1442,10 +1465,13 @@ export function useChatSession(chatId: string | null) {
               activeSwipe,
               scene,
               tokenCount: await countTokens(combined),
-              failed: false,
+              failed: !isUsableReply,
             })
           }
-          wroteAnything = true
+          // Only a round that actually produced a real, non-echoed reply counts — an empty or
+          // echoed round shouldn't mask a genuine failure if this is also the round the loop ends
+          // on (see `isUsableReply` above).
+          wroteAnything = wroteAnything || isUsableReply
           // Also rolls the sticky/cooldown bookkeeping forward for next turn (built once per round;
           // the final round's state is the one that sticks). Bumps updatedAt regardless.
           await chatsApi.update(chat.id, { worldInfoState: built.worldInfoState ?? {} })

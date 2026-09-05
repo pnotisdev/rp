@@ -1,7 +1,7 @@
 import type { GenerateRequest } from './types'
 import { KoboldApiError } from './types'
 import { estimateTokens } from '@/lib/tokenEstimate'
-import type { ChatBackend } from './chatBackend'
+import type { ChatBackend, ConnectionCheckResult } from './chatBackend'
 
 const TEXT_NOVELAI = 'https://text.novelai.net'
 const API_NOVELAI = 'https://api.novelai.net'
@@ -247,5 +247,27 @@ export class NovelAIClient implements ChatBackend {
   /** Not a locally-loaded GGUF — nothing to compare the active instruct template against. */
   async getChatTemplate(): Promise<string | null> {
     return null
+  }
+
+  /**
+   * Settings → Connection's "does this actually work" check. `GET /user/subscription` is the
+   * endpoint SillyTavern's own current backend (`src/endpoints/novelai.js`) calls for exactly this —
+   * a real generation costs real subscription-tier quota for no reason, this doesn't. 401 there
+   * means a rejected key; any other non-ok is a general error. The response does carry real
+   * subscription details (tier, perks), but its exact shape isn't confirmed anywhere this session
+   * checked (see the class doc comment's own honesty note) — reachability plus a clear auth-or-not
+   * answer is the honest thing to report, not a guessed-at field.
+   */
+  async checkConnection(): Promise<ConnectionCheckResult> {
+    if (!this.apiKey.trim()) return { ok: false, detail: 'No API key set.' }
+    let res: Response
+    try {
+      res = await fetch(`${API_NOVELAI}/user/subscription`, { headers: this.headers() })
+    } catch {
+      return { ok: false, detail: 'Could not reach NovelAI.' }
+    }
+    if (res.status === 401) return { ok: false, detail: 'The API key was rejected.' }
+    if (!res.ok) return { ok: false, detail: `Unexpected response (${res.status}).` }
+    return { ok: true }
   }
 }

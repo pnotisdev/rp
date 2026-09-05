@@ -150,6 +150,32 @@ export function truncateAtStrayTurnMarker(text: string, charName: string, person
   return text.slice(0, cut).trim()
 }
 
+/** A leading name-shaped label a model sometimes glues onto an otherwise-verbatim echo — `"Kai: "`
+ *  on text that's actually just the other party's own last line played back at them. Deliberately
+ *  narrow (1-2 capitalized words, nothing else, right before the colon) so it only strips something
+ *  that actually looks like a speaker tag, not the opening clause of a real sentence that happens to
+ *  contain an early colon (e.g. "Chapter One: the beginning" stays untouched — two capitalized
+ *  words is the edge of what this matches, and real prose essentially never opens exactly that way
+ *  right before a colon). */
+const LEADING_SPEAKER_LABEL_RE = /^\s*[A-Z][A-Za-z'-]*(?:\s[A-Z][A-Za-z'-]*)?\s*:\s*/
+
+/**
+ * True when `text` is nothing but the immediately-preceding message played back — bare, or with a
+ * stray speaker-label glued on the front. Seen live: a weak/confused model occasionally parrots the
+ * last line instead of writing a new one (see ROADMAP.md's playthrough report, bug #4). Deliberately
+ * checks only the ONE immediately-preceding message, not a scan across history: a short line
+ * legitimately recurring later in a real conversation ("Oh." "Fine.") is common and not something
+ * this can safely flag without false-positiving on it, but an exact, *immediate* repeat essentially
+ * never is legitimate dialogue. Both shapes were caught live: a bare echo of the just-sent message,
+ * and the same thing with a stray "Kai: " label glued onto the front of it.
+ */
+export function isVerbatimEcho(text: string, priorText: string | undefined): boolean {
+  const prior = priorText?.trim()
+  if (!prior) return false
+  const trimmed = text.trim()
+  return trimmed === prior || trimmed.replace(LEADING_SPEAKER_LABEL_RE, '') === prior
+}
+
 /**
  * Trims a reply back to its last complete sentence — for a generation that ran out of token budget
  * mid-word and has no continuation coming.

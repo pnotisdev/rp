@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
-import { useConnectionStatus } from '@/lib/hooks/useConnectionStatus'
+import { useConnectionStatus, type ConnectionStatus } from '@/lib/hooks/useConnectionStatus'
+import { useHostedBackendStatus } from '@/lib/hooks/useHostedBackendStatus'
 import { BUILTIN_INSTRUCT_TEMPLATES } from '@/lib/prompt/instructTemplates'
 import { CHAT_BACKEND_LABELS, KNOWN_CHAT_PROVIDERS, NOVELAI_MODELS, type ChatBackendId } from '@/lib/api/chatBackend'
 import { TextField, SelectField } from '@/components/ui/Field'
@@ -15,6 +16,26 @@ const STATUS_DOT = { online: 'bg-success', offline: 'bg-danger', checking: 'bg-w
 const STATUS_LABEL = { online: 'Connected', offline: 'Not reachable', checking: 'Checking…' } as const
 const BUILTIN_IDS = new Set(BUILTIN_INSTRUCT_TEMPLATES.map((t) => t.id))
 
+/**
+ * The hosted-backend (OpenAI-compatible / NovelAI) equivalent of the KoboldCpp status block above —
+ * a "Test connection" button rather than an always-running poll, since `useHostedBackendStatus`
+ * only checks once per distinct config plus on demand (see that hook's own doc comment for why).
+ */
+function HostedConnectionStatus({ status, detail, recheck }: { status: ConnectionStatus; detail: string | null; recheck: () => void }) {
+  return (
+    <div className="mt-2 rounded-xl bg-bg-elevated p-5 text-xs">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-1.5">
+          <span className={`h-2 w-2 rounded-full ${STATUS_DOT[status]}`} />
+          <span className="text-text">{STATUS_LABEL[status]}</span>
+        </div>
+        <Button onClick={recheck}>{status === 'checking' ? 'Testing…' : 'Test connection'}</Button>
+      </div>
+      {detail && <div className="mt-1 text-text-muted">{detail}</div>}
+    </div>
+  )
+}
+
 export function ConnectionSettings() {
   const baseUrl = useSettingsStore((s) => s.baseUrl)
   const setBaseUrl = useSettingsStore((s) => s.setBaseUrl)
@@ -27,6 +48,18 @@ export function ConnectionSettings() {
   const setChatBackendConfig = useSettingsStore((s) => s.setChatBackendConfig)
   const [draft, setDraft] = useState(baseUrl)
   const { status, model, version, maxContext, detectedTemplateId } = useConnectionStatus(baseUrl)
+  // Checked once per distinct config plus on manual demand (`recheck`), not on a timer like the
+  // KoboldCpp status above — see the hook's own doc comment for why a metered hosted backend
+  // shouldn't be polled the same way a free local one is. Only ever enabled for whichever hosted
+  // backend is actually selected, which — since the fields below are already gated the same way —
+  // is exactly "whichever of these two sections is currently visible."
+  const hostedStatus = useHostedBackendStatus(
+    chatBackend !== 'koboldcpp',
+    chatBackend === 'novelai' ? 'novelai' : 'openai-compatible',
+    chatBackendBaseUrl,
+    chatBackendApiKey,
+    chatBackendModel,
+  )
 
   // Only nudge when the model clearly implies a builtin format AND the active template is itself a
   // builtin we can compare against — a user on a hand-tuned custom template is assumed to know.
@@ -158,6 +191,7 @@ export function ConnectionSettings() {
               onChange={(e) => setChatBackendConfig({ chatBackendModel: e.target.value })}
               placeholder={matchedProvider ? `e.g. ${matchedProvider.modelExample}` : 'e.g. gpt-4o-mini'}
             />
+            <HostedConnectionStatus status={hostedStatus.status} detail={hostedStatus.detail} recheck={hostedStatus.recheck} />
             <p className="mt-2 text-xs text-text-muted">
               Keys are stored only in this browser and sent directly to the base URL above — never
               through any other server. Context-size and tokenizer figures elsewhere in the app fall
@@ -195,6 +229,7 @@ export function ConnectionSettings() {
               onChange={(e) => setChatBackendConfig({ chatBackendApiKey: e.target.value })}
               hint="From your NovelAI account's user settings, not your login password."
             />
+            <HostedConnectionStatus status={hostedStatus.status} detail={hostedStatus.detail} recheck={hostedStatus.recheck} />
             <p className="mt-2 text-xs text-text-muted">
               Keys are stored only in this browser and sent directly to NovelAI — never through any
               other server. The KoboldCpp sampler above supplies temperature/top P/penalties for
