@@ -643,6 +643,16 @@ export function CharacterEditor({
 
       {tab === 'vn' && (
         <div className="space-y-10">
+        {!worldId && (
+          <p className="rounded-xl bg-bg-sunken px-4 py-3 text-xs text-text-muted">
+            Sprites show in Visual Novel mode, but scene <em>backgrounds</em> come from a world — this character isn't
+            bound to one, so VN scenes will fall back to a placeholder gradient. Pick a world in the{' '}
+            <button type="button" onClick={() => setTab('identity')} className="text-accent hover:underline">
+              Identity tab
+            </button>
+            .
+          </p>
+        )}
         <Section
           title="Expressions"
           description="Art per expression so Visual Novel mode shows the right one as the model tags each reply's mood. Blank falls back to the avatar. The small number is the warmth needed to unlock it."
@@ -1271,8 +1281,26 @@ export function CharacterEditor({
       {showGenerate && (
         <GenerateCharacterDialog
           onClose={() => setShowGenerate(false)}
-          onGenerated={(card) => {
-            setForm(card)
+          onGenerated={({ card, profile, bonds, outfits: draftedOutfits, characterBook }) => {
+            setForm(characterBook ? { ...card, character_book: characterBook } : card)
+            if (draftedOutfits?.length) setOutfits(draftedOutfits)
+            if (profile) {
+              setOccupation(profile.occupation)
+              setWorkplace(profile.workplace)
+              setHomeLocation(profile.homeLocation)
+              setFrequentedLocations(profile.frequentedLocations)
+              setLikes(profile.likes)
+              setGoals(profile.goals)
+              setBoundaries(profile.boundaries)
+              setLoveLanguage(profile.loveLanguage)
+            }
+            if (bonds) {
+              setGiftLikes(bonds.giftLikes)
+              setGiftDislikes(bonds.giftDislikes)
+              setWeatherLoves(bonds.weatherLoves)
+              setWeatherHates(bonds.weatherHates)
+              setRelationshipStarters(bonds.relationshipStarters)
+            }
             setShowGenerate(false)
           }}
           worldTone={editingWorld?.description}

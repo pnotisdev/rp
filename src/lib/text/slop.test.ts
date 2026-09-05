@@ -3,6 +3,8 @@ import {
   buildSlopAvoidanceNote,
   cleanModelOutput,
   findRepeatedPhrases,
+  balanceTrailingMarkup,
+  endsCleanly,
   findSlop,
   findSlopAcross,
   isVerbatimEcho,
@@ -39,6 +41,14 @@ describe('cleanModelOutput — meta/preamble removal', () => {
   it('cuts a fabricated next turn at a stray name prefix', () => {
     const raw = '"See you tomorrow."\nKai: "Wait, one more thing."'
     expect(cleanModelOutput(raw, { charName: 'Sumire', personaName: 'Kai' })).toBe('"See you tomorrow."')
+  })
+
+  it('scrubs an impersonation suggestion: names swapped, so a leading persona label goes and a run-on into the character is cut', () => {
+    // `impersonate()` in useChatSession calls it this way — persona is the expected speaker here.
+    const raw = 'Kai: *I lean over and kiss her cheek.* "I\'ll be right back."\nSumire: *She catches his hand.*'
+    expect(cleanModelOutput(raw, { charName: 'Kai', personaName: 'Sumire' })).toBe(
+      '*I lean over and kiss her cheek.* "I\'ll be right back."',
+    )
   })
 
   it('drops a lone unclosed trailing asterisk', () => {
@@ -122,6 +132,54 @@ describe('buildSlopAvoidanceNote', () => {
 
   it('ignores the player-supplied turns (caller passes char turns only)', () => {
     expect(buildSlopAvoidanceNote([])).toBeUndefined()
+  })
+})
+
+describe('endsCleanly', () => {
+  it('accepts a finished sentence, with or without a trailing quote/asterisk/bracket', () => {
+    expect(endsCleanly('She looks up. "What do you want?"')).toBe(true)
+    expect(endsCleanly('*She turns away.*')).toBe(true)
+    expect(endsCleanly('Ask her yourself (if you dare).')).toBe(true)
+    expect(endsCleanly('"I already told you"')).toBe(true) // bare closing quote, unpunctuated dialogue
+    expect(endsCleanly('It trails off...')).toBe(true)
+    expect(endsCleanly('')).toBe(true)
+  })
+
+  it('rejects a reply cut off mid-sentence', () => {
+    expect(endsCleanly('She reaches for the')).toBe(false)
+    expect(endsCleanly('"Fine, but only if you promise to')).toBe(false)
+    expect(endsCleanly('He steps closer,')).toBe(false)
+  })
+
+  it('rejects a reply that ends on a period but left an action beat or quote open', () => {
+    // The screenshot case: sentence-final punctuation, but the closing `*` never came.
+    expect(endsCleanly('"Don\'t watch me waste it."\n\n*She says it like a warning.')).toBe(false)
+    expect(endsCleanly('She looks up. "I already said no.')).toBe(false)
+  })
+})
+
+describe('balanceTrailingMarkup', () => {
+  it('closes an action beat a stop sequence cut off mid-mark', () => {
+    expect(balanceTrailingMarkup('*She says it like a warning.')).toBe('*She says it like a warning.*')
+  })
+
+  it('closes an open line of dialogue', () => {
+    expect(balanceTrailingMarkup('"The paper is expensive. Don\'t watch me waste it.')).toBe(
+      '"The paper is expensive. Don\'t watch me waste it."',
+    )
+  })
+
+  it('closes a quote nested inside an action beat, quote first', () => {
+    expect(balanceTrailingMarkup('*She mutters, "not again.')).toBe('*She mutters, "not again."*')
+  })
+
+  it('drops a bare trailing mark with nothing inside it', () => {
+    expect(balanceTrailingMarkup('She turns away. *')).toBe('She turns away.')
+  })
+
+  it('leaves balanced text alone', () => {
+    const t = '*She turns away.* "Goodnight."'
+    expect(balanceTrailingMarkup(t)).toBe(t)
   })
 })
 

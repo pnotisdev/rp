@@ -6,7 +6,7 @@ import { buildSceneInstruction } from '@/lib/vn/sceneTag'
 import { applyRegexScripts } from '@/lib/text/regexScripts'
 import type { RegexScript } from '@/lib/types'
 import type { InstructTemplate } from './instructTemplates'
-import { DEFAULT_SYSTEM_PROMPT } from './systemPrompts'
+import { DEFAULT_SYSTEM_PROMPT, IMPERSONATION_SYSTEM_PROMPT } from './systemPrompts'
 
 export { DEFAULT_SYSTEM_PROMPT }
 export type { SystemPromptPreset } from './systemPrompts'
@@ -172,9 +172,12 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
   const after = activatedEntries.filter((e) => e.position === 'after_char')
   const worldAtDepth = activatedEntries.filter((e) => e.position === 'at_depth')
 
-  const systemBlock = sub(
-    character.system_prompt?.trim() || input.globalSystemPrompt?.trim() || DEFAULT_SYSTEM_PROMPT,
-  )
+  // Impersonation ("suggest what {{user}} would say") needs its own system block — the normal one
+  // opens with "you are {{char}}, write only {{char}}, never {{user}}", which the model follows over
+  // the lone `{{user}}:` generation cue and writes the character's turn regardless.
+  const systemBlock = input.impersonateAsUser
+    ? sub(IMPERSONATION_SYSTEM_PROMPT)
+    : sub(character.system_prompt?.trim() || input.globalSystemPrompt?.trim() || DEFAULT_SYSTEM_PROMPT)
 
   const descriptionParts = [
     character.description?.trim() ? sub(character.description) : '',
@@ -252,15 +255,21 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
   const worldAtDepthTokens = worldAtDepthItems.reduce((sum, i) => sum + i.tokens, 0)
 
   // Injected right before generation — same "late" placement as ST's post-history-instructions,
-  // which is exactly where steering toward an in-progress objective is most effective.
+  // which is exactly where steering toward an in-progress objective is most effective. Impersonation
+  // ("suggest what {{user}} would say") suppresses the character-reply steers here — the card's own
+  // post-history note and the scene tag both assume {{char}} is the one about to speak. The computed
+  // steers (objective, relationship nudge, and the character-behaviour half of `styleGuidance`) are
+  // already withheld by `useChatSession` for this mode.
+  const imp = !!input.impersonateAsUser
   const postHistoryBlock = [
-    character.post_history_instructions?.trim() ? sub(character.post_history_instructions) : '',
-    input.globalPostHistory?.trim() ? sub(input.globalPostHistory) : '',
+    imp || !character.post_history_instructions?.trim() ? '' : sub(character.post_history_instructions),
+    imp || !input.globalPostHistory?.trim() ? '' : sub(input.globalPostHistory),
     buildObjectiveBlock(input.activeObjective, sub),
     input.relationshipDescription?.trim() ? sub(input.relationshipDescription) : '',
     input.styleGuidance?.trim() ? input.styleGuidance.trim() : '',
     // The scene tag describes the character's own turn, so it makes no sense when generating the user's line instead.
-    input.impersonateAsUser ? '' : buildSceneInstruction(input.sceneOptions),
+    imp ? '' : buildSceneInstruction(input.sceneOptions),
+    imp ? `[Write only ${macroCtx.userName}'s next message. Stop before ${macroCtx.charName} replies.]` : '',
   ]
     .filter(Boolean)
     .join('\n\n')

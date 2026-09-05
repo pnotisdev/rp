@@ -176,6 +176,40 @@ export function isVerbatimEcho(text: string, priorText: string | undefined): boo
   return trimmed === prior || trimmed.replace(LEADING_SPEAKER_LABEL_RE, '') === prior
 }
 
+const oddCount = (text: string, mark: string): boolean => (text.split(mark).length - 1) % 2 === 1
+
+/**
+ * Whether `text` ends on a finished thought. Two ways it can fail: it stops mid-sentence (no
+ * terminal punctuation and no closing quote/asterisk), or it leaves an action beat or a line of
+ * dialogue open — an odd number of `*` or `"`, which means a stop sequence cut the reply off inside
+ * the beat even if it happens to land on a period (`*She says it like a warning.` — the closing `*`
+ * never came). Used by `trimToLastSentence` to skip a no-op, and by the generation loop to tell a
+ * genuinely short reply from one that got cut. Empty counts as clean — nothing half-said to finish.
+ */
+export function endsCleanly(text: string): boolean {
+  const t = text.trimEnd()
+  if (!t) return true
+  if (oddCount(t, '*') || oddCount(t, '"')) return false
+  return /[.!?…]["'’”*)\]]*$/.test(t) || /[*"”’]$/.test(t)
+}
+
+/**
+ * Closes markup a stop sequence cut off mid-beat, as a last tidy once auto-continue can't finish it
+ * properly: `*She says it like a warning.` → `*She says it like a warning.*`, `"Don't.` → `"Don't."`.
+ * A bare trailing mark with nothing inside it (`She turns away. *`) is dropped instead. Quote before
+ * asterisk, since a quote nests inside an action beat.
+ */
+export function balanceTrailingMarkup(text: string): string {
+  let out = text.trimEnd()
+  for (const mark of ['"', '*']) {
+    if (!oddCount(out, mark)) continue
+    out = new RegExp(`\\${mark}\\s*$`).test(out)
+      ? out.replace(new RegExp(`\\s*\\${mark}\\s*$`), '').trimEnd()
+      : out + mark
+  }
+  return out
+}
+
 /**
  * Trims a reply back to its last complete sentence — for a generation that ran out of token budget
  * mid-word and has no continuation coming.
@@ -188,8 +222,7 @@ export function isVerbatimEcho(text: string, priorText: string | undefined): boo
 export function trimToLastSentence(text: string, maxLossRatio = 0.35): string {
   const trimmed = text.trimEnd()
   if (!trimmed) return text
-  // Already ends cleanly: sentence punctuation, or a closed action/quote.
-  if (/[.!?…]["'’”*)\]]*$/.test(trimmed) || /[*"”’]$/.test(trimmed)) return trimmed
+  if (endsCleanly(trimmed)) return trimmed
   const match = trimmed.match(/[\s\S]*[.!?…]["'’”*)\]]*/)
   if (!match) return text
   const cut = match[0].trimEnd()

@@ -198,6 +198,12 @@ interface SettingsState {
   chatsPanelCollapsed: boolean
   setChatsPanelCollapsed: (v: boolean) => void
 
+  /** Character ids whose "VN mode has no art yet" setup hint the user has dismissed — per-character
+   *  so a brand-new character without sprites still gets told, but a deliberately art-less one
+   *  stops nagging. */
+  vnArtHintDismissed: string[]
+  dismissVnArtHint: (characterId: string) => void
+
   // long-term memory
   autoSummarize: boolean
   keepRecentMessages: number
@@ -409,6 +415,14 @@ export const useSettingsStore = create<SettingsState>()(
 
       chatsPanelCollapsed: false,
       setChatsPanelCollapsed: (v) => set({ chatsPanelCollapsed: v }),
+
+      vnArtHintDismissed: [],
+      dismissVnArtHint: (characterId) =>
+        set((s) =>
+          s.vnArtHintDismissed.includes(characterId)
+            ? s
+            : { vnArtHintDismissed: [...s.vnArtHintDismissed, characterId] },
+        ),
 
       autoSummarize: true,
       keepRecentMessages: 12,

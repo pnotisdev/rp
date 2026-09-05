@@ -62,7 +62,14 @@ import { intimacyGuidance, resolveIntimacyLevel } from '@/lib/prompt/intimacyGui
 import { chatCompletionSamplerToRequest } from '@/lib/api/chatCompletionSampler'
 import { extractSceneTag, stripSceneTagForDisplay, type SceneTag } from '@/lib/vn/sceneTag'
 import { withIndefiniteArticle } from '@/lib/text/article'
-import { buildSlopAvoidanceNote, cleanModelOutput, isVerbatimEcho, trimToLastSentence } from '@/lib/text/slop'
+import {
+  balanceTrailingMarkup,
+  buildSlopAvoidanceNote,
+  cleanModelOutput,
+  endsCleanly,
+  isVerbatimEcho,
+  trimToLastSentence,
+} from '@/lib/text/slop'
 import { normalizeRpMarkup } from '@/lib/text/messageSegments'
 import { replyMaxTokens, resolveReplyLength } from '@/lib/characters/voice'
 import { SCENE_MOOD_IDS } from '@/lib/vn/moods'
@@ -629,9 +636,15 @@ export function useChatSession(chatId: string | null) {
         ? historyForPrompt.filter((m) => (createdAtById.get(m.id) ?? Infinity) > cutoff)
         : historyForPrompt
 
+      // "Suggest what you'd say next" (`impersonateAsUser`) is writing {{user}}'s line, not {{char}}'s
+      // — so every steer built for {{char}}'s reply (the objective it's working toward, the
+      // relationship nudge, and the character-behaviour half of `styleGuidance` below) is withheld.
+      // Left in for it: the world/persona/history context, and the plain writing-style rules, which
+      // apply to {{user}}'s line just the same.
+      const impersonating = !!opts?.impersonateAsUser
       const pendingTasks = activeObjective?.tasks.filter((t) => t.status === 'pending') ?? []
       const objectiveForPrompt =
-        activeObjective && pendingTasks.length > 0
+        !impersonating && activeObjective && pendingTasks.length > 0
           ? {
               title: activeObjective.title,
               description: activeObjective.description,
@@ -642,7 +655,9 @@ export function useChatSession(chatId: string | null) {
       // {{user}}'s relationship with the primary specifically, not something a non-primary
       // participant's own dialogue should be steered by.
       const relationshipDescription =
-        effectiveAssistFlag(freshChat.assistOverrides?.autoTrackRelationship, autoTrackRelationship) && speaker.id === character.id
+        !impersonating &&
+        effectiveAssistFlag(freshChat.assistOverrides?.autoTrackRelationship, autoTrackRelationship) &&
+        speaker.id === character.id
           ? buildRelationshipDescription(freshChat, world, character)
           : undefined
       // Names back to the model the specific AI-prose tells and verbatim repeats this character
@@ -665,27 +680,33 @@ export function useChatSession(chatId: string | null) {
       // answering when asked.
       const activityInitiativeGuidance =
         "Your character doesn't only answer what's put in front of them. Every so often, especially once things feel comfortable, let them bring up an idea of their own: something to do together, a place to go, a topic they're curious about, drawing on their own interests and routine rather than only reacting to what's proposed to them."
-      const styleGuidance =
-        [
-          avoidEmDashes ? 'Never use em dashes (the — character) in your writing. Use a comma, period, or parentheses instead.' : '',
-          slowBurnPacing
-            ? "Pace intimacy like a slow burn. Earn it through many small moments; don't grant it just because it was asked for. If pushed toward more affection, a kiss, or closeness faster than the relationship has earned, react the way your character actually would. Hesitation, deflection, or a flat no are often the right call, especially early on. Don't cave just to be agreeable. None of this makes your character passive, though: once something is genuinely earned, don't just sit and wait for it to be asked for either. Let your character be the one who closes the distance, reaches for a hand, or leans in first sometimes, the same way a real person catching feelings would."
-            : '',
-          intimacyGuidance(intimacyLevel),
-          intimacyOptions,
-          activityInitiativeGuidance,
-          afterglowLine,
-          moodLine,
-          needLine,
-          intentLine,
-          sceneNudge,
-          replyLengthInstruction,
-          styleGuidanceNote.trim(),
-          slopAvoidance ?? '',
-          opts?.extraStyleGuidance ?? '',
-        ]
-          .filter(Boolean)
-          .join(' ') || undefined
+      const emDashRule = avoidEmDashes
+        ? 'Never use em dashes (the — character) in your writing. Use a comma, period, or parentheses instead.'
+        : ''
+      const styleGuidance = impersonating
+        ? // Impersonation: only the rules that shape prose, not {{char}}'s behaviour or {{char}}'s
+          // recent phrasing (the slop-avoidance note is scoped to the character's own turns).
+          [emDashRule, styleGuidanceNote.trim(), opts?.extraStyleGuidance ?? ''].filter(Boolean).join(' ') || undefined
+        : [
+            emDashRule,
+            slowBurnPacing
+              ? "Pace intimacy like a slow burn. Earn it through many small moments; don't grant it just because it was asked for. If pushed toward more affection, a kiss, or closeness faster than the relationship has earned, react the way your character actually would. Hesitation, deflection, or a flat no are often the right call, especially early on. Don't cave just to be agreeable. None of this makes your character passive, though: once something is genuinely earned, don't just sit and wait for it to be asked for either. Let your character be the one who closes the distance, reaches for a hand, or leans in first sometimes, the same way a real person catching feelings would."
+              : '',
+            intimacyGuidance(intimacyLevel),
+            intimacyOptions,
+            activityInitiativeGuidance,
+            afterglowLine,
+            moodLine,
+            needLine,
+            intentLine,
+            sceneNudge,
+            replyLengthInstruction,
+            styleGuidanceNote.trim(),
+            slopAvoidance ?? '',
+            opts?.extraStyleGuidance ?? '',
+          ]
+            .filter(Boolean)
+            .join(' ') || undefined
 
       const contextBudget = sampler.max_context_length - sampler.max_length - 32
       return buildPrompt({
@@ -1751,10 +1772,10 @@ export function useChatSession(chatId: string | null) {
       let combined = ''
       let scene: ReturnType<typeof sanitizeSceneTag>
       let wroteAnything = false
-      // Set when the final round stopped because it hit this character's reply-length band cap
-      // (not the user's budget, and not a natural stop) — the reply may end mid-sentence with no
-      // continuation coming, so it gets trimmed back to its last complete sentence after the loop.
-      let cutShortByBandCap = false
+      // Set when the loop breaks on a reply that still ends mid-sentence and has no continuation
+      // coming (a reply-length band cap stopped it short, or it stayed ragged through the last
+      // auto-continue round) — trimmed back to its last complete sentence after the loop.
+      let needsSentenceTrim = false
 
       try {
         // A reply that used its entire token budget without reaching a natural stop almost
@@ -1974,11 +1995,22 @@ export function useChatSession(chatId: string | null) {
           // "don't keep going" regardless of how close to the token cap it landed.
           const generatedTokens = !abort.signal.aborted && newText.trim() ? await countTokens(newText) : 0
           const hitCap = !abort.signal.aborted && generatedTokens >= effectiveMaxLength - 1
-          // Extend only a reply that ran into the user's real token budget, never one this
-          // character's reply-length band deliberately kept short.
-          const looksTruncated = hitCap && !bandCapsBelowUserMax
+          // A round that stopped well under the cap but leaves the reply mid-sentence was cut by a
+          // stop sequence firing early (an over-eager end-of-turn token, a card's example-dialogue
+          // delimiter, a stray persona-name line) — the same visibly-unfinished outcome as hitting
+          // max_length, just a different cause. A reply that stops early *on a complete sentence* is
+          // a legitimate short turn and is left alone.
+          // Only worth *one* recovery round: a stop sequence that fires a second time (a card's
+          // `<START>` in its examples, say) won't be fixed by generating into it again, and a model
+          // that just punctuates poorly shouldn't cost three generations every reply.
+          const endedMidThought =
+            round === 0 && !abort.signal.aborted && !!newText.trim() && !hitCap && !endsCleanly(combined)
+          // Extend a reply that ran into the user's real token budget, or one a stray stop cut off
+          // mid-sentence — never one this character's reply-length band deliberately kept short.
+          const looksTruncated = !bandCapsBelowUserMax && (hitCap || endedMidThought)
           if (!looksTruncated || round === MAX_AUTO_CONTINUE_ROUNDS) {
-            cutShortByBandCap = hitCap && bandCapsBelowUserMax
+            // Band-capped, or still ragged after the last allowed round: tidy the tail below.
+            needsSentenceTrim = !abort.signal.aborted && !endsCleanly(combined)
             break
           }
 
@@ -1990,12 +2022,13 @@ export function useChatSession(chatId: string | null) {
               : [...currentHistory.slice(0, -1), { ...currentHistory[currentHistory.length - 1], text: combined }]
         }
 
-        // The reply-length band cap can stop a turn mid-sentence with no auto-continue coming.
-        // Trim it back to the last complete sentence (trimToLastSentence bails itself if that
-        // would lose too much of a single long run-on). Only the display text and active swipe
-        // change; the untouched `rawText` stays as the model produced it.
-        if (cutShortByBandCap && !abort.signal.aborted) {
-          const tidied = trimToLastSentence(combined)
+        // A reply that broke out of the loop still ending mid-sentence (band cap, or ragged past
+        // the last auto-continue round) gets trimmed back to its last complete sentence
+        // (trimToLastSentence bails itself if that would lose too much of a single long run-on),
+        // then any action beat / line of dialogue a stop sequence cut off mid-mark is closed off.
+        // Only the display text and active swipe change; the untouched `rawText` stays as-is.
+        if (needsSentenceTrim && !abort.signal.aborted) {
+          const tidied = balanceTrailingMarkup(trimToLastSentence(combined))
           if (tidied && tidied !== combined) {
             combined = tidied
             const freshMsg = await messagesApi.get(targetMessageId)
@@ -2419,8 +2452,13 @@ export function useChatSession(chatId: string | null) {
     const built = await buildCurrentPrompt(historyForPrompt, { impersonateAsUser: true })
     if (!built) return ''
     const text = await client.generate({ ...sampler, prompt: built.prompt, genkey: makeGenKey() })
-    return text.trim()
-  }, [buildCurrentPrompt, character, chat, client, messages, sampler])
+    // The generation cue already ends with "{{user}}:", so a model that opens with "Kai: " is
+    // echoing the label, not naming itself — the same scrub the character reply path gets. Passing
+    // the persona name as `charName` (the expected speaker of *this* text) strips that leading
+    // label; passing the character name as `personaName` truncates the suggestion if the model runs
+    // on past {{user}}'s line into {{char}}'s reply.
+    return cleanModelOutput(text, { charName: persona?.name || 'You', personaName: character.card.name })
+  }, [buildCurrentPrompt, character, chat, client, messages, persona?.name, sampler])
 
   const createObjective = useCallback(
     async (title: string, description: string, createdBy: 'user' | 'ai' = 'user') => {

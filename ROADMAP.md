@@ -1137,6 +1137,23 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
       no repeated or dropped text at the stitch points, confirming multiple rounds actually ran and
       merged correctly; at a normal `max_length` (300), this gives up to 900 tokens of headroom
       before a reply would ever visibly cut off.
+      **Follow-up (user-reported, twice): a reply cut off *without* hitting `max_length`** — the
+      token-count heuristic only caught the "used the whole budget" case, so a reply a stop sequence
+      killed early (an over-eager end-of-turn token, a card's `mes_example` `<START>`, a stray
+      persona-name line) just ended abruptly with no recovery. `runGeneration` now also auto-continues
+      once when a round stopped well under the cap, wasn't aborted, wasn't band-capped, and leaves the
+      text unfinished — `endsCleanly()` (`slop.ts`) is the test: it fails on no terminal punctuation
+      *and* on an odd number of `*` or `"`, which is the real-world shape the user hit — a reply
+      ending `*She says it like a warning.` (sentence-final period, but the closing `*` never came,
+      so it rendered half-italicised). A reply that stops early *on a finished, balanced sentence* is
+      a legitimate short turn and is left alone. The mid-thought recovery is capped at one extra round
+      (a stop that fires twice won't be fixed by a third try, and a punctuation-poor model shouldn't
+      cost three generations a reply); any tail still ragged when the loop ends is trimmed to the last
+      complete sentence (as the band-cap case already was) and then `balanceTrailingMarkup()` closes a
+      still-open beat or line of dialogue (or drops a bare trailing mark). 8 new `slop.test.ts`
+      cases. Needs a live model to confirm the end-to-end recovery. A precise fix (surfacing the
+      backend's own `finish_reason` — `"length"` vs `"stop"` — instead of inferring from token count)
+      stays open: it needs a `ChatBackend` return-shape change touching every call site.
 - [x] **Writing-style steering (avoid em dashes, reduce "AI slop" phrasing)** — user-requested,
       described as needing real enforcement, not just a hopeful prompt hint. Two new global
       settings (`useSettingsStore.ts`): `avoidEmDashes` (a dedicated toggle) and `styleGuidance`
@@ -2349,6 +2366,69 @@ below:**
       correctly (checked via the real file-picker frame and its help text, not just that a button
       exists) — the actual vision call itself needs a real vision-capable model loaded, which
       wasn't available to confirm this session.
+- [x] **"Generate a whole character," not just the card** (#137) — the user's own follow-up ("focus
+      on character creation first" of a bigger "AI creates everything" idea). `generateFullCharacter.ts`
+      is a staged orchestrator: it drafts the card (`draftCharacterFromBrief`, pulled out of
+      `GenerateCharacterDialog` so the orchestrator can call it headlessly, and now folding in
+      `worldTone` the way the portrait path already did), then feeds that card forward as grounding
+      context into four more focused, individually-parseable calls — `draftCharacterProfile`
+      (occupation/workplace/home/haunts/likes/goals/boundaries/love language),
+      `draftCharacterBonds` (gift likes/dislikes, weather feelings clamped to `WEATHER_KINDS`, three
+      escalating `relationshipStarters` with fresh ids + affection clamped 0-100),
+      `draftCharacterOutfits` (2-4 wardrobe states for the Visual novel → Expressions grid — labels
+      and unlock gates only, no art, `id`s minted with `slugifyOutfitId`, an `intimate` state also
+      flagged `manualOnly`), and `suggestLoreEntries` for a per-character `character_book`. One JSON
+      blob for all of it is exactly the shape a local model breaks halfway through; one call per
+      artifact is not. Only the card stage is load-bearing — a parse failure in any later stage is
+      recorded in `draft.failed` and the run continues, since a character with no drafted goals is
+      still perfectly usable. The card prompt itself was rewritten: shared `CARD_FIELD_SPEC` /
+      `CARD_PROSE_STYLE` / `CARD_JSON_RULES` blocks across the brief and portrait paths, `first_mes`
+      now explicitly asks for `*action*` / `"speech"` markup across 2-4 paragraphs, `mes_example` for
+      `<START>`-delimited exchanges, and the style guidance was sharpened to the same house voice as
+      `systemPrompts.ts` (was producing flat, unformatted prose before). The per-field "Regenerate
+      with AI" button (`regenerateCardField` / `RegenerateFieldButton`) got the same treatment after
+      the user flagged its output as "generic, AI sounding and bad": the old prompt said only
+      "rewrite this field so it fits" with no target and no style steering. Now it shows the current
+      text and asks for a rewrite that keeps its facts, states what a good version of that specific
+      field is (`FIELD_GUIDANCE` per description/personality/scenario), carries the shared
+      `PROSE_STYLE_CORE` anti-slop block, and — the concrete-beats-abstract trick from `slop.ts` —
+      runs `findSlop` on the current text and names the exact tells back to the model to avoid.
+      `max_length` 300 → 450, and the button now opens a small popover with an optional steer
+      ("colder, ex-military") threaded through as the `hint` param that already existed but had no UI.
+      Both the field rewrite and every prose stage of the whole-character generator now also fold in
+      the user's global **Writing style** setting (`useSettingsStore.styleGuidance`, Settings →
+      Generation) via a shared `writerStyleNote` helper — placed right after the built-in style block
+      and told to win on conflict, the same "closest to generation wins" placement `buildPrompt`
+      gives it in the live chat prompt — so a generated or rewritten card matches the prose the user
+      has asked for everywhere else, not just chat replies. The generate dialog and the rewrite
+      popover each show a one-line "Your writing style from Settings is applied" when one is set.
+      The dialog gains a "Full character" / "Just the card" scope toggle, a live per-stage checklist,
+      and a Stop button wired through a new optional `external` `AbortSignal` on `generateWithTimeout`
+      (so Stop aborts the in-flight call instead of waiting out its 45s timeout); `CharacterEditor`
+      spreads the returned profile/bonds/outfits/book into its existing field state for review before
+      save. `generateFullCharacter.test.ts` (new, 8 tests) plus ~15 `aiAssist.test.ts` additions
+      cover the full run, per-stage progress ordering, card-fails-hard vs optional-stage-fails-soft,
+      stage selection, the portrait path, between-stage abort, each new primitive's coercion, the
+      field-rewrite prompt's grounding / slop-naming / empty-field handling, and the writing-style
+      note being folded in (and omitted when blank) across the prose stages. Live-verified: the
+      dialog, the scope/mode toggles, the 5-row stage checklist, Stop (aborts and reverts to Cancel
+      without closing), and the field-rewrite popover (opens, autofocuses, Cancel closes, shows the
+      writing-style line when one is set) all behave correctly; the generation calls themselves need
+      a model loaded, which wasn't available this session (koboldcpp off). **Still open**: the same
+      orchestration for worlds, lorebooks, and personas — the rest of the "AI creates everything"
+      idea — plus wiring an uploaded portrait through every stage, not just the card.
+- [x] **API origin check no longer pins the client to port 5173** — surfaced this session: the
+      preview/sandbox ran the client on a free port (5173 was already held by another instance), and
+      `server/app.ts`'s cross-site guard derived its allowlist from `PORT` (default 5173), so every
+      `/api` request from the real port got `403 Forbidden origin` and the whole app rendered with
+      "none of your data" — the exact failure `vite.config.ts`'s own comment warns a port collision
+      would cause. That check's real job is to reject a request whose Origin is *another website*
+      (the browser sets Origin truthfully, so a remote page can't forge a loopback origin); the exact
+      port was never the point. Extracted to `server/originCheck.ts` (`originAllowed` kept free of
+      `express` so it unit-tests without standing up the app, 4 tests) — now any loopback origin
+      (`localhost` / `127.0.0.1` / `[::1]`, any port, any scheme) passes and a present Origin on any
+      other host is rejected. Live-verified: preview on `:51018` went from empty lists to showing the
+      seeded Sumire / Sakura Hill University content.
 - [x] **World templates**: a starting point picked when creating a world (Freeform RP / Visual
       Novel / Dating Sim / Slice of Life), pulled forward out of section 10's phase order per
       section 13's own note that it's the structural fix for "which toggles do I want." Shipped: a
@@ -2987,21 +3067,24 @@ changelog #49), and nothing points the user at it.
       keys) hidden by default; `WorldEditor` got the same tab treatment. Still open: `(?)` popovers
       for the genuinely opaque ones (regex key syntax, inclusion groups, the sampler params in
       `SamplingControls`), and a true "Basic" mode that hides whole tabs for a first character.
-- [ ] **VN mode reads as broken before art exists** — enabling `visualNovelMode` with a character
-      that has no sprites and a world with no backgrounds shows a placeholder gradient and initials
-      full-bleed, which looks like a bug, not a "you haven't uploaded art yet" state. Either a
-      clear empty-VN affordance ("Upload sprites for {char} to see them here"), or don't offer the
-      toggle until at least one sprite exists, or a bundled default sprite set.
-      **A real, silent instance of this found live**: a character with a full custom sprite set but
-      *no world bound at all* — `Character.worldId` unset — has nowhere to source background art
-      from regardless of what the model tags, so VN mode always showed the placeholder gradient
-      even with an otherwise fully-dressed character, with no indication anywhere that "bind a
-      world" was the missing step. Fixed for that one character by binding her to the existing
-      seeded world's background set. Confirms this item's own point rather than closing it — the
-      real fix is still the general empty-state affordance above (here, ideally: a nudge on the
-      character/world editors when VN mode is on but the active character has no world, since
-      background art specifically is a world-level concept a user might not realize they need to
-      set up separately from sprites).
+- [x] **VN mode reads as broken before art exists** — enabling `visualNovelMode` with a character
+      that has no sprites and a world with no backgrounds showed a placeholder gradient and a
+      full-bleed avatar/initials, which looks like a bug rather than a "you haven't uploaded art
+      yet" state — and the silent variant found live (a fully-sprited character with `worldId`
+      unset, so *nothing* can source a background) had no indication anywhere that binding a world
+      was the missing step. Shipped the "clear empty-VN affordance" option: `vnArtHint(character,
+      world, dismissedIds)` (`src/lib/vn/artHint.ts`, pure, 6 tests) names the *one* specific
+      missing piece in priority order — no sprites → "add art in the character editor's Visual novel
+      tab"; sprites but no world → "assign one from the Identity tab"; world but no backgrounds →
+      "add them in the world editor". `VNStage` renders it as a dashed glass card centred in the
+      sprite area (so an empty stage reads as intentional), dismissible **per-character** via a new
+      persisted `vnArtHintDismissed: string[]` in `useSettingsStore` — so a deliberately art-less
+      character stops nagging while a brand-new one still gets told. Plus the editor nudge this item
+      asked for: `CharacterEditor`'s Visual novel tab shows a one-line note when the character has no
+      `worldId`, with an inline jump to the Identity tab, explaining that backgrounds are a
+      world-level concept separate from sprites. Live-verified: the VNStage card renders for a
+      sprite-less character in VN mode, the × dismisses it and persists, and the editor note
+      appears/disappears as a world is picked.
 - [x] **Command palette / global search (Ctrl/Cmd-K)** — jump to any character, chat, world, or
       view from one input. `src/components/layout/CommandPalette.tsx` (new), wired into
       `src/App.tsx` via a global `keydown` listener and a search-trigger button in
@@ -4786,3 +4869,35 @@ lorebook/character-authoring tools rather than new engineering. The user's own d
 noticing that "unlocked" never actually meant "usable" — led straight into another planned pass:
 ~~clickable intimacy actions, a real toy economy, and a first-time-together milestone~~ (#136),
 live-verified against the real backend down to a genuine mid-test 429 handled cleanly.
+
+The user then floated a much larger "an LLM automatically creates complete character, persona,
+lorebooks, world cards, and more from a short preference brief" idea and asked to start with
+character creation. ~~The character slice~~ (#137, see section 10's "AI-assisted authoring" area
+for the full write-up): `generateFullCharacter.ts` is a staged orchestrator that drafts the card,
+then feeds it forward into profile / bonds / outfits / per-character-lorebook calls — one parseable
+call per artifact rather than one blob a local model breaks halfway through — with soft-failure on
+every stage past the card, a live per-stage checklist, and a Stop button. It also grew a rewritten
+card prompt (`*action*`/`"speech"` markup in `first_mes`, `<START>` in `mes_example`, sharpened
+anti-slop style), the same treatment for the per-field "Regenerate" button (grounded rewrite +
+slop-naming + an optional steer popover), and the global Writing-style setting now applies to all AI
+authoring, not just chat. World/lorebook/persona orchestration and portrait-through-every-stage stay
+explicitly open.
+
+Off the same session: ~~the API origin check no longer 403s when the client runs on a port other
+than 5173~~ (`server/originCheck.ts` — any loopback origin passes, the cross-site guard's real job
+is unchanged); ~~a VN-mode empty-state affordance~~ (a dashed card in `VNStage` naming the specific
+missing art — sprites vs world-binding vs backgrounds — per-character dismissible, plus a
+Visual-novel-tab note in the character editor when no world is bound); and ~~a fix for "Suggest what
+you'd say next" writing the character's turn instead of the player's~~ — `impersonateAsUser` swapped
+only the trailing generation cue while the system prompt ("write only {{char}}, never {{user}}") and
+every character-behaviour steer below it stayed, so the model wrote {{char}} (or third-person
+narration about them). Now `builder.ts` swaps in a dedicated `IMPERSONATION_SYSTEM_PROMPT` and drops
+the card's post-history note and scene tag; `useChatSession` withholds the objective, the
+relationship nudge, and the character-behaviour half of `styleGuidance`, leaving only the writing
+context and plain prose rules that apply to the player's line too. A `[Write only {{user}}'s next
+message. Stop before {{char}} replies.]` reinforcement sits right before the cue. Live-confirmed by
+the user (it now writes a first-person line for the persona), which surfaced a follow-on: the model
+echoed the `Kai: ` speaker label into the suggestion, since the gen cue already ends with it — fixed
+by routing the impersonate result through the same `cleanModelOutput` the character path uses, with
+the persona name as `charName` (strips the leading label) and the character name as `personaName`
+(cuts a run-on into {{char}}'s reply). 6 new `builder.test.ts` / `slop.test.ts` cases.

@@ -143,6 +143,65 @@ describe('buildPrompt — styleGuidance', () => {
   })
 })
 
+describe('buildPrompt — impersonateAsUser', () => {
+  const history: ChatMessage[] = [
+    { id: '1', role: 'user', name: 'You', text: 'How was your day?' },
+    { id: '2', role: 'char', name: 'Aria', text: 'Long. The archive flooded.' },
+  ]
+
+  it('swaps in the impersonation system block and drops the "write only {{char}}" framing', async () => {
+    const result = await buildPrompt(baseInput({ impersonateAsUser: true, history }))
+    expect(result.prompt).toContain("writing You's next line")
+    expect(result.prompt).not.toContain('Write only Aria (their words')
+  })
+
+  it('ends the prompt on the user turn cue, not the character cue', async () => {
+    const result = await buildPrompt(baseInput({ impersonateAsUser: true, history }))
+    expect(result.prompt.trimEnd().endsWith('You:')).toBe(true)
+  })
+
+  it('adds the terse "write only {{user}}, stop before {{char}} replies" reinforcement', async () => {
+    const result = await buildPrompt(baseInput({ impersonateAsUser: true, history }))
+    expect(result.prompt).toContain("[Write only You's next message. Stop before Aria replies.]")
+  })
+
+  it("suppresses the character's post-history instructions and the scene instruction", async () => {
+    const withImp = await buildPrompt(
+      baseInput({
+        impersonateAsUser: true,
+        history,
+        character: character({ name: 'Aria', post_history_instructions: 'PHI_MARKER stay terse' }),
+        sceneOptions: { expressionIds: ['neutral'], backgroundIds: ['library'] },
+      }),
+    )
+    expect(withImp.prompt).not.toContain('PHI_MARKER')
+    // The scene-tag instruction (already gated pre-change) still stays out.
+    expect(withImp.prompt).not.toContain('<<scene:')
+
+    const normal = await buildPrompt(
+      baseInput({
+        history,
+        character: character({ name: 'Aria', post_history_instructions: 'PHI_MARKER stay terse' }),
+      }),
+    )
+    expect(normal.prompt).toContain('PHI_MARKER')
+  })
+
+  it('still carries the world, persona, and history context', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        impersonateAsUser: true,
+        history,
+        worldDescription: 'WORLD_MARKER a rain-soaked city',
+        personaDescription: 'PERSONA_MARKER a junior archivist',
+      }),
+    )
+    expect(result.prompt).toContain('WORLD_MARKER')
+    expect(result.prompt).toContain('PERSONA_MARKER')
+    expect(result.prompt).toContain('The archive flooded.')
+  })
+})
+
 describe("buildPrompt — Author's Note", () => {
   const history: ChatMessage[] = [
     { id: '1', role: 'user', name: 'You', text: 'FIRST_LINE' },

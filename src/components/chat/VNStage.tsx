@@ -22,6 +22,7 @@ import { parseSfxWordList } from '@/lib/text/messageSegments'
 import { sfxConfigFor } from '@/lib/text/sfx'
 import { resolveExpressionSprite } from '@/lib/vn/expressions'
 import { currentOutfitFrom } from '@/lib/vn/outfits'
+import { vnArtHint } from '@/lib/vn/artHint'
 
 /** Falling petals only make sense for scenes actually outdoors — never indoors (kitchen, office, a bedroom). */
 const OUTDOOR_BACKGROUNDS = new Set(['park', 'forest', 'rooftop', 'city-street', 'beach'])
@@ -161,6 +162,12 @@ export function VNStage({
   const swipes = lastCharMsg?.swipes ?? []
   const canSwipe = !!lastCharMsg && swipes.length > 0 && !isStreamingThis
   const { displaySrc: displaySpriteUrl, visible: spriteVisible, fadeMs: spriteFadeMs } = useSpriteCrossfade(spriteUrl)
+
+  // "VN mode reads as broken before art exists" — see `vnArtHint`. Dismiss is per-character so a
+  // deliberately art-less one stops nagging while a new one still gets told.
+  const vnArtHintDismissed = useSettingsStore((s) => s.vnArtHintDismissed)
+  const dismissVnArtHint = useSettingsStore((s) => s.dismissVnArtHint)
+  const artHint = vnArtHint(character, world, vnArtHintDismissed)
   const personaName = persona?.name
   const reducedMotion = useSettingsStore((s) => s.reducedMotion)
   const regexScripts = useSettingsStore((s) => s.regexScripts)
@@ -281,6 +288,21 @@ export function VNStage({
               instead of scaling down — AND gives the scene art a guaranteed floor, so the
               docked panel below never squeezes it down to near-nothing. */}
           <div className="relative z-0 flex min-h-[190px] flex-1 items-end justify-center pb-3">
+            {artHint && character && (
+              <div className="absolute inset-x-0 top-[32%] z-10 flex justify-center px-6">
+                <div className="relative max-w-sm rounded-2xl border border-dashed border-white/25 bg-black/45 px-5 py-4 text-center text-[12px] leading-relaxed text-white/80 backdrop-blur-sm">
+                  <button
+                    type="button"
+                    onClick={() => dismissVnArtHint(character.id)}
+                    aria-label="Dismiss VN setup hint"
+                    className="absolute right-1.5 top-1.5 text-white/45 transition-colors hover:text-white/90"
+                  >
+                    <X size={13} strokeWidth={2} />
+                  </button>
+                  <p className="pr-3">{artHint}</p>
+                </div>
+              </div>
+            )}
             {displaySpriteUrl && (
               <img
                 src={displaySpriteUrl}
