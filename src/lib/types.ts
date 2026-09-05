@@ -3,6 +3,7 @@ import type { ChatMessage } from '@/lib/prompt/builder'
 import type { InstructTemplate } from '@/lib/prompt/instructTemplates'
 import type { SceneTag } from '@/lib/vn/sceneTag'
 import type { WorldTemplateId } from '@/lib/world/worldTemplates'
+import type { CustomBackground } from '@/lib/vn/backgrounds'
 
 export interface Persona {
   id: string
@@ -465,6 +466,8 @@ export interface WorldCard {
   backgrounds?: Record<string, string>
   /** Minimum affection required before a tagged background can be selected/displayed. */
   backgroundUnlocks?: Record<string, number>
+  /** World-authored scene locations beyond the 12 built-in defaults — see `CustomBackground`. */
+  customBackgrounds?: CustomBackground[]
   /** Background-music track URLs keyed by scene mood id (src/lib/vn/moods.ts), plus a `default` key played when no mood-specific track applies. VN mode only. */
   music?: Record<string, string>
   /** Overrides the default gift catalog for characters living here. Empty/unset falls back to the built-in default catalog. */

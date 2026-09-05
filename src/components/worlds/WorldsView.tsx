@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Globe, ImagePlus, Music, X } from 'lucide-react'
+import { Globe, ImagePlus, Music, Plus, X } from 'lucide-react'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { worldsApi } from '@/lib/api/client'
 import type { CustomSceneFlag, GiftItem, GiftRarity, ItemDef, ItemEffect, RelationshipDimension, WorldCard } from '@/lib/types'
 import { fileToDataUrl } from '@/lib/characters/importExport'
-import { DEFAULT_BACKGROUNDS } from '@/lib/vn/backgrounds'
+import { DEFAULT_BACKGROUNDS, DEFAULT_BACKGROUND_IDS, slugifyBackgroundId, type CustomBackground } from '@/lib/vn/backgrounds'
 import { BGM_DEFAULT_KEY, SCENE_MOODS } from '@/lib/vn/moods'
 import { combinedSceneFlags, formatRelationshipStage, RELATIONSHIP_MILESTONES } from '@/lib/dating/stage'
 import { advancePhase, getCalendarInfo, getEnergyRemaining, getMaxEnergyForDay, getWeather, describeWeather, PHASES } from '@/lib/world/calendar'
@@ -21,6 +21,7 @@ import { ListEditor } from '@/components/ui/ListEditor'
 import { errorMessage, toastError } from '@/lib/store/useToastStore'
 import { confirmDialog } from '@/lib/store/useConfirmStore'
 import { LorebookEditor } from '@/components/worldinfo/LorebookEditor'
+import { GenerateImageButton } from '@/components/ui/GenerateImageButton'
 import { WorldTemplateGallery } from './WorldTemplateGallery'
 
 const GIFT_RARITIES: GiftRarity[] = ['common', 'uncommon', 'rare', 'epic']
@@ -173,6 +174,8 @@ function WorldEditor({
   const [avatarDataUrl, setAvatarDataUrl] = useState(base.avatarDataUrl)
   const [backgrounds, setBackgrounds] = useState<Record<string, string>>(base.backgrounds ?? {})
   const [backgroundUnlocks, setBackgroundUnlocks] = useState<Record<string, number>>(base.backgroundUnlocks ?? {})
+  const [customBackgrounds, setCustomBackgrounds] = useState<CustomBackground[]>(base.customBackgrounds ?? [])
+  const [newBackgroundLabel, setNewBackgroundLabel] = useState('')
   const [music, setMusic] = useState<Record<string, string>>(base.music ?? {})
   const [gifts, setGifts] = useState<GiftItem[]>(base.gifts ?? [])
   const [items, setItems] = useState<ItemDef[]>(base.items ?? [])
@@ -197,6 +200,7 @@ function WorldEditor({
       avatarDataUrl,
       backgrounds,
       backgroundUnlocks,
+      customBackgrounds,
       music,
       gifts,
       items,
@@ -300,6 +304,19 @@ function WorldEditor({
   const setBackgroundUnlock = (tagId: string, minAffection: number) =>
     setBackgroundUnlocks((b) => ({ ...b, [tagId]: Math.max(0, Math.min(100, minAffection)) }))
 
+  /** World-authored scene locations beyond the 12 defaults — same "author extends a fixed set" pattern as `addCustomExpression` in `CharacterEditor.tsx`. */
+  const addCustomBackground = () => {
+    const label = newBackgroundLabel.trim()
+    if (!label) return
+    const existingIds = [...DEFAULT_BACKGROUND_IDS, ...customBackgrounds.map((b) => b.id)]
+    setCustomBackgrounds((list) => [...list, { id: slugifyBackgroundId(label, existingIds), label }])
+    setNewBackgroundLabel('')
+  }
+  const removeCustomBackground = (backgroundId: string) => {
+    setCustomBackgrounds((list) => list.filter((b) => b.id !== backgroundId))
+    removeBackground(backgroundId)
+  }
+
   const advanceClock = async () => {
     if (!world || advancing) return
     setAdvancing(true)
@@ -339,6 +356,11 @@ function WorldEditor({
   useEffect(() => {
     if (!tabs.some((t) => t.id === tab)) setTab('overview')
   }, [hidden.join(','), tab])
+
+  const allBackgrounds = [
+    ...DEFAULT_BACKGROUNDS.map((b) => ({ id: b.id, label: b.label, custom: false })),
+    ...customBackgrounds.map((b) => ({ id: b.id, label: b.label, custom: true })),
+  ]
 
   return (
     <EditorShell
@@ -445,13 +467,13 @@ function WorldEditor({
           surface="bare"
         >
           <p className="mb-4 text-xs text-text-muted">
-            {Object.keys(backgrounds).length}/{DEFAULT_BACKGROUNDS.length} set. The number under each is
+            {Object.keys(backgrounds).length}/{allBackgrounds.length} set. The number under each is
             the warmth needed before that background can appear.
           </p>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-            {DEFAULT_BACKGROUNDS.map((bg) => (
-              <div key={bg.id} className="space-y-1.5">
-                <label className="portrait-frame group relative block aspect-video cursor-pointer overflow-hidden rounded-xl border border-dashed border-border bg-bg-sunken">
+            {allBackgrounds.map((bg) => (
+              <div key={bg.id} className="group relative space-y-1.5">
+                <label className="portrait-frame relative block aspect-video cursor-pointer overflow-hidden rounded-xl border border-dashed border-border bg-bg-sunken">
                   {backgrounds[bg.id] ? (
                     <img src={backgrounds[bg.id]} alt="" className="h-full w-full object-cover" />
                   ) : (
@@ -466,20 +488,29 @@ function WorldEditor({
                     className="hidden"
                     onChange={(e) => e.target.files?.[0] && handleBackgroundPick(bg.id, e.target.files[0])}
                   />
-                  {backgrounds[bg.id] && (
+                  {(bg.custom || backgrounds[bg.id]) && (
                     <button
                       type="button"
                       onClick={(e) => {
                         e.preventDefault()
-                        removeBackground(bg.id)
+                        bg.custom ? removeCustomBackground(bg.id) : removeBackground(bg.id)
                       }}
-                      aria-label={`Remove ${bg.label} background`}
+                      aria-label={bg.custom ? `Remove custom location ${bg.label}` : `Remove ${bg.label} background`}
                       className="absolute right-1.5 top-1.5 hidden h-6 w-6 items-center justify-center rounded-lg bg-bg-elevated/90 text-text-muted hover:text-danger group-hover:flex"
                     >
                       ✕
                     </button>
                   )}
                 </label>
+                <div className="absolute bottom-8 right-1.5 hidden group-hover:block">
+                  <GenerateImageButton
+                    label={`Generate ${bg.label} with AI`}
+                    initialPrompt={description ? `${bg.label}, ${description}`.slice(0, 300) : `${bg.label}, ${name || 'a scene'}`}
+                    width={1216}
+                    height={832}
+                    onGenerated={(dataUrl) => setBackgrounds((b) => ({ ...b, [bg.id]: dataUrl }))}
+                  />
+                </div>
                 <div className="flex items-center justify-between gap-2 px-0.5">
                   <span className="truncate text-[11px] text-text-muted">{bg.label}</span>
                   <input
@@ -494,6 +525,19 @@ function WorldEditor({
                 </div>
               </div>
             ))}
+          </div>
+          <div className="mt-4 flex items-center gap-2">
+            <input
+              value={newBackgroundLabel}
+              onChange={(e) => setNewBackgroundLabel(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && addCustomBackground()}
+              placeholder="Custom location — e.g. Her family's bookshop"
+              className="flex-1 rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40"
+            />
+            <Button onClick={addCustomBackground} disabled={!newBackgroundLabel.trim()} className="flex items-center gap-1.5">
+              <Plus size={14} strokeWidth={2} />
+              Add
+            </Button>
           </div>
         </Section>
 

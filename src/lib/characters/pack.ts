@@ -3,6 +3,7 @@ import { fileToDataUrl } from './importExport'
 import type { Character, CharacterCardData, GalleryEntry, Lorebook, RelationshipStarter, SocialConnection } from './cardSpec'
 import type { CustomSceneFlag, GiftItem, ItemDef, WorldCard } from '@/lib/types'
 import type { CustomExpression } from '@/lib/vn/expressions'
+import type { CustomBackground } from '@/lib/vn/backgrounds'
 import type { ScheduleEntry, WeatherPreferences } from '@/lib/world/calendar'
 
 const PACK_KIND = 'rp-character-pack'
@@ -47,6 +48,7 @@ export interface CharacterPackV1 {
     avatarDataUrl?: string
     backgrounds?: Record<string, string>
     backgroundUnlocks?: Record<string, number>
+    customBackgrounds?: CustomBackground[]
     music?: Record<string, string>
     gifts?: GiftItem[]
     items?: ItemDef[]
@@ -133,6 +135,7 @@ export async function buildCharacterPack(character: Character, world?: WorldCard
       avatarDataUrl: worldAvatarDataUrl,
       backgrounds,
       backgroundUnlocks: world.backgroundUnlocks,
+      customBackgrounds: world.customBackgrounds,
       music,
       gifts: world.gifts,
       items: world.items,
@@ -186,6 +189,7 @@ export async function importCharacterPack(pack: CharacterPackV1): Promise<{ char
       avatarDataUrl: pack.world.avatarDataUrl,
       backgrounds: pack.world.backgrounds,
       backgroundUnlocks: pack.world.backgroundUnlocks,
+      customBackgrounds: pack.world.customBackgrounds,
       music: pack.world.music,
       gifts: pack.world.gifts,
       items: pack.world.items,

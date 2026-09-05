@@ -81,6 +81,19 @@ function normalizeCustomExpressions(raw: unknown) {
   return entries.length ? entries : undefined
 }
 
+/** A world's own scene locations beyond the 12 built-in defaults — same shape/validation as `normalizeCustomExpressions` above. */
+function normalizeCustomBackgrounds(raw: unknown) {
+  if (!Array.isArray(raw)) return undefined
+  const entries = raw
+    .filter((e): e is Record<string, unknown> => !!e && typeof e === 'object')
+    .map((e) => ({
+      id: typeof e.id === 'string' ? e.id.trim() : '',
+      label: typeof e.label === 'string' && e.label.trim() ? e.label.trim() : 'Custom',
+    }))
+    .filter((e) => !!e.id)
+  return entries.length ? entries : undefined
+}
+
 function normalizeGalleryEntries(id: string, galleryRaw: unknown) {
   if (!Array.isArray(galleryRaw)) return []
   const mapInput: Record<string, string> = {}
@@ -103,7 +116,12 @@ function normalizeGalleryEntries(id: string, galleryRaw: unknown) {
       }
     })
   const resolvedMap = resolveAvatarMap('characters', 'gallery', id, mapInput) ?? {}
-  return entries.map((g) => ({ ...g, imageUrl: resolvedMap[g.id] || g.imageUrl })).filter((g) => !!g.imageUrl)
+  // No `.filter((g) => !!g.imageUrl)` here (removed) — that used to silently delete a CG entry's
+  // title/unlock hint/threshold/flags the moment it was saved before an image was added, which
+  // `GenerateImageButton`'s own async generation made a real, easy-to-hit trap: save mid-generation
+  // and the whole entry vanished. `GalleryView.tsx` already renders a missing `imageUrl` safely (a
+  // placeholder, not a crash), so there's nothing to protect by dropping the entry server-side too.
+  return entries.map((g) => ({ ...g, imageUrl: resolvedMap[g.id] || g.imageUrl }))
 }
 
 const GIFT_RARITIES = new Set(['common', 'uncommon', 'rare', 'epic'])
@@ -791,6 +809,7 @@ app.post('/api/worlds', (req, res) => {
     gifts: normalizeGiftItems(req.body.gifts),
     items: normalizeItemDefs(req.body.items, allowedFlags),
     customSceneFlags,
+    customBackgrounds: normalizeCustomBackgrounds(req.body.customBackgrounds),
     relationshipThresholds: normalizeRelationshipThresholds(req.body.relationshipThresholds),
     createdAt: now,
     updatedAt: now,
@@ -809,6 +828,7 @@ app.put('/api/worlds/:id', (req, res) => {
   if ('backgroundUnlocks' in req.body) patch.backgroundUnlocks = req.body.backgroundUnlocks ?? {}
   if ('gifts' in req.body) patch.gifts = normalizeGiftItems(req.body.gifts)
   if ('customSceneFlags' in req.body) patch.customSceneFlags = normalizeCustomSceneFlags(req.body.customSceneFlags)
+  if ('customBackgrounds' in req.body) patch.customBackgrounds = normalizeCustomBackgrounds(req.body.customBackgrounds)
   if ('items' in req.body) {
     // Validate against whichever custom flags are actually in effect after this same request —
     // the just-normalized ones if this save also touched customSceneFlags, otherwise the world's

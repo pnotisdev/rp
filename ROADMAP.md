@@ -58,9 +58,9 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
       when the active expression changes (`useSpriteCrossfade`), respecting `reducedMotion` for
       free via the global transition-duration override in `globals.css`. Outfit/pose *layers* — a
       real layered sprite composition system, not just a transition — is a separate, much bigger
-      effort and remains open; see section 11's "generate a full expression set" bullet, which
-      would make layering far more tractable once art can be generated on demand instead of
-      hand-uploaded per expression.
+      effort and remains open. Section 11's "generate a full expression set" bullet (#125) is
+      shipped now, so the prerequisite this was waiting on — art generated on demand instead of
+      hand-uploaded per expression — genuinely exists; the layering system itself still doesn't.
 - [x] **Fixed: sprite silently cropped to a sliver on a wide-but-short window** — user-reported,
       reproduced directly (a real character's portrait sprite showed only the top of the head on a
       1440×700 viewport). A classic flexbox bug: the sprite's flex container defaulted to
@@ -71,6 +71,31 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
       standard fix for this flex-shrink class of bug. Verified live: reproduced the crop at
       1440×700 before the fix, confirmed it renders correctly there after, and confirmed normal
       desktop sizes were unaffected either way.
+- [x] **Custom scene locations, and a real gallery-CG data-loss bug fixed** (#127) — the user's own
+      direct follow-up ask: "make it possible in the World to create more Scene backgrounds, easier
+      to add CG gallery." World backgrounds were a fixed 12-location list (`DEFAULT_BACKGROUNDS`)
+      with no way to add one, unlike character expressions, which already let an author extend the
+      default set. **`CustomBackground`** ([src/lib/vn/backgrounds.ts](src/lib/vn/backgrounds.ts))
+      closes that gap — same shape and same "author extends a fixed default set" pattern as
+      `CustomExpression`, plumbed through `WorldCard.customBackgrounds`, server-side normalization
+      (`server/app.ts`), and the character/world pack export/import format
+      (`src/lib/characters/pack.ts`), not just the editor form. `slugifyBackgroundId` shares its
+      actual slug logic with `CustomExpression`'s own `slugifyExpressionId` via a newly-extracted
+      `slugifyId()` ([src/lib/text/slugify.ts](src/lib/text/slugify.ts)) rather than a copy-pasted
+      near-duplicate — both existing tests kept passing unchanged, confirming the extraction is a
+      pure refactor, not a behavior change.
+      **A real, unrelated bug found and fixed while making the CG gallery genuinely easier to use**:
+      `normalizeGalleryEntries` (`server/app.ts`) silently deleted a CG gallery entry's title/unlock
+      hint/threshold/required-flags on save if it had no `imageUrl` yet — dead code from before this
+      app could ever create a CG in stages, but a real, easy-to-hit trap now that generating one's
+      art (#125's `GenerateImageButton`) is an async operation a creator could easily save mid-flight
+      of, or deliberately skip until later. `GalleryView.tsx` already rendered a missing `imageUrl`
+      safely (a placeholder, not a crash), so nothing was actually protected by dropping the entry
+      server-side too — just removed the filter. Verified live end-to-end for both fixes: added a
+      custom background, saved, confirmed via a direct `GET /api/worlds` that `customBackgrounds`
+      persisted correctly, removed it, saved again, confirmed it's gone; added a titled CG with no
+      image, saved, confirmed via `GET /api/characters` that the *entire entry* used to vanish and
+      now survives intact, removed it, saved again, confirmed the gallery is back to empty.
 
 ## 2. Dating-sim mechanics
 - [x] Affection/relationship meter: `Chat.affection`/`relationshipStage`, updated by an AI-graded
@@ -158,6 +183,28 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
       surfaced via the existing `toastSuccess()` system the moment they happen. Deliberately NOT
       toasting scene flags or per-turn stat deltas — those are internal bookkeeping/would be
       constant noise, not a player-facing reward.
+- [x] **Intimacy detail setting** (#127) — the user's own direct request: "add more romance,
+      romantic scenes and more (NSFW)." This app writes no narrative content itself — the connected
+      model does — so the real feature is a genuine, user-controlled dial over how explicit that
+      model gets once a scene the story has actually built toward turns intimate, the same
+      "deterministic code sets the knob, the model writes the words" split as every other
+      prompt-steering setting here. Deliberately separate from the existing `slowBurnPacing`, which
+      governs *pacing* (how fast affection is earned), not *register* (how the prose reads once it
+      has been). `intimacyGuidance()`
+      ([src/lib/prompt/intimacyGuidance.ts](src/lib/prompt/intimacyGuidance.ts)) maps a new
+      `IntimacyDetailLevel` (`'default' | 'fade_to_black' | 'suggestive' | 'explicit'`) to a prompt
+      instruction, picked via a Settings → Generation button row right under Slow-burn pacing.
+      `'default'` sends no instruction at all — identical behavior to every chat before this setting
+      existed, so nobody's existing output changes unless they deliberately pick a level, in either
+      direction: towards less explicit (`fade_to_black`) or more (`explicit`, framed in its own
+      instruction text as the user's own deliberate, enabled choice). 4 new tests
+      (`intimacyGuidance.test.ts`) confirm the default is truly empty, the three opt-in levels are
+      each non-empty and distinct from each other, and the specific framing each is supposed to
+      carry (fade-to-black explicitly tells the model not to narrate explicit content; explicit
+      names itself as user-enabled) actually landed in the text. 572 tests total, typecheck and
+      build clean. Live-verified: the four-way picker renders and persists the choice correctly,
+      reset back to 'default' afterward — actually generating a scene at each level needs a real
+      connected model, not exercised this session.
 
 ## 3. Character & content creation
 - [x] Multi-sprite upload UI in `CharacterEditor` with an unlock-affection field per expression.
@@ -1971,10 +2018,21 @@ below:**
       line, worded naturally rather than as raw data.
 
 ### 10e. Character & world authoring depth
-- [ ] **Guaranteed expression coverage for dates**: extend the sprite/expression system
-      (`Character.sprites`, `DEFAULT_EXPRESSIONS`) so a real face variant (happy, shy, hurt, etc.)
-      is available for the live-date reactive portrait in 10b, not just a hard swap between
-      whatever's been uploaded — ties directly into section 1's open "sprite layering" gap.
+- [x] **Guaranteed expression coverage for dates** (#126) — the user's own follow-up request to
+      complete section 10's remaining partial items. The reactive portrait (10b, default layout)
+      and VN mode's own sprite (`VNStage.tsx`) each independently hard-swapped straight to the
+      generic avatar the instant the model's tagged expression had no uploaded (or unlocked) sprite
+      — tag "yearning" on a character who only drew "love" and "blush" threw away real, close-enough
+      art that already existed. `resolveExpressionSprite()`
+      ([src/lib/vn/expressions.ts](src/lib/vn/expressions.ts)) replaces both call sites with one
+      shared resolver: exact tag → a hand-authored same-family fallback chain
+      (`EXPRESSION_FALLBACKS`, e.g. yearning → love → sad → blush) → 'neutral' → the avatar,
+      checking upload *and* unlock status at every step exactly like the exact-tag check already
+      did. A deliberate judgment call, not a claim of psychological accuracy — the same "runs the
+      world" trade-off already made for scene tags and backgrounds, using the one expression set
+      every character already draws from. 17 new tests (`expressions.test.ts`), including two that
+      sanity-check the fallback map itself (every id is real, nothing lists itself or 'neutral' as
+      its own fallback) — the kind of typo a hand-authored table like this is genuinely at risk of.
 - [x] **Full authoring editors** (partial — see below): identity/personality/lore/weather
       preferences already had editors before this pass; added likes/goals/boundaries, social
       connections (who a character knows and how), employment (occupation/workplace),
@@ -1986,12 +2044,27 @@ below:**
       flag (needs a real taxonomy of "certain content" first). See section 9's changelog for the
       full writeup, including how the new fields actually reach the model (not just sit in the
       editor) and how the date-mode flag is mechanically enforced, not just informational.
-- [ ] **AI-assisted authoring, reviewed before saving**: let the model roll a set of dating stats,
-      draft the narrative profile, or — with a vision-capable model — draft an entire character
-      from an uploaded portrait, fitted to the world's tone. Every field stays editable before
-      save, same as today's `GenerateCharacterDialog`/`RegenerateFieldButton` pattern. This is
-      image → text only; see section 11 for actual image *generation* (portraits, sprites, CGs),
-      which is a separate, larger integration.
+- [x] **AI-assisted authoring from a portrait, reviewed before saving** (#126) — the well-defined
+      two-thirds of this item; "roll a set of dating stats" stays open, since that concept is still
+      "named but never-specified" per the "Full authoring editors" item just above — building
+      something for an undefined ask would be guessing, not completing it.
+      `draftCharacterFromPortrait()` ([src/lib/characters/aiAssist.ts](src/lib/characters/aiAssist.ts))
+      reuses the exact `images: [base64]` shape `sceneVision.ts` already established for vision
+      calls in this app (image → text only — actual image *generation* is section 11's separate,
+      already-shipped `ImageBackend` work) to draft a full card from a reference image: name,
+      description (matching what the image actually shows), personality, scenario, first message,
+      example dialogue. `GenerateCharacterDialog.tsx` gained a "From a brief" / "From a portrait"
+      mode `Chip` toggle rather than a second dialog, reusing the same review-before-save flow
+      the brief mode already had. "Fitted to the world's tone" (this item's own wording): when a
+      world is selected in `CharacterEditor`, its description is passed through as `worldTone` and
+      folded into the prompt, so an image-drafted backstory fits the setting instead of contradicting
+      it. 7 new tests (`aiAssist.test.ts` — this file's first-ever coverage) confirm the image goes
+      out as `images`, never inlined into the prompt text; `worldTone`/brief text are included only
+      when actually provided; and a non-JSON response propagates as a real error rather than a
+      silently blank card. Live-verified: the mode toggle and portrait upload UI render and switch
+      correctly (checked via the real file-picker frame and its help text, not just that a button
+      exists) — the actual vision call itself needs a real vision-capable model loaded, which
+      wasn't available to confirm this session.
 - [x] **World templates**: a starting point picked when creating a world (Freeform RP / Visual
       Novel / Dating Sim / Slice of Life), pulled forward out of section 10's phase order per
       section 13's own note that it's the structural fix for "which toggles do I want." Shipped: a
@@ -2298,18 +2371,58 @@ above creates new fields to author.
         (`a1111Image.test.ts`, `comfyuiImage.test.ts`, `swarmuiImage.test.ts`,
         `novelaiImage.test.ts`) covering request shape, response parsing, the ComfyUI
         default-workflow substitution, SwarmUI's session-retry behavior, and error handling. 546
-        tests total, typecheck and build clean. **None of these
-        four backends has generated a single real image** — no local install of any of the three
-        self-hosted ones, and NovelAI needs the same paid subscription its text backend does.
-        Treat every one of them as a stronger starting point than a guess, not as confirmed working.
-- [ ] **Generate directly into a specific slot, with context**: rather than one generic "generate
-      an image" button, a generation request scoped to what it's for — this character, this
-      expression, this pose/outfit, optionally "as if reacting to X" — landing straight in the
-      matching sprite/CG slot instead of a raw image the creator has to save and re-upload
-      manually. The biggest win here is generating a full expression set (happy/sad/angry/
-      surprised/neutral/etc.) from one description in a single pass instead of one-off images,
-      directly closing section 1's "sprite layering" gap and section 10e's "guaranteed expression
-      coverage" bullet.
+        tests total, typecheck and build clean. **A1111, ComfyUI, and SwarmUI have not generated a
+        single real image** — no local install of any of the three was available to test against.
+      - **NovelAI image — a real partial live check, from a free trial account**: triggered for
+        real through `GenerateImageButton` in the actual character editor UI, not a synthetic
+        script. The result is genuinely informative rather than a clean pass or fail: NovelAI
+        returned a structured `400` — `{"statusCode":400,"message":"Recaptcha token is required
+        for trial generation"}` — which confirms the request actually reached NovelAI's real
+        business logic correctly (the `Bearer` auth was accepted, and the JSON body parsed cleanly
+        enough to be evaluated, not rejected as malformed) before being blocked by a trial-account-
+        specific anti-abuse gate this client has no way to satisfy — and, per this app's own safety
+        rules, no attempt was made to. This is very likely trial-tier-only (the message says so
+        explicitly); a paid account would need its own check to confirm. Text generation was not
+        also tried against this same key — out of scope of what was actually asked for this pass.
+- [x] **Generate directly into a specific slot, with context** (#125) — closes out section 11.
+      `GenerateImageButton` ([src/components/ui/GenerateImageButton.tsx](src/components/ui/GenerateImageButton.tsx))
+      is now wired into every existing image slot instead of only the character avatar: per-expression
+      sprites, world scene backgrounds, and gallery CGs, each seeded with real context instead of a
+      blank box — the character's own description for sprites, `{background label}, {world
+      description}` for backgrounds, and `{character}, {unlock hint}, {title}` for a gallery CG (the
+      unlock hint doubling as the "as if reacting to X" scene context this item's own wording asked
+      for). Portrait slots default to 832×1216, landscape ones to 1216×832 — SDXL's own native
+      bucket resolutions, not the SD1.5-era 512×768 this first shipped with.
+      - **The headline piece**: `GenerateExpressionSetDialog`
+        ([src/components/characters/GenerateExpressionSetDialog.tsx](src/components/characters/GenerateExpressionSetDialog.tsx)) —
+        one base appearance description, a `Chip`-based pick of which of the 21 expressions to fill
+        in (pre-selected: whichever don't already have art, so a bulk run defaults to filling gaps
+        rather than clobbering existing custom sprites), then one generation call per expression,
+        **sequential, not parallel** — the same reasoning this codebase already applies to a local
+        single-GPU KoboldCpp server extends just as much to a local Stable Diffusion one. Each
+        sprite lands in its slot the moment it finishes rather than waiting for the whole batch, a
+        Stop button halts before the next one, and a failed expression is collected into a results
+        summary rather than aborting the rest of the run. Directly closes section 1's outfit/pose-
+        layering note ("would make layering far more tractable once art can be generated on demand")
+        and section 10's "guaranteed expression coverage for dates" bullet, exactly as this item's
+        own original wording anticipated.
+      - **A real bug caught before it shipped**: the Stop button's first version checked the
+        `stopRequested` *state* variable inside the generation loop — a plain React state read
+        inside an already-running `async` closure that a later `setStopRequested(true)` re-render
+        can't actually change from the closure's point of view, so Stop would visibly react (button
+        text flipped to "Stopping…") while never actually halting anything. Fixed by checking a
+        `useRef` instead, mutated in place and read fresh every loop iteration.
+      - **Verification**: live in the browser, for real, against the NovelAI image backend
+        configured in #124 — with a real (if trial-restricted) account, not a mock. Selected 2 of 21
+        expressions, ran the batch, and both calls returned NovelAI's real, already-known trial
+        reCAPTCHA error; the dialog handled it exactly as designed — collected both failures without
+        aborting, showed a clean results summary, and transitioned its footer from Cancel/Generate to
+        Close correctly. This is genuine end-to-end verification of every piece of the batch
+        orchestration except the success path itself (which the avatar button's own earlier
+        successful `result.base64` → `data:image/...` flow already exercises) — still no backend in
+        this app has produced a real generated image. Also confirmed live: the per-slot buttons on
+        backgrounds and the gallery CG render in the right place and build the right context-seeded
+        prompt (checked via each field's actual DOM value, not just that the button appears).
 
 ## 12. Vision: platform-scale ideas (not scheduled)
 
@@ -4019,9 +4132,44 @@ Done so far (see checked boxes above for detail):
      of this feature. A new Settings → Images tab configures whichever backend is active, and a
      first minimal `GenerateImageButton` proves the whole thing end to end from the character
      editor's avatar slot — wiring the same button into VN sprites/backgrounds/gallery CGs stays
-     open (see the item right after this one). None of the four backends has generated a single
-     real image this session — no local install of any self-hosted one, and NovelAI needs the same
-     paid subscription its text backend does.
+     open (see the item right after this one). A1111, ComfyUI, and SwarmUI never got a real server
+     to test against. NovelAI image did get a real, live check from a free trial account, through
+     the actual UI — the request reached NovelAI correctly (auth accepted, body parsed) but a
+     trial-account-only reCAPTCHA gate blocked the actual generation, which this client correctly
+     didn't attempt to work around. Confirms the client is very likely correct; still needs a paid
+     account to fully confirm.
+109. ~~Generate directly into a specific slot, with context~~ — shipped as #125, closing out
+     section 11 in full. `GenerateImageButton` now wired into every image slot (avatar, per-
+     expression sprites, backgrounds, gallery CGs), each seeded with real context instead of a blank
+     prompt, plus the headline piece: `GenerateExpressionSetDialog` generates a whole expression set
+     from one description in a single pass, sequential calls with live per-slot application, a Stop
+     button, and per-item failure collection instead of aborting the batch. A real bug caught before
+     shipping: the Stop button checked React state from inside an already-running async closure,
+     which can't see a later state update — fixed with a `useRef` instead. Live-verified against the
+     real (if trial-restricted) NovelAI account from #124: ran a 2-expression batch, both failed with
+     the same known reCAPTCHA error, and the whole orchestration (collection, results summary, UI
+     state transitions) handled it exactly as designed.
+110. ~~Section 10's remaining partial items: guaranteed expression coverage + AI-assisted authoring
+     from a portrait~~ — shipped as #126, the user's own direct ask to complete section 10. One
+     shared `resolveExpressionSprite()` fallback resolver replaces the reactive portrait's and VN
+     mode's own independent hard-swap-to-avatar logic with a same-family fallback chain first — the
+     "guaranteed coverage" this item asked for. `draftCharacterFromPortrait()` covers the
+     well-defined two-thirds of "AI-assisted authoring" (drafting a narrative profile from a
+     reference image, fitted to the selected world's tone) — "roll a set of dating stats" stays
+     open, since that's still a named-but-unspecified concept per this section's own note, and
+     guessing at a meaning would be inventing the feature, not completing it.
+111. ~~Custom scene locations + a real CG-gallery data-loss bug~~ — shipped as #127, the user's own
+     direct follow-up: "make it possible in the World to create more Scene backgrounds, easier to
+     add CG gallery." `CustomBackground` closes the gap where world backgrounds (unlike character
+     expressions) had no way to add one beyond the fixed 12 defaults — same pattern, a newly-shared
+     `slugifyId()` instead of a copy-pasted duplicate. Along the way: a real, unrelated bug where
+     saving a CG gallery entry with no image yet (a real trap now that generating one is an async
+     operation) silently deleted the whole entry — title, unlock hint, threshold, everything — even
+     though the display side already handled a missing image safely. Also shipped in the same
+     request: an **intimacy detail setting** (section 2, `intimacyGuidance()`) — a genuine
+     user-controlled dial over how explicit intimate scenes get written once earned, separate from
+     the existing pacing-only `slowBurnPacing`, defaulting to no instruction at all so nobody's
+     existing output changes unprompted.
 
 That closes out SillyTavern's full World Info activation engine, plus the last "reasonable next batch," plus sections 10a, 10c, and 10d in full and a first
 slice each of 10b and 10f taken directly afterward since 10's own suggested phase order names them
@@ -4116,13 +4264,27 @@ full~~ (#124) followed directly after, at the user's own request to keep going t
 ComfyUI, SwarmUI, and NovelAI image generation overnight — one `ImageBackend` interface, all four
 implemented against each project's own official docs, a new Settings → Images tab, and a first
 minimal generation UI in the character editor's avatar slot proving the wiring works end to end.
-None of section 8's or 11's newest backends (NovelAI text/image, A1111, ComfyUI, SwarmUI) has
-actually talked to a real server this session — every one of them is a documented-contract
-implementation waiting on its first live check, not a confirmed-working one. What's left in
-section 10 now is just section 12's living-world core — see section 10's own "Suggested phase
-order" for how to sequence that; section 11's own remaining item (generating straight into a
-specific sprite/background/CG slot with real scene context) is the natural next step whenever one
-of tonight's four backends gets that first live check.
+A real NovelAI trial account (the user's own) then gave #124's image client its first live check —
+blocked by a trial-only reCAPTCHA gate rather than a bug, confirming the request pipeline itself is
+sound. ~~Generate directly into a specific slot, with context~~ (#125) closed out section 11 in
+full straight after: every image slot (avatar, sprites, backgrounds, gallery CGs) now seeds a
+real, context-aware prompt instead of a blank one, and `GenerateExpressionSetDialog` generates a
+whole expression set in one sequential pass — live-verified against that same NovelAI account,
+which confirmed the entire batch-orchestration path (collection, results, Stop) works correctly
+even though every call still failed on the same trial restriction. Section 8's/11's backends still
+haven't produced a single successful real generation this session — every one remains a
+documented-contract implementation waiting on an account that isn't trial-limited. ~~Section 10's
+remaining partial items~~ (#126) followed the user's own direct request to complete that section:
+`resolveExpressionSprite()` gives the reactive portrait and VN mode a shared same-family fallback
+chain instead of each independently hard-swapping to the avatar, and `draftCharacterFromPortrait()`
+covers the well-defined two-thirds of "AI-assisted authoring" (the undefined "dating stats" third
+stays open rather than guessed at). ~~Custom scene locations + a CG-gallery data-loss fix + an
+intimacy detail setting~~ (#127) shipped from the same AFK-handoff message, alongside a real,
+unrelated bug caught along the way: saving a gallery CG with no image yet used to silently delete
+the whole entry. What's left in section 10 now is just section 12's living-world core, plus the
+two items sections 2/10 both still flag as genuinely unspecified ("dating stats") or explicitly
+deferred pending live-verification ability this session still doesn't have (the context-budget
+tier system) — see section 10's own "Suggested phase order" for how to sequence the former.
 
 Section 15 (added from a user-supplied AI Dungeon competitive analysis) is a separate set of ideas,
 not yet folded into this priority order. The high-contrast theme preset (#73) and raw-vs-processed

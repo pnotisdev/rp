@@ -28,6 +28,14 @@ export interface PromptPreset {
 export type ChatStyle = 'flat' | 'bubbles' | 'document'
 export type AvatarShape = 'circle' | 'square' | 'rounded' | 'rectangle'
 export type ColorMode = 'light' | 'dark'
+/**
+ * How explicit intimate/romantic scenes get written once the story has actually led there —
+ * separate from `slowBurnPacing` (which governs how *fast* a relationship escalates, not how the
+ * prose reads once it has). 'default' sends no instruction at all, identical to every chat before
+ * this setting existed, so nobody's existing behavior changes unless they deliberately pick a
+ * level — same "opt-in, safe default" rule as every other setting in this app.
+ */
+export type IntimacyDetailLevel = 'default' | 'fade_to_black' | 'suggestive' | 'explicit'
 
 export const DEFAULT_THEME_TOKENS: Record<string, string> = {
   '--c-bg': '251 251 250',
@@ -247,6 +255,9 @@ interface SettingsState {
    *  "warms up slowly," the model just wasn't holding that line under a direct, escalating request. */
   slowBurnPacing: boolean
   setSlowBurnPacing: (v: boolean) => void
+  /** How explicit intimate scenes get written once earned — see `IntimacyDetailLevel`'s own doc comment. */
+  intimacyLevel: IntimacyDetailLevel
+  setIntimacyLevel: (v: IntimacyDetailLevel) => void
 
   // companion voice
   ttsProvider: TtsProviderId
@@ -448,6 +459,8 @@ export const useSettingsStore = create<SettingsState>()(
       setAvoidEmDashes: (v) => set({ avoidEmDashes: v }),
       slowBurnPacing: true,
       setSlowBurnPacing: (v) => set({ slowBurnPacing: v }),
+      intimacyLevel: 'default',
+      setIntimacyLevel: (v) => set({ intimacyLevel: v }),
 
       ttsProvider: 'koboldcpp',
       ttsApiKey: '',

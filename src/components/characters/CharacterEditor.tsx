@@ -18,6 +18,7 @@ import { EditorShell, type EditorTab } from '@/components/ui/EditorShell'
 import { ListEditor } from '@/components/ui/ListEditor'
 import { FileButton } from '@/components/ui/FileButton'
 import { GenerateImageButton } from '@/components/ui/GenerateImageButton'
+import { GenerateExpressionSetDialog } from './GenerateExpressionSetDialog'
 import { errorMessage, toastError, toastSuccess } from '@/lib/store/useToastStore'
 import { confirmDialog } from '@/lib/store/useConfirmStore'
 import { TTS_PROVIDER_LABELS, type TtsProviderId } from '@/lib/voice/ttsProviders'
@@ -65,6 +66,7 @@ export function CharacterEditor({
   const [spriteUnlocks, setSpriteUnlocks] = useState<Record<string, number>>(character?.spriteUnlocks ?? {})
   const [customExpressions, setCustomExpressions] = useState<CustomExpression[]>(character?.customExpressions ?? [])
   const [newExpressionLabel, setNewExpressionLabel] = useState('')
+  const [showExpressionSetDialog, setShowExpressionSetDialog] = useState(false)
   const [giftPreferences, setGiftPreferences] = useState<Record<string, number>>(character?.giftPreferences ?? {})
   const [giftLikes, setGiftLikes] = useState<string[]>(character?.giftLikes ?? [])
   const [giftDislikes, setGiftDislikes] = useState<string[]>(character?.giftDislikes ?? [])
@@ -610,12 +612,16 @@ export function CharacterEditor({
           description="Art per expression so Visual Novel mode shows the right one as the model tags each reply's mood. Blank falls back to the avatar. The small number is the warmth needed to unlock it."
           surface="bare"
         >
-          <div className="mb-4">
+          <div className="mb-4 flex flex-wrap items-center gap-2">
             <FileButton onPick={handleBulkSpritePick} accept="image/png,image/jpeg,image/webp" multiple>
               <Plus size={14} strokeWidth={2} />
               Bulk upload by filename
             </FileButton>
-            <span className="ml-2 text-[11px] text-text-muted">e.g. laughing.png → Laughing</span>
+            <span className="text-[11px] text-text-muted">e.g. laughing.png → Laughing</span>
+            <Button onClick={() => setShowExpressionSetDialog(true)} className="flex items-center gap-1.5">
+              <Sparkles size={14} strokeWidth={2} />
+              Generate expression set with AI
+            </Button>
           </div>
 
           <div className="grid grid-cols-3 gap-3 sm:grid-cols-4">
@@ -646,6 +652,13 @@ export function CharacterEditor({
                     onChange={(e) => setSpriteUnlock(exp.id, Number(e.target.value) || 0)}
                     className="w-9 rounded-md bg-bg-sunken px-1 py-0.5 text-center text-[11px] text-text outline-none"
                     aria-label={`Unlock warmth for ${exp.label}`}
+                  />
+                </div>
+                <div className="absolute -bottom-1 -right-1 hidden group-hover:block">
+                  <GenerateImageButton
+                    label={`Generate ${exp.label} with AI`}
+                    initialPrompt={form.description ? `portrait of ${form.name || 'a character'}, ${form.description}, ${exp.label.toLowerCase()} expression`.slice(0, 300) : ''}
+                    onGenerated={(dataUrl) => setSprites((s) => ({ ...s, [exp.id]: dataUrl }))}
                   />
                 </div>
                 {(exp.custom || sprites[exp.id]) && (
@@ -725,6 +738,22 @@ export function CharacterEditor({
                         onChange={(e) => e.target.files?.[0] && pickGalleryImage(entry.id, e.target.files[0])}
                       />
                     </label>
+                    <div className="relative shrink-0 self-center">
+                      <GenerateImageButton
+                        label={`Generate "${entry.title}" with AI`}
+                        initialPrompt={[
+                          form.description ? `${form.name || 'a character'}, ${form.description}` : form.name,
+                          entry.unlockHint,
+                          entry.title,
+                        ]
+                          .filter(Boolean)
+                          .join(', ')
+                          .slice(0, 300)}
+                        width={1216}
+                        height={832}
+                        onGenerated={(dataUrl) => updateGalleryEntry(entry.id, { imageUrl: dataUrl })}
+                      />
+                    </div>
                     <div className="flex-1">
                       <TextField label="Title" value={entry.title} onChange={(e) => updateGalleryEntry(entry.id, { title: e.target.value })} />
                     </div>
@@ -1081,6 +1110,7 @@ export function CharacterEditor({
             setForm(card)
             setShowGenerate(false)
           }}
+          worldTone={editingWorld?.description}
         />
       )}
       {showTemplates && (
@@ -1090,6 +1120,14 @@ export function CharacterEditor({
             setForm(card)
             setShowTemplates(false)
           }}
+        />
+      )}
+      {showExpressionSetDialog && (
+        <GenerateExpressionSetDialog
+          expressions={allExpressions.map((exp) => ({ id: exp.id, label: exp.label, hasSprite: !!sprites[exp.id] }))}
+          initialPrompt={form.description ? `portrait of ${form.name || 'a character'}, ${form.description}`.slice(0, 300) : ''}
+          onGenerated={(expressionId, dataUrl) => setSprites((s) => ({ ...s, [expressionId]: dataUrl }))}
+          onClose={() => setShowExpressionSetDialog(false)}
         />
       )}
     </EditorShell>

@@ -1,4 +1,4 @@
-import type { CharacterCardData, LorebookEntry } from './cardSpec'
+import { normalizeCardJson, type CharacterCardData, type LorebookEntry } from './cardSpec'
 import type { ChatBackend } from '@/lib/api/chatBackend'
 import { parseLenientJson } from '@/lib/jsonRepair'
 
@@ -67,6 +67,56 @@ export async function regenerateCardField(
     trim_stop: true,
   })
   return text.trim()
+}
+
+const PORTRAIT_SYSTEM_INSTRUCTION = `You write character cards for a roleplay app, drafted from a reference portrait image rather than a text brief. Look at the attached image and imagine a personality and backstory that plausibly fits what's actually shown — expression, styling, setting, era, any visible detail. Output ONLY a single JSON object (no markdown fences, no commentary before or after) with exactly these fields, ALL of which are plain strings (never arrays or nested objects): name, description, personality, scenario, first_mes, mes_example, creator_notes, plus one array field, "tags", an array of short lowercase strings. "description" covers physical appearance (matching what the image actually shows, not a generic guess) plus an invented background. "personality" is a concise trait list capturing how they speak, act and feel. "first_mes" is the character's opening line in-character. "mes_example" is a SINGLE STRING (not an array!) with 1-2 short example exchanges using {{user}} and {{char}}, with \\n between lines.
+
+Write like a person, not like an AI. Plain, concrete language. No em dashes. Avoid stock phrasing: "a mix of X and Y", "not just X but Y", tidy lists of three. Give the character a specific voice.
+
+Critical JSON formatting rules: output strictly valid JSON. Every string value on a single logical line — backslash-n for any line break inside a string, never an actual newline. Every property/array element followed by a comma unless it's the last one. Straight double quotes only.`
+
+/**
+ * Section 10's "AI-assisted authoring... draft an entire character from an uploaded portrait" —
+ * image-to-text only (an existing vision-capable model describing a picture into card fields),
+ * not image *generation*; that's section 11's separate, already-shipped `ImageBackend` work.
+ * Reuses the exact same `images: [base64]` shape `sceneVision.ts` already established for vision
+ * calls in this app. `worldTone` (a selected world's own description, when the character is being
+ * created under one) steers the invented backstory/setting to fit rather than contradict it —
+ * the "fitted to the world's tone" half of this item's own wording.
+ */
+export async function draftCharacterFromPortrait(
+  client: ChatBackend,
+  portraitBase64: string,
+  opts?: { brief?: string; worldTone?: string },
+): Promise<{ card: CharacterCardData; rawOutput: string }> {
+  const prompt = [
+    PORTRAIT_SYSTEM_INSTRUCTION,
+    opts?.worldTone?.trim() ? `Fit the character to this world's own tone and setting:\n${opts.worldTone.trim()}` : '',
+    opts?.brief?.trim() ? `Additional guidance from the creator: ${opts.brief.trim()}` : '',
+    'JSON:',
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+
+  const text = await client.generate({
+    prompt,
+    images: [portraitBase64],
+    max_length: 1024,
+    max_context_length: await client.getEffectiveMaxContext(),
+    temperature: 0.8,
+    top_p: 0.95,
+    top_k: 0,
+    min_p: 0.05,
+    typical: 1,
+    tfs: 1,
+    rep_pen: 1.1,
+    rep_pen_range: 1024,
+    rep_pen_slope: 0.7,
+    stop_sequence: ['\n\n\n', '```'],
+    trim_stop: true,
+  })
+  const card = normalizeCardJson(parseLenientJson(text))
+  return { card, rawOutput: text }
 }
 
 export interface SuggestedLoreEntry {

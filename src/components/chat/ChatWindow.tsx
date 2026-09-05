@@ -58,6 +58,7 @@ import { TuningPanel } from './TuningPanel'
 import { ReactivePortrait } from './ReactivePortrait'
 import { ScenePanel } from './ScenePanel'
 import { nextRoundRobinSpeaker, rosterFrom } from '@/lib/chat/scene'
+import { resolveExpressionSprite } from '@/lib/vn/expressions'
 import { getGiftCatalog } from '@/lib/dating/gifts'
 import { getItemCatalog } from '@/lib/dating/items'
 
@@ -249,14 +250,18 @@ export function ChatWindow({
   const pinnedCount = messages.filter((m) => m.pinned).length
   // 10b's reactive portrait for the default (non-VN) layout — same expression/unlock resolution
   // VNStage already does for its sprite, so a live scene reads the same character mood regardless
-  // of which layout you're in. Falls back to the plain avatar once unlocked art runs out, same as
-  // VNStage; `undefined` (no avatar either) just means the portrait doesn't render at all.
+  // of which layout you're in. `resolveExpressionSprite` guarantees coverage: an unlocked/missing
+  // exact tag falls through to a same-family expression before the plain avatar, rather than
+  // hard-swapping straight to the avatar the moment the exact tag isn't available (section 10's
+  // "guaranteed expression coverage for dates"). `undefined` (no avatar either) means no portrait.
   const reactivePortraitExpression = lastCharScene?.expression || 'neutral'
-  const reactivePortraitUnlocked =
-    (chat.affection ?? 0) >= Number(character?.spriteUnlocks?.[reactivePortraitExpression] ?? 0)
-  const reactivePortraitUrl = reactivePortraitUnlocked
-    ? character?.sprites?.[reactivePortraitExpression] || character?.avatarDataUrl
-    : character?.avatarDataUrl
+  const reactivePortraitUrl = resolveExpressionSprite(
+    character?.sprites,
+    character?.spriteUnlocks,
+    character?.avatarDataUrl,
+    reactivePortraitExpression,
+    chat.affection ?? 0,
+  )
   // Presence reads the world's shared clock, so it's only meaningful for a world-bound character
   // that actually has a schedule authored — most characters have neither, and stay unbadged.
   const presence =

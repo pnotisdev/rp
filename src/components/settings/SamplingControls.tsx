@@ -65,6 +65,8 @@ export function SamplingControls() {
   const setRelationshipDifficulty = useSettingsStore((s) => s.setRelationshipDifficulty)
   const slowBurnPacing = useSettingsStore((s) => s.slowBurnPacing)
   const setSlowBurnPacing = useSettingsStore((s) => s.setSlowBurnPacing)
+  const intimacyLevel = useSettingsStore((s) => s.intimacyLevel)
+  const setIntimacyLevel = useSettingsStore((s) => s.setIntimacyLevel)
   const autoSuggestChoices = useSettingsStore((s) => s.autoSuggestChoices)
   const setAutoSuggestChoices = useSettingsStore((s) => s.setAutoSuggestChoices)
 
@@ -212,6 +214,35 @@ export function SamplingControls() {
             label="Slow-burn pacing"
             description="This is the one that actually touches scene content, unlike the difficulty scale above: steers a character away from giving in to affection, a kiss, or closeness just because it was asked for, especially early in a relationship. On by default."
           />
+        </div>
+        <div className="pt-3">
+          <div className="mb-1.5 text-sm text-text">Intimacy detail</div>
+          <div className="flex flex-wrap gap-2">
+            {(
+              [
+                ['default', 'Default'],
+                ['fade_to_black', 'Fade to black'],
+                ['suggestive', 'Suggestive'],
+                ['explicit', 'Explicit'],
+              ] as const
+            ).map(([level, label]) => (
+              <button
+                key={level}
+                onClick={() => setIntimacyLevel(level)}
+                className={`rounded-xl px-3 py-2 text-sm transition-colors ${
+                  intimacyLevel === level ? 'bg-accent/10 text-accent' : 'bg-bg-sunken text-text-muted'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <p className="mt-1.5 text-xs text-text-muted">
+            How explicit intimate scenes get written once a scene has actually earned one — separate
+            from the pacing above, which only governs how fast that point is reached. Default sends
+            no instruction at all (whatever the connected model already does on its own); the other
+            three are your own explicit choice, in either direction.
+          </p>
         </div>
       </Section>
 

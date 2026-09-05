@@ -20,6 +20,7 @@ import { LiveRapport } from './LiveRapport'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import { parseSfxWordList } from '@/lib/text/messageSegments'
 import { sfxConfigFor } from '@/lib/text/sfx'
+import { resolveExpressionSprite } from '@/lib/vn/expressions'
 
 /** Falling petals only make sense for scenes actually outdoors — never indoors (kitchen, office, a bedroom). */
 const OUTDOOR_BACKGROUNDS = new Set(['park', 'forest', 'rooftop', 'city-street', 'beach'])
@@ -131,10 +132,10 @@ export function VNStage({
   const liveDateActive = isLiveScene(chat.activeEvent)
   const isHangoutEvent = chat.activeEvent?.kind === 'hangout'
   const expression = scene?.expression || 'neutral'
-  const spriteUnlocked = affection >= Number(character?.spriteUnlocks?.[expression] ?? 0)
-  const spriteUrl = spriteUnlocked
-    ? character?.sprites?.[expression] || character?.avatarDataUrl
-    : character?.avatarDataUrl
+  // Guaranteed coverage (section 10): an unlocked/missing exact tag falls through to a
+  // same-family expression before the plain avatar, rather than hard-swapping to the avatar the
+  // moment the exact tag isn't available — see `resolveExpressionSprite`'s own doc comment.
+  const spriteUrl = resolveExpressionSprite(character?.sprites, character?.spriteUnlocks, character?.avatarDataUrl, expression, affection)
   const sceneBackground = scene?.background ?? chat.activeEvent?.backgroundId
   const bgUnlocked = sceneBackground
     ? affection >= Number(world?.backgroundUnlocks?.[sceneBackground] ?? 0)

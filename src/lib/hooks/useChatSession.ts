@@ -53,6 +53,7 @@ import { nextRoundRobinSpeaker, parseMention, pickDirectorSpeaker, rosterFrom } 
 import { itemById } from '@/lib/dating/items'
 import { buildRelationshipDescription } from '@/lib/dating/relationshipDescription'
 import { getInstructTemplate, resolveInstructTemplate } from '@/lib/prompt/instructTemplates'
+import { intimacyGuidance } from '@/lib/prompt/intimacyGuidance'
 import { chatCompletionSamplerToRequest } from '@/lib/api/chatCompletionSampler'
 import { extractSceneTag, stripSceneTagForDisplay, type SceneTag } from '@/lib/vn/sceneTag'
 import { buildSlopAvoidanceNote, cleanModelOutput, trimToLastSentence } from '@/lib/text/slop'
@@ -271,6 +272,7 @@ export function useChatSession(chatId: string | null) {
   const styleGuidanceNote = useSettingsStore((s) => s.styleGuidance)
   const avoidEmDashes = useSettingsStore((s) => s.avoidEmDashes)
   const slowBurnPacing = useSettingsStore((s) => s.slowBurnPacing)
+  const intimacyLevel = useSettingsStore((s) => s.intimacyLevel)
   const visionSceneDetection = useSettingsStore((s) => s.visionSceneDetection)
   const globalSystemPrompt = useSettingsStore((s) => s.systemPrompt)
   const globalPostHistory = useSettingsStore((s) => s.postHistoryInstructions)
@@ -520,6 +522,7 @@ export function useChatSession(chatId: string | null) {
           slowBurnPacing
             ? "Pace intimacy like a slow burn. Earn it through many small moments; don't grant it just because it was asked for. If pushed toward more affection, a kiss, or closeness faster than the relationship has earned, react the way your character actually would. Hesitation, deflection, or a flat no are often the right call, especially early on. Don't cave just to be agreeable."
             : '',
+          intimacyGuidance(intimacyLevel),
           replyLengthInstruction,
           styleGuidanceNote.trim(),
           slopAvoidance ?? '',

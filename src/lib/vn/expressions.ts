@@ -1,3 +1,5 @@
+import { slugifyId } from '@/lib/text/slugify'
+
 export interface ExpressionOption {
   id: string
   label: string
@@ -31,6 +33,69 @@ export const DEFAULT_EXPRESSIONS: ExpressionOption[] = [
 
 export const DEFAULT_EXPRESSION_IDS = DEFAULT_EXPRESSIONS.map((e) => e.id)
 
+/**
+ * Section 10's "guaranteed expression coverage for dates": the live-date reactive portrait (and
+ * VN mode's own sprite) used to hard-swap straight to the generic avatar the moment the model
+ * tagged an expression the creator hadn't drawn (or hadn't unlocked yet) — showing a blank avatar
+ * for "yearning" when the creator only drew "love" and "blush" throws away real, close-enough art
+ * that already exists. Each entry here is a same-family emotion to try, in order, before finally
+ * falling back to 'neutral' and then the avatar. Deliberately a hand-authored judgment call (a
+ * "closest embedding" approach would need a model call, a much bigger ask for a cosmetic fallback)
+ * rather than a claim of psychological accuracy — every character in this app draws from the same
+ * `DEFAULT_EXPRESSIONS` set, so one shared mapping is the same "runs the world" trade-off already
+ * made for scene tags/backgrounds. Deliberately excludes 'neutral' as a value (it's the universal
+ * last resort, checked separately, not a per-expression association) and excludes an expression
+ * from its own list (redundant with the direct check that happens before this is ever consulted).
+ */
+export const EXPRESSION_FALLBACKS: Record<string, string[]> = {
+  happy: ['laughing', 'smitten', 'blush'],
+  smirk: ['flirty', 'happy'],
+  laughing: ['happy', 'smitten'],
+  sad: ['crying', 'yearning', 'annoyed'],
+  crying: ['sad', 'scared'],
+  angry: ['annoyed', 'determined'],
+  annoyed: ['angry', 'determined'],
+  surprised: ['scared', 'embarrassed'],
+  scared: ['surprised', 'crying'],
+  blush: ['embarrassed', 'flirty', 'happy'],
+  love: ['smitten', 'blush', 'happy'],
+  flirty: ['smirk', 'sultry', 'happy'],
+  smitten: ['love', 'blush', 'happy'],
+  yearning: ['love', 'sad', 'blush'],
+  sultry: ['flirty', 'aroused'],
+  aroused: ['sultry', 'blush'],
+  embarrassed: ['blush', 'surprised'],
+  thinking: ['determined'],
+  determined: ['angry', 'thinking'],
+  sleepy: [],
+}
+
+/**
+ * The single source of truth for "which sprite actually shows for this tagged expression" —
+ * `ChatWindow.tsx`'s reactive portrait and `VNStage.tsx`'s own sprite used to each inline the same
+ * `sprites[expression] || avatarDataUrl` hard swap independently; this replaces both. Checks the
+ * exact tag first, then its `EXPRESSION_FALLBACKS` chain, then 'neutral', before finally giving up
+ * and returning the avatar (or undefined, if even that isn't set). A fallback still has to be both
+ * uploaded *and* unlocked at the current affection — a locked/missing fallback is skipped exactly
+ * like a locked/missing primary tag already was.
+ */
+export function resolveExpressionSprite(
+  sprites: Record<string, string> | undefined,
+  spriteUnlocks: Record<string, number> | undefined,
+  avatarDataUrl: string | undefined,
+  expression: string,
+  affection: number,
+): string | undefined {
+  const isAvailable = (id: string): boolean => !!sprites?.[id] && affection >= Number(spriteUnlocks?.[id] ?? 0)
+
+  if (isAvailable(expression)) return sprites![expression]
+  for (const fallback of EXPRESSION_FALLBACKS[expression] ?? []) {
+    if (isAvailable(fallback)) return sprites![fallback]
+  }
+  if (expression !== 'neutral' && isAvailable('neutral')) return sprites!['neutral']
+  return avatarDataUrl
+}
+
 /** A character-specific expression beyond the default set — e.g. a signature smirk unique to them. */
 export interface CustomExpression {
   id: string
@@ -44,16 +109,5 @@ export interface CustomExpression {
  * (with a default expression id or another custom one) rather than silently overwriting it.
  */
 export function slugifyExpressionId(label: string, existingIds: string[]): string {
-  const base =
-    label
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 40)
-      .replace(/-+$/, '') || 'expression'
-  if (!existingIds.includes(base)) return base
-  let i = 2
-  while (existingIds.includes(`${base}-${i}`)) i++
-  return `${base}-${i}`
+  return slugifyId(label, existingIds, 'expression')
 }
