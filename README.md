@@ -1,29 +1,22 @@
 # RP Suite
 
-A local-first roleplay client with a real dating-sim and visual-novel layer underneath, and a calm interface on top.
-
-Import SillyTavern character cards and World Info lorebooks, keep the same low-level sampler control — then play a relationship that actually has continuity, stakes, and consequences instead of resetting every session.
+A roleplay client that runs entirely on your own machine, built around a dating sim rather than bolted onto one.
 
 <p align="center">
   <img src="screenshots/rp-visual-novel-chat.png" alt="Visual novel style chat with a character sprite over a classroom background" width="820">
 </p>
 
----
+Most local chat frontends hand you a character, a text box, and no memory that anything happened. This one tracks a relationship. Seven stats move based on what you say. The world has a clock, seasons and weather. Characters hold their own moods and grudges, and will message you first when they feel like it. When a scene goes well or badly, the app decides how much that mattered and writes it down.
 
-## Why
+The catch with letting a model score its own relationship is that it will happily award itself fifty affection points. So it never gets to. Small validated calls judge what happened; the app applies the numbers. Same for scene flags, gallery unlocks and everything else with consequences.
 
-SillyTavern is powerful and looks like it. This keeps the parts worth keeping — card compatibility, lorebooks, full sampler access — and rebuilds the rest around two ideas:
+The interface stays out of the way: one accent colour, a lot of empty space, and the dense settings hidden until you go looking for them.
 
-- **The interface should get out of the way.** Large negative space, a single accent colour, no wall of buttons.
-- **A roleplay should have stakes.** Relationship movement, scene outcomes and unlocks are decided by small validated model calls that the app then applies *deterministically* — never a number the model can simply declare.
+Nothing leaves your computer. Characters, chats, worlds and personas live in a SQLite file under `data/`, alongside the real image and audio files they reference. No account, no telemetry.
 
-Everything runs on your machine. Characters, chats, worlds and personas live in a SQLite file in `data/`. No accounts, no telemetry, no cloud sync.
+## Setup
 
----
-
-## Getting started
-
-**You'll need** [Node.js 22.5+](https://nodejs.org/) (developed on 24 — `node:sqlite` requires it) and a model backend, most commonly [KoboldCpp](https://github.com/LostRuins/koboldcpp) with a model loaded.
+You need [Node 22.5+](https://nodejs.org/) (24 is what this is developed against; `node:sqlite` requires at least 22.5) and something to generate text with. A local [KoboldCpp](https://github.com/LostRuins/koboldcpp) is the usual answer, but an API key works too.
 
 ```bash
 git clone https://github.com/pnotisdev/rp.git
@@ -32,91 +25,98 @@ npm install
 npm run dev
 ```
 
-Opens on `http://localhost:5173`, with a local Express + SQLite API on port 3001. Go to Settings → Connection and point it at your backend. First run seeds one character and world so there's something to open immediately.
+That starts the client on `http://localhost:5173` and a local Express + SQLite API on 3001. Open Settings → Connection and point it at your backend. The first run seeds a character and a world so there's something to click.
 
 ```bash
-npm run build       # type-check and produce a production build
+npm run build       # type-check, then production build
 npm run typecheck   # type-check only
 npm test            # run the suite once
 npm run test:watch  # watch mode
 ```
 
----
-
-## Features
+## What's in it
 
 ### Model backends
-- **KoboldCpp** — the primary target. Streaming, vision (with an mmproj), abort handling, token counting.
-- **Any OpenAI-compatible endpoint** — OpenRouter, LM Studio, llama.cpp, TabbyAPI, oobabooga.
-- **NovelAI** — chat and image generation, with its own tokenizer.
-- Live connection status per backend, with an on-demand **Test connection** that uses a free metadata endpoint rather than spending a real generation.
+
+KoboldCpp is the main target, with streaming, vision, abort handling and token counting written against its own API rather than a lowest common denominator. Any OpenAI-compatible endpoint also works: OpenRouter, LM Studio, llama.cpp, TabbyAPI, oobabooga. NovelAI is supported for both text and images, with its own tokenizer.
+
+Each backend reports its connection state in the header, and Settings has a Test connection button that hits a free metadata endpoint instead of burning a real generation on a paid provider.
 
 ### Characters
-- Import/export **SillyTavern V2/V3 cards** (JSON or PNG), plus a `.rppack` bundle format carrying sprites, gallery, gift preferences and the bound world in one file.
-- Full editor across seven tabbed sections, with **AI-assisted generation** for any individual field or a whole card from a one-line premise.
-- Per-character **voice**, **reply length**, **instruct template**, sound-effect words, likes, goals, boundaries, occupation, home, and social connections.
-- **Relationship starters** — authored "how you two already know each other" openings that seed long-term memory from message one.
 
-### Visual novel presentation
-- Full-bleed scene view: background, character sprite, dialogue box, backlog.
-- **21 expression slots** per character, plus custom ones. The model tags each reply and the app resolves it — falling through same-family expressions before ever showing a blank avatar.
-- **Outfits** — a second axis on the sprite grid, so wardrobe can change mid-scene. Per-outfit unlock gates, and resolution that degrades outfit art → base art → avatar so a half-drawn outfit still shows a real character.
-- Scene backgrounds per world, unlockable by warmth; sprite crossfades; sakura petals; per-mood background music; manga-style SFX bursts.
-- Optional **vision pass** that picks the expression by actually looking at your sprites.
-- A **reactive portrait** in the ordinary chat layout during live scenes.
+Cards import and export in the SillyTavern V2/V3 format, as JSON or PNG, so the existing card ecosystem works unchanged. There's also a `.rppack` bundle that carries sprites, gallery art, gift preferences and the bound world in one file.
 
-### Relationship simulation
-- **Affection plus six dimensions** — trust, chemistry, comfort, respect, curiosity, tension — scored per turn by a validated model call and applied by the app.
-- Derived **warmth** drives a six-stage ladder from near-strangers to sweethearts, with per-world thresholds.
-- A separate **commitment ladder** — dating → exclusive → living together → married — that must be *asked for* and can be deflected or backfire. Warmth only gates when you may ask.
-- **Breakups and reconciliation**: an explicit end, plus a slow-burn path where sustained tension raises a warning that becomes a real breakup after a grace period. Breakups leave lasting scars.
-- **Character Mind** — a transient mood, a steadier unmet need, and a private intention, all tracked separately from the relationship itself. A character can love you and still be having a bad day.
-- An append-only **event log**: every stat change with the one-line reason it happened.
+The editor covers seven tabbed sections, and every field can be AI-generated individually or the whole card written from a one-line premise. Beyond the card spec, a character carries a voice, a reply length, an instruct template, sound-effect words, likes, goals, boundaries, an occupation, a home, and named connections to other characters.
+
+Relationship starters let you author how the two of you already know each other, seeding long-term memory from the first message instead of always beginning as strangers.
+
+### Visual novel mode
+
+A full-bleed scene: background, sprite, dialogue box, backlog. Each character has 21 expression slots plus any custom ones you add. The model tags its reply and the app resolves the tag, falling through same-family expressions so a missing "yearning" lands on "love" rather than a blank avatar.
+
+**Outfits** add a second axis to the sprite grid, so what you see can change mid-scene. Each one can be gated behind warmth or a story flag, marked as something the model may never pick on its own, or designated as the one an intimate scene switches to. A partly-drawn outfit falls back to base art, so you can add two poses without breaking the other nineteen expressions.
+
+Scene backgrounds are per world and unlock as things warm up. There are sprite crossfades, falling petals on outdoor scenes, per-mood background music, and manga-style bursts on sound-effect words. An optional vision pass picks the expression by looking at your actual sprite art. Outside VN mode, a small portrait appears during live scenes.
+
+### Relationships
+
+Affection plus six dimensions: trust, chemistry, comfort, respect, curiosity, tension. A validated call scores each turn and the app applies it. Their average drives a six-stage ladder from near-strangers up to sweethearts, with thresholds a world can override.
+
+Commitment is a separate ladder (dating, exclusive, living together, married) and has to be asked for. Asking can be deflected or backfire. Warmth only decides when you're allowed to ask, never whether you get a yes.
+
+Breakups are real. There's an explicit one, and a slower path where sustained tension raises a warning that becomes a breakup on its own if you never fix it. Either way it leaves a scar on trust, comfort and chemistry that doesn't wash out.
+
+Separately from all that, characters carry a passing mood, a steadier unmet need, and a private intention they never tell you. Someone can love you and still be having a bad day. Every stat change is logged with the one-line reason it happened, so a number is never just a number.
 
 ### Dates, scenes and intimacy
-- **Dates and hangouts** as live scored scenes. A date carries real stakes — including a hidden agenda the character never tells you, and the possibility they walk out. A hangout is the same with the stakes off.
-- Per-turn scoring is suppressed during a scene in favour of a qualitative **live rapport** read, then settled in one end-of-scene judgement.
-- **Intent chips** — tag a line as flirting, teasing, opening up, reassuring or apologising. It can land badly if misread.
-- A warmth-gated **intimacy catalog** (~30 built-ins plus world-authored ones): kissing spots, positions, toys, activities — each a real clickable action, not just prompt flavour.
-- **Aftercare**: an intimate scene opens a window of a few turns where the character is written as being in the aftermath. How you spend it is judged once at the end — tender, awkward or cold — and a cold aftermath leaves a lasting unmet need behind.
-- A per-world **content rating** overriding the global one, so a wholesome world and an explicit one can sit side by side.
+
+Dates and hangouts run as live scored scenes. A date has stakes: the character goes in with a hidden agenda you never see, and can walk out. A hangout is the same thing with the stakes off. During a scene, per-turn scoring gives way to a qualitative rapport read, then the whole thing is settled in one judgement at the end.
+
+Intent chips let you tag a line as flirting, teasing, opening up, reassuring or apologising. Misread, it can land badly.
+
+The intimacy catalog holds around thirty warmth-gated unlockables (kissing spots, positions, toys, activities) plus whatever a world adds, each a clickable action rather than flavour text.
+
+**Aftercare** opens a window of a few turns after an intimate scene, where the character is written as being in the aftermath. What you do with it is judged once at the end as tender, awkward or cold. A cold one hurts, and leaves an unmet need behind that colours the next stretch.
+
+Content rating is per world as well as global, so a soft world and an explicit one can sit side by side without touching Settings between chats.
 
 ### Worlds
-- A shared setting per group of characters: description, hard rules, its own lorebook and scene art.
-- **World clock** with days, phases, seasons, weekday, seeded weather, and an energy/action economy.
-- Authorable **relationship thresholds**, **gift catalog**, **item catalog**, **scene flags**, and **intimacy options**.
-- **Rules** — an author-facing "when X, then Y" layer. Conditions over stats, scene flags, the commitment ladder or the clock; actions that write a durable memory, set a scene flag, or notify you. One-shot per chat by default. A closed set by design, not a scripting language.
 
-### Economy, gifts and gallery
-- Gift shop with per-character preferences, authored likes and dislikes, and a love language.
-- Usable items with authored effects, and a bag.
-- **CG gallery** unlocked by affection, story flags, or AI-detected story beats — plus dedicated **ending** entries that unlock at the top stage.
+A world is a shared setting for a group of characters: description, hard rules, its own lorebook, its own scene art. It runs a clock with days, phases, seasons, weekdays and seeded weather, plus an energy budget that live scenes spend.
+
+Worlds own their own catalogs: relationship thresholds, gifts, usable items, scene flags, intimacy options.
+
+**Rules** are the author-facing "when this, then that" layer. Conditions read stats, scene flags, the commitment ladder or the clock. Actions write a durable memory, set a scene flag, or tell you something happened. Each fires once per chat unless you mark it repeatable. It's a fixed set of conditions and actions rather than a scripting language, which means a rule can't do anything the app couldn't already do; it only decides when.
+
+### Money, gifts and gallery
+
+A gift shop with per-character taste, both as a numeric preference and as authored likes and dislikes, plus a love language. Usable items with authored effects, and a bag to keep them in. CG gallery entries unlock from affection, story flags, or a story beat the app notices on its own, and dedicated ending entries unlock at the top stage.
 
 ### World Info
-- Full lorebook support: probability, inclusion groups with weighted selection, regex keys, recursive scanning, token budgets, and SillyTavern's complete activation set — **sticky, cooldown, delay**, and injection at a chat depth.
-- A synthetic **Remembered facts** book: durable facts extracted from play, budget-capped and recency-prioritised.
+
+Full lorebook support: probability, inclusion groups with weighted selection, regex keys, recursive scanning, token budgets, sticky and cooldown and delay, and injection at a chat depth. A synthetic "Remembered facts" book collects durable facts from play, capped by token budget and prioritised by recency.
 
 ### Chat
-- Streaming with live tokens/sec and context usage, abort, auto-continue for truncated replies.
-- **Swipes, forking, rewind, pinning, inline editing, search, trash and restore.**
-- **AI-suggested choices**, impersonation, quick replies, author's note, objectives with AI-generated and AI-detected tasks.
-- **Group chats** with per-character relationship tracking and four turn policies — manual, round-robin, mention-based, or an AI director.
-- Long-term memory summarisation, and a **Prompt Inspector** showing exactly what was sent.
-- Slop avoidance, verbatim-echo detection, RP markup normalisation, and user-defined regex scripts.
 
-### Proactive characters
-- Give a character a weekly schedule and let them **message you first** when they'd plausibly be free.
-- **Companion mode** — hands-free voice: talk, it transcribes, the character replies, and it's read back aloud.
-- Text-to-speech across KoboldCpp, OpenAI-compatible, ElevenLabs, Azure and Alibaba.
+Streaming with live tokens per second and context usage, abort, and auto-continue when a reply is cut off mid-sentence. Swipes, forking, rewind, pinning, click-to-edit, search and a trash you can restore from.
+
+AI-suggested choices, impersonation, quick replies, an author's note, and objectives whose tasks are both generated and marked complete by the model as you play.
+
+Group chats track each character's relationship separately and offer four turn policies: manual, round-robin, reply-to-whoever-was-mentioned, or an AI director that picks. Older history folds into a running summary, and a Prompt Inspector shows the exact text being sent.
+
+Output gets cleaned on the way in: AI prose tells are named back to the model to avoid, verbatim echoes of your own message are caught and flagged as failures, markup is normalised, and you can add your own regex scripts.
+
+### Voice and proactive characters
+
+Give a character a weekly schedule and they'll message you first when they'd plausibly be free. Companion mode is hands-free: you talk, it transcribes, the character answers, and it's read back aloud. Text-to-speech runs through KoboldCpp, any OpenAI-compatible server, ElevenLabs, Azure or Alibaba.
 
 ### Image generation
-Optional, for sprites, backgrounds and CGs: **AUTOMATIC1111, ComfyUI, SwarmUI, or NovelAI**.
 
-### Interface
-- Command palette (`Ctrl`/`Cmd`-K), keyboard shortcuts sheet (`?`), themes with a full editor, responsive down to phone width, reduced-motion and reduced-audio options.
-- One-file **backup and restore** of everything, including all media.
+Optional, for sprites, backgrounds and CGs, through AUTOMATIC1111, ComfyUI, SwarmUI or NovelAI.
 
----
+### The rest
+
+Command palette on Ctrl/Cmd-K, a shortcuts sheet on `?`, a theme editor, a layout that survives phone width, and reduced-motion and reduced-audio options. Everything backs up and restores from a single file, media included.
 
 ## Screenshots
 
@@ -138,7 +138,7 @@ Optional, for sprites, backgrounds and CGs: **AUTOMATIC1111, ComfyUI, SwarmUI, o
 </td>
 <td width="50%">
 <img src="screenshots/rp-world-creation-screen.png" alt="World editor">
-<p align="center"><em>A world: setting, rules, and which tabs it exposes.</em></p>
+<p align="center"><em>A world: setting, rules and which tabs it exposes.</em></p>
 </td>
 </tr>
 </table>
@@ -149,15 +149,13 @@ Optional, for sprites, backgrounds and CGs: **AUTOMATIC1111, ComfyUI, SwarmUI, o
   <em>Scene art per location, unlocked as a relationship warms.</em>
 </p>
 
----
-
 ## Notes
 
-**Local only.** The app talks to nothing except the backend you point it at. `data/` is a plain SQLite file plus real image and audio files — back it up, move it, or delete it to start fresh.
+This isn't a hosted product and there's no fallback if you can't run a model or bring a key.
 
-**Not a hosted product.** It assumes you can run a model, or bring an API key. There is no fallback if you can't.
+`data/` is a plain SQLite file plus ordinary image and audio files. Back it up, move it between machines, or delete it to start over. Nothing else on your system is touched.
 
-**Stack.** React 18 + TypeScript + Vite + Tailwind + Zustand, Express + `node:sqlite` on the server. No ORM, no build-time codegen, 800+ tests.
+Built with React, TypeScript, Vite, Tailwind and Zustand on the front, Express and `node:sqlite` on the back. No ORM, no codegen, 800-odd tests.
 
 ## License
 
@@ -165,4 +163,4 @@ MIT. See [LICENSE](LICENSE).
 
 ## Credits
 
-Built by [pnotisdev](https://github.com/pnotisdev). Inspired by [SillyTavern](https://github.com/SillyTavern/SillyTavern); built against [KoboldCpp](https://github.com/LostRuins/koboldcpp); indebted to the local-model and visual-novel communities whose card formats and conventions this tries to meet rather than reinvent.
+Built by [pnotisdev](https://github.com/pnotisdev), against [KoboldCpp](https://github.com/LostRuins/koboldcpp), and owing a debt to [SillyTavern](https://github.com/SillyTavern/SillyTavern) and the wider local-model and visual-novel communities whose formats and conventions this tries to meet rather than reinvent.
