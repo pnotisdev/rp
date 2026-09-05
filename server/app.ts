@@ -19,6 +19,7 @@ import {
   avatarsDir,
 } from './db.ts'
 import { removeAvatar, resolveAvatar, resolveAvatarMap, resolveWorldMusicMap } from './avatars.ts'
+import { encodeTokens, tokenizerForModel } from './novelaiTokenizer.ts'
 
 export const app = express()
 
@@ -997,6 +998,29 @@ app.post('/api/restore', express.json({ limit: '1gb' }), (req, res) => {
     fs.renameSync(tmpDir, avatarsDir)
   }
   res.status(204).end()
+})
+
+/**
+ * Section 8's NovelAI backend: NovelAI's `input` field wants the prompt already tokenized (see
+ * `novelaiTokenizer.ts`'s own header comment for why this runs here instead of the browser). The
+ * browser calls this first, then sends the resulting token ids straight to NovelAI itself with its
+ * own API key — this server never sees that key, matching every other backend in this app. Express
+ * 5 forwards a rejected async handler's promise to the error middleware below automatically, so an
+ * unsupported model or a corrupt `.model` file surfaces as a normal JSON error, not a crash.
+ */
+app.post('/api/novelai/tokenize', async (req, res) => {
+  const { text, model } = req.body as { text?: unknown; model?: unknown }
+  if (typeof text !== 'string' || typeof model !== 'string') {
+    res.status(400).json({ error: '"text" and "model" are both required strings.' })
+    return
+  }
+  const tokenizerId = tokenizerForModel(model)
+  if (!tokenizerId) {
+    res.status(400).json({ error: `No bundled tokenizer for NovelAI model "${model}" — only Clio and Kayra are supported so far.` })
+    return
+  }
+  const ids = await encodeTokens(text, tokenizerId)
+  res.json({ ids })
 })
 
 // Catches synchronous throws from any route above (malformed ids, missing required

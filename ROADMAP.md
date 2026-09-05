@@ -774,6 +774,76 @@ stores everything as JSON blobs, most new fields need no migrations — just ext
       hand-tested the same live setup in parallel with a real extended exchange (gift-giving,
       several back-and-forth turns, relationship score climbing normally) — the best validation of
       the three "live" checks so far, since it's genuine unscripted use rather than a scripted probe.
+- [x] **NovelAI as a third `ChatBackend`** (#123) — the user's own SillyTavern screenshots showed
+      "NovelAI" as a peer of "Text Completion" and "Chat Completion," not a variant of either, with
+      a direct link to `docs.novelai.net`. Investigating that turned into the most research-heavy
+      integration in section 8, including a real correction mid-build:
+      - **It's a text-completion API, architecturally** — `POST https://text.novelai.net/ai/generate`
+        (Kayra) or `https://api.novelai.net/ai/generate` (Clio), `Authorization: Bearer <key>`, a
+        flat `input` string plus a `parameters` object — much closer to `KoboldClient` than to
+        `OpenAICompatibleClient`. `NovelAIClient` ([src/lib/api/novelai.ts](src/lib/api/novelai.ts))
+        implements `ChatBackend` and deliberately reuses the existing KoboldCpp-shaped `sampler`
+        settings directly (`temperature`/`top_p`/`top_k`/`top_a`/`min_p`/`typical`→`typical_p`/
+        `tfs`→`tail_free_sampling`/`rep_pen`→`repetition_penalty`(`_range`/`_slope`)/
+        `presence_penalty`/`mirostat_tau`/`mirostat_eta`→`mirostat_lr`) rather than the new
+        chat-completion-native settings from #122 — NovelAI's own sampler zoo is close enough to
+        KoboldCpp's that a translation layer was more honest than a second parallel settings UI.
+        Settings UI: `chatBackend: 'novelai'` in the same picker as the other two, a Kayra/Clio
+        model select, and an API key field, all in
+        [ConnectionSettings.tsx](src/components/settings/ConnectionSettings.tsx).
+      - **A real mid-build correction, caught before it shipped wrong**: the first working
+        assumption (from `Aedial/novelai-api`, a well-established low-level Python reference client)
+        was that the prompt must be tokenized with NovelAI's own tokenizer and sent as base64-packed
+        token ids — a real, working design was most of the way built around that (a bundled
+        SentencePiece WASM tokenizer, two ~1MB `.model` files, a server endpoint). Fetching
+        SillyTavern's own actual, currently-shipping frontend source
+        (`public/scripts/nai-settings.js`) at the user's own suggestion ("implement it how
+        SillyTavern does") proved that assumption wrong: ST sends `input` as **plain text** with
+        `use_string: true` for the main prompt, every time — the token-based path was real (NovelAI
+        does support it) but wasn't the one actually needed. Caught before any of it reached
+        production, but a genuine reminder that a plausible, internally-consistent-looking spec from
+        one real reference client can still be the wrong path — cross-checking against a second,
+        currently-working, more widely-used client caught it here.
+      - **What the tokenizer work turned out to still be for**: NovelAI's `stop_sequences` and
+        `bad_words_ids` parameters are documented as needing token ids, not strings, unlike every
+        other backend in this app. The already-built tokenizer infrastructure was repurposed for
+        exactly that narrower job instead of thrown away: `server/novelaiTokenizer.ts` bundles
+        NovelAI's own official NerdStash v1 (Clio) / v2 (Kayra) SentencePiece models — downloaded
+        from `huggingface.co/NovelAI/nerdstash-tokenizer-v{1,2}` with the user's explicit permission,
+        stated file names/sources/sizes first — loaded via `@agnai/sentencepiece-js` (the same npm
+        package SillyTavern itself depends on for this), served from a new
+        `POST /api/novelai/tokenize` endpoint (`server/app.ts`). `NovelAIClient` calls it once per
+        stop-sequence string before a real generation call, converting this app's universal
+        `stop_sequence: string[]` into NovelAI's own `number[][]` shape; a tokenize failure (server
+        unreachable, or a model with no bundled tokenizer) just means that call goes out with no stop
+        sequences rather than failing the generation. Runs server-side rather than in the browser
+        bundle — confirmed by the production build only growing ~4.5KB, not the ~2MB a bundled WASM
+        tokenizer + two model files would have added.
+      - **Deliberately unsupported**: **Erato** (NovelAI's newest model) needs a different,
+        Llama-3-family tokenizer (`@agnai/web-tokenizers`, not SentencePiece) with no confirmed
+        source found for its tokenizer file — `tokenizerForModel()` returns `null` for it rather than
+        guessing, and it isn't offered in the model picker. **`bad_words_ids`/`logit_bias_exp`** —
+        real NovelAI parameters SillyTavern fills with its own curated per-model anti-repetition/
+        anti-asterisk presets, skipped here as polish rather than correctness. **The exact SSE
+        streaming event format** — every source found details the request shape precisely; none
+        pinned down `/ai/generate-stream`'s response shape (SillyTavern's own backend just pipes the
+        raw stream through unparsed, and its frontend's actual parser wasn't reached before this
+        needed to ship). `generateStream` guesses the same `data:` + `{token}` shape every other
+        backend here already uses, with a safety net new to this client: a stream that closes having
+        produced zero tokens automatically retries via the non-streaming endpoint, so a wrong
+        guess here degrades to "works, just not incrementally" instead of "silently returns nothing."
+      - **Verification, genuinely split down the middle**: the tokenizer half is fully, honestly
+        verified — `server/novelaiTokenizer.test.ts` loads the real bundled `.model` files (not
+        mocked) and checks real output: non-empty, deterministic, positive-integer token ids, longer
+        text producing more tokens than a prefix of it. The generation half could not be verified at
+        all — no NovelAI subscription was available this session — so `novelai.test.ts`'s 17 cases
+        are mocked against the documented/reverse-engineered contract only: `use_string: true` and
+        plain-text `input`, correct host selection per model, the full sampler field mapping, the
+        stop-sequence tokenization round-trip (and its unreachable-server fallback), the zero-token
+        streaming fallback, and error/abort handling. 520 tests total (34 files, `server/` now has
+        its first-ever test coverage), typecheck and build clean. **This backend has not generated a
+        single real token from NovelAI** — treat it as a stronger starting point than a guess, not as
+        confirmed working; sanity-check the first real call before trusting it.
 - [x] Surface actual max-context from the server info endpoint — `KoboldClient.getEffectiveMaxContext()`
       (`kobold.ts`) calls the existing `getTrueMaxContextLength()`, caches the result per client
       instance (one extra request, not one per judge call), and falls back to `4096` if the server
@@ -2170,15 +2240,68 @@ loop worth spending energy and money in; (5) authoring depth (10e) throughout, a
 above creates new fields to author.
 
 ## 11. Image/asset generation backends
-- [ ] **SwarmUI API integration** for generating character portraits, sprites, gallery CGs, and
-      world backgrounds from within the app.
-- [ ] **ComfyUI API integration** for the same, for users running a ComfyUI workflow instead.
-- [ ] **NovelAI API integration** for the same, for users on NovelAI's hosted image generation.
-      All three are alternative backends for one underlying need (generate-an-image-into-a-slot
-      that today only accepts an upload) — worth designing one internal "image generation
-      provider" interface once, the way `TtsProviderId`/`ttsProviders.ts` already abstracts
-      multiple TTS backends behind one call, rather than three bespoke integrations. Feeds
-      section 3's open "AI-assisted sprite prompt generation" gap and 10e's authoring flow.
+- [x] **A1111, ComfyUI, SwarmUI, and NovelAI as four `ImageBackend` implementations** (#124) — the
+      user's own direct follow-up once section 8's NovelAI text backend (#123) showed it also has
+      hosted image generation, asking to keep going through the night with the rest of section 11
+      while away: "figure out how to implement SwarmUI api, A1111 Stable diffusion API, ComfyUI
+      API, and any others." One shared interface as this section's own note already called for —
+      `ImageBackend` ([src/lib/api/imageBackend.ts](src/lib/api/imageBackend.ts)): `generateImage`
+      (prompt/negative/width/height/steps/cfg/seed/model → base64 PNG + the seed actually used) and
+      `listModels` (best-effort — an empty array, not an error, when a backend has no such
+      introspection or is unreachable), the same "one interface, many providers" shape as
+      `ChatBackend`/`ttsProviders.ts`. `createImageBackend()` is the matching factory.
+      - **Automatic1111 / Forge** ([src/lib/api/a1111Image.ts](src/lib/api/a1111Image.ts)) — the
+        most standardized of the four; `POST /sdapi/v1/txt2img`, base64 images in the response's
+        `images` array, `GET /sdapi/v1/sd-models` for the checkpoint list, optional HTTP Basic auth
+        for a server launched with `--api-auth`. Confirmed from the project's own official wiki.
+      - **ComfyUI** ([src/lib/api/comfyuiImage.ts](src/lib/api/comfyuiImage.ts)) — no "just send a
+        prompt" endpoint exists; every request is a full node-graph workflow. Uses ComfyUI's own
+        official default txt2img graph (from its `script_examples/basic_api_example.py`:
+        CheckpointLoaderSimple → two CLIPTextEncode → EmptyLatentImage → KSampler → VAEDecode →
+        SaveImage) with this app's params substituted in, `POST /prompt` to queue, polls
+        `GET /history/{id}` for the output filename, then `GET /view` for the actual bytes. Works
+        for a standard install; a heavily customized workflow of the user's own isn't supported —
+        flagged as a real, deliberate limitation rather than attempted and possibly wrong.
+      - **SwarmUI** ([src/lib/api/swarmuiImage.ts](src/lib/api/swarmuiImage.ts)) — session-based:
+        `POST /API/GetNewSession` (cached, refreshed exactly once on the documented
+        `invalid_session_id` error) then `POST /API/GenerateText2Image` with params at the same
+        JSON level as the session id, confirmed from SwarmUI's own official `docs/API.md` and
+        `docs/APIRoutes/T2IAPI.md`. Individual parameter names (`negativeprompt`, `cfgscale`, ...)
+        follow its documented convention but weren't each individually confirmed in the source
+        actually reached — the lowest-confidence piece of the four. `listModels` returns `[]`: no
+        confirmed model-listing endpoint found, left honest rather than guessed at.
+      - **NovelAI image** ([src/lib/api/novelaiImage.ts](src/lib/api/novelaiImage.ts)) — same
+        account/`Authorization: Bearer` as #123's text backend, `POST /ai/generate-image`, but a
+        genuinely different response: a ZIP archive (one PNG inside), not a plain image or JSON.
+        `extractFirstFileFromZip` ([src/lib/api/binaryUtils.ts](src/lib/api/binaryUtils.ts)) reads
+        the local-file-header directly rather than adding a zip dependency, and handles both
+        compression methods actually seen in the wild (stored and deflate) via the standard
+        `DecompressionStream` Web API — genuinely tested with real compressed and uncompressed
+        fixtures (`node:zlib`-produced, not mocked), unlike the rest of this feature.
+      - **Settings UI**: a new "Images" tab ([src/components/settings/ImageGenSettings.tsx](src/components/settings/ImageGenSettings.tsx))
+        — backend picker, a server-URL field for the three local backends (pre-filled with each
+        one's own conventional default port on first pick), optional Automatic1111 Basic-auth
+        fields, and a model field, all following the same flat-settings-plus-one-setter shape as
+        the chat and TTS backends.
+      - **A first real generation UI, deliberately minimal**: `GenerateImageButton`
+        ([src/components/ui/GenerateImageButton.tsx](src/components/ui/GenerateImageButton.tsx)) —
+        a small inline prompt popover, wired into the character editor's avatar slot only, seeded
+        with the character's own description as a starting prompt. Proves the whole interface end
+        to end from a real UI rather than shipping four backends nothing in the app actually calls;
+        wiring the same button into VN sprites/backgrounds/gallery CGs, and the fuller "generate a
+        whole expression set in one pass with real scene context" vision, stay open — see the item
+        just below, unchanged from before this entry.
+      - **Verification, split the same way as #123**: the genuinely testable half (ZIP extraction,
+        base64 round-tripping) is verified with real bytes, not mocks — `binaryUtils.test.ts`.
+        Everything that needs an actual server is mocked against each project's own documented
+        contract: 26 new tests across `binaryUtils.test.ts` and the four clients
+        (`a1111Image.test.ts`, `comfyuiImage.test.ts`, `swarmuiImage.test.ts`,
+        `novelaiImage.test.ts`) covering request shape, response parsing, the ComfyUI
+        default-workflow substitution, SwarmUI's session-retry behavior, and error handling. 546
+        tests total, typecheck and build clean. **None of these
+        four backends has generated a single real image** — no local install of any of the three
+        self-hosted ones, and NovelAI needs the same paid subscription its text backend does.
+        Treat every one of them as a stronger starting point than a guess, not as confirmed working.
 - [ ] **Generate directly into a specific slot, with context**: rather than one generic "generate
       an image" button, a generation request scoped to what it's for — this character, this
       expression, this pose/outfit, optionally "as if reacting to X" — landing straight in the
@@ -3869,6 +3992,36 @@ Done so far (see checked boxes above for detail):
      invisible in #121's own test only because it happened to run on the token-free `plain-chat`
      template. Fixed by forcing `plain-chat` for this backend regardless of the user's actual
      instruct-template setting, and re-verified live with ChatML deliberately selected.
+107. ~~NovelAI as a third `ChatBackend`~~ — shipped as #123, prompted by the user's SillyTavern
+     screenshots showing NovelAI as its own peer of Text/Chat Completion. Reuses the KoboldCpp
+     sampler shape directly rather than #122's chat-completion settings, since NovelAI's own sampler
+     zoo is close enough. A real assumption caught and corrected mid-build: the initial plan
+     (tokenize the prompt with NovelAI's own tokenizer, base64-encode it) came from a lower-level
+     Python reference client and turned out wrong — SillyTavern's actual current frontend sends the
+     prompt as plain text with `use_string: true`. The tokenizer work wasn't wasted, just
+     repurposed: NovelAI's `stop_sequences` genuinely does need token ids, so
+     `server/novelaiTokenizer.ts` bundles NovelAI's own published NerdStash tokenizer files (Clio +
+     Kayra; Erato deliberately excluded — different tokenizer family) behind a new
+     `/api/novelai/tokenize` endpoint. That half is fully verified with real, unmocked tests against
+     the actual model files; the generation half is documented-contract-only, since no NovelAI
+     subscription was available to check a single real call against.
+108. ~~Section 11 in full: A1111, ComfyUI, SwarmUI, and NovelAI image generation~~ — shipped as
+     #124, the user's own direct ask to keep going through the four remaining backends overnight.
+     One `ImageBackend` interface (`generateImage`/`listModels`) behind a `createImageBackend()`
+     factory, matching this section's own long-standing note to do it once rather than four times.
+     A1111's contract came from its official wiki with high confidence; ComfyUI needed its own
+     official default node-graph workflow substituted with this app's params, since there's no
+     simpler endpoint; SwarmUI's session-based API came from its own official docs, though the
+     individual field names inside a generation request are the least-confirmed piece of the four;
+     NovelAI's image endpoint returns a ZIP archive, handled by reading the local-file-header
+     directly and decompressing via the standard `DecompressionStream` API rather than adding a zip
+     dependency — genuinely tested with real compressed and uncompressed fixtures, unlike the rest
+     of this feature. A new Settings → Images tab configures whichever backend is active, and a
+     first minimal `GenerateImageButton` proves the whole thing end to end from the character
+     editor's avatar slot — wiring the same button into VN sprites/backgrounds/gallery CGs stays
+     open (see the item right after this one). None of the four backends has generated a single
+     real image this session — no local install of any self-hosted one, and NovelAI needs the same
+     paid subscription its text backend does.
 
 That closes out SillyTavern's full World Info activation engine, plus the last "reasonable next batch," plus sections 10a, 10c, and 10d in full and a first
 slice each of 10b and 10f taken directly afterward since 10's own suggested phase order names them
@@ -3952,8 +4105,24 @@ way: the active instruct template's reserved tokens (ChatML's `<|im_start|>`, et
 verbatim into the hosted API's message content, invisible in #121's own test only because it
 happened to run on the token-free `plain-chat` template — now forced for this backend regardless of
 the user's actual instruct-template setting, re-verified live with ChatML deliberately selected.
-What's left in section 10 now is just section 12's living-world core — see section 10's own
-"Suggested phase order" for how to sequence that.
+~~NovelAI as a third `ChatBackend`~~ (#123) followed the same session, off the user's own
+SillyTavern screenshots showing it as a peer of Text/Chat Completion rather than a variant of
+either. A real assumption got corrected mid-build here too: cross-checking a lower-level Python
+reference client's "tokenize the prompt yourself" approach against SillyTavern's actual current
+frontend source (at the user's own suggestion) revealed NovelAI's real, working path is plain-text
+`input` with `use_string: true` — the tokenizer work already built wasn't wasted, just repurposed
+for the one thing that genuinely does need it (`stop_sequences`, as token ids). ~~Section 11 in
+full~~ (#124) followed directly after, at the user's own request to keep going through A1111,
+ComfyUI, SwarmUI, and NovelAI image generation overnight — one `ImageBackend` interface, all four
+implemented against each project's own official docs, a new Settings → Images tab, and a first
+minimal generation UI in the character editor's avatar slot proving the wiring works end to end.
+None of section 8's or 11's newest backends (NovelAI text/image, A1111, ComfyUI, SwarmUI) has
+actually talked to a real server this session — every one of them is a documented-contract
+implementation waiting on its first live check, not a confirmed-working one. What's left in
+section 10 now is just section 12's living-world core — see section 10's own "Suggested phase
+order" for how to sequence that; section 11's own remaining item (generating straight into a
+specific sprite/background/CG slot with real scene context) is the natural next step whenever one
+of tonight's four backends gets that first live check.
 
 Section 15 (added from a user-supplied AI Dungeon competitive analysis) is a separate set of ideas,
 not yet folded into this priority order. The high-contrast theme preset (#73) and raw-vs-processed

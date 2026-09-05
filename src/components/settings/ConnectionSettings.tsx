@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import { useConnectionStatus } from '@/lib/hooks/useConnectionStatus'
 import { BUILTIN_INSTRUCT_TEMPLATES } from '@/lib/prompt/instructTemplates'
-import { CHAT_BACKEND_LABELS, KNOWN_CHAT_PROVIDERS, type ChatBackendId } from '@/lib/api/chatBackend'
+import { CHAT_BACKEND_LABELS, KNOWN_CHAT_PROVIDERS, NOVELAI_MODELS, type ChatBackendId } from '@/lib/api/chatBackend'
 import { TextField, SelectField } from '@/components/ui/Field'
 import { Section } from '@/components/ui/Section'
 import { SettingsPage } from '@/components/ui/SettingsPage'
@@ -164,6 +164,41 @@ export function ConnectionSettings() {
               back to an estimate for this backend, since hosted providers don't expose either. Temperature,
               top P, penalties, and reasoning effort for this backend live in Settings → Generation,
               separate from the KoboldCpp sampler above.
+            </p>
+          </>
+        )}
+
+        {chatBackend === 'novelai' && (
+          <>
+            <p className="mb-2 text-xs text-text-muted">
+              NovelAI's own hosted models — a paid subscription, not something verified live while
+              building this (see ROADMAP.md #123). Built against NovelAI's documented contract,
+              cross-checked against SillyTavern's own current source rather than guessed at.
+              Erato isn't offered here — it needs a different tokenizer this app doesn't bundle yet;
+              Kayra and Clio both work through the local tokenizer for stop sequences.
+            </p>
+            <SelectField
+              label="Model"
+              value={chatBackendModel}
+              onChange={(e) => setChatBackendConfig({ chatBackendModel: e.target.value })}
+            >
+              {NOVELAI_MODELS.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                </option>
+              ))}
+            </SelectField>
+            <TextField
+              label="API key"
+              type="password"
+              value={chatBackendApiKey}
+              onChange={(e) => setChatBackendConfig({ chatBackendApiKey: e.target.value })}
+              hint="From your NovelAI account's user settings, not your login password."
+            />
+            <p className="mt-2 text-xs text-text-muted">
+              Keys are stored only in this browser and sent directly to NovelAI — never through any
+              other server. The KoboldCpp sampler above supplies temperature/top P/penalties for
+              this backend too, since NovelAI's own sampler shape is close enough to reuse directly.
             </p>
           </>
         )}

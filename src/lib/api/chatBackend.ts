@@ -21,12 +21,19 @@ export interface ChatBackend {
   getChatTemplate(): Promise<string | null>
 }
 
-export type ChatBackendId = 'koboldcpp' | 'openai-compatible'
+export type ChatBackendId = 'koboldcpp' | 'openai-compatible' | 'novelai'
 
 export const CHAT_BACKEND_LABELS: Record<ChatBackendId, string> = {
   koboldcpp: 'KoboldCpp (local)',
   'openai-compatible': 'OpenAI-compatible (OpenAI, OpenRouter, Groq, local servers, ...)',
+  novelai: 'NovelAI (hosted, subscription)',
 }
+
+/** NovelAI's own two current text models this app supports — see `novelai.ts`'s own header comment for why Erato isn't included yet. */
+export const NOVELAI_MODELS = [
+  { id: 'kayra-v1', label: 'Kayra' },
+  { id: 'clio-v1', label: 'Clio' },
+] as const
 
 export interface ChatBackendConfig {
   backend: ChatBackendId

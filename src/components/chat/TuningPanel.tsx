@@ -121,7 +121,9 @@ export function TuningPanel({
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-5">
-        {chatBackend === 'koboldcpp' ? (
+        {/* NovelAI reuses this same KoboldCpp-shaped sampler (see novelai.ts) — only
+            'openai-compatible' wants the separate chat-completion-native controls below. */}
+        {chatBackend !== 'openai-compatible' ? (
           <div className="mb-5">
             <span className="mb-1.5 block text-sm font-semibold text-text">Sampler</span>
             <div className="mb-3">
@@ -270,8 +272,9 @@ export function TuningPanel({
         )}
 
         {/* A chat-completion backend formats its own turns — an instruct template (ChatML, Llama 3,
-            ...) is a text-completion-only concept and would be actively misleading to show here. */}
-        {chatBackend === 'koboldcpp' && (
+            ...) is a text-completion-only concept and would be actively misleading to show here.
+            NovelAI is a raw text-completion API too, so it still wants a real instruct template. */}
+        {chatBackend !== 'openai-compatible' && (
           <div className="mb-5">
             <span className="mb-1.5 block text-sm font-semibold text-text">Instruct template</span>
             <select

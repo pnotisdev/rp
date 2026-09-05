@@ -1,5 +1,6 @@
 import { KoboldClient } from './kobold'
 import { OpenAICompatibleClient } from './openaiCompatible'
+import { NovelAIClient } from './novelai'
 import type { ChatBackend, ChatBackendId } from './chatBackend'
 
 export interface ChatBackendSettings {
@@ -31,6 +32,11 @@ export function createChatBackend(settings: ChatBackendSettings): ChatBackend {
       settings.chatBackendApiKey,
       settings.chatBackendModel,
     )
+  }
+  if (settings.chatBackend === 'novelai') {
+    // No base URL field — NovelAI's own two hosts are fixed per model (see novelai.ts's
+    // baseUrlForModel), unlike 'openai-compatible' which points at whatever server the user names.
+    return new NovelAIClient(settings.chatBackendApiKey, settings.chatBackendModel)
   }
   return new KoboldClient(settings.baseUrl)
 }

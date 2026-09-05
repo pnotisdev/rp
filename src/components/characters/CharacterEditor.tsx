@@ -17,6 +17,7 @@ import { Section } from '@/components/ui/Section'
 import { EditorShell, type EditorTab } from '@/components/ui/EditorShell'
 import { ListEditor } from '@/components/ui/ListEditor'
 import { FileButton } from '@/components/ui/FileButton'
+import { GenerateImageButton } from '@/components/ui/GenerateImageButton'
 import { errorMessage, toastError, toastSuccess } from '@/lib/store/useToastStore'
 import { confirmDialog } from '@/lib/store/useConfirmStore'
 import { TTS_PROVIDER_LABELS, type TtsProviderId } from '@/lib/voice/ttsProviders'
@@ -438,25 +439,34 @@ export function CharacterEditor({
           </div>
 
           <div className="flex items-start gap-4">
-            <label
-              className="portrait-frame group relative flex h-24 w-24 shrink-0 cursor-pointer items-center justify-center rounded-xl border border-dashed border-border bg-bg-sunken"
-              aria-label="Change character avatar"
-            >
-              {avatarDataUrl ? (
-                <img src={avatarDataUrl} alt="" className="h-full w-full rounded-xl object-cover" />
-              ) : (
-                <span className="flex flex-col items-center gap-1 text-[11px] text-text-muted">
-                  <ImagePlus size={18} strokeWidth={1.5} />
-                  Avatar
-                </span>
-              )}
-              <input
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                className="hidden"
-                onChange={(e) => e.target.files?.[0] && handleAvatarPick(e.target.files[0])}
-              />
-            </label>
+            <div className="relative shrink-0">
+              <label
+                className="portrait-frame group relative flex h-24 w-24 cursor-pointer items-center justify-center rounded-xl border border-dashed border-border bg-bg-sunken"
+                aria-label="Change character avatar"
+              >
+                {avatarDataUrl ? (
+                  <img src={avatarDataUrl} alt="" className="h-full w-full rounded-xl object-cover" />
+                ) : (
+                  <span className="flex flex-col items-center gap-1 text-[11px] text-text-muted">
+                    <ImagePlus size={18} strokeWidth={1.5} />
+                    Avatar
+                  </span>
+                )}
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  className="hidden"
+                  onChange={(e) => e.target.files?.[0] && handleAvatarPick(e.target.files[0])}
+                />
+              </label>
+              <div className="absolute -bottom-1.5 -right-1.5">
+                <GenerateImageButton
+                  label="Generate avatar with AI"
+                  initialPrompt={form.description ? `portrait of ${form.name || 'a character'}, ${form.description}`.slice(0, 300) : ''}
+                  onGenerated={setAvatarDataUrl}
+                />
+              </div>
+            </div>
             <div className="flex-1 space-y-0">
               <TextField label="Name" value={form.name} onChange={(e) => set('name', e.target.value)} />
               <SelectField label="World" value={worldId} onChange={(e) => setWorldId(e.target.value)}>

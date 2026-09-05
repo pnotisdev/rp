@@ -9,6 +9,8 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
-    include: ['src/**/*.test.ts'],
+    // `server/` had no tests at all until the NovelAI tokenizer — worth real coverage since it's
+    // the one piece of that whole integration verifiable without a live NovelAI account.
+    include: ['src/**/*.test.ts', 'server/**/*.test.ts'],
   },
 })

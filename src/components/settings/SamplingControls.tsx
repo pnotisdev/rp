@@ -236,8 +236,10 @@ export function SamplingControls() {
       <PromptSectionsSection />
 
       {/* A chat-completion backend formats its own turns — an instruct template (ChatML, Llama 3,
-          ...) is a text-completion-only concept and would be actively misleading to show here. */}
-      {chatBackend === 'koboldcpp' && <InstructTemplateSection />}
+          ...) is a text-completion-only concept and would be actively misleading to show here.
+          NovelAI is a raw text-completion API too (just its own hosted one), so it still wants a
+          real instruct template exactly like KoboldCpp does. */}
+      {chatBackend !== 'openai-compatible' && <InstructTemplateSection />}
 
       {chatBackend === 'openai-compatible' ? (
         <ChatCompletionSamplerSection />
@@ -323,8 +325,9 @@ export function SamplingControls() {
 
       {/* Saves/loads the KoboldCpp `sampler` shape specifically — meaningless while a
           chat-completion backend (its own separate settings, no saved-preset library yet) is
-          active, so hidden rather than shown greyed-out or silently no-op. */}
-      {chatBackend === 'koboldcpp' && (
+          active, so hidden rather than shown greyed-out or silently no-op. NovelAI reuses this
+          same `sampler` shape (see novelai.ts), so its presets stay meaningful there too. */}
+      {chatBackend !== 'openai-compatible' && (
         <Section title="Presets" surface="bare">
           <TextField label="Preset name" value={presetName} onChange={(e) => setPresetName(e.target.value)} />
           <div className="flex flex-wrap gap-2">

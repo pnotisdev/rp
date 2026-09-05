@@ -3,9 +3,10 @@ import { ConnectionSettings } from './ConnectionSettings'
 import { ThemeEditor } from './ThemeEditor'
 import { SamplingControls } from './SamplingControls'
 import { VoiceSettings } from './VoiceSettings'
+import { ImageGenSettings } from './ImageGenSettings'
 import { DataSettings } from './DataSettings'
 
-type Tab = 'connection' | 'appearance' | 'generation' | 'voice' | 'data'
+type Tab = 'connection' | 'appearance' | 'generation' | 'voice' | 'images' | 'data'
 
 export function SettingsView() {
   const [tab, setTab] = useState<Tab>('connection')
@@ -15,6 +16,7 @@ export function SettingsView() {
     ['appearance', 'Appearance'],
     ['generation', 'Generation'],
     ['voice', 'Voice'],
+    ['images', 'Images'],
     ['data', 'Data'],
   ]
 
@@ -51,6 +53,7 @@ export function SettingsView() {
       {tab === 'appearance' && <ThemeEditor />}
       {tab === 'generation' && <SamplingControls />}
       {tab === 'voice' && <VoiceSettings />}
+      {tab === 'images' && <ImageGenSettings />}
       {tab === 'data' && <DataSettings />}
     </div>
   )

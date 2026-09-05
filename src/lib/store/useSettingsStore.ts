@@ -4,6 +4,7 @@ import type { ChatCompletionSamplerParams, GenerationParams } from '@/lib/api/ty
 import { DEFAULT_CHAT_COMPLETION_SAMPLER } from '@/lib/api/types'
 import type { TtsProviderId } from '@/lib/voice/ttsProviders'
 import type { ChatBackendId } from '@/lib/api/chatBackend'
+import type { ImageBackendId } from '@/lib/api/imageBackend'
 import type { RelationshipDifficulty } from '@/lib/dating/relationshipAssist'
 import type { QuickReply, RegexScript } from '@/lib/types'
 import type { ThemePreset } from '@/lib/store/themePresets'
@@ -285,6 +286,24 @@ interface SettingsState {
    */
   chatCompletionSampler: ChatCompletionSamplerParams
   setChatCompletionSampler: (patch: Partial<ChatCompletionSamplerParams>) => void
+
+  /**
+   * Section 11's "image/asset generation backends" — same flat-fields-plus-one-setter shape as
+   * the chat backend above. `imageBackendUsername`/`imageBackendPassword` do double duty per
+   * backend: Automatic1111's optional `--api-auth user:pass`, or (username only) NovelAI's API key.
+   */
+  imageBackend: ImageBackendId
+  imageBackendBaseUrl: string
+  imageBackendUsername: string
+  imageBackendPassword: string
+  imageBackendModel: string
+  setImageBackendConfig: (patch: Partial<{
+    imageBackend: ImageBackendId
+    imageBackendBaseUrl: string
+    imageBackendUsername: string
+    imageBackendPassword: string
+    imageBackendModel: string
+  }>) => void
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -445,6 +464,13 @@ export const useSettingsStore = create<SettingsState>()(
 
       chatCompletionSampler: DEFAULT_CHAT_COMPLETION_SAMPLER,
       setChatCompletionSampler: (patch) => set((s) => ({ chatCompletionSampler: { ...s.chatCompletionSampler, ...patch } })),
+
+      imageBackend: 'a1111',
+      imageBackendBaseUrl: '',
+      imageBackendUsername: '',
+      imageBackendPassword: '',
+      imageBackendModel: '',
+      setImageBackendConfig: (patch) => set(patch),
     }),
     {
       name: 'rp-settings',
