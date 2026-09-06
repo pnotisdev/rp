@@ -3776,6 +3776,84 @@ the subset that's actually a good fit for a local-first, single-user, character-
       layers should read as *rungs to climb into*, not a wall of settings a new user meets on day
       one. Not a feature to build so much as a lens for sequencing section 13's remaining work.
 
+## 16. Immersion depth: overnight expansion (2026-09-06)
+
+A user-directed overnight pass across ten specific gaps in speech fidelity, sexual-scene
+depth, slow-burn realism, gifting, steering, world liveliness, group-chat dynamics, the
+VN sensory loop, and author tooling, run as three file-partitioned concurrent agents plus
+a final integration pass wiring their independently-tested modules into the live prompt.
+
+- [x] **Sexual-scene state machine** — [`src/lib/dating/intimacyScene.ts`](src/lib/dating/intimacyScene.ts):
+      a real `IntimacyPhase` (`'building'|'peak'`), deliberately separate from `aftercare.ts`'s
+      `Afterglow` (which judges the aftermath, not where a scene currently stands). Re-centers on
+      every intimacy-catalog click — itself the consent-checkpoint for a changed trajectory, since
+      every position/toy/activity already goes through the same warmth/commitment-gated catalog.
+      Advances via a new conditional field on the existing `assessRelationshipMoment` judge call (no
+      new AI call), and feeds phase-scaled sensory guidance plus "you are currently in X, doing Y"
+      physical continuity into `styleGuidance`.
+- [x] **Asymmetric pacing & lingering rebuffs** — `momentum.ts` gained `nextInitiativeBalance`/
+      `asymmetricPacingNote` (same decayed-running-value shape as momentum itself), wired into
+      `buildRelationshipDescription`. [`src/lib/dating/rebuff.ts`](src/lib/dating/rebuff.ts) gives a
+      deflected/backfired commitment or intimacy-milestone ask a lingering, decaying "recently
+      rebuffed" cue (5 char-replies), distinct from the hard `relationshipWarning` banner.
+- [x] **Gifting depth** — `gifts.ts` gained a bounded recency log (`giftLog`), a repetition
+      multiplier softening a same-gift streak toward hollow, a real cost when an authored dislike
+      repeats, and a one-shot `giftReactionGuidance` steer. A genuinely loved gift hooks into the
+      existing `ChatFact` system for later callback continuity instead of new storage.
+- [x] **A deterministic hard rail + mid-scene steer** —
+      [`src/lib/dating/boundaryGuard.ts`](src/lib/dating/boundaryGuard.ts): a conservative, non-AI
+      lexical check of a finished reply against the character's authored `boundaries`, surfaced as
+      an informational toast (never a silent auto-reroll, left unverified for tonight).
+      [`src/lib/dating/steer.ts`](src/lib/dating/steer.ts) + `regenerateWithSteer`: a one-shot
+      "correct the scene" regenerate, wired in the hook. **Open**: the UI trigger for it belongs in
+      `ChatWindow`/`Composer` and hasn't been added yet.
+- [x] **Authored state over generic romance tropes** — `authoredStatePriorityNote`
+      (`mindGuidance.ts`): fires only on a real tension (a resistant mood, or the character
+      deliberately holding back) and states explicitly that authored state wins over generic
+      romantic instinct.
+- [x] **Consequence chains & secondhand social reactions** —
+      [`src/lib/world/triggers.ts`](src/lib/world/triggers.ts) gained a `trigger_fired` condition
+      (same-pass and cross-turn chaining, resolved internally, no caller change needed) and a
+      `social_reaction` action; [`src/lib/world/ambientEvents.ts`](src/lib/world/ambientEvents.ts)
+      gained `selectSocialReaction`/`describeSocialReaction`, picking a named, already-authored
+      `socialConnections` entry to have "heard about" a topic and relay it secondhand, never
+      appearing in-scene themselves. Wired live in `useChatSession.ts`'s trigger-action loop.
+- [x] **Per-participant relationship archetypes for group chats** —
+      [`src/lib/chat/participantArchetype.ts`](src/lib/chat/participantArchetype.ts): closed a
+      confirmed gap where a non-primary speaker got zero relationship-flavor guidance (silently
+      borrowing the primary's romantic warmth by default). `participantRelationshipGuidance` gives
+      every non-primary speaker independent footing plus an archetype-specific tone (rival /
+      found-family / mentor-mentee / power-imbalanced) via `findArchetypeMatch` over authored
+      `socialConnections`. Wired live in `useChatSession.ts` for every non-primary speaker.
+- [x] **Ambient world-event hooks reach the live per-turn prompt, not just proactive outreach** —
+      `world/ambientEvents.ts`'s `selectAmbientEvent`/`ambientEventGuidance` (holiday, weather-
+      loved/hated, routine-absence, goal-on-mind, free-time-interest — all grounded in a character's
+      own authored data) were built and wired into `outreach.ts` earlier the same night, but the
+      per-turn channel was left as a documented integration point; now wired into
+      `useChatSession.ts`'s `styleGuidance` assembly alongside `sceneNudge`, same live-event
+      suppression rule.
+- [x] **Voice fingerprint** — `Character.voiceFingerprint` (verbal tics, catchphrases, dialect/
+      register notes, sentence rhythm), editable on the Voice tab, plus `detectVoiceFingerprint()` —
+      a deterministic n-gram/heuristic pass over the card's own example dialogue, not a model call
+      (mechanical properties a `split()` counts perfectly and a small model counts unreliably).
+      Reaches the model with zero prompt-builder changes: folded into `buildCharacterProfileNote()`.
+- [x] **VN text-vs-tag consistency check** — `sceneVision.ts`'s `detectExpressionTextMismatch()`: a
+      cheap, text-only classifier (same shape as the existing `detectGreetingScene`) catches a stale
+      expression tag contradicting what the text just showed and corrects the *tag* to match the
+      text. Deliberately expression-only, never outfit (outfit's stickiness is a deliberate existing
+      guarantee). **Open**: not yet wired into the live generation path — needs care around exactly
+      where in the streaming/auto-continue flow a single classifier call belongs; left undone
+      pending a closer look rather than risking a rushed edit to that path.
+- [x] **"Maximum Immersion" one-click preset** —
+      [`src/lib/prompt/immersionPreset.ts`](src/lib/prompt/immersionPreset.ts): applies the
+      "Immersive, no meta" system prompt, the "Creative" sampler preset, slow-burn pacing, and VN
+      mode in one click from `CharacterEditor`'s Advanced tab, with "Dating Sim" world template and
+      per-world intimacy rating named as explicit recommendations rather than silently applied.
+
+**Still open, not part of this pass**: the steer-control's UI trigger (function exists, no button
+yet), the VN mismatch-check's live wiring, and persona-description boundary matching (the boundary
+guard only reads `Character.boundaries` today).
+
 ## Suggested next steps
 
 Done so far (see checked boxes above for detail):
