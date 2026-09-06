@@ -11,7 +11,7 @@ import type { Trigger } from '@/lib/world/triggers'
 import type { IntimacyDetailLevel } from '@/lib/store/useSettingsStore'
 import type { IntimacyScene } from '@/lib/dating/intimacyScene'
 import type { RecentRebuff } from '@/lib/dating/rebuff'
-import type { GiftLogEntry } from '@/lib/dating/gifts'
+import type { GiftLogEntry, ReciprocityCue } from '@/lib/dating/gifts'
 
 export interface Persona {
   id: string
@@ -225,6 +225,13 @@ export interface RelationshipTrack {
   /** A short, hidden thing this character currently privately wants — never shown to the player, only shapes tone via `mindGuidance.ts`. See `mood`'s own doc comment. */
   characterIntent?: string
   /**
+   * A deeper, steadier underlying drive — the want-axis counterpart to `currentNeed` (`characterIntent`
+   * is to `currentDesire` what `mood` is to `currentNeed`). Never shown to the player, same as
+   * `characterIntent`/`currentFear`. See `mindGuidance.ts`'s `desireGuidance` for the full three-way
+   * (need/intent/desire) distinction.
+   */
+  currentDesire?: string
+  /**
    * Relationship *momentum* — the recent rate of change of warmth, not its level. A decayed
    * running sum of each turn's warmth movement (`dating/momentum.ts`'s `nextMomentum`): positive =
    * deepening fast, negative = cooling off, ~0 = settled. Fed to the generation layer as a pacing
@@ -289,6 +296,13 @@ export interface RelationshipTrack {
    * doc comment. Undefined means no clear read yet, not "fearless".
    */
   currentFear?: string
+  /**
+   * Item 6's character-initiated gift reciprocity — a still-live, decaying cue (`dating/gifts.ts`'s
+   * `ReciprocityCue`) after warmth/circumstance has genuinely earned it (a meaningful gift received
+   * recently, or a relationship stage just crossed), same "turn-stamped window" shape as `afterglow`/
+   * `recentRebuff`. `null` clears it, same convention as those two.
+   */
+  reciprocityCue?: ReciprocityCue | null
 }
 
 /**
@@ -589,6 +603,10 @@ export interface Chat {
   expectationsOfUser?: UserExpectation[]
   /** The primary's own copy of `RelationshipTrack.currentFear` — see that field. */
   currentFear?: string
+  /** The primary's own copy of `RelationshipTrack.currentDesire` — see that field. */
+  currentDesire?: string
+  /** The primary's own copy of `RelationshipTrack.reciprocityCue` — see that field. */
+  reciprocityCue?: ReciprocityCue | null
   /** Ids of one-shot world triggers this chat has already fired (`world/triggers.ts`). Per chat, not per world, so two chats in the same world progress through it independently and a fork inherits the parent's history. */
   firedTriggerIds?: string[]
   activeEvent?: DateEventCard

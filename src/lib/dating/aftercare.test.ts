@@ -4,6 +4,7 @@ import {
   AFTERGLOW_TURNS,
   aftercareDeltas,
   aftercareNeed,
+  aftercarePaceContext,
   aftercareReason,
   aftercareToast,
   afterglowTurnsSince,
@@ -152,5 +153,22 @@ describe('aftercareNeed', () => {
       const need = aftercareNeed(v)
       if (need) expect(NEED_VOCAB).toContain(need)
     }
+  })
+})
+
+describe('aftercarePaceContext', () => {
+  it('reads a high snapshot as rushed', () => {
+    expect(aftercarePaceContext(3)).toBe('rushed')
+    expect(aftercarePaceContext(2)).toBe('rushed')
+  })
+
+  it('reads a low/settled snapshot as earned', () => {
+    expect(aftercarePaceContext(1)).toBe('earned')
+    expect(aftercarePaceContext(0)).toBe('earned')
+    expect(aftercarePaceContext(-1)).toBe('earned')
+  })
+
+  it('is undefined with no snapshot to read (a window opened before this field existed)', () => {
+    expect(aftercarePaceContext(undefined)).toBeUndefined()
   })
 })

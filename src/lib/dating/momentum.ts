@@ -1,4 +1,5 @@
 import type { RelationshipDimension } from '@/lib/types'
+import type { CharacterMood, CharacterNeed } from '@/lib/prompt/mindGuidance'
 
 /**
  * Relationship *momentum* — the derivative of warmth, not its level. The state model
@@ -132,4 +133,34 @@ export function asymmetricPacingNote(charName: string, balance: number): string 
     return `${charName} has actually been the one initiating more than {{user}} lately — worth reflecting that ${charName} isn't only reacting here, they're the one closing the distance right now.`
   }
   return undefined
+}
+
+/**
+ * Item 2(a): the `slowBurnPacing` toggle (`useChatSession.ts`) used to fold in one fixed instruction
+ * for every character regardless of who they actually are right now — a `content`, easygoing
+ * character and one who's actively `guarded` or holding back on a `distance`-kind plan got the exact
+ * same wording. This reads the character's own current mood/plan/unmet-need (all already tracked,
+ * see `prompt/mindGuidance.ts`) and scales the actual severity of the instruction: a character with a
+ * live, in-character reason to resist gets told to resist *harder* — a flat no or real deflection,
+ * not just a token hesitation that quickly gives way — while an otherwise-settled character keeps the
+ * gentler baseline wording the toggle always had.
+ */
+const HIGH_RESISTANCE_MOODS: readonly CharacterMood[] = ['guarded', 'anxious', 'hurt', 'embarrassed', 'tense']
+
+export function slowBurnPacingNote(
+  charName: string,
+  mood: CharacterMood | undefined,
+  isHoldingBackByPlan: boolean,
+  unmetNeed: CharacterNeed | undefined,
+): string {
+  const base = "Pace intimacy like a slow burn. Earn it through many small moments; don't grant it just because it was asked for."
+  const strongResistance = isHoldingBackByPlan || (!!mood && HIGH_RESISTANCE_MOODS.includes(mood))
+  if (strongResistance) {
+    const because = isHoldingBackByPlan ? 'is actively holding back right now, on their own terms' : `is currently ${mood}`
+    return `${base} Right now ${charName} ${because} — that's a live, in-character reason to resist harder than usual, not less: an outright deflection, a flat no, or genuinely pulling back are the honest reactions here, more than a token hesitation that quickly gives way anyway. Don't cave just to be agreeable, and don't let accumulated warmth talk ${charName} out of this.`
+  }
+  const needClause = unmetNeed
+    ? ` ${charName} has also been quietly wanting more ${unmetNeed} lately — that undercurrent should make them slower to open up physically until it's actually been met, not faster.`
+    : ''
+  return `${base} If pushed toward more affection, a kiss, or closeness faster than the relationship has earned, react the way your character actually would. Hesitation, deflection, or a flat no are often the right call, especially early on. Don't cave just to be agreeable.${needClause} None of this makes your character passive, though: once something is genuinely earned, don't just sit and wait for it to be asked for either. Let your character be the one who closes the distance, reaches for a hand, or leans in first sometimes, the same way a real person catching feelings would.`
 }

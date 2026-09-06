@@ -247,5 +247,41 @@ describe('describeCondition / describeAction', () => {
     expect(describeAction({ kind: 'remember', text: 'x' })).toContain('remember')
     expect(describeAction({ kind: 'notify', text: 'x' })).toContain('notify')
     expect(describeAction({ kind: 'social_reaction', topic: 'the engagement' })).toContain('the engagement')
+    expect(describeAction({ kind: 'style_guidance', text: 'gifts read as suspicious right now' })).toContain(
+      'gifts read as suspicious right now',
+    )
+  })
+})
+
+describe('style_guidance action (bounded-window world rules)', () => {
+  it('flows through evaluateTriggers actions like any other action kind', () => {
+    const t = [trigger({ id: 'a', then: [{ kind: 'style_guidance', text: 'gifts read as loaded right now' }] })]
+    const out = evaluateTriggers(t, ctx())
+    expect(out.actions).toEqual([{ kind: 'style_guidance', text: 'gifts read as loaded right now' }])
+  })
+
+  it('a repeatable trigger only keeps firing the steer while its own condition still holds — the "bounded window" falls out of re-evaluation, not new timer state', () => {
+    const t = [
+      trigger({
+        id: 'jealousy-suspicion',
+        repeatable: true,
+        when: [{ kind: 'stat_at_least', stat: 'tension', value: 60 }],
+        then: [{ kind: 'style_guidance', text: 'a gift right now would read as loaded' }],
+      }),
+    ]
+    const hot = evaluateTriggers(t, ctx({ stats: { tension: 70 } }))
+    expect(hot.actions).toEqual([{ kind: 'style_guidance', text: 'a gift right now would read as loaded' }])
+    // Tension has since cooled back down — the same repeatable rule simply stops firing, with no
+    // flag or timer left over from the earlier turn.
+    const cooled = evaluateTriggers(t, ctx({ stats: { tension: 10 } }), hot.firedIds)
+    expect(cooled.actions).toEqual([])
+  })
+
+  it('a one-shot style_guidance fires exactly once, as a single callout rather than a window', () => {
+    const t = [trigger({ id: 'a', then: [{ kind: 'style_guidance', text: 'one-time callout' }] })]
+    const first = evaluateTriggers(t, ctx())
+    expect(first.actions).toEqual([{ kind: 'style_guidance', text: 'one-time callout' }])
+    const second = evaluateTriggers(t, ctx(), first.firedIds)
+    expect(second.actions).toEqual([])
   })
 })

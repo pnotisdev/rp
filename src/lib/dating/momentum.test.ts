@@ -7,6 +7,7 @@ import {
   nextInitiativeBalance,
   nextMomentum,
   relationshipPacingNote,
+  slowBurnPacingNote,
   warmthDeltaOf,
 } from './momentum'
 
@@ -154,5 +155,36 @@ describe('describeMomentum', () => {
     expect(describeMomentum(-2)).toBe('cooling off')
     expect(describeMomentum(0.1)).toBeUndefined()
     expect(describeMomentum(undefined)).toBeUndefined()
+  })
+})
+
+describe('slowBurnPacingNote', () => {
+  it('uses the gentle baseline when nothing gives a strong reason to resist', () => {
+    const note = slowBurnPacingNote('Sumire', 'content', false, undefined)
+    expect(note).toMatch(/Pace intimacy like a slow burn/)
+    expect(note).toMatch(/Hesitation, deflection, or a flat no/)
+    expect(note).not.toMatch(/resist harder than usual/)
+  })
+
+  it('escalates to a harder resistance when actively holding back by plan', () => {
+    const note = slowBurnPacingNote('Sumire', 'content', true, undefined)
+    expect(note).toMatch(/resist harder than usual/)
+    expect(note).toMatch(/is actively holding back right now/)
+  })
+
+  it('escalates to a harder resistance on a high-resistance mood', () => {
+    const note = slowBurnPacingNote('Sumire', 'guarded', false, undefined)
+    expect(note).toMatch(/resist harder than usual/)
+    expect(note).toMatch(/is currently guarded/)
+  })
+
+  it('folds in an unmet need as a slowing factor on the gentle baseline path', () => {
+    const note = slowBurnPacingNote('Sumire', 'content', false, 'reassurance')
+    expect(note).toMatch(/quietly wanting more reassurance/)
+    expect(note).toMatch(/slower to open up physically/)
+  })
+
+  it('never emits a {{char}}/{{user}} macro', () => {
+    expect(slowBurnPacingNote('Sumire', 'guarded', true, 'stability')).not.toContain('{{')
   })
 })

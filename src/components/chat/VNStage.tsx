@@ -41,6 +41,8 @@ interface VNStageProps {
   highlightedMessageId?: string | null
   onSwipe: (id: string, dir: 'left' | 'right') => void
   onRegenerate: (id: string) => void
+  /** Item 4's mid-scene correction — only reaches a `MessageBubble` via the backlog drawer's `MessageLog`; the VN dialogue box's own inline regenerate/swipe row (below) stays as-is. */
+  onSteer: (id: string, steerText: string) => void
   onDelete: (id: string) => void
   onRewind: (id: string) => void
   onEdit: (id: string, text: string) => void
@@ -83,6 +85,7 @@ export function VNStage({
   highlightedMessageId,
   onSwipe,
   onRegenerate,
+  onSteer,
   onDelete,
   onRewind,
   onEdit,
@@ -275,6 +278,7 @@ export function VNStage({
             onDelete={onDelete}
             onRewind={onRewind}
             onRegenerate={onRegenerate}
+            onSteer={onSteer}
             onSwipe={onSwipe}
             onFork={onFork}
             onTogglePin={onTogglePin}

@@ -23,7 +23,16 @@ export interface VoiceFingerprint {
   verbalTics?: string[]
   /** Signature phrases they reuse across scenes, not just once — "you're impossible", "don't push it". */
   catchphrases?: string[]
-  /** Dialect, register, and formality notes in the author's own words — e.g. "clipped and formal, never contracts a verb" or "Kansai-ben, drops word endings". */
+  /**
+   * Dialect, register, and formality notes in the author's own words — e.g. "clipped and formal,
+   * never contracts a verb" or "Kansai-ben, drops word endings". Also where formality level, slang
+   * density, sentence complexity, and taboo-language handling belong — e.g. "never swears, not even
+   * hurt" or "swears constantly, blunt to the point of crude" — free text rather than a fixed set of
+   * structured fields, since an author's actual voice rarely fits a small enum, and this field
+   * already reaches the model verbatim via `buildVoiceFingerprintNote`/`buildVoiceFingerprintReminder`
+   * (`profile.ts`), the latter restating it on its own line specifically so a rule like "never
+   * swears" survives a long chat instead of getting diluted.
+   */
   dialectNotes?: string
   /** How their sentences tend to run, in the author's own words — e.g. "short and clipped" or "long, winding, rarely a full stop". */
   sentenceRhythm?: string

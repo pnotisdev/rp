@@ -1,4 +1,4 @@
-import type { ScheduleEntry, WeatherPreferences } from '@/lib/world/calendar'
+import type { PresenceStatus, ScheduleEntry, WeatherPreferences } from '@/lib/world/calendar'
 import { describeWeather, getCalendarInfo, getCurrentActivity, getWeather, pickFrom, seededFraction } from '@/lib/world/calendar'
 
 /**
@@ -231,6 +231,31 @@ export function selectSocialReaction(params: {
   if (!params.connections?.length) return undefined
   const connection = pickFrom(params.connections, `social-reaction:${params.characterId}:${params.chatId}:${params.topic}`)
   return { connectionName: connection.name, relation: connection.relation, topic: params.topic }
+}
+
+/**
+ * The schedule half of "the world pushes back, not just narrates" — `calendar.ts`'s own top comment
+ * already admits `getCurrentActivity`/`describePresence` are flavor-only: nothing today actually
+ * costs anything when a character's own authored schedule has them genuinely busy, asleep, or
+ * traveling right now. This is deliberately not a hard block — nothing here prevents a date, a deep
+ * moment, or an intimacy escalation from starting — it gives the model an honest, concrete cost
+ * signal instead of the schedule silently not existing the instant something is suggested for
+ * *right now*. Returns `''` while genuinely free (`'available'`), exactly like every other guidance
+ * function in this file paying nothing when there's nothing to say.
+ */
+export function scheduleConflictGuidance(
+  charName: string,
+  presence: { status: PresenceStatus; activity?: string; location?: string },
+): string {
+  if (presence.status === 'available') return ''
+  const activityNote = presence.activity ? ` (${presence.activity})` : ''
+  const locationNote = presence.location ? ` at ${presence.location}` : ''
+  const STAKES: Record<Exclude<PresenceStatus, 'available'>, string> = {
+    busy: `is genuinely supposed to be busy right now${activityNote}${locationNote}, per their own routine. Starting a date, a deep unhurried moment, or escalating intimacy right this instant should read as a real, noticed cost, stepping away from something they're actually on the hook for, not a free action. ${charName} can still go along with it, but let some honest friction show (reluctance, a glance at the time, guilt, something they're now not doing) rather than the schedule silently not existing.`,
+    sleeping: `is supposed to be asleep right now, per their own routine. Being woken for a date or something intimate is a real disruption, not free — grogginess, a genuinely mixed reaction, or asking why this couldn't wait are all fair, honest responses instead of snapping instantly alert and ready.`,
+    traveling: `is currently traveling${locationNote}, not settled somewhere a real date or a deep, unhurried scene can comfortably start. That's a real physical constraint on how this moment can play out right now, not just flavor text to ignore.`,
+  }
+  return `${charName} ${STAKES[presence.status]}`
 }
 
 /**

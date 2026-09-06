@@ -83,6 +83,31 @@ export function giftMismatchPenalty(preferenceScore: number, priorTimesGivenThis
  * Returns `undefined` on an ordinary first-time, well-matched gift — the common case, where the
  * existing gift-taste guidance (`buildGiftTasteNote`) already says everything that needs saying.
  */
+/**
+ * Item 4(b)'s "thoughtful vs. expensive" distinction — passed only for an ordinary first-time,
+ * non-mismatched gift (see the call site below), since a repeat or a real dislike already has its
+ * own, stronger-signal framing above. `rarity` is the gift's own catalog tier; `preferenceScore` is
+ * the same authored -2..3 score `useChatSession.ts` already reads for the base delta. Neither
+ * `giftPreferences` alone (already reflected in the base stat delta) nor `rarity` alone currently
+ * shapes the character's own *reaction text* — this is the gap: a cheap gift that happens to be
+ * exactly this character's taste should read as more touching than an expensive one that leaves them
+ * cold, which the delta math already gets right but the reaction guidance never said out loud.
+ */
+export interface GiftTaste {
+  rarity: GiftRarity
+  preferenceScore: number
+}
+
+/** A cheap/mid gift that scores as a genuine favorite (`giftMismatchPenalty`'s own bar is -0.5 for a miss; this is the mirror-image "clearly loved" bar). */
+function isThoughtfulNotExpensive(taste: GiftTaste): boolean {
+  return (taste.rarity === 'common' || taste.rarity === 'uncommon') && taste.preferenceScore >= 2
+}
+
+/** An expensive gift that lands as merely neutral (never negative — that's a mismatch, handled above) rather than genuinely wanted. */
+function isExpensiveNotThoughtful(taste: GiftTaste): boolean {
+  return (taste.rarity === 'rare' || taste.rarity === 'epic') && taste.preferenceScore >= -0.5 && taste.preferenceScore < 2
+}
+
 export function giftReactionGuidance(
   charName: string,
   userName: string,
@@ -90,6 +115,7 @@ export function giftReactionGuidance(
   sameGiftRun: number,
   isMismatch: boolean,
   priorTimesGivenThisGift: number,
+  taste?: GiftTaste,
 ): string | undefined {
   if (isMismatch && priorTimesGivenThisGift > 0) {
     return `This isn't the first time ${userName} has given ${charName} something like this even though it's never really landed for them. ${charName} can be genuinely gracious without pretending this is exactly what they wanted — a real reaction, not a performance of delight.`
@@ -99,6 +125,12 @@ export function giftReactionGuidance(
   }
   if (sameGiftRun === 1) {
     return `${userName} just gave ${charName} another ${giftName}, the same gift as last time. Still sweet, but ${charName} can notice the repeat rather than reacting exactly as freshly as the first time.`
+  }
+  if (taste && isThoughtfulNotExpensive(taste)) {
+    return `The ${giftName} isn't a lavish or expensive gift, but it happens to be exactly ${charName}'s taste. Let that land as genuinely touching precisely because of how well-chosen and personal it is — the thought and the fit are what's moving here, not the price tag.`
+  }
+  if (taste && isExpensiveNotThoughtful(taste)) {
+    return `The ${giftName} is a genuinely lavish, expensive gift, but it isn't really ${charName}'s taste. ${charName} can be sincerely appreciative of the gesture and the generosity without it landing as deeply personal — impressive is not the same feeling as truly wanted, and it's fine for the reaction to reflect that honestly.`
   }
   return undefined
 }
@@ -142,4 +174,68 @@ export function defaultGiftInventory(world?: WorldCard): Record<string, number> 
   const inventory: Record<string, number> = {}
   for (const gift of starters) inventory[gift.id] = 1
   return inventory
+}
+
+/**
+ * Item 4(a): `suggestDateEvent` (`relationshipAssist.ts`) drafts an event card with zero awareness of
+ * gift history, so a suggestion can never plausibly build on one ("a shared restaurant after a
+ * favorite-novel gift"). This is the bridge: the most recent gift on `giftLog` that scored as a real,
+ * authored favorite (`>= 2`, the same bar `useChatSession.ts` already uses for the durable-memory
+ * hook right after a gift lands), by name, ready to fold into that prompt. Undefined for the common
+ * case of a relationship with no such gift yet on record — this only ever looks backward at what
+ * genuinely happened, never invents one.
+ */
+export function recentMeaningfulGiftName(
+  log: GiftLogEntry[] | undefined,
+  giftPreferences: Record<string, number> | undefined,
+  world?: WorldCard,
+): string | undefined {
+  const entries = log ?? []
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const score = giftPreferences?.[entries[i].giftId] ?? 0
+    if (score >= 2) {
+      const gift = giftById(entries[i].giftId, world)
+      if (gift) return gift.name
+    }
+  }
+  return undefined
+}
+
+/**
+ * Item 6: character-initiated gift reciprocity — a lightweight, narrative nudge, deliberately not a
+ * parallel gift economy (no new inventory/coin plumbing). Same "turn-stamped, decaying window" shape
+ * `dating/rebuff.ts`'s `RecentRebuff` and `dating/aftercare.ts`'s `Afterglow` already use for a cue
+ * that should color a handful of turns and then quietly stop mattering, rather than either firing
+ * once and vanishing or nagging forever. Stored per relationship (`RelationshipTrack.reciprocityCue`).
+ * `null` clears it, same convention as `Afterglow`/`RecentRebuff`.
+ */
+export const RECIPROCITY_WINDOW_TURNS = 4
+
+/** What actually earned the cue — read back into the guidance text so the reason given fits what really happened. */
+export type ReciprocityReason = 'gift_received' | 'milestone'
+
+export interface ReciprocityCue {
+  /** `messages.length` when the cue was set — the same turn unit `GiftLogEntry.turn` already uses (gift-giving isn't scoped to the character's own reply count the way `Afterglow`/`RecentRebuff` are). */
+  startedAtTurn: number
+  reason: ReciprocityReason
+}
+
+export function isReciprocityCueActive(cue: ReciprocityCue | undefined | null, currentTurn: number): boolean {
+  if (!cue) return false
+  const since = currentTurn - cue.startedAtTurn
+  return since >= 0 && since < RECIPROCITY_WINDOW_TURNS
+}
+
+/**
+ * The `styleGuidance` line for the still-live window — permits, never requires, a small reciprocal
+ * gesture. Deliberately narrative only: the character can "reciprocate" with a small in-character
+ * gift/gesture the model writes into the scene, not a mechanical grant of coins/inventory. Real
+ * names, no `{{macros}}` (see `mindGuidance.ts`'s own note on why).
+ */
+export function reciprocityGuidance(charName: string, userName: string, reason: ReciprocityReason): string {
+  const because =
+    reason === 'gift_received'
+      ? `${userName} gave them something not long ago that genuinely landed`
+      : `things between them have genuinely deepened to a new point lately`
+  return `Right now, ${because} — it would be earned, not forced, for ${charName} to reciprocate in some small way of their own: a small gift, a thoughtful gesture, something they made or picked out, or simply showing up with something in hand. This is an option, not an obligation — ${charName} doesn't have to act on it this exact turn, and if they do, it should come from who they are rather than read as a mechanical tit-for-tat.`
 }

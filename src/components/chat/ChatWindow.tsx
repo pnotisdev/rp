@@ -94,6 +94,7 @@ export function ChatWindow({
     assistActivity,
     sendUserMessage,
     regenerate,
+    regenerateWithSteer,
     swipe,
     editMessage,
     deleteMessage,
@@ -714,6 +715,7 @@ export function ChatWindow({
           highlightedMessageId={highlightedId}
           onSwipe={swipe}
           onRegenerate={regenerate}
+          onSteer={regenerateWithSteer}
           onDelete={deleteMessage}
           onRewind={rewindToMessage}
           onEdit={editMessage}
@@ -747,6 +749,7 @@ export function ChatWindow({
                 onDelete={deleteMessage}
                 onRewind={rewindToMessage}
                 onRegenerate={regenerate}
+                onSteer={regenerateWithSteer}
                 onSwipe={swipe}
                 onFork={forkChat}
                 onTogglePin={togglePinMessage}

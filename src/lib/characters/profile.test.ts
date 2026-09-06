@@ -72,6 +72,30 @@ describe('buildCharacterProfileNote', () => {
     expect(note).toContain(`"it's not like i"`)
   })
 
+  it('adds a compact "Voice check" reminder restating only the top catchphrase and tic, separate from the full note', () => {
+    const note = buildCharacterProfileNote(
+      character({ voiceFingerprint: { verbalTics: ['well', 'you know'], catchphrases: ["it's not like i", 'obviously'] } }),
+    )
+    expect(note).toContain('Voice check, every single reply')
+    expect(note).toContain('reach for "it\'s not like i" again')
+    expect(note).toContain('keep the "well" tic alive')
+    // Only the *first* of each list is restated in the compact reminder, not the full set.
+    const reminderLine = note!.split('\n').find((l) => l.startsWith('Voice check'))!
+    expect(reminderLine).not.toContain('obviously')
+    expect(reminderLine).not.toContain('you know')
+  })
+
+  it('folds the register into the reminder when there is no catchphrase or tic to restate', () => {
+    const note = buildCharacterProfileNote(character({ voiceFingerprint: { dialectNotes: 'clipped, never contracts a verb' } }))
+    expect(note).toContain('Voice check, every single reply')
+    expect(note).toContain('clipped, never contracts a verb')
+  })
+
+  it('never flattens into generic prose is the closing instruction on the reminder line', () => {
+    const note = buildCharacterProfileNote(character({ voiceFingerprint: { catchphrases: ['you are impossible'] } }))
+    expect(note).toContain('Never let this quietly flatten into generic prose.')
+  })
+
   it('includes dialect notes and sentence rhythm when authored', () => {
     const note = buildCharacterProfileNote(
       character({
@@ -98,6 +122,9 @@ describe('buildCharacterProfileNote', () => {
 
   it('still returns a note when only the voice fingerprint is set, with no life-context fields at all', () => {
     const note = buildCharacterProfileNote(character({ voiceFingerprint: { dialectNotes: 'blunt, one-word answers' } }))
-    expect(note).toBe('Speech patterns to stay consistent with, every turn: dialect/register: blunt, one-word answers.')
+    expect(note).toBe(
+      'Speech patterns to stay consistent with, every turn: dialect/register: blunt, one-word answers.\n' +
+        'Voice check, every single reply no matter how long this chat has run: blunt, one-word answers. Never let this quietly flatten into generic prose.',
+    )
   })
 })

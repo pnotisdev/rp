@@ -45,6 +45,15 @@ export interface Afterglow {
   startedAtTurn: number
   /** Short human label of what opened it, for prompt flavour only — never a gate, and safe to be absent. */
   sourceLabel?: string
+  /**
+   * Item 2(b)'s "earned vs. rushed" read: a snapshot of `RelationshipTrack.momentum` at the exact
+   * moment this window opened, taken once rather than recomputed when the window closes — by then
+   * `momentum` has already moved on to reflect the turns *during* the aftermath itself, which answers
+   * a different question ("how are they doing now") than the one this needs ("how fast did the
+   * warmth that led here actually build"). Undefined for a window opened before this field existed.
+   * See `aftercarePaceContext`, which reads it back.
+   */
+  momentumAtStart?: number
 }
 
 /**
@@ -143,4 +152,21 @@ export function aftercareNeed(verdict: AftercareVerdict): CharacterNeed | undefi
 
 export function isAftercareVerdict(value: unknown): value is AftercareVerdict {
   return typeof value === 'string' && (AFTERCARE_VERDICTS as readonly string[]).includes(value)
+}
+
+/**
+ * Item 2(b): whether the warmth driving toward this milestone built up gradually or spiked right
+ * beforehand — reused straight from `momentum.ts`'s own "deepening fast" bar (`describeMomentum`'s
+ * `>= 2` threshold) rather than a second, drifting number. Undefined when there's no snapshot to read
+ * (a window opened before `momentumAtStart` existed) — the caller treats that as "no read", never as
+ * a silent "earned". Fed to `assessRelationshipMoment` as extra context for the aftercare verdict; it
+ * never touches `AftercareVerdict`'s own vocabulary, only what the judge is told going in.
+ */
+export type AftercarePace = 'earned' | 'rushed'
+
+const RUSHED_MOMENTUM_THRESHOLD = 2
+
+export function aftercarePaceContext(momentumAtStart: number | undefined): AftercarePace | undefined {
+  if (momentumAtStart === undefined) return undefined
+  return momentumAtStart >= RUSHED_MOMENTUM_THRESHOLD ? 'rushed' : 'earned'
 }

@@ -29,6 +29,17 @@
  * own inner state — live in their own small modules (`dating/beliefs.ts`/`dating/expectations.ts`)
  * since each has a real multi-entry lifecycle, not a single sticky value.
  *
+ * `desire` (this file's `desireGuidance`) is a fifth sticky field, added for the same reason `need`
+ * exists alongside `mood`: two independent axes, each with a transient/steady pair. `mood` (transient)
+ * and `currentNeed` (its steadier undercurrent) are the *emotional* axis; `characterIntent` (a
+ * transient, concrete want or small plan — "bring up the gallery opening tonight") and `currentDesire`
+ * (its steadier undercurrent — "wants to feel truly seen, not just liked") are the *want* axis.
+ * `currentDesire` is deliberately NOT the same thing as `currentNeed`: a need is what this specific
+ * stretch of the story hasn't been giving them (situational, gets satisfied and can clear); a desire
+ * is closer to a foundational trait of who they are, and can sit unmet indefinitely without that
+ * being a problem to fix. Never shown to the player (same as `characterIntent`/`currentFear`) — it's
+ * private by nature, not a stat.
+ *
  * The rest of the mindmap (opinions, secrets-as-entities, the social graph beyond
  * `socialConnections`, rumors, internal conflicts) stays a documented follow-up (see ROADMAP) —
  * those are each a structurally different, standalone system (their own storage shape, often their
@@ -108,7 +119,19 @@ export function needGuidance(charName: string, need?: CharacterNeed): string {
  */
 export function characterIntentGuidance(charName: string, intent?: string): string {
   if (!intent) return ''
-  return `${charName} is privately holding onto something right now: ${intent}. It can quietly shape what they say or do, but they don't have to act on it or announce it this exact turn.`
+  return `${charName} is privately holding onto something right now: ${intent}. It can quietly shape what they say or do, but they don't have to act on it or announce it this exact turn. Every so often it's fine for this to surface as a small, unexplained action instead of only a shift in word choice — texting first out of nowhere, bringing it up with no obvious lead-in, quietly doing something about it off-screen — not just coloring tone.`
+}
+
+/**
+ * A `styleGuidance` line for the character's own deeper, steadier underlying drive — the want-axis
+ * counterpart to `needGuidance`'s emotional-axis one. See this file's own top doc comment for the
+ * full mood/need vs intent/desire distinction. Same sticky-until-replaced contract as the other
+ * fields here. Never framed as something to satisfy or announce — a desire this foundational isn't
+ * a todo item.
+ */
+export function desireGuidance(charName: string, desire?: string): string {
+  if (!desire) return ''
+  return `Underneath the specific things ${charName} wants day to day, there's something deeper and steadier driving them right now: ${desire}. It isn't on today's agenda the way a concrete want would be, and it doesn't need satisfying or even naming this turn — but it can quietly shape what draws their attention, what rings true to them, or what they gravitate toward when nothing more pressing is going on.`
 }
 
 /**
@@ -187,6 +210,47 @@ export function authoredStatePriorityNote(
     ? ` This includes ${charName}'s own authored boundaries — those are not softened by how warm things generally are.`
     : ''
   return `${charName} is ${because}. A generic romance story would have a character soften, lean in, or escalate anyway just because the moment invites it — resist that trained instinct here. ${charName}'s actual authored state wins over generic romantic instinct: however high warmth or affection reads right now, it does not override a mood like this, an unmet need, or what ${charName} is actually doing right now.${boundaryClause} Write the character who is actually anxious/guarded/holding back, not the version of this scene a stock romance would write.`
+}
+
+/**
+ * Item 3's second, narrower failure mode: `authoredStatePriorityNote` above catches a model's
+ * trained romantic *behavior* overriding this character's authored state; this catches trained
+ * romantic *prose* — the stock phrases a model reaches for in any AI romance scene, regardless of
+ * which character or relationship it's actually writing. Distinct from `buildSlopAvoidanceNote`
+ * (`characters/voice.ts`'s sibling concept), which only ever catches this *specific character's own*
+ * verbatim repeats within this chat — a fresh chat with a brand new character gets zero signal from
+ * that, since there's nothing yet to repeat. This list fires on generic tells a model has seen a
+ * million times in training, on the very first romantic turn a chat ever has.
+ *
+ * A small closed list, same "closed vocabulary, not a vague vibe" reasoning as `MOOD_VOCAB` — matches
+ * the existing em-dash rule's own shape (`useChatSession.ts`'s `avoidEmDashes` line): name the exact
+ * things to avoid, don't just ask for "better writing."
+ */
+const STOCK_ROMANCE_PHRASES = [
+  'electricity between them',
+  'the air was thick with',
+  'despite herself',
+  'despite himself',
+  'butterflies in her stomach',
+  'butterflies in his stomach',
+  'heart skipped a beat',
+  'time seemed to stop',
+  'the world fell away',
+  'lost in each other',
+  "couldn't help but",
+  'sent shivers down',
+  'electric touch',
+] as const
+
+/**
+ * Gated so it only ever spends tokens during a scene that's actually romantic/intimate — the caller
+ * decides that from signals already computed every turn (an active `intimacyScene`, an open
+ * `afterglow`, or high `chemistry`), rather than this function re-deriving it. Returns `''` on an
+ * ordinary turn, which is most of them.
+ */
+export function stockRomancePhrasingNote(isRomanticMoment: boolean): string {
+  if (!isRomanticMoment) return ''
+  return `This is a romantic/intimate moment, which is exactly where a model's own generic training shows up hardest. Avoid reaching for stock romance-writing tells here regardless of whether they've come up before in this chat — things like "${STOCK_ROMANCE_PHRASES.join('", "')}". Write what's actually specific to this character and this moment instead of the generic version of a romance scene.`
 }
 
 export function afterglowGuidance(

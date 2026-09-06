@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronLeft, ChevronRight, GitFork, History, RotateCcw, Star, TriangleAlert, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Compass, GitFork, History, RotateCcw, Star, TriangleAlert, X } from 'lucide-react'
 import type { StoredMessage } from '@/lib/types'
 import { useSettingsStore, type AvatarShape } from '@/lib/store/useSettingsStore'
 import { messageAnchorId } from '@/lib/scrollToMessage'
@@ -43,6 +43,8 @@ interface MessageBubbleProps {
   onDelete: () => void
   onRewind: () => void
   onRegenerate: () => void
+  /** Item 4's mid-scene correction: re-generates this reply with a one-shot, explicit correction folded in (`dating/steer.ts`) — never touches the chat, the card, or any persistent prompt section. */
+  onSteer: (steerText: string) => void
   onSwipe: (dir: 'left' | 'right') => void
   onFork: () => void
   onTogglePin: () => void
@@ -59,6 +61,7 @@ export function MessageBubble({
   onDelete,
   onRewind,
   onRegenerate,
+  onSteer,
   onSwipe,
   onFork,
   onTogglePin,
@@ -72,6 +75,10 @@ export function MessageBubble({
 
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(message.text)
+  // Item 4's steer popover: a one-shot correction typed here goes straight to `regenerateWithSteer`
+  // and is never persisted anywhere — closing/cancelling just discards it, same as never opening it.
+  const [steering, setSteering] = useState(false)
+  const [steerDraft, setSteerDraft] = useState('')
 
   const isUser = message.role === 'user'
   const displayText = isStreaming ? streamingText ?? '' : message.text
@@ -91,6 +98,71 @@ export function MessageBubble({
     setEditing(false)
     if (draft !== message.text) onEdit(draft)
   }
+
+  const closeSteer = () => {
+    setSteering(false)
+    setSteerDraft('')
+  }
+  const submitSteer = () => {
+    const trimmed = steerDraft.trim()
+    closeSteer()
+    if (trimmed) onSteer(trimmed)
+  }
+  // A small inline popover anchored to the Steer button itself — same click-outside-backdrop
+  // technique `ChatsPanel.tsx`'s row menu uses, kept local here rather than a full `Modal` since
+  // this is a single short-lived textarea, not a standalone screen.
+  const steerControl = (
+    <span className="relative">
+      <button
+        onClick={() => setSteering((v) => !v)}
+        className={`flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-bg-sunken ${steering ? 'bg-bg-sunken text-accent' : 'hover:text-text'}`}
+        title="Steer — correct this reply and regenerate"
+        aria-label="Steer this reply"
+      >
+        <Compass size={13} strokeWidth={2} />
+      </button>
+      {steering && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={closeSteer} />
+          <div
+            className="absolute bottom-full right-0 z-50 mb-1.5 w-64 rounded-xl border border-border bg-bg-elevated p-2.5 themed-shadow"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <textarea
+              autoFocus
+              value={steerDraft}
+              onChange={(e) => setSteerDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submitSteer()
+                if (e.key === 'Escape') closeSteer()
+              }}
+              placeholder="e.g. stop escalating, she should pull back and change the subject"
+              rows={2}
+              className="w-full resize-none rounded-lg bg-bg-sunken p-2 text-xs text-text outline-none ring-1 ring-accent/40"
+            />
+            <div className="mt-1.5 flex items-center justify-between gap-2">
+              <span className="text-[10px] text-text-muted">Regenerates with this correction — nothing is saved.</span>
+              <div className="flex shrink-0 items-center gap-1">
+                <button
+                  onClick={closeSteer}
+                  className="rounded-md px-2 py-1 text-[11px] text-text-muted transition-colors hover:bg-bg-sunken hover:text-text"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={submitSteer}
+                  disabled={!steerDraft.trim()}
+                  className="rounded-md bg-accent px-2 py-1 text-[11px] font-medium text-accent-text transition-opacity disabled:opacity-40"
+                >
+                  Regenerate
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+    </span>
+  )
 
   const imageStrip = message.images?.length ? (
     <div className="mb-1.5 flex flex-wrap gap-2">
@@ -174,6 +246,7 @@ export function MessageBubble({
           >
             <RotateCcw size={13} strokeWidth={2} />
           </button>
+          {steerControl}
           <button
             onClick={onFork}
             className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-bg-sunken hover:text-text"
@@ -211,8 +284,13 @@ export function MessageBubble({
     </div>
   )
   // Meta (timestamp, regenerate/delete, swipe) only appears on hover — keeps the resting
-  // conversation calm and free of per-line chrome, matching the reference screens.
-  const metaHoverable = <div className="mt-1 h-6 opacity-0 transition-opacity group-hover:opacity-100">{meta}</div>
+  // conversation calm and free of per-line chrome, matching the reference screens. Forced visible
+  // while the steer popover is open: it's a child of this row, and CSS opacity is inherited by
+  // descendants regardless of position, so it would otherwise vanish (while still interactive) the
+  // moment the pointer leaves the row to type into it.
+  const metaHoverable = (
+    <div className={`mt-1 h-6 transition-opacity ${steering ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>{meta}</div>
+  )
   // Unlike the rest of `meta`, a pin needs to stay visible at rest — otherwise there's no way to
   // spot favorited moments while scrolling without hovering every single bubble.
   const pinBadge = message.pinned ? (
@@ -257,7 +335,7 @@ export function MessageBubble({
             </>
           )}
         </span>
-        <span className="ml-2 opacity-0 transition-opacity group-hover:opacity-100">{meta}</span>
+        <span className={`ml-2 transition-opacity ${steering ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>{meta}</span>
       </div>
     )
   }

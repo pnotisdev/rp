@@ -21,6 +21,8 @@ interface MessageLogProps {
   onDelete: (id: string) => void
   onRewind: (id: string) => void
   onRegenerate: (id: string) => void
+  /** Item 4's mid-scene correction — see `MessageBubble`'s own doc comment on the prop it forwards. */
+  onSteer: (id: string, steerText: string) => void
   onSwipe: (id: string, dir: 'left' | 'right') => void
   onFork: (id: string) => void
   onTogglePin: (id: string) => void
@@ -39,6 +41,7 @@ export function MessageLog({
   onDelete,
   onRewind,
   onRegenerate,
+  onSteer,
   onSwipe,
   onFork,
   onTogglePin,
@@ -73,6 +76,7 @@ export function MessageLog({
           onDelete={() => onDelete(m.id)}
           onRewind={() => onRewind(m.id)}
           onRegenerate={() => onRegenerate(m.id)}
+          onSteer={(steerText) => onSteer(m.id, steerText)}
           onSwipe={(dir) => onSwipe(m.id, dir)}
           onFork={() => onFork(m.id)}
           onTogglePin={() => onTogglePin(m.id)}

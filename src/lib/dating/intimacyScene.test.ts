@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   advanceIntimacyScene,
+  intimacyAnticipationGuidance,
+  intimacyConsentTensionGuidance,
+  intimacyPaceFor,
   intimacySceneGuidance,
   isIntimacySceneActive,
   isIntimacySceneStale,
@@ -71,6 +74,63 @@ describe('advanceIntimacyScene', () => {
     expect(next?.activityLabel).toBe('against the wall')
     expect(next?.category).toBe('position')
   })
+
+  it("item 1: a 'reserved' pace holds a same-turn jump to peak at building for one extra beat", () => {
+    const s = scene({ phase: 'building', updatedAtTurn: 10, phaseSinceTurn: 10 })
+    const held = advanceIntimacyScene(s, 'peak', 11, 'reserved')
+    expect(held?.phase).toBe('building')
+    expect(held?.updatedAtTurn).toBe(11)
+  })
+
+  it("a 'reserved' pace honors the judge's peak read once enough turns have actually passed", () => {
+    const s = scene({ phase: 'building', updatedAtTurn: 10, phaseSinceTurn: 10 })
+    const next = advanceIntimacyScene(s, 'peak', 12, 'reserved')
+    expect(next?.phase).toBe('peak')
+  })
+
+  it("'neutral'/'eager' pace honor a same-turn jump to peak immediately, unaffected by the reserved gate", () => {
+    const s = scene({ phase: 'building', updatedAtTurn: 10, phaseSinceTurn: 10 })
+    expect(advanceIntimacyScene(s, 'peak', 11, 'neutral')?.phase).toBe('peak')
+    expect(advanceIntimacyScene(s, 'peak', 11, 'eager')?.phase).toBe('peak')
+  })
+
+  it('falls back to updatedAtTurn for phaseSinceTurn on a scene persisted before that field existed', () => {
+    const s: IntimacyScene = { phase: 'building', activityLabel: 'x', category: 'activity', updatedAtTurn: 10 }
+    const held = advanceIntimacyScene(s, 'peak', 11, 'reserved')
+    expect(held?.phase).toBe('building')
+  })
+
+  it('stamps phaseSinceTurn fresh whenever the phase actually changes', () => {
+    const s = scene({ phase: 'building', updatedAtTurn: 10, phaseSinceTurn: 10 })
+    const next = advanceIntimacyScene(s, 'peak', 15)
+    expect(next?.phaseSinceTurn).toBe(15)
+  })
+})
+
+describe('intimacyPaceFor', () => {
+  it("reads 'reserved' from a resistant mood alone", () => {
+    expect(intimacyPaceFor('anxious', false, 0)).toBe('reserved')
+    expect(intimacyPaceFor('guarded', false, 0)).toBe('reserved')
+  })
+
+  it("reads 'reserved' from actively holding back by plan, regardless of mood", () => {
+    expect(intimacyPaceFor('excited', true, 0)).toBe('reserved')
+  })
+
+  it("reads 'reserved' once authored boundaries clear the floor, regardless of mood", () => {
+    expect(intimacyPaceFor('confident', false, 2)).toBe('reserved')
+    expect(intimacyPaceFor('confident', false, 1)).not.toBe('reserved')
+  })
+
+  it("reads 'eager' only once nothing reserved applies and the mood itself is open", () => {
+    expect(intimacyPaceFor('playful', false, 0)).toBe('eager')
+    expect(intimacyPaceFor('excited', false, 1)).toBe('eager')
+  })
+
+  it("reads 'neutral' for an ordinary mood with nothing pulling either way", () => {
+    expect(intimacyPaceFor('content', false, 0)).toBe('neutral')
+    expect(intimacyPaceFor(undefined, false, 0)).toBe('neutral')
+  })
 })
 
 describe('intimacySceneGuidance', () => {
@@ -91,5 +151,54 @@ describe('intimacySceneGuidance', () => {
 
   it('never emits a {{char}}/{{user}} macro — styleGuidance strings are not macro-substituted', () => {
     expect(intimacySceneGuidance('Sumire', scene())).not.toContain('{{')
+  })
+
+  it("defaults to the plain neutral text with no pace argument", () => {
+    expect(intimacySceneGuidance('Sumire', scene())).not.toMatch(/taking longer to build|lean into this more readily/)
+  })
+
+  it("adds a 'reserved' clause at building and at peak, distinct from the neutral text", () => {
+    const building = intimacySceneGuidance('Sumire', scene({ phase: 'building' }), 'reserved')
+    const peak = intimacySceneGuidance('Sumire', scene({ phase: 'peak' }), 'reserved')
+    expect(building).toMatch(/taking longer to build/)
+    expect(peak).toMatch(/took more for them/)
+  })
+
+  it("adds an 'eager' clause only at building, not at peak", () => {
+    const building = intimacySceneGuidance('Sumire', scene({ phase: 'building' }), 'eager')
+    const peak = intimacySceneGuidance('Sumire', scene({ phase: 'peak' }), 'eager')
+    expect(building).toMatch(/lean into this more readily/)
+    expect(peak).toBe(intimacySceneGuidance('Sumire', scene({ phase: 'peak' }), 'neutral'))
+  })
+})
+
+describe('intimacyConsentTensionGuidance', () => {
+  it('fires when comfort trails well behind chemistry and comfort itself is still short of comfortable', () => {
+    const line = intimacyConsentTensionGuidance('Sumire', 30, 60)!
+    expect(line).toContain('Sumire')
+    expect(line).toMatch(/comfort.*trailing well behind/i)
+    expect(line).toMatch(/hesitation/i)
+  })
+
+  it('is undefined once comfort itself is already fairly comfortable, regardless of the gap', () => {
+    expect(intimacyConsentTensionGuidance('Sumire', 50, 90)).toBeUndefined()
+  })
+
+  it('is undefined when the gap between chemistry and comfort is not actually wide', () => {
+    expect(intimacyConsentTensionGuidance('Sumire', 30, 40)).toBeUndefined()
+  })
+})
+
+describe('intimacyAnticipationGuidance', () => {
+  it('fires once both chemistry and comfort are genuinely high with nothing physical started yet', () => {
+    const line = intimacyAnticipationGuidance('Sumire', 'Kai', 70, 70)!
+    expect(line).toContain('Sumire')
+    expect(line).toContain('Kai')
+    expect(line).toMatch(/heading toward an intimate turn/i)
+  })
+
+  it('is undefined when either chemistry or comfort falls short of the floor', () => {
+    expect(intimacyAnticipationGuidance('Sumire', 'Kai', 40, 70)).toBeUndefined()
+    expect(intimacyAnticipationGuidance('Sumire', 'Kai', 70, 40)).toBeUndefined()
   })
 })

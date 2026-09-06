@@ -9,6 +9,10 @@ import {
   giftMismatchPenalty,
   giftReactionGuidance,
   giftRepetitionMultiplier,
+  isReciprocityCueActive,
+  recentMeaningfulGiftName,
+  reciprocityGuidance,
+  RECIPROCITY_WINDOW_TURNS,
   trailingSameGiftRun,
   type GiftLogEntry,
 } from './gifts'
@@ -113,6 +117,80 @@ describe('giftReactionGuidance', () => {
 
   it('never emits a {{char}}/{{user}} macro — styleGuidance strings are not macro-substituted', () => {
     expect(giftReactionGuidance('Sumire', 'Kai', 'a flower bouquet', 2, false, 2)).not.toContain('{{')
+  })
+
+  it('reads a cheap gift that scores as a real favorite as touching because of the fit, not the price', () => {
+    const line = giftReactionGuidance('Sumire', 'Kai', 'a handmade charm', 0, false, 0, { rarity: 'common', preferenceScore: 2 })!
+    expect(line).toMatch(/genuinely touching/i)
+    expect(line).toMatch(/not the price tag/i)
+  })
+
+  it('reads an expensive gift that misses the character\'s taste as impressive but not deeply personal', () => {
+    const line = giftReactionGuidance('Sumire', 'Kai', 'a silver pendant', 0, false, 0, { rarity: 'rare', preferenceScore: 0 })!
+    expect(line).toMatch(/lavish, expensive gift/i)
+    expect(line).toMatch(/isn't really Sumire's taste/i)
+  })
+
+  it('ignores taste when it is a mismatch or a repeat — those framings win first', () => {
+    expect(giftReactionGuidance('Sumire', 'Kai', 'x', 0, true, 2, { rarity: 'common', preferenceScore: 2 })).toMatch(/never really landed/i)
+    expect(giftReactionGuidance('Sumire', 'Kai', 'x', 1, false, 1, { rarity: 'common', preferenceScore: 2 })).toMatch(/still sweet/i)
+  })
+
+  it('is undefined when taste is neither clearly thoughtful nor clearly just-expensive', () => {
+    expect(giftReactionGuidance('Sumire', 'Kai', 'x', 0, false, 0, { rarity: 'common', preferenceScore: 0 })).toBeUndefined()
+    expect(giftReactionGuidance('Sumire', 'Kai', 'x', 0, false, 0, { rarity: 'rare', preferenceScore: 2 })).toBeUndefined()
+  })
+})
+
+describe('recentMeaningfulGiftName', () => {
+  const log: GiftLogEntry[] = [
+    { giftId: 'flower-bouquet', turn: 1 },
+    { giftId: 'favorite-novel', turn: 5 },
+    { giftId: 'handmade-charm', turn: 9 },
+  ]
+  const preferences = { 'flower-bouquet': 3, 'favorite-novel': -1, 'handmade-charm': 0 }
+
+  it('finds the most recent gift on the log that scored as a real favorite', () => {
+    expect(recentMeaningfulGiftName(log, preferences)).toBe('Flower Bouquet')
+  })
+
+  it('is undefined when nothing on the log ever scored as a favorite', () => {
+    expect(recentMeaningfulGiftName(log, { 'flower-bouquet': 1, 'favorite-novel': -1, 'handmade-charm': 0 })).toBeUndefined()
+  })
+
+  it('is undefined for no log or no preferences', () => {
+    expect(recentMeaningfulGiftName(undefined, preferences)).toBeUndefined()
+    expect(recentMeaningfulGiftName(log, undefined)).toBeUndefined()
+  })
+})
+
+describe('isReciprocityCueActive / reciprocityGuidance', () => {
+  it('is active from the turn it starts through the window, then closes', () => {
+    const cue = { startedAtTurn: 10, reason: 'gift_received' as const }
+    expect(isReciprocityCueActive(cue, 10)).toBe(true)
+    expect(isReciprocityCueActive(cue, 10 + RECIPROCITY_WINDOW_TURNS - 1)).toBe(true)
+    expect(isReciprocityCueActive(cue, 10 + RECIPROCITY_WINDOW_TURNS)).toBe(false)
+  })
+
+  it('is false for no cue, or a cue somehow ahead of the current turn', () => {
+    expect(isReciprocityCueActive(undefined, 10)).toBe(false)
+    expect(isReciprocityCueActive(null, 10)).toBe(false)
+    expect(isReciprocityCueActive({ startedAtTurn: 12, reason: 'milestone' }, 10)).toBe(false)
+  })
+
+  it('frames a gift-received reason as something that genuinely landed', () => {
+    const line = reciprocityGuidance('Sumire', 'Kai', 'gift_received')
+    expect(line).toContain('Sumire')
+    expect(line).toMatch(/gave them something not long ago/)
+    expect(line).toMatch(/not an obligation/)
+  })
+
+  it('frames a milestone reason as the relationship having deepened', () => {
+    expect(reciprocityGuidance('Sumire', 'Kai', 'milestone')).toMatch(/deepened to a new point/)
+  })
+
+  it('never emits a {{char}}/{{user}} macro', () => {
+    expect(reciprocityGuidance('Sumire', 'Kai', 'gift_received')).not.toContain('{{')
   })
 })
 

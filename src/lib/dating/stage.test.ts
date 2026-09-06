@@ -460,6 +460,8 @@ describe('getRelationshipTrack / patchRelationshipTrack', () => {
       beliefsAboutUser: [{ id: 'belief-1', text: 'He is unusually patient with me.', formedTurn: 6 }],
       expectationsOfUser: [{ id: 'expect-1', text: 'expects a check-in most Sundays', formedTurn: 10 }],
       currentFear: 'being seen as too much',
+      currentDesire: 'wants to feel truly seen, not just liked',
+      reciprocityCue: { startedAtTurn: 7, reason: 'gift_received' },
     }
     // `Chat` stores `relationshipWarning` as `T | undefined` while the track accepts `T | null`
     // (null being the wire signal for "clear it"), so the spread needs the narrowing.

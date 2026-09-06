@@ -5,6 +5,7 @@ import {
   ambientEventGuidance,
   describeAmbientEvent,
   describeSocialReaction,
+  scheduleConflictGuidance,
   selectAmbientEvent,
   selectSocialReaction,
   type AmbientEvent,
@@ -263,6 +264,44 @@ describe('selectSocialReaction', () => {
   it('single-connection roster always resolves to that one connection', () => {
     const reaction = selectSocialReaction({ characterId: 'c1', chatId: 'chat1', topic: 'x', connections: [CONNECTIONS[0]] })
     expect(reaction?.connectionName).toBe('Aiko')
+  })
+})
+
+describe('scheduleConflictGuidance', () => {
+  it('returns empty while genuinely available — nothing to cost', () => {
+    expect(scheduleConflictGuidance('Sumire', { status: 'available' })).toBe('')
+  })
+
+  it('names the activity and location and frames it as a real, noticed cost when busy', () => {
+    const line = scheduleConflictGuidance('Sumire', { status: 'busy', activity: 'a work shift', location: 'the cafe' })
+    expect(line).toContain('Sumire')
+    expect(line).toContain('a work shift')
+    expect(line).toContain('the cafe')
+    expect(line.toLowerCase()).toContain('cost')
+  })
+
+  it('still returns a real line when busy with no activity/location authored', () => {
+    const line = scheduleConflictGuidance('Sumire', { status: 'busy' })
+    expect(line).toContain('Sumire')
+    expect(line.length).toBeGreaterThan(0)
+  })
+
+  it('frames sleeping as a genuine disruption, not a free wake-up', () => {
+    const line = scheduleConflictGuidance('Sumire', { status: 'sleeping' })
+    expect(line.toLowerCase()).toContain('asleep')
+    expect(line.toLowerCase()).toContain('disruption')
+  })
+
+  it('frames traveling as a physical constraint on the scene, naming the location when given', () => {
+    const line = scheduleConflictGuidance('Sumire', { status: 'traveling', location: 'the train' })
+    expect(line).toContain('the train')
+    expect(line.toLowerCase()).toContain('constraint')
+  })
+
+  it('never emits a {{char}}/{{user}} macro for any non-available status', () => {
+    for (const status of ['busy', 'sleeping', 'traveling'] as const) {
+      expect(scheduleConflictGuidance('Sumire', { status })).not.toContain('{{')
+    }
   })
 })
 

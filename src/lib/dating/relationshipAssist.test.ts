@@ -482,6 +482,81 @@ describe('assessRelationshipMoment: beliefs, expectations, and fear', () => {
       '{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"currentFear":""}'
     expect((await assessRelationshipMoment(stubClient(blank), baseParams)).currentFear).toBeUndefined()
   })
+
+  it('accepts and trims a currentDesire, capped at 160 chars, and treats an empty string as no change', async () => {
+    const longDesire = 'w'.repeat(300)
+    const reply = `{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"currentDesire":"  ${longDesire}  "}`
+    const moment = await assessRelationshipMoment(stubClient(reply), baseParams)
+    expect(moment.currentDesire?.length).toBe(160)
+
+    const blank =
+      '{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"currentDesire":""}'
+    expect((await assessRelationshipMoment(stubClient(blank), baseParams)).currentDesire).toBeUndefined()
+  })
+
+  it('always mentions the current desire going into the exchange, sticky-read style like mood/need/intent/fear', async () => {
+    let prompt = ''
+    await assessRelationshipMoment(
+      stubClient(EMPTY_REPLY, (p) => {
+        prompt = p.prompt as string
+      }),
+      { ...baseParams, currentDesire: 'wants to feel truly seen, not just liked' },
+    )
+    expect(prompt).toContain('wants to feel truly seen, not just liked')
+    expect(prompt).toContain('"currentDesire"')
+  })
+})
+
+// Item 2(b)'s "earned vs. rushed" read (`dating/aftercare.ts`'s `aftercarePaceContext`) — extra
+// context for the aftercare verdict only, never a replacement for the judge's own read of the turns
+// since.
+describe('assessRelationshipMoment: aftercare pace context', () => {
+  const baseParams = { history: TRANSCRIPT, latestReply: 'Thanks for helping me pack up.', charName: 'Sumire', userName: 'Kai', current: currentStats }
+  const AFTERCARE_TURNS = [{ id: 'a1', role: 'user' as const, name: 'Kai', text: 'Hey, you okay?' }]
+
+  it('mentions a sudden spike as context only when aftercare is actually due', async () => {
+    let prompt = ''
+    await assessRelationshipMoment(
+      stubClient('{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[]}', (p) => {
+        prompt = p.prompt as string
+      }),
+      { ...baseParams, aftercareTurns: AFTERCARE_TURNS, aftercarePaceContext: 'rushed' },
+    )
+    expect(prompt).toMatch(/built up very suddenly/)
+  })
+
+  it('mentions a gradual build differently', async () => {
+    let prompt = ''
+    await assessRelationshipMoment(
+      stubClient('{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[]}', (p) => {
+        prompt = p.prompt as string
+      }),
+      { ...baseParams, aftercareTurns: AFTERCARE_TURNS, aftercarePaceContext: 'earned' },
+    )
+    expect(prompt).toMatch(/built up gradually/)
+  })
+
+  it('says nothing about pace when there is no snapshot to read, even with aftercare due', async () => {
+    let prompt = ''
+    await assessRelationshipMoment(
+      stubClient('{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[]}', (p) => {
+        prompt = p.prompt as string
+      }),
+      { ...baseParams, aftercareTurns: AFTERCARE_TURNS },
+    )
+    expect(prompt).not.toMatch(/built up (very suddenly|gradually)/)
+  })
+
+  it('says nothing about pace when aftercare is not due, even if a pace value is somehow passed', async () => {
+    let prompt = ''
+    await assessRelationshipMoment(
+      stubClient('{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[]}', (p) => {
+        prompt = p.prompt as string
+      }),
+      { ...baseParams, aftercarePaceContext: 'rushed' },
+    )
+    expect(prompt).not.toMatch(/built up (very suddenly|gradually)/)
+  })
 })
 
 // The user's own direct follow-up to the intimacy catalog: a deliberate "first time together" ask,

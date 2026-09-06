@@ -58,6 +58,25 @@ export type TriggerAction =
    * prompt through (a `ChatFact`, the same durable channel `remember` above already uses).
    */
   | { kind: 'social_reaction'; topic: string }
+  /**
+   * A free-text steer folded directly into the live per-turn `styleGuidance` channel — the same
+   * channel `ambientEventGuidance`/`sceneProgressionNudge` already write into (see
+   * `useChatSession.ts`'s prompt assembly). Distinct from `notify` (player-facing only, touches
+   * nothing the model sees) and from `remember` (a durable, permanent `ChatFact`): this exists for
+   * a bounded, situational tone shift that shouldn't need a whole new mechanical gate invented for
+   * it — e.g. "a gift offered right now reads as suspicious or overcompensating, not simply
+   * generous" while a jealousy flare is genuinely running hot, without actually locking the gift
+   * catalog itself (that logic lives in `dating/gifts.ts`, outside what a world-authored rule can
+   * reach).
+   *
+   * The "bounded window" comes for free from how `evaluateTriggers` already works, not from any new
+   * expiry-timer state: pair this action with a `repeatable: true` trigger whose `when` condition is
+   * itself something that naturally rises and falls (a relationship dimension like `tension`, or a
+   * `flag_set` combined with a `day_at_least` range) and the steer is only ever live while that
+   * condition actually holds, re-checked fresh every turn. A one-shot rule instead surfaces this
+   * exactly once, as a single-turn callout rather than a window at all.
+   */
+  | { kind: 'style_guidance'; text: string }
 
 export interface Trigger {
   id: string
@@ -208,6 +227,8 @@ export function describeAction(action: TriggerAction): string {
       return `notify "${action.text}"`
     case 'social_reaction':
       return `a named connection reacts to "${action.topic}"`
+    case 'style_guidance':
+      return `steer: "${action.text}"`
     default:
       return 'unknown action'
   }

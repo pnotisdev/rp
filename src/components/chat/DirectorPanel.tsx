@@ -342,13 +342,26 @@ export function DirectorPanel({ chat, character, world, onClose }: DirectorPanel
         </Section>
 
         <Section
-          title="Beliefs, expectations & fear"
-          description="What the character has come to think of you, what they've quietly started counting on, and what they're privately afraid of — formed and retired by the per-turn judge, read-only."
+          title="Beliefs, expectations, fear & desire"
+          description="What the character has come to think of you, what they've quietly started counting on, what they're privately afraid of, and what deeper drive underlies it all — formed and retired by the per-turn judge, read-only."
           surface="sunken"
         >
           <div className="space-y-1.5">
             <div className="text-xs text-text-muted">
               Fear right now: {chat.currentFear ? <span className="text-text">{chat.currentFear}</span> : 'none on record'}
+            </div>
+            <div className="text-xs text-text-muted">
+              Desire underneath it all: {chat.currentDesire ? <span className="text-text">{chat.currentDesire}</span> : 'none on record'}
+            </div>
+            <div className="text-xs text-text-muted">
+              Reciprocity cue:{' '}
+              {chat.reciprocityCue ? (
+                <span className="text-text">
+                  {chat.reciprocityCue.reason} (turn {chat.reciprocityCue.startedAtTurn})
+                </span>
+              ) : (
+                'none on record'
+              )}
             </div>
             {(chat.beliefsAboutUser ?? []).map((b) => (
               <div key={b.id} className="rounded-lg bg-bg-elevated px-3 py-1.5 text-xs text-text-muted">

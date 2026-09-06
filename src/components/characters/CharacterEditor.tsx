@@ -543,6 +543,20 @@ export function CharacterEditor({
               Generate with AI
             </Button>
             {!character && <Button onClick={() => setShowTemplates(true)}>Start from a template</Button>}
+            <Button
+              variant="secondary"
+              onClick={() => {
+                applyMaximumImmersion()
+                setTab('advanced')
+              }}
+              className="flex items-center gap-1.5"
+              title={
+                'One click: sets this character\'s system prompt to "Immersive, no meta", switches the global sampler to "Creative", and turns on slow-burn pacing + visual novel mode. See the Advanced tab for the full checklist and a recommendation to bind a "Dating Sim" world.'
+              }
+            >
+              <Sparkles size={14} strokeWidth={2} />
+              Maximum Immersion
+            </Button>
             {character && (
               <>
                 <Button variant="ghost" onClick={() => downloadJson(form)}>
@@ -1270,7 +1284,7 @@ export function CharacterEditor({
       {tab === 'voice' && (
         <Section
           title="Voice fingerprint"
-          description="Concrete, recurring speech patterns — not a general impression like personality, but the actual repeatable tells that make a line unmistakably theirs. Reaches the model every turn alongside their description and personality."
+          description="Concrete, recurring speech patterns — not a general impression like personality, but the actual repeatable tells that make a line unmistakably theirs. Reaches the model every turn alongside their description and personality, plus a short standalone reminder of the single most important catchphrase/tic/register so it doesn't get diluted once a chat runs long."
           surface="bare"
           action={
             <Button variant="ghost" onClick={detectVoiceFromExamples} className="inline-flex items-center">
@@ -1298,7 +1312,8 @@ export function CharacterEditor({
               rows={2}
               value={dialectNotes}
               onChange={(e) => setDialectNotes(e.target.value)}
-              placeholder="Clipped and formal, never contracts a verb. Or: Kansai-ben, drops word endings."
+              placeholder="Clipped and formal, never contracts a verb. Or: Kansai-ben, drops word endings. Or: never swears, even when hurt."
+              hint="Formality, slang density, sentence complexity, and how they handle taboo language all belong here too — your own words, not a fixed list."
               className="sm:col-span-2"
             />
             <TextField

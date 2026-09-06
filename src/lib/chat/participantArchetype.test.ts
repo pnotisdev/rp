@@ -5,6 +5,8 @@ import {
   classifyArchetype,
   findArchetypeMatch,
   participantRelationshipGuidance,
+  rivalCommitmentFraming,
+  rivalJealousyIntensifier,
   type ArchetypeMatch,
 } from './participantArchetype'
 
@@ -132,5 +134,116 @@ describe('participantRelationshipGuidance', () => {
   it('falls back to generic wording with no primaryName (a plain group chat with no bound primary)', () => {
     const line = participantRelationshipGuidance({ speakerName: 'Aiko', personaName: 'Kai', warmth: 50 })
     expect(line).toContain('the rest of the group')
+  })
+
+  it('never applies the rival commitment/jealousy deepening to a non-rival archetype', () => {
+    const line = participantRelationshipGuidance({
+      speakerName: 'Aiko',
+      personaName: 'Kai',
+      primaryName: 'Sumire',
+      warmth: 40,
+      archetype: { archetype: 'mentor_mentee', sourceText: 'her mentor' },
+      primaryCommitmentStatus: 'married',
+      jealousyFlagActive: true,
+    })
+    expect(line.toLowerCase()).not.toContain('exclusive')
+    expect(line.toLowerCase()).not.toContain('genuinely standing right here')
+  })
+
+  it('layers the commitment framing onto a rival match when primaryCommitmentStatus is given', () => {
+    const line = participantRelationshipGuidance({
+      speakerName: 'Aiko',
+      personaName: 'Kai',
+      primaryName: 'Sumire',
+      warmth: 40,
+      archetype: { archetype: 'rival', sourceText: 'childhood rival' },
+      primaryCommitmentStatus: 'exclusive',
+    })
+    expect(line).toContain('exclusive')
+    expect(line).toContain('Sumire')
+    expect(line).toContain('Kai')
+  })
+
+  it('layers the jealousy intensifier onto a rival match when jealousyFlagActive is true', () => {
+    const line = participantRelationshipGuidance({
+      speakerName: 'Aiko',
+      personaName: 'Kai',
+      primaryName: 'Sumire',
+      warmth: 40,
+      archetype: { archetype: 'rival', sourceText: 'childhood rival' },
+      jealousyFlagActive: true,
+    })
+    expect(line.toLowerCase()).toContain('genuinely standing right here')
+    expect(line).toContain('Aiko')
+  })
+
+  it('rival deepening is additive: both fields present layers both lines', () => {
+    const both = participantRelationshipGuidance({
+      speakerName: 'Aiko',
+      personaName: 'Kai',
+      primaryName: 'Sumire',
+      warmth: 40,
+      archetype: { archetype: 'rival', sourceText: 'childhood rival' },
+      primaryCommitmentStatus: 'married',
+      jealousyFlagActive: true,
+    })
+    const neither = participantRelationshipGuidance({
+      speakerName: 'Aiko',
+      personaName: 'Kai',
+      primaryName: 'Sumire',
+      warmth: 40,
+      archetype: { archetype: 'rival', sourceText: 'childhood rival' },
+    })
+    expect(both.length).toBeGreaterThan(neither.length)
+    expect(both.toLowerCase()).toContain('married')
+    expect(both.toLowerCase()).toContain('genuinely standing right here')
+  })
+})
+
+describe('rivalCommitmentFraming', () => {
+  it('returns empty for "none" or undefined — the base rival line already covers it', () => {
+    expect(rivalCommitmentFraming('none', 'Sumire', 'Kai')).toBe('')
+    expect(rivalCommitmentFraming(undefined, 'Sumire', 'Kai')).toBe('')
+  })
+
+  it('reads as still-open competition while merely dating', () => {
+    const line = rivalCommitmentFraming('dating', 'Sumire', 'Kai')
+    expect(line).toContain('Sumire')
+    expect(line).toContain('Kai')
+    expect(line.toLowerCase()).toContain('still-competing')
+  })
+
+  it('reads as a real boundary once exclusive', () => {
+    const line = rivalCommitmentFraming('exclusive', 'Sumire', 'Kai')
+    expect(line.toLowerCase()).toContain('exclusive')
+    expect(line.toLowerCase()).toContain('boundary')
+  })
+
+  it('reads as history/begrudging respect once living together or married, naming which', () => {
+    const livingTogether = rivalCommitmentFraming('living_together', 'Sumire', 'Kai')
+    expect(livingTogether).toContain('living together')
+    const married = rivalCommitmentFraming('married', 'Sumire', 'Kai')
+    expect(married).toContain('married')
+    expect(married.toLowerCase()).toContain('history')
+  })
+
+  it('is progressively different across the commitment ladder, not one static line', () => {
+    const lines = new Set(
+      (['dating', 'exclusive', 'living_together', 'married'] as const).map((s) => rivalCommitmentFraming(s, 'Sumire', 'Kai')),
+    )
+    expect(lines.size).toBe(4)
+  })
+})
+
+describe('rivalJealousyIntensifier', () => {
+  it('returns empty when the jealousy flag is not active', () => {
+    expect(rivalJealousyIntensifier('Aiko', false)).toBe('')
+    expect(rivalJealousyIntensifier('Aiko', undefined)).toBe('')
+  })
+
+  it('names the rival and emphasizes their live presence when the flag is active', () => {
+    const line = rivalJealousyIntensifier('Aiko', true)
+    expect(line).toContain('Aiko')
+    expect(line.toLowerCase()).toContain('presence')
   })
 })

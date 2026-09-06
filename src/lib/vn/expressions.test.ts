@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_EXPRESSION_IDS, EXPRESSION_FALLBACKS, resolveExpressionSprite, slugifyExpressionId } from './expressions'
+import {
+  DEFAULT_EXPRESSION_IDS,
+  EXPRESSION_FALLBACKS,
+  expressionCandidatesFor,
+  resolveExpressionSprite,
+  slugifyExpressionId,
+} from './expressions'
 import { BASE_OUTFIT_ID } from './outfits'
 
 describe('slugifyExpressionId', () => {
@@ -154,5 +160,42 @@ describe('resolveExpressionSprite — outfits', () => {
 
   it('handles an unknown outfit id by resolving base art', () => {
     expect(resolveExpressionSprite(sprites, {}, AVATAR, 'blush', 50, 'battle-armor')).toBe('base-blush')
+  })
+})
+
+describe('expressionCandidatesFor', () => {
+  it('pairs each unlocked id with its default label', () => {
+    expect(expressionCandidatesFor(['neutral', 'happy'], undefined)).toEqual([
+      { id: 'neutral', label: 'Neutral' },
+      { id: 'happy', label: 'Happy' },
+    ])
+  })
+
+  it('falls back to the bare id when it matches nothing in DEFAULT_EXPRESSIONS or the custom list', () => {
+    expect(expressionCandidatesFor(['made-up-id'], undefined)).toEqual([{ id: 'made-up-id', label: 'made-up-id' }])
+  })
+
+  it("prefers a custom expression's own label over a same-id default", () => {
+    expect(expressionCandidatesFor(['happy'], [{ id: 'happy', label: 'Beaming' }])).toEqual([
+      { id: 'happy', label: 'Beaming' },
+    ])
+  })
+
+  it('includes a custom expression id with its own label', () => {
+    expect(expressionCandidatesFor(['sly-grin'], [{ id: 'sly-grin', label: 'Sly Grin' }])).toEqual([
+      { id: 'sly-grin', label: 'Sly Grin' },
+    ])
+  })
+
+  it('preserves input order and does not require sprite art (unlike the vision shortlist)', () => {
+    expect(expressionCandidatesFor(['sad', 'neutral', 'happy'], undefined).map((c) => c.id)).toEqual([
+      'sad',
+      'neutral',
+      'happy',
+    ])
+  })
+
+  it('returns an empty list for an empty input', () => {
+    expect(expressionCandidatesFor([], [])).toEqual([])
   })
 })

@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { afterglowGuidance, authoredStatePriorityNote, characterIntentGuidance, fearGuidance, MOOD_VOCAB, moodGuidance, NEED_VOCAB, needGuidance } from './mindGuidance'
+import {
+  afterglowGuidance,
+  authoredStatePriorityNote,
+  characterIntentGuidance,
+  desireGuidance,
+  fearGuidance,
+  MOOD_VOCAB,
+  moodGuidance,
+  NEED_VOCAB,
+  needGuidance,
+  stockRomancePhrasingNote,
+} from './mindGuidance'
 
 describe('moodGuidance', () => {
   it('says nothing with no mood set', () => {
@@ -82,6 +93,40 @@ describe('fearGuidance', () => {
 
   it('never emits a {{char}}/{{user}} macro', () => {
     expect(fearGuidance('Sumire', 'being left behind')).not.toContain('{{')
+  })
+})
+
+describe('desireGuidance', () => {
+  it('says nothing with no desire set', () => {
+    expect(desireGuidance('Sumire', undefined)).toBe('')
+  })
+
+  it('names the character and the desire, framed as not needing satisfying or naming', () => {
+    const line = desireGuidance('Sumire', 'wants to feel truly seen, not just liked')
+    expect(line).toContain('Sumire')
+    expect(line).toContain('wants to feel truly seen, not just liked')
+    expect(line).toMatch(/doesn't need satisfying or even naming/)
+  })
+
+  it('never emits a {{char}}/{{user}} macro', () => {
+    expect(desireGuidance('Sumire', 'wants to matter to someone again')).not.toContain('{{')
+  })
+})
+
+describe('stockRomancePhrasingNote', () => {
+  it('says nothing when it is not a romantic moment', () => {
+    expect(stockRomancePhrasingNote(false)).toBe('')
+  })
+
+  it('names concrete stock phrases to avoid when it is a romantic moment', () => {
+    const note = stockRomancePhrasingNote(true)
+    expect(note).toMatch(/romantic\/intimate moment/i)
+    expect(note).toContain('electricity between them')
+    expect(note).toContain('despite herself')
+  })
+
+  it('never emits a {{char}}/{{user}} macro', () => {
+    expect(stockRomancePhrasingNote(true)).not.toContain('{{')
   })
 })
 

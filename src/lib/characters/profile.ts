@@ -71,15 +71,50 @@ function buildVoiceFingerprintNote(fingerprint: VoiceFingerprint | undefined): s
 }
 
 /**
+ * A second, much shorter restatement of only the single most load-bearing fingerprint elements —
+ * one catchphrase, one verbal tic, and the register/rhythm note — as its own compact, imperative
+ * line, deliberately separate from `buildVoiceFingerprintNote`'s fuller list above.
+ *
+ * The problem this exists to fix: on a weak or heavily-RLHF'd model, a distinctive voice tends to
+ * get smoothed into generic romance-novel prose over a long chat, and a signal buried mid-list in a
+ * longer paragraph (surrounded by tics, catchphrases, dialect notes, AND sentence rhythm all at
+ * once) is the first thing that gets diluted as the surrounding context grows. This is the same
+ * "make it impossible to miss" move the codebase already makes for the em-dash rule
+ * (`WritingStyleSection.tsx`'s standalone `avoidEmDashes` toggle plus managed regex, not a clause
+ * buried in a longer system prompt): repeat only the top signal, short and blunt, as its own line.
+ *
+ * Picks the *first* authored catchphrase/tic rather than trying to rank them — an author lists
+ * what matters most first, and `detectVoiceFingerprint` already sorts its own suggestions by how
+ * often they actually recur, so "first" is a reasonable proxy for "most load-bearing" either way.
+ * `undefined` when there's nothing to restate (no fingerprint, or one with only fields this
+ * function doesn't pull from — e.g. a card with tics/catchphrases capped out lower in the list but
+ * no register note at all still gets a reminder from whichever of the three is present).
+ */
+function buildVoiceFingerprintReminder(fingerprint: VoiceFingerprint | undefined): string | undefined {
+  if (!fingerprint) return undefined
+  const catchphrase = fingerprint.catchphrases?.[0]?.trim()
+  const tic = fingerprint.verbalTics?.[0]?.trim()
+  const register = (fingerprint.dialectNotes?.trim() || fingerprint.sentenceRhythm?.trim())?.replace(/\.+$/, '')
+  const bits: string[] = []
+  if (catchphrase) bits.push(`reach for "${catchphrase}" again when it fits`)
+  if (tic) bits.push(`keep the "${tic}" tic alive`)
+  if (register) bits.push(register)
+  if (bits.length === 0) return undefined
+  return `Voice check, every single reply no matter how long this chat has run: ${bits.join('; ')}. Never let this quietly flatten into generic prose.`
+}
+
+/**
  * The single note folded into the identity block alongside description/personality/scenario
  * (`PromptBuildInput.characterProfile`, `builder.ts`) — everything here lives on `Character`, not
- * the portable `CharacterCardData` the builder otherwise reads from directly. Two independent
- * sub-notes (life context, voice fingerprint) are combined so either can be present alone without
- * the other leaving a stray separator behind.
+ * the portable `CharacterCardData` the builder otherwise reads from directly. Three independent
+ * sub-notes (life context, the full voice fingerprint, and its compact reminder) are combined so
+ * any subset can be present alone without the others leaving a stray separator behind.
  */
 export function buildCharacterProfileNote(character: Character): string | undefined {
-  const blocks = [buildLifeContextNote(character), buildVoiceFingerprintNote(character.voiceFingerprint)].filter(
-    (b): b is string => !!b,
-  )
+  const blocks = [
+    buildLifeContextNote(character),
+    buildVoiceFingerprintNote(character.voiceFingerprint),
+    buildVoiceFingerprintReminder(character.voiceFingerprint),
+  ].filter((b): b is string => !!b)
   return blocks.length ? blocks.join('\n') : undefined
 }

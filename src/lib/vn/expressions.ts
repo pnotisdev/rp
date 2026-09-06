@@ -126,6 +126,27 @@ export interface CustomExpression {
 }
 
 /**
+ * Builds the `{id, label}` list `detectExpressionTextMismatch` (`sceneVision.ts`) compares a
+ * tagged expression against — every currently unlocked expression id, paired with its display
+ * label (a custom expression's own label wins over a same-id default, same precedence every other
+ * id→label lookup in this app uses). Deliberately unfiltered by sprite art, unlike the shortlist
+ * `shortlistExpressions`/`detectExpressionFromSprites` build for the vision pass: that pass is
+ * choosing between actual portrait images, so an id with nothing drawn is useless to it, while this
+ * one is only judging whether a *tag id* fits the prose that was just written — an expression the
+ * model may legitimately tag despite having no art yet still belongs in the running.
+ */
+export function expressionCandidatesFor(
+  unlockedExpressionIds: string[],
+  customExpressions: CustomExpression[] | undefined,
+): { id: string; label: string }[] {
+  const labelById = new Map<string, string>([
+    ...DEFAULT_EXPRESSIONS.map((e) => [e.id, e.label] as const),
+    ...(customExpressions ?? []).map((c) => [c.id, c.label] as const),
+  ])
+  return unlockedExpressionIds.map((id) => ({ id, label: labelById.get(id) ?? id }))
+}
+
+/**
  * Turns a free-typed label into a safe expression id: lowercase, hyphenated, matching the
  * server's `SAFE_KEY_RE` (`server/avatars.ts`) since this id becomes both a sprite filename and a
  * literal token in the model's prompt. `existingIds` gets a numeric suffix appended on collision

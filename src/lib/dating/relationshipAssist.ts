@@ -8,6 +8,7 @@ import { formatCommitmentStatus, RELATIONSHIP_DIMENSIONS, SCENE_FLAGS } from '@/
 import { describeIntentForJudge, describeIntentsForDate } from '@/lib/dating/intent'
 import { AFTERCARE_VERDICTS, isAftercareVerdict, type AftercareVerdict } from '@/lib/dating/aftercare'
 import { MOOD_VOCAB, NEED_VOCAB, type CharacterMood, type CharacterNeed } from '@/lib/prompt/mindGuidance'
+import type { AftercarePace } from '@/lib/dating/aftercare'
 import { parsePlanUpdates, type PlanUpdate } from '@/lib/dating/plans'
 import type { IntimacyPhase } from '@/lib/dating/intimacyScene'
 import { parseBeliefUpdates, type BeliefUpdate } from '@/lib/dating/beliefs'
@@ -272,6 +273,8 @@ export interface RelationshipMoment {
   expectationUpdates: ExpectationUpdate[]
   /** See `prompt/mindGuidance.ts`'s `fearGuidance` — sticky like `mood`/`currentNeed`/`characterIntent`; undefined means no change this turn. */
   currentFear?: string
+  /** See `prompt/mindGuidance.ts`'s `desireGuidance` — the want-axis counterpart to `currentNeed`, sticky the same way; undefined means no change this turn. */
+  currentDesire?: string
 }
 
 /**
@@ -334,6 +337,16 @@ export async function assessRelationshipMoment(
     activeExpectations?: string[]
     /** The character's current private fear going into this exchange, if one's been read — see `prompt/mindGuidance.ts`'s `fearGuidance`. */
     currentFear?: string
+    /** The character's current underlying desire going into this exchange, if one's been read — see `prompt/mindGuidance.ts`'s `desireGuidance`. */
+    currentDesire?: string
+    /**
+     * Item 2(b)'s "earned vs. rushed" read (`dating/aftercare.ts`'s `aftercarePaceContext`), passed
+     * only alongside `aftercareTurns` (same ride-along contract as every other conditional field
+     * here) — extra context for the verdict, never a replacement for the judge's own read of the
+     * actual turns since. Omitted when there's no snapshot to read (a window opened before this
+     * signal existed).
+     */
+    aftercarePaceContext?: AftercarePace
   },
 ): Promise<RelationshipMoment> {
   const hasTasks = !!params.pendingTasks?.length
@@ -359,10 +372,15 @@ export async function assessRelationshipMoment(
     hasAftercare
       ? `Separately: ${params.charName} and ${params.userName} were intimate a few turns ago, and you are also judging how the time SINCE went for ${params.charName} — the aftermath, not the act. Everything said since:\n${recentText(params.aftercareTurns!, params.charName, params.userName, 24)}`
       : '',
+    hasAftercare && params.aftercarePaceContext
+      ? params.aftercarePaceContext === 'rushed'
+        ? `Context for the aftercare verdict only: the warmth that led here built up very suddenly right beforehand (one big spike, not a gradual accumulation over many turns). A milestone that arrived this fast is more plausibly followed by second-guessing, self-consciousness, or a colder reaction than one that was clearly earned — weigh that honestly, though the actual behaviour in the turns since should still be what decides the verdict.`
+        : `Context for the aftercare verdict only: the warmth that led here built up gradually, over many small moments, not a sudden spike. That's the more solid foundation for a genuinely tender aftermath, though it's still the actual behaviour in the turns since that should decide the verdict.`
+      : '',
     hasIntimacyScene
       ? `Separately: an explicit intimate scene is currently in progress (currently read as "${params.currentIntimacyPhase}"). Judge whether the latest reply is still building, has reached its physical peak, or has now wound down/concluded (moving into its aftermath).`
       : '',
-    `${params.charName}'s mood going into this exchange: ${params.currentMood ?? 'not yet read'}. Their underlying need lately: ${params.currentNeed ?? 'not yet read'}. Their private intention going in: ${params.currentIntent ?? 'none noted'}. Their private fear going in: ${params.currentFear ?? 'none noted'}.`,
+    `${params.charName}'s mood going into this exchange: ${params.currentMood ?? 'not yet read'}. Their underlying need lately: ${params.currentNeed ?? 'not yet read'}. Their private intention going in: ${params.currentIntent ?? 'none noted'}. Their deeper underlying desire going in: ${params.currentDesire ?? 'not yet read'}. Their private fear going in: ${params.currentFear ?? 'none noted'}.`,
     hasPlans
       ? `${params.charName}'s current standing plans — concrete intentions they're carrying between turns, not just this-turn reactions:\n${params.activePlans!.map((p, i) => `${i}: ${p}`).join('\n')}`
       : `${params.charName} has no standing plans on record yet.`,
@@ -372,7 +390,7 @@ export async function assessRelationshipMoment(
     hasExpectations
       ? `${params.charName}'s standing expectations of ${params.userName} — things ${params.charName} has started counting on, whether or not ${params.userName} knows it:\n${params.activeExpectations!.map((e, i) => `${i}: ${e}`).join('\n')}`
       : `${params.charName} has no standing expectations of ${params.userName} on record yet.`,
-    `Return ONLY a minified JSON object: {"deltas":{ one integer -2..2 per dimension key },"newFlags":[ any newly-established flags from the known set, or [] ],"reason":"...","newFacts":[ any new durable facts, or [] ]${hasOpenThreads ? ',"resolvedFactIndices":[ open-thread index numbers this exchange clearly closed, or [] ]' : ''}${hasTasks ? ',"completedTaskIndices":[ pending task index numbers this exchange clearly and unambiguously accomplished, or [] ]' : ''}${hasAftercare ? `,"aftercareVerdict":"exactly one of [${AFTERCARE_VERDICTS.join(', ')}]"` : ''}${hasIntimacyScene ? ',"intimacyPhase":"exactly one of [building, peak, resolved]"' : ''},"mood":"one of [${MOOD_VOCAB.join(', ')}], only if this exchange gives a clear enough read to state one — omit entirely otherwise","currentNeed":"one of [${NEED_VOCAB.join(', ')}], only if this stretch of the story clearly shows this need going unmet — omit entirely otherwise, and don't change it lightly","characterIntent":"a short (under 12 words) private thing ${params.charName} now wants, only if something concrete and new became clear this exchange — omit entirely otherwise","currentFear":"a short (under 12 words) private fear ${params.charName} has right now, only if this exchange makes one genuinely clear — omit entirely otherwise, and don't change it lightly","planUpdates":[ usually [] — see the plan rules below ],"beliefUpdates":[ usually [] — see the belief rules below ],"expectationUpdates":[ usually [] — see the expectation rules below ]}.`,
+    `Return ONLY a minified JSON object: {"deltas":{ one integer -2..2 per dimension key },"newFlags":[ any newly-established flags from the known set, or [] ],"reason":"...","newFacts":[ any new durable facts, or [] ]${hasOpenThreads ? ',"resolvedFactIndices":[ open-thread index numbers this exchange clearly closed, or [] ]' : ''}${hasTasks ? ',"completedTaskIndices":[ pending task index numbers this exchange clearly and unambiguously accomplished, or [] ]' : ''}${hasAftercare ? `,"aftercareVerdict":"exactly one of [${AFTERCARE_VERDICTS.join(', ')}]"` : ''}${hasIntimacyScene ? ',"intimacyPhase":"exactly one of [building, peak, resolved]"' : ''},"mood":"one of [${MOOD_VOCAB.join(', ')}], only if this exchange gives a clear enough read to state one — omit entirely otherwise","currentNeed":"one of [${NEED_VOCAB.join(', ')}], only if this stretch of the story clearly shows this need going unmet — omit entirely otherwise, and don't change it lightly","characterIntent":"a short (under 12 words) private thing ${params.charName} now wants, only if something concrete and new became clear this exchange — omit entirely otherwise","currentDesire":"a short (under 12 words) deeper, steadier underlying drive of ${params.charName}'s, only if this exchange makes one genuinely clear — omit entirely otherwise, and don't change it lightly","currentFear":"a short (under 12 words) private fear ${params.charName} has right now, only if this exchange makes one genuinely clear — omit entirely otherwise, and don't change it lightly","planUpdates":[ usually [] — see the plan rules below ],"beliefUpdates":[ usually [] — see the belief rules below ],"expectationUpdates":[ usually [] — see the expectation rules below ]}.`,
     'Only move a dimension if this specific exchange clearly affected it. Leave the rest at 0. Most turns should move only one or two dimensions and add no new flags.',
     '"reason" is a short (under 12 words) in-world one-liner naming what just happened, e.g. "Complimented her cooking unprompted". Give one only if at least one dimension moved or a flag was added, otherwise "".',
     `"newFacts" is for concrete, durable things worth recalling much later: a name, a stated preference, a piece of backstory, a promise made, a moment that landed hard. Not every line of dialogue. Most turns add none. Each fact is an object {"text": one short standalone sentence, "importance": 0-1, "valence": -1 to 1, "unresolved": true/false}. "importance": ~0.2 for a small detail, 0.8+ for something that reshapes how ${params.charName} sees ${params.userName}. "valence": how it felt to ${params.charName} — negative if it hurt or disappointed, positive if it meant a lot, 0 for neutral information. "unresolved": true only for an open wound or open question the story has NOT closed (a slight not addressed, a promise not yet kept, a question dodged) — most facts are false.`,
@@ -382,6 +400,7 @@ export async function assessRelationshipMoment(
     `"mood" is ${params.charName}'s own transient emotional state right now, independent of the relationship dimensions above — a close, trusted relationship can still have an "annoyed" or "exhausted" day. Omit it on most turns; only state one when this exchange actually gave a clear signal, and don't just repeat the current mood back for no reason.`,
     `"currentNeed" is steadier than mood — a psychological undercurrent this stretch of the story hasn't been meeting (e.g. "reassurance" after being flaky, "recognition" after going unnoticed, "solitude" after being crowded). Omit it almost every turn; it shouldn't flip as readily as mood does, and should only be set or changed on a genuinely clear, sustained signal, not one line of dialogue.`,
     `"characterIntent" is a private thing ${params.charName} wants that the player hasn't necessarily been told — a small hidden agenda that can quietly color future turns (wanting reassurance, wanting space, planning a surprise, wanting an apology first). Omit it on almost every turn; once set it should usually stay omitted (meaning "no change") for a while rather than being reset every exchange.`,
+    `"currentDesire" is deeper and steadier than "characterIntent" the same way "currentNeed" is deeper and steadier than "mood" — not a specific plan or agenda item, but a foundational underlying drive that doesn't change turn to turn (e.g. "wants to feel truly seen, not just liked", "wants to matter to someone again", "wants to be the one chosen, not settled for"). Omit it on almost every turn; once set it should stay omitted (meaning "no change") for a long while, longer even than "characterIntent" does.`,
     `"planUpdates" changes ${params.charName}'s standing plans — bigger and longer-lived than "characterIntent": a real intention that spans many turns and can be entirely about ${params.charName}'s own life. Each entry is one of: {"action":"add","goal":"short, in ${params.charName}'s own terms","kind":"personal"|"together"|"distance","note":"optional"} to form a new one; {"action":"note","index":N,"note":"..."} to record progress or a setback on plan N; {"action":"resolve","index":N} to close plan N (finished, abandoned, or overtaken by events). "personal" = ${params.charName}'s own life independent of ${params.userName}; "together" = something they want to do with ${params.userName}; "distance" = deliberately holding back or protecting themselves. Use [] on almost every turn. Only "add" when this exchange genuinely gave ${params.charName} a new reason to want something lasting — a plan formed on a whim and never mentioned again is noise. Resolve a plan the moment the story has clearly moved past it.`,
     `"beliefUpdates" changes ${params.charName}'s standing impressions of ${params.userName} as a person — a judgment about who ${params.userName} *is*, not a one-off event (that's "newFacts") and not a relationship stat. Each entry is one of: {"action":"add","text":"the impression in ${params.charName}'s own voice, e.g. 'He's unusually patient with me.'"} to form a new one; {"action":"revise","index":N,"text":"..."} to correct or sharpen belief N once it's proven wrong or too simple; {"action":"drop","index":N} to abandon one that's been clearly disproven. Use [] on almost every turn — only add one when this exchange gives real, repeated-pattern evidence, not from a single isolated moment.`,
     `"expectationUpdates" changes ${params.charName}'s standing expectations of ${params.userName} — something ${params.charName} has started quietly counting on, whether or not ${params.userName} has ever been told. Each entry is one of: {"action":"add","text":"the expectation, e.g. 'expects a check-in most Sundays'"}; {"action":"note","index":N,"note":"..."} to record it playing out; {"action":"resolve","index":N,"outcome":"met"|"violated"} once it's clearly been met or clearly been missed. Use [] on almost every turn. "violated" should be reserved for a real, noticeable letdown, not a trivial miss.`,
@@ -448,6 +467,8 @@ export async function assessRelationshipMoment(
     typeof obj.characterIntent === 'string' && obj.characterIntent.trim() ? obj.characterIntent.trim().slice(0, 160) : undefined
   const currentFear =
     typeof obj.currentFear === 'string' && obj.currentFear.trim() ? obj.currentFear.trim().slice(0, 160) : undefined
+  const currentDesire =
+    typeof obj.currentDesire === 'string' && obj.currentDesire.trim() ? obj.currentDesire.trim().slice(0, 160) : undefined
   // `note`/`resolve` updates that point past the plans actually passed in are dropped — a stale
   // index from a model that miscounted must not silently rewrite or delete the wrong plan.
   const planCount = params.activePlans?.length ?? 0
@@ -483,6 +504,7 @@ export async function assessRelationshipMoment(
     beliefUpdates,
     expectationUpdates,
     currentFear,
+    currentDesire,
   }
 }
 
@@ -659,6 +681,14 @@ export async function suggestDateEvent(
      * instead of risking a `hangout`/`gift`/`milestone` card that never goes live at all.
      */
     milestoneOccasion?: Extract<CommitmentStatus, 'married' | 'living_together'>
+    /**
+     * Item 4(a): the name of the most recent gift that genuinely landed (`dating/gifts.ts`'s
+     * `recentMeaningfulGiftName`), so a suggested date/hangout can plausibly build on or reference it
+     * (a shared restaurant after a "favorite novel" gift, say) instead of being gift-blind. Optional
+     * and additive — an ordinary call with no gift history on record keeps the exact prompt this
+     * always had.
+     */
+    recentGiftName?: string
   },
 ): Promise<DateEventCard | null> {
   const official = params.commitmentStatus && params.commitmentStatus !== 'none' ? params.commitmentStatus : null
@@ -678,6 +708,9 @@ export async function suggestDateEvent(
       (official
         ? `They are already officially ${formatCommitmentStatus(official)}. Suggest something that fits a couple at that stage — an actual date, or something they'd plausibly do together now that it's established — rather than a tentative, getting-to-know-you outing.`
         : 'They are not officially together.'),
+    params.recentGiftName
+      ? `${params.characterName} was recently given something that genuinely meant something to them: ${params.recentGiftName}. If it fits naturally, the suggested event can plausibly build on or reference that (not force it) — e.g. a shared meal after a favorite-novel gift, or a place that connects to a gift's theme.`
+      : '',
     `Available background ids: ${params.availableBackgrounds.join(', ')}`,
     'Return ONLY one minified JSON object:',
     '{"title":"...","description":"...","objectiveTitle":"...","objectiveDescription":"...","backgroundId":"...","kind":"date|hangout|gift|milestone"}',
