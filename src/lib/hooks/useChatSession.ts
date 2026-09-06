@@ -45,6 +45,8 @@ import {
   spendEnergy,
 } from '@/lib/world/calendar'
 import { evaluateTriggers } from '@/lib/world/triggers'
+import { ambientEventGuidance, describeSocialReaction, selectAmbientEvent, selectSocialReaction } from '@/lib/world/ambientEvents'
+import { findArchetypeMatch, participantRelationshipGuidance } from '@/lib/chat/participantArchetype'
 import {
   applyBreakupScar,
   clampAffection,
@@ -633,6 +635,29 @@ export function useChatSession(chatId: string | null) {
                   .slice(0, 3)
                   .map((id) => backgroundLabel(id, world)),
           })
+      // A concrete, authored-data-grounded "something's going on" hook (a holiday, weather the
+      // character loves/hates, a routine gap, a goal on their mind, an idle-time interest) — see
+      // `world/ambientEvents.ts`. Suppressed during a live event for the same reason `sceneNudge`
+      // is: the event itself is already the scene's content.
+      const ambientLine = freshChat.activeEvent
+        ? ''
+        : ambientEventGuidance({
+            charName: speaker.card.name,
+            characterId: speaker.id,
+            chatId: freshChat.id,
+            charTurnCount: countCharReplies(messages),
+            event: selectAmbientEvent({
+              worldId: world?.id,
+              characterId: speaker.id,
+              day: world?.currentDay ?? 0,
+              phaseIndex: world?.currentPhaseIndex ?? 0,
+              schedule: speaker.schedule,
+              likes: speaker.likes,
+              goals: speaker.goals,
+              frequentedLocations: speaker.frequentedLocations,
+              weatherPreferences: speaker.weatherPreferences,
+            }),
+          })
 
       // What this specific relationship has earned so far (places to kiss, and — once the user has
       // explicit content turned on — positions/toys/other intimate beats), offered as a bank of
@@ -718,6 +743,22 @@ export function useChatSession(chatId: string | null) {
         speaker.id === character.id
           ? buildRelationshipDescription(freshChat, world, character)
           : undefined
+      // The non-primary half of the line above: every other speaking participant got zero
+      // relationship-flavor guidance until now, which read as either silence or (worse) borrowing
+      // the primary's own romantic warmth. See `chat/participantArchetype.ts`'s own top comment.
+      const participantGuidance =
+        !impersonating && speaker.id !== character.id
+          ? participantRelationshipGuidance({
+              speakerName: speaker.card.name,
+              personaName: persona?.name || 'You',
+              primaryName: character.card.name,
+              warmth: speakerWarmth,
+              archetype: findArchetypeMatch(
+                [character.card.name, persona?.name].filter((n): n is string => !!n),
+                [{ connections: character.socialConnections }, { connections: speaker.socialConnections }],
+              ),
+            })
+          : undefined
       // Names back to the model the specific AI-prose tells and verbatim repeats this character
       // has just used, so it has something concrete to avoid rather than a generic "write well"
       // line it will agree with and ignore. Costs zero tokens when the recent turns are clean.
@@ -773,6 +814,8 @@ export function useChatSession(chatId: string | null) {
             rebuffLine,
             repeatNudge ?? '',
             sceneNudge,
+            ambientLine,
+            participantGuidance ?? '',
             replyLengthInstruction,
             styleGuidanceNote.trim(),
             slopAvoidance ?? '',
@@ -1102,6 +1145,19 @@ export function useChatSession(chatId: string | null) {
           else if (action.kind === 'remember') {
             chatFactsApi.create({ chatId: chatIdForRelationship, text: action.text }).catch(() => {})
           } else if (action.kind === 'notify') toastInfo(action.text)
+          else if (action.kind === 'social_reaction') {
+            const reaction = selectSocialReaction({
+              characterId: speaker.id,
+              chatId: chatIdForRelationship,
+              topic: action.topic,
+              connections: speaker.socialConnections,
+            })
+            if (reaction) {
+              chatFactsApi
+                .create({ chatId: chatIdForRelationship, text: describeSocialReaction(speaker.card.name, reaction) })
+                .catch(() => {})
+            }
+          }
         }
       }
 
