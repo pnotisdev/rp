@@ -968,6 +968,7 @@ function WorldEditor({
                   <TriggerConditionRows
                     conditions={t.when}
                     knownFlags={combinedSceneFlags(customSceneFlags)}
+                    knownTriggers={triggers.filter((other) => other.id !== t.id).map((other) => ({ id: other.id, label: other.label }))}
                     onChange={(when) => updateTrigger(t.id, { when })}
                   />
                   <TriggerActionRows

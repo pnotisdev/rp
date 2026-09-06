@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { WEATHER_KINDS } from './calendar'
-import { AMBIENT_EVENT_KINDS, ambientEventGuidance, describeAmbientEvent, selectAmbientEvent, type AmbientEvent } from './ambientEvents'
+import {
+  AMBIENT_EVENT_KINDS,
+  ambientEventGuidance,
+  describeAmbientEvent,
+  describeSocialReaction,
+  selectAmbientEvent,
+  selectSocialReaction,
+  type AmbientEvent,
+} from './ambientEvents'
 
 describe('selectAmbientEvent', () => {
   it('a holiday takes unconditional priority over every other qualifying hook', () => {
@@ -215,5 +223,56 @@ describe('ambientEventGuidance', () => {
       }
     }
     expect(found).toBe(describeAmbientEvent('Sumire', EVENT))
+  })
+})
+
+describe('selectSocialReaction', () => {
+  const CONNECTIONS = [
+    { name: 'Aiko', relation: 'childhood friend' },
+    { name: 'Ren', relation: 'older brother' },
+  ]
+
+  it('returns undefined with no authored connections at all', () => {
+    expect(selectSocialReaction({ characterId: 'c1', chatId: 'chat1', topic: 'the engagement', connections: undefined })).toBeUndefined()
+    expect(selectSocialReaction({ characterId: 'c1', chatId: 'chat1', topic: 'the engagement', connections: [] })).toBeUndefined()
+  })
+
+  it('picks a real, named authored connection and carries the topic through', () => {
+    const reaction = selectSocialReaction({ characterId: 'c1', chatId: 'chat1', topic: 'the engagement', connections: CONNECTIONS })
+    expect(reaction).toBeDefined()
+    expect(['Aiko', 'Ren']).toContain(reaction?.connectionName)
+    expect(reaction?.topic).toBe('the engagement')
+    const picked = CONNECTIONS.find((c) => c.name === reaction?.connectionName)
+    expect(reaction?.relation).toBe(picked?.relation)
+  })
+
+  it('is fully deterministic for identical inputs', () => {
+    const params = { characterId: 'c1', chatId: 'chat1', topic: 'the engagement', connections: CONNECTIONS }
+    expect(selectSocialReaction(params)).toEqual(selectSocialReaction(params))
+  })
+
+  it('draws from more than one connection across different topics/chats, not always the same one', () => {
+    const seen = new Set<string>()
+    for (let i = 0; i < 30; i++) {
+      const reaction = selectSocialReaction({ characterId: 'c1', chatId: `chat${i}`, topic: `topic ${i}`, connections: CONNECTIONS })
+      if (reaction) seen.add(reaction.connectionName)
+    }
+    expect(seen.size).toBeGreaterThan(1)
+  })
+
+  it('single-connection roster always resolves to that one connection', () => {
+    const reaction = selectSocialReaction({ characterId: 'c1', chatId: 'chat1', topic: 'x', connections: [CONNECTIONS[0]] })
+    expect(reaction?.connectionName).toBe('Aiko')
+  })
+})
+
+describe('describeSocialReaction', () => {
+  it('names the connection, their relation, the character, and the topic, framed as reported not present', () => {
+    const line = describeSocialReaction('Sumire', { connectionName: 'Aiko', relation: 'childhood friend', topic: 'the engagement' })
+    expect(line).toContain('Aiko')
+    expect(line).toContain('childhood friend')
+    expect(line).toContain('Sumire')
+    expect(line).toContain('the engagement')
+    expect(line).not.toContain('{{')
   })
 })

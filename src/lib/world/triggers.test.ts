@@ -73,6 +73,12 @@ describe('conditionHolds', () => {
     // evaluate would be worse than not firing it.
     expect(conditionHolds({ kind: 'from_the_future' } as never, ctx())).toBe(false)
   })
+
+  it('trigger_fired reads the firedTriggerIds set directly, defaulting to false when absent', () => {
+    expect(conditionHolds({ kind: 'trigger_fired', triggerId: 'a' }, ctx())).toBe(false)
+    expect(conditionHolds({ kind: 'trigger_fired', triggerId: 'a' }, ctx({ firedTriggerIds: new Set(['a']) }))).toBe(true)
+    expect(conditionHolds({ kind: 'trigger_fired', triggerId: 'a' }, ctx({ firedTriggerIds: new Set(['b']) }))).toBe(false)
+  })
 })
 
 describe('triggerSatisfied', () => {
@@ -169,6 +175,51 @@ describe('evaluateTriggers', () => {
     const c = ctx()
     expect(evaluateTriggers(t, c)).toEqual(evaluateTriggers(t, c))
   })
+
+  describe('consequence chains (trigger_fired)', () => {
+    it('lets a later rule in the SAME pass fire off an earlier one that just fired (author order)', () => {
+      const chain = [
+        trigger({ id: 'jealousy-flares', then: [{ kind: 'set_flag', flag: 'jealousy' }] }),
+        trigger({ id: 'trust-test', when: [{ kind: 'trigger_fired', triggerId: 'jealousy-flares' }], then: [{ kind: 'notify', text: 'chained' }] }),
+      ]
+      const out = evaluateTriggers(chain, ctx())
+      expect(out.fired.map((t) => t.id)).toEqual(['jealousy-flares', 'trust-test'])
+    })
+
+    it('does NOT let an earlier rule in the pass see a LATER one firing (order matters, no lookahead)', () => {
+      const chain = [
+        trigger({ id: 'trust-test', when: [{ kind: 'trigger_fired', triggerId: 'jealousy-flares' }], then: [{ kind: 'notify', text: 'chained' }] }),
+        trigger({ id: 'jealousy-flares', then: [{ kind: 'set_flag', flag: 'jealousy' }] }),
+      ]
+      const out = evaluateTriggers(chain, ctx())
+      expect(out.fired.map((t) => t.id)).toEqual(['jealousy-flares'])
+    })
+
+    it('chains across two turns exactly the way the real caller applies it: fire, persist firedIds, re-evaluate later', () => {
+      const chain = [
+        trigger({ id: 'jealousy-flares', when: [{ kind: 'stat_at_least', stat: 'tension', value: 50 }] }),
+        trigger({ id: 'trust-test', when: [{ kind: 'trigger_fired', triggerId: 'jealousy-flares' }, { kind: 'stat_at_least', stat: 'trust', value: 80 }] }),
+      ]
+      // Turn 1: tension is high enough for the first rule, but trust isn't there yet for the second.
+      const turn1 = evaluateTriggers(chain, ctx({ stats: { tension: 60, trust: 40 } }))
+      expect(turn1.fired.map((t) => t.id)).toEqual(['jealousy-flares'])
+      // Turn 2 (a later scene): tension has settled back down (the first rule's own condition no
+      // longer holds, and it's one-shot so it wouldn't re-fire anyway), but trust has since grown
+      // — the second rule fires now purely because the first one fired *at some point*, exactly
+      // the "a jealousy beat feeds a later trust rule" shape this was built for.
+      const turn2 = evaluateTriggers(chain, ctx({ stats: { tension: 10, trust: 85 } }), turn1.firedIds)
+      expect(turn2.fired.map((t) => t.id)).toEqual(['trust-test'])
+    })
+
+    it('never satisfies trigger_fired for a rule that has not fired at all', () => {
+      const chain = [
+        trigger({ id: 'never-holds', when: [{ kind: 'stat_at_least', stat: 'affection', value: 999 }] }),
+        trigger({ id: 'trust-test', when: [{ kind: 'trigger_fired', triggerId: 'never-holds' }] }),
+      ]
+      const out = evaluateTriggers(chain, ctx())
+      expect(out.fired).toEqual([])
+    })
+  })
 })
 
 describe('slugifyTriggerId', () => {
@@ -188,11 +239,13 @@ describe('describeCondition / describeAction', () => {
     expect(describeCondition({ kind: 'flag_set', flag: 'confession' })).toContain('confession')
     expect(describeCondition({ kind: 'commitment_at_least', status: 'living_together' })).toBe('at least living together')
     expect(describeCondition({ kind: 'day_at_least', day: 7 })).toBe('day 7+')
+    expect(describeCondition({ kind: 'trigger_fired', triggerId: 'first-kiss' })).toContain('first-kiss')
   })
 
   it('summarises each action kind readably', () => {
     expect(describeAction({ kind: 'set_flag', flag: 'opened_up' })).toContain('opened_up')
     expect(describeAction({ kind: 'remember', text: 'x' })).toContain('remember')
     expect(describeAction({ kind: 'notify', text: 'x' })).toContain('notify')
+    expect(describeAction({ kind: 'social_reaction', topic: 'the engagement' })).toContain('the engagement')
   })
 })

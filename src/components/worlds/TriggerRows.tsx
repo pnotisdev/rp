@@ -21,6 +21,9 @@ export interface KnownFlag {
   label: string
 }
 
+/** Same shape as `KnownFlag` — a rule's own id/label — kept as a distinct alias since a `trigger_fired` condition picks from the world's OTHER rules, not its scene flags. */
+export type KnownTrigger = KnownFlag
+
 function RemoveButton({ onClick, label }: { onClick: () => void; label: string }) {
   return (
     <button type="button" onClick={onClick} aria-label={label} className="text-text-muted transition-colors hover:text-danger">
@@ -32,10 +35,13 @@ function RemoveButton({ onClick, label }: { onClick: () => void; label: string }
 export function TriggerConditionRows({
   conditions,
   knownFlags,
+  knownTriggers = [],
   onChange,
 }: {
   conditions: TriggerCondition[]
   knownFlags: KnownFlag[]
+  /** Other rules in this world a `trigger_fired` condition can reference — the caller excludes this rule's own id, since a rule can never reference itself. Defaults to none, which still works: the condition falls back to a free-typed id field. */
+  knownTriggers?: KnownTrigger[]
   onChange: (next: TriggerCondition[]) => void
 }) {
   const set = (i: number, c: TriggerCondition) => onChange(conditions.map((x, j) => (j === i ? c : x)))
@@ -46,6 +52,7 @@ export function TriggerConditionRows({
     if (kind === 'stat_at_least' || kind === 'stat_below') set(i, { kind, stat: 'affection', value: 50 })
     else if (kind === 'flag_set') set(i, { kind, flag: knownFlags[0]?.id ?? 'first_date' })
     else if (kind === 'commitment_at_least') set(i, { kind, status: 'dating' })
+    else if (kind === 'trigger_fired') set(i, { kind, triggerId: knownTriggers[0]?.id ?? '' })
     else set(i, { kind: 'day_at_least', day: 1 })
   }
 
@@ -65,6 +72,7 @@ export function TriggerConditionRows({
             <option value="flag_set">flag is set</option>
             <option value="commitment_at_least">commitment at least</option>
             <option value="day_at_least">day at least</option>
+            <option value="trigger_fired">another rule has fired</option>
           </select>
 
           {(c.kind === 'stat_at_least' || c.kind === 'stat_below') && (
@@ -134,6 +142,30 @@ export function TriggerConditionRows({
             />
           )}
 
+          {c.kind === 'trigger_fired' &&
+            (knownTriggers.length > 0 ? (
+              <select
+                value={c.triggerId}
+                onChange={(e) => set(i, { kind: 'trigger_fired', triggerId: e.target.value })}
+                aria-label="Rule"
+                className={SELECT_CLASS}
+              >
+                {knownTriggers.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                value={c.triggerId}
+                onChange={(e) => set(i, { kind: 'trigger_fired', triggerId: e.target.value })}
+                placeholder="another rule's id"
+                aria-label="Rule id"
+                className="min-w-0 flex-1 rounded-md bg-bg px-2 py-1 text-text outline-none"
+              />
+            ))}
+
           <RemoveButton onClick={() => onChange(conditions.filter((_, j) => j !== i))} label="Remove condition" />
         </div>
       ))}
@@ -169,6 +201,7 @@ export function TriggerActionRows({
             onChange={(e) => {
               const kind = e.target.value as TriggerAction['kind']
               if (kind === 'set_flag') set(i, { kind, flag: knownFlags[0]?.id ?? 'first_date' })
+              else if (kind === 'social_reaction') set(i, { kind, topic: '' })
               else set(i, { kind, text: '' })
             }}
             aria-label="Action type"
@@ -177,6 +210,7 @@ export function TriggerActionRows({
             <option value="remember">remember</option>
             <option value="set_flag">set flag</option>
             <option value="notify">notify me</option>
+            <option value="social_reaction">a named connection reacts</option>
           </select>
 
           {a.kind === 'set_flag' ? (
@@ -192,6 +226,14 @@ export function TriggerActionRows({
                 </option>
               ))}
             </select>
+          ) : a.kind === 'social_reaction' ? (
+            <input
+              value={a.topic}
+              onChange={(e) => set(i, { kind: 'social_reaction', topic: e.target.value })}
+              placeholder="What they heard about, e.g. the engagement — picks one of the character's own authored connections to react"
+              aria-label="Topic a connection reacts to"
+              className="min-w-0 flex-1 rounded-md bg-bg px-2 py-1 text-text outline-none"
+            />
           ) : (
             <input
               value={a.text}

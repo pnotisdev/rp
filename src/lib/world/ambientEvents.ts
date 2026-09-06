@@ -194,3 +194,52 @@ export function ambientEventGuidance(opts: {
   if (roll >= AMBIENT_EVENT_CHANCE) return ''
   return describeAmbientEvent(opts.charName, opts.event)
 }
+
+/**
+ * The "NPCs outside the primary notice things" half of world liveliness — a named person from the
+ * character's own already-authored `socialConnections` (10e), someone real to this world who isn't
+ * actually in the scene, reacting to something that happened (a milestone, a jealousy beat, whatever
+ * a world author's own `triggers.ts` rule decided was reaction-worthy via a `social_reaction`
+ * action). Deliberately grounded in authored data rather than inventing a name: with no
+ * `socialConnections` at all, this simply never fires, exactly like every other hook in this module
+ * having nothing to draw from.
+ *
+ * `topic` itself is NOT decided here — it comes from the trigger action that called this, since
+ * *whether* something is reaction-worthy is exactly the kind of authored condition/one-shot-vs-
+ * repeatable judgment `triggers.ts` already owns. This function's only job is the one still missing:
+ * which of possibly several authored connections plausibly heard about it, deterministically and
+ * reproducibly rather than always picking the first one in the list.
+ */
+export interface SocialConnectionLike {
+  name: string
+  relation: string
+  notes?: string
+}
+
+export interface SocialReaction {
+  connectionName: string
+  relation: string
+  topic: string
+}
+
+export function selectSocialReaction(params: {
+  characterId: string
+  chatId: string
+  topic: string
+  connections: SocialConnectionLike[] | undefined
+}): SocialReaction | undefined {
+  if (!params.connections?.length) return undefined
+  const connection = pickFrom(params.connections, `social-reaction:${params.characterId}:${params.chatId}:${params.topic}`)
+  return { connectionName: connection.name, relation: connection.relation, topic: params.topic }
+}
+
+/**
+ * Formats a selected reaction into a durable memory line — meant to be written as a `ChatFact`
+ * (the same channel a trigger's own `remember` action already uses, per `describeAction`'s doc
+ * comment for `social_reaction`), so it rides into every later prompt as a real, secondhand mention
+ * rather than a one-off toast that's forgotten the instant the turn ends. Framed explicitly as
+ * reported/relayed, not a live appearance — this connection is not actually in the scene.
+ */
+export function describeSocialReaction(charName: string, reaction: SocialReaction): string {
+  return `${reaction.connectionName} (${charName}'s ${reaction.relation}) heard about ${reaction.topic} and had something to say about it — ${charName} can bring this up in a later scene as a real secondhand mention (something ${reaction.connectionName} said, texted, or was overheard saying), relayed in ${charName}'s own words, not as ${reaction.connectionName} literally appearing.`
+}

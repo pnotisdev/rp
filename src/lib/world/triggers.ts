@@ -30,6 +30,17 @@ export type TriggerCondition =
   | { kind: 'flag_set'; flag: string }
   | { kind: 'commitment_at_least'; status: CommitmentStatus }
   | { kind: 'day_at_least'; day: number }
+  /**
+   * A consequence-chain condition: holds once another rule (by id) has fired — either earlier in
+   * this SAME evaluation pass (author order matters — a rule can only reference one earlier in the
+   * list), or on a previous turn, via `alreadyFired`. Exists so a deliberate chain ("a jealousy
+   * flag from one scene feeds a later trust rule") doesn't require the author to also invent and
+   * keep in sync a redundant `set_flag` just to make the first rule's firing checkable — see
+   * `evaluateTriggers`'s own comment for exactly how `firedTriggerIds` is assembled. Only ever true
+   * for a one-shot (non-repeatable) rule: a repeatable rule's firing is never remembered past the
+   * instant it fires, so referencing one here can only ever catch it within the same pass.
+   */
+  | { kind: 'trigger_fired'; triggerId: string }
 
 export type TriggerAction =
   /** Sets a scene flag, exactly as the AI classifier can — so gallery entries, outfits, and other triggers can all gate on an authored beat. */
@@ -38,6 +49,15 @@ export type TriggerAction =
   | { kind: 'remember'; text: string }
   /** Tells the player something happened. Purely informational; never touches state. */
   | { kind: 'notify'; text: string }
+  /**
+   * A named person from the character's own authored `socialConnections` — someone real to this
+   * world who isn't actually in the scene — has heard about `topic` and reacted. Deterministic code
+   * (`world/ambientEvents.ts`'s `selectSocialReaction`) picks which connection, keeping this data-
+   * grounded rather than an invented NPC; the model only ever writes the actual line, same split as
+   * every other authored hook in this app. See that module for the exact call site this reaches the
+   * prompt through (a `ChatFact`, the same durable channel `remember` above already uses).
+   */
+  | { kind: 'social_reaction'; topic: string }
 
 export interface Trigger {
   id: string
@@ -64,6 +84,14 @@ export interface TriggerContext {
   commitmentStatus: CommitmentStatus
   /** The world clock's current day, or undefined for a character with no world bound — a `day_at_least` condition simply never holds then. */
   day?: number
+  /**
+   * Ids of rules already known to have fired — for `trigger_fired` conditions. Callers never need
+   * to assemble this themselves: `evaluateTriggers` always overwrites it per-trigger with the right
+   * running set (previously-fired ids plus whichever rules already fired earlier in the same pass),
+   * so this is safe to simply omit when calling `conditionHolds`/`triggerSatisfied` directly (as
+   * every existing call site does) — it only matters to `evaluateTriggers` itself.
+   */
+  firedTriggerIds?: ReadonlySet<string>
 }
 
 function statValue(stat: TriggerStat, ctx: TriggerContext): number {
@@ -89,6 +117,8 @@ export function conditionHolds(condition: TriggerCondition, ctx: TriggerContext)
       // Undefined means no world clock at all, which can never satisfy a day condition — as
       // opposed to day 0, which legitimately satisfies `day_at_least: 0`.
       return ctx.day !== undefined && ctx.day >= condition.day
+    case 'trigger_fired':
+      return !!ctx.firedTriggerIds?.has(condition.triggerId)
     default:
       // An unknown condition kind (a world authored by a newer build, or hand-edited data) must
       // never hold — silently firing an author's rule on a condition this build cannot evaluate
@@ -130,7 +160,12 @@ export function evaluateTriggers(
   for (const trigger of triggers ?? []) {
     if (trigger.enabled === false) continue
     if (!trigger.repeatable && firedIds.has(trigger.id)) continue
-    if (!triggerSatisfied(trigger, ctx)) continue
+    // `firedIds` at this exact point already holds every previous-turn one-shot fire (from
+    // `alreadyFired`) plus every one-shot rule that already fired earlier in THIS pass (added
+    // below, in author order) — exactly what a `trigger_fired` condition needs to see. Rebuilt
+    // per-trigger (a plain object spread, not a mutation of the caller's own `ctx`) so this stays
+    // pure like every other condition here.
+    if (!triggerSatisfied(trigger, { ...ctx, firedTriggerIds: firedIds })) continue
     fired.push(trigger)
     if (!trigger.repeatable) firedIds.add(trigger.id)
   }
@@ -155,6 +190,8 @@ export function describeCondition(condition: TriggerCondition): string {
       return `at least ${condition.status.replace(/_/g, ' ')}`
     case 'day_at_least':
       return `day ${condition.day}+`
+    case 'trigger_fired':
+      return `rule "${condition.triggerId}" has already fired`
     default:
       return 'unknown condition'
   }
@@ -169,6 +206,8 @@ export function describeAction(action: TriggerAction): string {
       return `remember "${action.text}"`
     case 'notify':
       return `notify "${action.text}"`
+    case 'social_reaction':
+      return `a named connection reacts to "${action.topic}"`
     default:
       return 'unknown action'
   }
