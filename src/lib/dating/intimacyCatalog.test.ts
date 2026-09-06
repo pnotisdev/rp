@@ -170,6 +170,23 @@ describe('getIntimacyCatalog', () => {
     expect(catalog.length).toBe(DEFAULT_INTIMACY_CATALOG.length + 1)
     expect(catalog).toEqual([...DEFAULT_INTIMACY_CATALOG, ...custom])
   })
+
+  it('item 11: replaceIntimacyCatalog makes custom entries the entire catalog, dropping the humanoid-anatomy defaults', () => {
+    const custom = [{ id: 'custom-3', category: 'activity' as const, label: 'bioluminescent glow-sharing', minWarmth: 20 }]
+    const catalog = getIntimacyCatalog({ customIntimacyOptions: custom, replaceIntimacyCatalog: true })
+    expect(catalog).toEqual(custom)
+    expect(catalog.some((e) => DEFAULT_INTIMACY_CATALOG.includes(e))).toBe(false)
+  })
+
+  it('replaceIntimacyCatalog with no custom entries yet falls back to an empty catalog, not the defaults', () => {
+    expect(getIntimacyCatalog({ replaceIntimacyCatalog: true })).toEqual([])
+    expect(getIntimacyCatalog({ customIntimacyOptions: [], replaceIntimacyCatalog: true })).toEqual([])
+  })
+
+  it('replaceIntimacyCatalog is ignored (stays additive) when false/unset, regardless of custom entries', () => {
+    const custom = [{ id: 'custom-3', category: 'activity' as const, label: 'stargazing', minWarmth: 20 }]
+    expect(getIntimacyCatalog({ customIntimacyOptions: custom, replaceIntimacyCatalog: false })).toEqual([...DEFAULT_INTIMACY_CATALOG, ...custom])
+  })
 })
 
 describe('nextLockedInCategory', () => {

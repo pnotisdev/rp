@@ -57,3 +57,65 @@ export function detectBoundaryCrossing(boundaries: string[] | undefined, replyTe
   if (!boundaries?.length || !replyText.trim()) return undefined
   return boundaries.find((b) => boundaryPhraseCrossed(b, replyText))
 }
+
+/**
+ * Item 7's gap: this whole file only ever read `Character.boundaries`, a real but narrower scope
+ * than "the player's own limits" — a persona's free-text `description` is where those actually
+ * live today (there is no structured `Persona.boundaries` field, and adding one is a bigger,
+ * separate schema/editor change than this narrow fix calls for). Unlike a character's boundaries
+ * (already a curated list of short phrases, each one deliberately a limit), a persona description
+ * is ordinary prose mostly about other things — running the whole block through
+ * `boundaryPhraseCrossed` as one long phrase would false-positive constantly on unrelated words.
+ * This extracts just the sentences that actually *read* as a stated limit (containing a plain
+ * negation/refusal marker — "won't", "don't", "never", "hate(s)", "refuse(s)", "not okay with",
+ * "uncomfortable with", "no ___"), each treated as its own boundary phrase from there on, same
+ * lexical rules as the rest of this file. A description with no such sentence contributes nothing,
+ * which is the common case and the safe default (no persona bio, or one that's just physical
+ * description/backstory, was never meant to gate anything).
+ */
+const LIMIT_MARKERS = [
+  "won't",
+  'wont',
+  "don't",
+  'dont',
+  'never',
+  "can't",
+  'cant',
+  'refuse',
+  'refuses',
+  'hate',
+  'hates',
+  'uncomfortable',
+  'not okay',
+  'not into',
+  'no ',
+]
+
+/** Splits on sentence-ending punctuation — good enough for a short bio; a persona description isn't formal prose with abbreviations to trip over. */
+function splitSentences(text: string): string[] {
+  return text
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+}
+
+export function personaBoundaryPhrases(description: string | undefined): string[] {
+  if (!description?.trim()) return []
+  const lower = (s: string) => s.toLowerCase()
+  return splitSentences(description).filter((sentence) => LIMIT_MARKERS.some((marker) => lower(sentence).includes(marker)))
+}
+
+/**
+ * The combined check, reading both sources of authored limits — a character's own `boundaries`
+ * (unchanged, still checked first so its existing behavior/ordering is untouched) and whatever the
+ * persona's own description states as a limit (`personaBoundaryPhrases` above). Same conservative
+ * contract as `detectBoundaryCrossing`: `undefined` is the common case, and a miss is the safe
+ * failure mode.
+ */
+export function detectAnyBoundaryCrossing(
+  characterBoundaries: string[] | undefined,
+  personaDescription: string | undefined,
+  replyText: string,
+): string | undefined {
+  return detectBoundaryCrossing(characterBoundaries, replyText) ?? detectBoundaryCrossing(personaBoundaryPhrases(personaDescription), replyText)
+}

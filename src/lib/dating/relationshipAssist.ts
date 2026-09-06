@@ -347,6 +347,16 @@ export async function assessRelationshipMoment(
      * signal existed).
      */
     aftercarePaceContext?: AftercarePace
+    /**
+     * Item 6: names of anyone else actually present and speaking in this scene right now (a group
+     * chat's other participants), so the jealousy `SceneFlag` classifier can weigh a rival's live
+     * presence differently from the same tension merely being talked about — see
+     * `chat/participantArchetype.ts`'s `rivalJealousyIntensifier`, which already deepens the *tone*
+     * once the flag is set; this is the missing other half, giving the classifier itself a reason to
+     * set it more readily in the first place. Omit for an ordinary single-character chat, where
+     * there's never anyone else to be present.
+     */
+    presentParticipants?: string[]
   },
 ): Promise<RelationshipMoment> {
   const hasTasks = !!params.pendingTasks?.length
@@ -356,6 +366,7 @@ export async function assessRelationshipMoment(
   const hasIntimacyScene = !!params.currentIntimacyPhase
   const hasBeliefs = !!params.activeBeliefs?.length
   const hasExpectations = !!params.activeExpectations?.length
+  const hasOthersPresent = !!params.presentParticipants?.length
   const prompt = [
     'You are scoring relationship momentum, tracking high-level romance route flags, noting durable facts worth remembering long-term, AND (separately) reading the character\'s own current emotional state, an underlying need, and private intentions, in an in-character roleplay.',
     `Current scores (0-100 each): ${DELTA_KEYS.map((k) => `${k}=${params.current[k]}`).join(', ')}.`,
@@ -363,6 +374,9 @@ export async function assessRelationshipMoment(
     `Latest reply from ${params.charName}:\n${params.latestReply}`,
     `Dimension meanings: ${DELTA_KEYS.map((k) => `${k} = ${DIMENSION_GLOSSARY[k]}`).join('; ')}.`,
     `Known route flags: ${describeFlags(params.customFlags)}.`,
+    hasOthersPresent
+      ? `Also actually present and speaking in this scene right now: ${params.presentParticipants!.join(', ')}. If jealousy is genuinely building, someone else being physically here for it to happen in front of is a stronger, more concrete signal than the same feeling from a conversation or a memory alone — weigh that when deciding whether "jealousy" is established this exchange.`
+      : '',
     describeIntentForJudge(params.intent)?.replace(/\{\{char\}\}/g, params.charName) ?? '',
     params.knownFacts?.length ? `Facts already remembered (don't repeat these): ${params.knownFacts.join('; ')}.` : '',
     hasOpenThreads
@@ -392,7 +406,7 @@ export async function assessRelationshipMoment(
       : `${params.charName} has no standing expectations of ${params.userName} on record yet.`,
     `Return ONLY a minified JSON object: {"deltas":{ one integer -2..2 per dimension key },"newFlags":[ any newly-established flags from the known set, or [] ],"reason":"...","newFacts":[ any new durable facts, or [] ]${hasOpenThreads ? ',"resolvedFactIndices":[ open-thread index numbers this exchange clearly closed, or [] ]' : ''}${hasTasks ? ',"completedTaskIndices":[ pending task index numbers this exchange clearly and unambiguously accomplished, or [] ]' : ''}${hasAftercare ? `,"aftercareVerdict":"exactly one of [${AFTERCARE_VERDICTS.join(', ')}]"` : ''}${hasIntimacyScene ? ',"intimacyPhase":"exactly one of [building, peak, resolved]"' : ''},"mood":"one of [${MOOD_VOCAB.join(', ')}], only if this exchange gives a clear enough read to state one — omit entirely otherwise","currentNeed":"one of [${NEED_VOCAB.join(', ')}], only if this stretch of the story clearly shows this need going unmet — omit entirely otherwise, and don't change it lightly","characterIntent":"a short (under 12 words) private thing ${params.charName} now wants, only if something concrete and new became clear this exchange — omit entirely otherwise","currentDesire":"a short (under 12 words) deeper, steadier underlying drive of ${params.charName}'s, only if this exchange makes one genuinely clear — omit entirely otherwise, and don't change it lightly","currentFear":"a short (under 12 words) private fear ${params.charName} has right now, only if this exchange makes one genuinely clear — omit entirely otherwise, and don't change it lightly","planUpdates":[ usually [] — see the plan rules below ],"beliefUpdates":[ usually [] — see the belief rules below ],"expectationUpdates":[ usually [] — see the expectation rules below ]}.`,
     'Only move a dimension if this specific exchange clearly affected it. Leave the rest at 0. Most turns should move only one or two dimensions and add no new flags.',
-    '"reason" is a short (under 12 words) in-world one-liner naming what just happened, e.g. "Complimented her cooking unprompted". Give one only if at least one dimension moved or a flag was added, otherwise "".',
+    '"reason" is a short (under 12 words) in-world one-liner naming what just happened, e.g. "Complimented their cooking unprompted". Give one only if at least one dimension moved or a flag was added, otherwise "".',
     `"newFacts" is for concrete, durable things worth recalling much later: a name, a stated preference, a piece of backstory, a promise made, a moment that landed hard. Not every line of dialogue. Most turns add none. Each fact is an object {"text": one short standalone sentence, "importance": 0-1, "valence": -1 to 1, "unresolved": true/false}. "importance": ~0.2 for a small detail, 0.8+ for something that reshapes how ${params.charName} sees ${params.userName}. "valence": how it felt to ${params.charName} — negative if it hurt or disappointed, positive if it meant a lot, 0 for neutral information. "unresolved": true only for an open wound or open question the story has NOT closed (a slight not addressed, a promise not yet kept, a question dodged) — most facts are false.`,
     hasOpenThreads
       ? '"resolvedFactIndices" lists open-thread indices from the list above that this exchange clearly closed — an apology that landed, a promise kept, a dodged question finally answered. Be conservative: [] unless it plainly happened this turn.'
@@ -402,7 +416,7 @@ export async function assessRelationshipMoment(
     `"characterIntent" is a private thing ${params.charName} wants that the player hasn't necessarily been told — a small hidden agenda that can quietly color future turns (wanting reassurance, wanting space, planning a surprise, wanting an apology first). Omit it on almost every turn; once set it should usually stay omitted (meaning "no change") for a while rather than being reset every exchange.`,
     `"currentDesire" is deeper and steadier than "characterIntent" the same way "currentNeed" is deeper and steadier than "mood" — not a specific plan or agenda item, but a foundational underlying drive that doesn't change turn to turn (e.g. "wants to feel truly seen, not just liked", "wants to matter to someone again", "wants to be the one chosen, not settled for"). Omit it on almost every turn; once set it should stay omitted (meaning "no change") for a long while, longer even than "characterIntent" does.`,
     `"planUpdates" changes ${params.charName}'s standing plans — bigger and longer-lived than "characterIntent": a real intention that spans many turns and can be entirely about ${params.charName}'s own life. Each entry is one of: {"action":"add","goal":"short, in ${params.charName}'s own terms","kind":"personal"|"together"|"distance","note":"optional"} to form a new one; {"action":"note","index":N,"note":"..."} to record progress or a setback on plan N; {"action":"resolve","index":N} to close plan N (finished, abandoned, or overtaken by events). "personal" = ${params.charName}'s own life independent of ${params.userName}; "together" = something they want to do with ${params.userName}; "distance" = deliberately holding back or protecting themselves. Use [] on almost every turn. Only "add" when this exchange genuinely gave ${params.charName} a new reason to want something lasting — a plan formed on a whim and never mentioned again is noise. Resolve a plan the moment the story has clearly moved past it.`,
-    `"beliefUpdates" changes ${params.charName}'s standing impressions of ${params.userName} as a person — a judgment about who ${params.userName} *is*, not a one-off event (that's "newFacts") and not a relationship stat. Each entry is one of: {"action":"add","text":"the impression in ${params.charName}'s own voice, e.g. 'He's unusually patient with me.'"} to form a new one; {"action":"revise","index":N,"text":"..."} to correct or sharpen belief N once it's proven wrong or too simple; {"action":"drop","index":N} to abandon one that's been clearly disproven. Use [] on almost every turn — only add one when this exchange gives real, repeated-pattern evidence, not from a single isolated moment.`,
+    `"beliefUpdates" changes ${params.charName}'s standing impressions of ${params.userName} as a person — a judgment about who ${params.userName} *is*, not a one-off event (that's "newFacts") and not a relationship stat. Each entry is one of: {"action":"add","text":"the impression in ${params.charName}'s own voice, e.g. 'They're unusually patient with me.'"} to form a new one; {"action":"revise","index":N,"text":"..."} to correct or sharpen belief N once it's proven wrong or too simple; {"action":"drop","index":N} to abandon one that's been clearly disproven. Use [] on almost every turn — only add one when this exchange gives real, repeated-pattern evidence, not from a single isolated moment.`,
     `"expectationUpdates" changes ${params.charName}'s standing expectations of ${params.userName} — something ${params.charName} has started quietly counting on, whether or not ${params.userName} has ever been told. Each entry is one of: {"action":"add","text":"the expectation, e.g. 'expects a check-in most Sundays'"}; {"action":"note","index":N,"note":"..."} to record it playing out; {"action":"resolve","index":N,"outcome":"met"|"violated"} once it's clearly been met or clearly been missed. Use [] on almost every turn. "violated" should be reserved for a real, noticeable letdown, not a trivial miss.`,
     hasAftercare
       ? `"aftercareVerdict" judges only how ${params.userName} treated ${params.charName} in the turns since they were intimate. "tender" = stayed present and warm, gave reassurance or closeness, took ${params.charName} seriously. "cold" = pulled away, went distant or dismissive, changed the subject, or acted as if it had not happened. "awkward" = anything in between, including a fumbled or self-conscious aftermath that was still well meant. Judge ${params.userName}'s behaviour, not ${params.charName}'s, and not whether the intimacy itself went well. Most aftermaths are "awkward" — reserve "cold" for a real, visible withdrawal, not merely for a quiet stretch.`
@@ -414,9 +428,9 @@ export async function assessRelationshipMoment(
       ? '"intimacyPhase": "building" if the scene is still escalating (anticipation, teasing, not yet at full intensity); "peak" once it has clearly reached full intensity; "resolved" once it has visibly wound down or concluded this reply (moving into its aftermath). Judge only this specific reply, not the scene in the abstract.'
       : '',
     `Example (nothing much happened): {"deltas":{"affection":1,"trust":0,"chemistry":0,"comfort":1,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"Stayed to help clean up without being asked","newFacts":[]${hasOpenThreads ? ',"resolvedFactIndices":[]' : ''}${hasTasks ? ',"completedTaskIndices":[]' : ''},"planUpdates":[],"beliefUpdates":[],"expectationUpdates":[]}`,
-    `Example (a fact landed hard): {"deltas":{"affection":-2,"trust":-1,"chemistry":0,"comfort":-1,"respect":0,"curiosity":0,"tension":2},"newFlags":[],"reason":"Forgot her birthday entirely","newFacts":[{"text":"Forgot ${params.charName}'s birthday","importance":0.75,"valence":-0.7,"unresolved":true}]${hasOpenThreads ? ',"resolvedFactIndices":[]' : ''}${hasTasks ? ',"completedTaskIndices":[]' : ''},"planUpdates":[],"beliefUpdates":[],"expectationUpdates":[]}`,
+    `Example (a fact landed hard): {"deltas":{"affection":-2,"trust":-1,"chemistry":0,"comfort":-1,"respect":0,"curiosity":0,"tension":2},"newFlags":[],"reason":"Forgot their birthday entirely","newFacts":[{"text":"Forgot ${params.charName}'s birthday","importance":0.75,"valence":-0.7,"unresolved":true}]${hasOpenThreads ? ',"resolvedFactIndices":[]' : ''}${hasTasks ? ',"completedTaskIndices":[]' : ''},"planUpdates":[],"beliefUpdates":[],"expectationUpdates":[]}`,
     `Example (a plan forms — ${params.charName} decides on something lasting): {"deltas":{"affection":0,"trust":1,"chemistry":0,"comfort":0,"respect":1,"curiosity":0,"tension":0},"newFlags":[],"reason":"Opened up about the gallery showcase deadline","newFacts":[]${hasOpenThreads ? ',"resolvedFactIndices":[]' : ''}${hasTasks ? ',"completedTaskIndices":[]' : ''},"planUpdates":[{"action":"add","goal":"finish the mural before the showcase","kind":"personal","note":"three weeks out, behind on it"}],"beliefUpdates":[],"expectationUpdates":[]}`,
-    `Example (a pattern becomes a real impression, and an expectation is broken): {"deltas":{"affection":-1,"trust":0,"chemistry":0,"comfort":-1,"respect":0,"curiosity":0,"tension":1},"newFlags":[],"reason":"Third Sunday in a row with no check-in","newFacts":[]${hasOpenThreads ? ',"resolvedFactIndices":[]' : ''}${hasTasks ? ',"completedTaskIndices":[]' : ''},"planUpdates":[],"beliefUpdates":[{"action":"add","text":"He means well but tends to go quiet when things get busy for him."}],"expectationUpdates":[{"action":"resolve","index":0,"outcome":"violated"}]}`,
+    `Example (a pattern becomes a real impression, and an expectation is broken): {"deltas":{"affection":-1,"trust":0,"chemistry":0,"comfort":-1,"respect":0,"curiosity":0,"tension":1},"newFlags":[],"reason":"Third Sunday in a row with no check-in","newFacts":[]${hasOpenThreads ? ',"resolvedFactIndices":[]' : ''}${hasTasks ? ',"completedTaskIndices":[]' : ''},"planUpdates":[],"beliefUpdates":[{"action":"add","text":"They mean well but tend to go quiet when things get busy for them."}],"expectationUpdates":[{"action":"resolve","index":0,"outcome":"violated"}]}`,
     'JSON:',
   ]
     .filter(Boolean)
@@ -621,8 +635,8 @@ export async function assessDateOutcome(
     // the flag back in the most suggestive line of the whole prompt. Hangouts get modest deltas
     // here too, matching the gentler framing they're judged under.
     isHangout
-      ? 'Example: {"deltas":{"affection":1,"trust":2,"chemistry":0,"comfort":2,"respect":0,"curiosity":1,"tension":0},"newFlags":["promise"],"recap":"She talked about her old bakery for the first time, and made you swear to try her cinnamon rolls sometime.","newFacts":[{"text":"Used to run a small bakery before moving here","importance":0.6,"valence":0.3,"unresolved":false}]}'
-      : 'Example: {"deltas":{"affection":3,"trust":2,"chemistry":2,"comfort":1,"respect":0,"curiosity":1,"tension":0},"newFlags":["first_date"],"recap":"She lit up talking about her old bakery and kept finding reasons to lean in closer.","newFacts":[{"text":"Used to run a small bakery before moving here","importance":0.6,"valence":0.3,"unresolved":false}]}',
+      ? 'Example: {"deltas":{"affection":1,"trust":2,"chemistry":0,"comfort":2,"respect":0,"curiosity":1,"tension":0},"newFlags":["promise"],"recap":"They talked about their old bakery for the first time, and made you swear to try their cinnamon rolls sometime.","newFacts":[{"text":"Used to run a small bakery before moving here","importance":0.6,"valence":0.3,"unresolved":false}]}'
+      : 'Example: {"deltas":{"affection":3,"trust":2,"chemistry":2,"comfort":1,"respect":0,"curiosity":1,"tension":0},"newFlags":["first_date"],"recap":"They lit up talking about their old bakery and kept finding reasons to lean in closer.","newFacts":[{"text":"Used to run a small bakery before moving here","importance":0.6,"valence":0.3,"unresolved":false}]}',
     'JSON:',
   ]
     .filter(Boolean)
@@ -835,7 +849,7 @@ export async function assessCommitmentAsk(
     '- "backfire": the timing or delivery was genuinely bad given how things have actually been going (asked too soon, mid-argument, or reads as presumptuous). This stings and costs something real.',
     'Return ONLY a minified JSON object: {"decision":"accept"|"deflect"|"backfire","reason":"one short in-character sentence explaining the reaction","deltas":{ one integer -3..3 per dimension key }}.',
     '"accept" should generally have positive deltas; "deflect" should stay close to neutral; "backfire" should have real negative deltas, not just zeros.',
-    'Example: {"decision":"accept","reason":"She laughs and pulls you into a hug. Of course she wants that too.","deltas":{"affection":3,"trust":2,"chemistry":2,"comfort":1,"respect":1,"curiosity":0,"tension":-1}}',
+    'Example: {"decision":"accept","reason":"They laugh and pull you into a hug. Of course they want that too.","deltas":{"affection":3,"trust":2,"chemistry":2,"comfort":1,"respect":1,"curiosity":0,"tension":-1}}',
     'JSON:',
   ]
     .filter(Boolean)
@@ -890,7 +904,7 @@ export async function assessIntimacyMilestone(
     '- "backfire": the timing or delivery was genuinely bad given how things have actually been going (asked too soon, mid-argument, or reads as presumptuous). This stings and costs something real.',
     'Return ONLY a minified JSON object: {"decision":"accept"|"deflect"|"backfire","reason":"one short in-character sentence explaining the reaction","deltas":{ one integer -3..3 per dimension key }}.',
     '"accept" should generally have positive deltas; "deflect" should stay close to neutral; "backfire" should have real negative deltas, not just zeros.',
-    'Example: {"decision":"accept","reason":"She goes still for a moment, then pulls you closer instead of pulling away.","deltas":{"affection":3,"trust":2,"chemistry":3,"comfort":1,"respect":0,"curiosity":0,"tension":-1}}',
+    'Example: {"decision":"accept","reason":"They go still for a moment, then pull you closer instead of pulling away.","deltas":{"affection":3,"trust":2,"chemistry":3,"comfort":1,"respect":0,"curiosity":0,"tension":-1}}',
     'JSON:',
   ]
     .filter(Boolean)

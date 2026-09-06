@@ -112,12 +112,21 @@ function commitmentMet(min: CommitmentStatus | undefined, actual: CommitmentStat
 }
 
 /**
- * The built-in ~37-entry catalog plus whatever a world has added of its own — additive, same
- * "author extends a fixed default set" pattern as `CustomBackground`/`DEFAULT_BACKGROUNDS`, not a
- * wholesale override like `getGiftCatalog` — a world's own kinks add to the sensible defaults
+ * The built-in ~37-entry catalog plus whatever a world has added of its own — additive by default,
+ * same "author extends a fixed default set" pattern as `CustomBackground`/`DEFAULT_BACKGROUNDS`, not
+ * a wholesale override like `getGiftCatalog` — a world's own kinks add to the sensible defaults
  * rather than requiring the author to redefine sex positions from scratch just to add one more.
+ *
+ * `replaceIntimacyCatalog` is the escape hatch that additive-only design was missing: the built-in
+ * entries assume a humanoid body plan throughout (hands, hips, knees, a back to lie on), which reads
+ * fine for the overwhelming majority of cards but has no honest way to be suppressed for a
+ * non-humanoid or otherwise very different character — a world could add its own entries, but could
+ * never stop the ~37 defaults from also surfacing alongside them. Set alongside `customIntimacyOptions`
+ * (never alone; an empty catalog with nothing to draw from isn't useful on its own), this makes those
+ * additions the *entire* catalog instead of a supplement to it.
  */
-export function getIntimacyCatalog(world?: { customIntimacyOptions?: IntimacyUnlockable[] }): IntimacyUnlockable[] {
+export function getIntimacyCatalog(world?: { customIntimacyOptions?: IntimacyUnlockable[]; replaceIntimacyCatalog?: boolean }): IntimacyUnlockable[] {
+  if (world?.replaceIntimacyCatalog) return world.customIntimacyOptions ?? []
   return world?.customIntimacyOptions?.length ? [...DEFAULT_INTIMACY_CATALOG, ...world.customIntimacyOptions] : DEFAULT_INTIMACY_CATALOG
 }
 
@@ -133,7 +142,7 @@ export function getIntimacyCatalog(world?: { customIntimacyOptions?: IntimacyUnl
 export function getUnlockedIntimacyOptions(
   warmth: number,
   commitmentStatus: CommitmentStatus,
-  world?: { customIntimacyOptions?: IntimacyUnlockable[] },
+  world?: { customIntimacyOptions?: IntimacyUnlockable[]; replaceIntimacyCatalog?: boolean },
   ownedToyIds?: Set<string>,
 ): IntimacyUnlockable[] {
   return getIntimacyCatalog(world).filter((item) => {
@@ -144,7 +153,7 @@ export function getUnlockedIntimacyOptions(
 }
 
 /** A single catalog entry by id — `buyToy`'s lookup, same shape as `giftById`/`itemById`. */
-export function intimacyItemById(id: string, world?: { customIntimacyOptions?: IntimacyUnlockable[] }): IntimacyUnlockable | undefined {
+export function intimacyItemById(id: string, world?: { customIntimacyOptions?: IntimacyUnlockable[]; replaceIntimacyCatalog?: boolean }): IntimacyUnlockable | undefined {
   return getIntimacyCatalog(world).find((i) => i.id === id)
 }
 
@@ -159,7 +168,7 @@ export function nextLockedInCategory(
   category: IntimacyCategory,
   warmth: number,
   commitmentStatus: CommitmentStatus,
-  world?: { customIntimacyOptions?: IntimacyUnlockable[] },
+  world?: { customIntimacyOptions?: IntimacyUnlockable[]; replaceIntimacyCatalog?: boolean },
 ): IntimacyUnlockable | undefined {
   const unlockedIds = new Set(getUnlockedIntimacyOptions(warmth, commitmentStatus, world).map((i) => i.id))
   return getIntimacyCatalog(world)

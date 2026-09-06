@@ -132,9 +132,3 @@ export function plansGuidance(charName: string, userName: string, plans: Charact
   const lines = active.map((p) => planLine(p, userName)).join('\n')
   return `Beyond just responding to ${userName}, ${charName} is carrying intentions of their own right now:\n${lines}\nA turn doesn't have to be only about ${userName}. Where it fits naturally, ${charName} can move one of these forward, bring it up, act on it (even something done off-screen between turns), or let it pull against what ${userName} wants — and can drop one if the scene makes it moot. Don't force it; a plan sitting in the background until its moment is fine.`
 }
-
-/** A short player-facing summary for the Director panel — plain strings only, never the objects (that rendering path has crashed before). */
-export function describePlanForPanel(plan: CharacterPlan): string {
-  const tag = plan.kind === 'together' ? 'with you' : plan.kind === 'distance' ? 'keeping distance' : 'personal'
-  return `${plan.goal} · ${tag}`
-}

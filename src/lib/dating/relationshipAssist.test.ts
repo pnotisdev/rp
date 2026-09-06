@@ -1036,3 +1036,55 @@ describe('generateWithTimeout', () => {
     await expect(generateWithTimeout(client, { prompt: 'x' } as never, 'Test call')).rejects.toThrow(/429/)
   })
 })
+
+// Item 6: a rival (or anyone else) genuinely present and speaking in the scene, not just discussed
+// — the missing half of `chat/participantArchetype.ts`'s `rivalJealousyIntensifier`, which deepens
+// the tone once a jealousy flag is set but had no way to influence the classifier's own decision to
+// set one in the first place.
+describe('assessRelationshipMoment: present participants', () => {
+  const baseParams = { history: TRANSCRIPT, latestReply: 'Thanks for helping me pack up.', charName: 'Sumire', userName: 'Kai', current: currentStats }
+  const EMPTY_REPLY = '{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[]}'
+
+  it('names whoever else is present and frames live presence as a stronger jealousy signal', async () => {
+    let prompt = ''
+    await assessRelationshipMoment(
+      stubClient(EMPTY_REPLY, (p) => {
+        prompt = p.prompt as string
+      }),
+      { ...baseParams, presentParticipants: ['Aiko'] },
+    )
+    expect(prompt).toContain('Also actually present and speaking in this scene right now: Aiko.')
+    expect(prompt).toMatch(/stronger, more concrete signal/)
+  })
+
+  it('joins several present participants by name', async () => {
+    let prompt = ''
+    await assessRelationshipMoment(
+      stubClient(EMPTY_REPLY, (p) => {
+        prompt = p.prompt as string
+      }),
+      { ...baseParams, presentParticipants: ['Aiko', 'Riku'] },
+    )
+    expect(prompt).toContain('Aiko, Riku')
+  })
+
+  it('says nothing when nobody else is present — the ordinary single-character chat', async () => {
+    let prompt = ''
+    await assessRelationshipMoment(
+      stubClient(EMPTY_REPLY, (p) => {
+        prompt = p.prompt as string
+      }),
+      baseParams,
+    )
+    expect(prompt).not.toMatch(/actually present and speaking/)
+
+    let promptEmptyArray = ''
+    await assessRelationshipMoment(
+      stubClient(EMPTY_REPLY, (p) => {
+        promptEmptyArray = p.prompt as string
+      }),
+      { ...baseParams, presentParticipants: [] },
+    )
+    expect(promptEmptyArray).not.toMatch(/actually present and speaking/)
+  })
+})

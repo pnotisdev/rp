@@ -88,6 +88,10 @@ export function MessageBubble({
   // error string as the character's actual dialogue, which would otherwise get fed back into
   // every future prompt. The failure itself is shown here, driven by the flag, not by content.
   const showFailedIndicator = !isUser && message.failed && !isStreaming
+  // Item 8: durable alternative to a one-shot toast — see `types.ts`'s `boundaryFlag` doc comment.
+  // Additive, not a replacement for the text (unlike the failed indicator above): the reply itself
+  // is still real, just flagged for the player's own judgment call.
+  const showBoundaryFlag = !isUser && !!message.boundaryFlag && !isStreaming
 
   const startEdit = () => {
     if (!clickToEdit || isStreaming) return
@@ -298,6 +302,14 @@ export function MessageBubble({
       <Star size={12} strokeWidth={2} fill="currentColor" />
     </span>
   ) : null
+  // Item 8: same "stays visible at rest" reasoning as the pin badge above — a toast at generation
+  // time is easy to miss; this stays on the message for as long as the flag stands, so it's still
+  // there whenever the player actually looks. See `types.ts`'s `boundaryFlag` doc comment.
+  const boundaryBadge = showBoundaryFlag ? (
+    <span className="inline-flex text-warning" title={`May have crossed a stated limit: "${message.boundaryFlag}". Worth a regenerate if it reads wrong.`}>
+      <TriangleAlert size={12} strokeWidth={2} />
+    </span>
+  ) : null
   // 10b: how the player tagged this line's intent. Shown at rest (not hover-only) — it's real
   // context for how the exchange should read.
   const intentBadge = (() => {
@@ -316,7 +328,7 @@ export function MessageBubble({
     return (
       <div id={anchorId} className={`group rounded-lg py-2 transition-colors duration-1000 ${highlightClass}`}>
         <span className={`font-display ${isUser ? 'text-accent' : 'text-text'}`}>{message.name}: </span>
-        {pinBadge} {intentBadge}{' '}
+        {pinBadge} {boundaryBadge} {intentBadge}{' '}
         {imageStrip}
         <span className="prose-rp whitespace-pre-wrap break-words text-sm leading-relaxed">
           {editing ? (
@@ -360,6 +372,7 @@ export function MessageBubble({
           </div>
           <div className="flex items-center gap-1.5">
             {pinBadge}
+            {boundaryBadge}
             {intentBadge}
             {metaHoverable}
           </div>
@@ -376,6 +389,7 @@ export function MessageBubble({
         <div className="flex items-center gap-1.5 text-sm font-display text-text">
           {message.name}
           {pinBadge}
+          {boundaryBadge}
           {intentBadge}
         </div>
         {imageStrip}

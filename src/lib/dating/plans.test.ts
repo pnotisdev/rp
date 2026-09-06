@@ -4,7 +4,6 @@ import {
   MAX_ACTIVE_PLANS,
   PLAN_STALE_TURNS,
   applyPlanUpdates,
-  describePlanForPanel,
   parsePlanUpdates,
   planLinesForJudge,
   plansChanged,
@@ -151,12 +150,5 @@ describe('plansGuidance', () => {
   it('is empty when there are no plans', () => {
     expect(plansGuidance('Sumire', 'Kai', [])).toBe('')
     expect(plansGuidance('Sumire', 'Kai', undefined)).toBe('')
-  })
-})
-
-describe('describePlanForPanel', () => {
-  it('renders a plain string with a readable kind tag', () => {
-    expect(describePlanForPanel(plan({ goal: 'A', kind: 'distance' }))).toBe('A · keeping distance')
-    expect(describePlanForPanel(plan({ goal: 'B', kind: 'together' }))).toBe('B · with you')
   })
 })

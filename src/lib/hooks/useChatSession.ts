@@ -43,7 +43,7 @@ import {
   isIntimacySceneActive,
   startOrShiftIntimacyScene,
 } from '@/lib/dating/intimacyScene'
-import { detectBoundaryCrossing } from '@/lib/dating/boundaryGuard'
+import { detectAnyBoundaryCrossing } from '@/lib/dating/boundaryGuard'
 import { buildSteerDirective } from '@/lib/dating/steer'
 import {
   activityPhase,
@@ -56,7 +56,13 @@ import {
   spendEnergy,
 } from '@/lib/world/calendar'
 import { evaluateTriggers } from '@/lib/world/triggers'
-import { ambientEventGuidance, describeSocialReaction, selectAmbientEvent, selectSocialReaction } from '@/lib/world/ambientEvents'
+import {
+  ambientEventGuidance,
+  describeSocialReaction,
+  scheduleConflictGuidance,
+  selectAmbientEvent,
+  selectSocialReaction,
+} from '@/lib/world/ambientEvents'
 import { findArchetypeMatch, participantRelationshipGuidance } from '@/lib/chat/participantArchetype'
 import {
   applyBreakupScar,
@@ -114,7 +120,7 @@ import {
 import { normalizeRpMarkup } from '@/lib/text/messageSegments'
 import { replyMaxTokens, resolveReplyLength } from '@/lib/characters/voice'
 import { SCENE_MOOD_IDS } from '@/lib/vn/moods'
-import { DEFAULT_EXPRESSIONS } from '@/lib/vn/expressions'
+import { DEFAULT_EXPRESSIONS, expressionCandidatesFor } from '@/lib/vn/expressions'
 import { getUnlockedBackgroundIds, getUnlockedExpressionIds } from '@/lib/vn/unlocks'
 import { currentOutfitFrom, intimateOutfitFor, selectableOutfitIds, spriteKey } from '@/lib/vn/outfits'
 import {
@@ -150,7 +156,12 @@ import {
   needGuidance,
   stockRomancePhrasingNote,
 } from '@/lib/prompt/mindGuidance'
-import { classifyAttachedImageScene, detectExpressionFromSprites, shortlistExpressions } from '@/lib/vn/sceneVision'
+import {
+  classifyAttachedImageScene,
+  detectExpressionFromSprites,
+  detectExpressionTextMismatch,
+  shortlistExpressions,
+} from '@/lib/vn/sceneVision'
 import { assessRapport } from '@/lib/dating/rapport'
 import { bookAppliesToChat } from '@/lib/worldinfo/scope'
 import { buildFactsLorebook } from '@/lib/worldinfo/facts'
@@ -660,9 +671,16 @@ export function useChatSession(chatId: string | null) {
       // it. Suppressed during a live hangout/date: that event *is* the scene change, and nudging
       // toward yet another one mid-event would fight the "stay here until it resolves" point of it.
       const { count: staticSceneTurns, currentBackground: staticSceneBackground } = countStaticSceneTurns(messages)
-      const scheduleLocation = speaker.schedule?.length
-        ? getCurrentActivity(speaker.schedule, world?.currentDay ?? 0, world?.currentPhaseIndex ?? 0).location
+      const speakerPresence = speaker.schedule?.length
+        ? getCurrentActivity(speaker.schedule, world?.currentDay ?? 0, world?.currentPhaseIndex ?? 0)
         : undefined
+      const scheduleLocation = speakerPresence?.location
+      // A genuine schedule conflict (busy/sleeping/traveling per the character's own authored
+      // routine) reads as a real, noticed cost rather than the schedule silently not existing —
+      // see `world/ambientEvents.ts`'s own doc comment. Suppressed during a live event for the same
+      // reason `sceneNudge` is: the event itself already carries whatever cost starting it had.
+      const scheduleConflictLine =
+        !freshChat.activeEvent && speakerPresence ? scheduleConflictGuidance(speaker.card.name, speakerPresence) : ''
       const sceneNudge = freshChat.activeEvent
         ? ''
         : sceneProgressionNudge(staticSceneTurns, {
@@ -704,6 +722,33 @@ export function useChatSession(chatId: string | null) {
       const speakerTrack = getRelationshipTrack(freshChat, speaker.id)
       const speakerStats = getRelationshipStats(speakerTrack)
       const speakerWarmth = computeWarmth(speakerTrack.affection ?? 0, speakerStats)
+      // A `style_guidance` world rule (`world/triggers.ts`) is meant to colour THIS turn's writing
+      // (e.g. "gifts read as loaded right now" while a jealousy flag is hot), not just the next one
+      // — the real, persisting evaluation in `updateAffectionFromReply` only runs after this reply
+      // already exists. This is a second, read-only preview pass against the pre-turn state already
+      // computed above: it never persists `firedIds` or applies any other action kind (that stays
+      // solely the post-turn call's job), so a one-shot rule can't get marked "fired" here — it can
+      // only ever add prompt text before its real evaluation actually happens. Primary-only, same
+      // scoping as the real evaluation ("a world rule describes the player's relationship with the
+      // character whose world it is").
+      const triggerStyleLines =
+        speaker.id === character.id && world?.triggers?.length
+          ? evaluateTriggers(
+              world.triggers,
+              {
+                affection: speakerTrack.affection ?? 0,
+                warmth: speakerWarmth,
+                stats: speakerStats,
+                flags: new Set(freshChat.sceneFlags ?? []),
+                commitmentStatus: speakerTrack.commitmentStatus ?? 'none',
+                day: world?.currentDay,
+              },
+              freshChat.firedTriggerIds ?? [],
+            )
+              .actions.filter((a): a is Extract<typeof a, { kind: 'style_guidance' }> => a.kind === 'style_guidance')
+              .map((a) => a.text)
+          : []
+      const triggerStyleLine = triggerStyleLines.join(' ')
       // A toy only ever reaches the model once actually bought (`Chat.toyInventory`) — warmth/
       // commitment alone just gate *eligibility to buy*, see `intimacyCatalog.ts`.
       const ownedToyIds = new Set(Object.keys(freshChat.toyInventory ?? {}))
@@ -832,6 +877,11 @@ export function useChatSession(chatId: string | null) {
                 [character.card.name, persona?.name].filter((n): n is string => !!n),
                 [{ connections: character.socialConnections }, { connections: speaker.socialConnections }],
               ),
+              // `Chat.commitmentStatus`/`sceneFlags` are always the PRIMARY's own copies (never a
+              // non-primary participant's), exactly what a rival's tone should be reading off —
+              // see `rivalCommitmentFraming`/`rivalJealousyIntensifier`'s own doc comments.
+              primaryCommitmentStatus: freshChat.commitmentStatus,
+              jealousyFlagActive: (freshChat.sceneFlags ?? []).includes('jealousy'),
             })
           : undefined
       // Names back to the model the specific AI-prose tells and verbatim repeats this character
@@ -897,6 +947,8 @@ export function useChatSession(chatId: string | null) {
             reciprocityLine,
             repeatNudge ?? '',
             sceneNudge,
+            scheduleConflictLine,
+            triggerStyleLine,
             ambientLine,
             participantGuidance ?? '',
             replyLengthInstruction,
@@ -1001,6 +1053,7 @@ export function useChatSession(chatId: string | null) {
           charName: character.card.name,
           userName: persona?.name || 'You',
           detail: summaryDetail,
+          voiceFingerprint: character.voiceFingerprint,
           generate: (prompt) =>
             client.generate({
               prompt,
@@ -1154,6 +1207,12 @@ export function useChatSession(chatId: string | null) {
         currentIntimacyPhase: sceneActive ? openScene!.phase : undefined,
         activeBeliefs: beliefLinesForJudge(activeBeliefs),
         activeExpectations: expectationLinesForJudge(activeExpectations),
+        // Item 6: everyone else actually in this scene besides whoever's speaking — a group chat's
+        // other participants, present for a jealousy beat to land in front of rather than merely be
+        // discussed. `[]`/undefined for the ordinary single-character chat, the common case.
+        presentParticipants: [...(character ? [character] : []), ...participantCharacters]
+          .filter((c) => c.id !== speaker.id)
+          .map((c) => c.card.name),
       })
       // A due window always closes, even if the model declined to name a verdict — leaving it open
       // would keep the aftermath guidance running forever. An unusable answer is read as the
@@ -1450,7 +1509,7 @@ export function useChatSession(chatId: string | null) {
       }
       return completedTaskIndices
     },
-    [activeFacts, client, persona?.name, relationshipDifficulty, world],
+    [activeFacts, character, client, participantCharacters, persona?.name, relationshipDifficulty, world],
   )
 
   // buyGift/buyItem/buyToy/useItem's currency branch, plus the coin writes in
@@ -2084,6 +2143,53 @@ export function useChatSession(chatId: string | null) {
     [chat?.affection, client, world],
   )
 
+  /**
+   * Text-only sibling to `refineSceneWithVision`: corrects the expression tag using nothing but the
+   * text that was just written (`detectExpressionTextMismatch`, `vn/sceneVision.ts`) — the fallback
+   * for the much more common case where no vision-capable model is loaded, so a stale tag left over
+   * from a few turns ago ("blush") can still be caught even when the model's own reply clearly reads
+   * as something else ("scowled, slammed the door"). Never touches background/outfit/mood, only
+   * expression, and only writes back on an actual change (same idempotent "diff before writing"
+   * guard `refineSceneWithVision` uses).
+   */
+  const refineExpressionFromText = useCallback(
+    async (messageId: string, speaker: Character, replyText: string) => {
+      if (!replyText.trim()) return
+      const affection = chat?.affection ?? 0
+      const unlockedExpressions = getUnlockedExpressionIds(speaker, affection)
+      const unlockedBackgrounds = getUnlockedBackgroundIds(world, affection)
+      const selectableOutfits = selectableOutfitIds(speaker.outfits, speaker.sprites, affection, new Set(chat?.sceneFlags ?? []))
+
+      const freshMsg = await messagesApi.get(messageId)
+      if (!freshMsg) return
+      const activeSwipe = freshMsg.activeSwipe ?? 0
+      const currentScene: SceneTag = freshMsg.swipeScenes?.[activeSwipe] ?? freshMsg.scene ?? {}
+      if (!currentScene.expression) return
+
+      const candidates = expressionCandidatesFor(unlockedExpressions, speaker.customExpressions)
+      const corrected = await detectExpressionTextMismatch(client, {
+        charName: speaker.card.name,
+        replyText,
+        taggedExpression: currentScene.expression,
+        candidates,
+      })
+      if (!corrected) return
+
+      const next: SceneTag = { ...currentScene, expression: corrected }
+      const sanitized = sanitizeSceneTag(next, unlockedExpressions, unlockedBackgrounds, selectableOutfits)
+      if (
+        JSON.stringify(sanitized ?? null) ===
+        JSON.stringify(sanitizeSceneTag(currentScene, unlockedExpressions, unlockedBackgrounds, selectableOutfits) ?? null)
+      ) {
+        return
+      }
+      const swipeScenes = freshMsg.swipeScenes ? [...freshMsg.swipeScenes] : []
+      swipeScenes[activeSwipe] = sanitized
+      await messagesApi.update(messageId, { scene: sanitized, swipeScenes })
+    },
+    [chat?.affection, chat?.sceneFlags, client, world],
+  )
+
   const runGeneration = useCallback(
     async (
       historyForPrompt: ChatMessage[],
@@ -2401,16 +2507,22 @@ export function useChatSession(chatId: string | null) {
         }
 
         // Item 4's deterministic "hard rail": a cheap, synchronous, non-AI lexical check against
-        // this character's own authored `boundaries` (`dating/boundaryGuard.ts`) — the one piece of
-        // real enforcement on top of that field's existing prompt-only treatment everywhere else.
-        // Informational only (a toast), never an auto-reroll or a silent rewrite — a false positive
-        // discarding a good reply with no way to verify that live would be worse than an occasional
-        // missed catch. See that file's own doc comment for why this stays conservative.
+        // this character's own authored `boundaries` PLUS — item 7 — anything the player's own
+        // persona description states as a limit (`dating/boundaryGuard.ts`'s `detectAnyBoundaryCrossing`),
+        // the one piece of real enforcement on top of either field's existing prompt-only treatment
+        // everywhere else. Informational only (a toast), never an auto-reroll or a silent rewrite —
+        // a false positive discarding a good reply with no way to verify that live would be worse
+        // than an occasional missed catch. See that file's own doc comment for why this stays conservative.
         if (!abort.signal.aborted && combined.trim()) {
-          const crossed = detectBoundaryCrossing(speaker.boundaries, combined)
+          const crossed = detectAnyBoundaryCrossing(speaker.boundaries, persona?.description, combined)
           if (crossed) {
-            toastInfo(`This reply may have crossed a boundary you set for ${speaker.card.name}: "${crossed}". Worth a regenerate if it reads wrong.`)
+            toastInfo(`This reply may have crossed a stated limit: "${crossed}". Worth a regenerate if it reads wrong.`)
           }
+          // Item 8: durable, not just the toast above — see `boundaryFlag`'s own doc comment
+          // (`types.ts`) for why a message-level marker is the safer alternative to an automatic
+          // reroll. `crossed ?? null`, not left conditionally omitted, so an old flag is actually
+          // cleared when a later attempt reads clean, not left stale from a previous round.
+          messagesApi.update(targetMessageId, { boundaryFlag: crossed ?? null }).catch(() => {})
         }
 
         // Post-reply assists. Each is fire-and-forget (never blocks the reply that just landed) but
@@ -2504,6 +2616,8 @@ export function useChatSession(chatId: string | null) {
         }
         if (visionSceneDetection) {
           runAssist('vision', 'Reading the scene', () => refineSceneWithVision(targetMessageId, speaker, combined, images))
+        } else {
+          runAssist('vision', 'Reading the scene', () => refineExpressionFromText(targetMessageId, speaker, combined))
         }
       } catch (e) {
         toastError(errorMessage(e))
@@ -2535,6 +2649,7 @@ export function useChatSession(chatId: string | null) {
       countTokens,
       detectAndMarkTasks,
       messages,
+      refineExpressionFromText,
       refineSceneWithVision,
       resolveSpeaker,
       runAssist,
@@ -2808,7 +2923,7 @@ export function useChatSession(chatId: string | null) {
           name: m.name,
           text: m.text,
         }))
-        await messagesApi.update(messageId, { text: '', failed: false })
+        await messagesApi.update(messageId, { text: '', failed: false, boundaryFlag: null })
         // Regenerating keeps whoever originally said it, rather than letting a regenerate silently
         // switch the speaker — that's a distinct, explicit action (editing the message).
         await runGeneration(historyForPrompt, messageId, latestImages(priorMessages), { speakerId: messages[idx].speakerId })
@@ -2843,7 +2958,7 @@ export function useChatSession(chatId: string | null) {
           name: m.name,
           text: m.text,
         }))
-        await messagesApi.update(messageId, { text: '', failed: false })
+        await messagesApi.update(messageId, { text: '', failed: false, boundaryFlag: null })
         const speakerId = messages[idx].speakerId
         const charName = (speakerId ? participantCharacters.find((c) => c.id === speakerId) : character)?.card.name ?? character?.card.name ?? 'the character'
         await runGeneration(historyForPrompt, messageId, latestImages(priorMessages), {
@@ -2883,6 +2998,7 @@ export function useChatSession(chatId: string | null) {
             swipes: newSwipes,
             activeSwipe: newSwipes.length - 1,
             text: '',
+            boundaryFlag: null,
           })
           await runGeneration(historyForPrompt, messageId, latestImages(priorMessages), { speakerId: msg.speakerId })
         } finally {
@@ -2896,6 +3012,10 @@ export function useChatSession(chatId: string | null) {
         text: swipes[nextIndex],
         scene: msg.swipeScenes?.[nextIndex],
         rawText: msg.swipeRawTexts?.[nextIndex],
+        // `boundaryFlag` isn't tracked per-swipe (unlike `scene`) — a flag from whichever swipe was
+        // previously active describes text that's no longer showing, so it's cleared here rather
+        // than left attached to different content.
+        boundaryFlag: null,
       })
     },
     [beginGeneration, endGeneration, messages, runGeneration],
@@ -3381,7 +3501,9 @@ export function useChatSession(chatId: string | null) {
     if (msg?.activeSwipe !== undefined && swipes[msg.activeSwipe] !== undefined) {
       swipes[msg.activeSwipe] = text
     }
-    await messagesApi.update(messageId, { text, swipes })
+    // A hand-edit is the player's own words now, not the flagged generation — the old flag no
+    // longer describes what's actually there, so it's cleared rather than left stale.
+    await messagesApi.update(messageId, { text, swipes, boundaryFlag: null })
   }, [])
 
   const deleteMessage = useCallback(async (messageId: string) => {

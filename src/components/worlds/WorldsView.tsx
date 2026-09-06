@@ -198,6 +198,7 @@ function WorldEditor({
   const [gifts, setGifts] = useState<GiftItem[]>(base.gifts ?? [])
   const [items, setItems] = useState<ItemDef[]>(base.items ?? [])
   const [intimacyOptions, setIntimacyOptions] = useState<IntimacyUnlockable[]>(base.customIntimacyOptions ?? [])
+  const [replaceIntimacyCatalog, setReplaceIntimacyCatalog] = useState(base.replaceIntimacyCatalog ?? false)
   const [customSceneFlags, setCustomSceneFlags] = useState<CustomSceneFlag[]>(base.customSceneFlags ?? [])
   const [thresholds, setThresholds] = useState(base.relationshipThresholds ?? {})
   /** `undefined` = inherit the global Settings value; a set value overrides it for every chat in this world. */
@@ -248,6 +249,7 @@ function WorldEditor({
       gifts,
       items,
       customIntimacyOptions: intimacyOptions,
+      replaceIntimacyCatalog,
       customSceneFlags,
       relationshipThresholds: thresholds,
       // `null`, not `undefined`, for "inherit the global setting" — `JSON.stringify` drops an
@@ -734,6 +736,19 @@ function WorldEditor({
             description="Kissing spots, positions, toys, and other intimate beats a relationship living here can unlock, beyond the ~37 built-in defaults. Positions/toys/activities only ever surface in the prompt once the user's own Intimacy detail setting is 'Explicit'. Give a toy a price and it has to actually be bought (from the Relationship panel) before it's usable or ever mentioned to the model — leave it at 0 for no purchase step, same as every non-toy category."
             surface="bare"
           >
+            <label
+              className="mb-3 flex items-center gap-1.5 text-[11px] text-text-muted"
+              title="For a non-humanoid or otherwise very different character/setting the built-in catalog (hands, hips, knees, a back to lie on) doesn't fit — this makes your own additions below the entire catalog instead of a supplement to the defaults."
+            >
+              <input
+                type="checkbox"
+                checked={replaceIntimacyCatalog}
+                onChange={(e) => setReplaceIntimacyCatalog(e.target.checked)}
+                disabled={intimacyOptions.length === 0}
+                className="accent-accent"
+              />
+              Replace the built-in catalog entirely with my own additions below (for a non-humanoid or very different setting)
+            </label>
             <ListEditor
               items={intimacyOptions}
               getKey={(o) => o.id}

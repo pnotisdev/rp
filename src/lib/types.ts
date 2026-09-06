@@ -519,6 +519,20 @@ export interface StoredMessage extends ChatMessage {
   initiatedBy?: 'character'
   /** 10b's intent chips — how the player meant this line. User messages only; fed to the relationship judge as interpretation context, never a direct stat move. See `src/lib/dating/intent.ts`. */
   intent?: MessageIntent
+  /**
+   * Item 8: the boundary phrase `dating/boundaryGuard.ts`'s `detectAnyBoundaryCrossing` flagged
+   * this reply as having likely crossed, persisted onto the message itself rather than only shown
+   * as a toast at generation time. A toast disappears; a player who steps away or is mid-scene can
+   * easily miss it and never know to regenerate. This makes the flag durable and visible on the
+   * message itself (see `MessageBubble.tsx`'s small warning badge) for as long as the reply stands.
+   * Deliberately NOT an automatic reroll — see that file's own doc comment for why an unverifiable
+   * false-positive risk makes a player-reviewed flag the safer default; this only makes that
+   * existing, safe design harder to miss, not more aggressive. Cleared (set to `undefined`) the
+   * moment the message is edited or regenerated, since a new attempt deserves its own fresh check.
+   * `null` clears it — `JSON.stringify` drops an undefined-valued key, so a bare `undefined` here
+   * would silently fail to overwrite a flag a previous attempt left standing.
+   */
+  boundaryFlag?: string | null
 }
 
 /** 10b: how a player meant a tagged line, distinct from what it literally says. Specs (labels, how the judge reads each) live in `src/lib/dating/intent.ts`. */
@@ -693,6 +707,8 @@ export interface WorldCard {
   items?: ItemDef[]
   /** World-authored additions to the built-in intimacy catalog (kissing spots/positions/toys/activities) beyond the ~30 defaults — additive, same pattern as `customBackgrounds`. See `intimacyCatalog.ts`. */
   customIntimacyOptions?: IntimacyUnlockable[]
+  /** When true, `customIntimacyOptions` entirely REPLACES the built-in catalog instead of adding to it — the escape hatch for a non-humanoid or otherwise very different character/setting the built-in (humanoid-anatomy) defaults don't fit. Ignored when `customIntimacyOptions` is empty. See `intimacyCatalog.ts`'s `getIntimacyCatalog`. */
+  replaceIntimacyCatalog?: boolean
   /**
    * This world's own content rating, overriding the global Settings value for every chat in it —
    * one dial can't serve a wholesome world and an explicit one at the same time. Unset means

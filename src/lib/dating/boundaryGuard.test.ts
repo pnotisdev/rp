@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { boundaryPhraseCrossed, detectBoundaryCrossing } from './boundaryGuard'
+import { boundaryPhraseCrossed, detectAnyBoundaryCrossing, detectBoundaryCrossing, personaBoundaryPhrases } from './boundaryGuard'
 
 describe('boundaryPhraseCrossed', () => {
   it('matches an on-the-nose crossing of a short boundary phrase', () => {
@@ -46,5 +46,48 @@ describe('detectBoundaryCrossing', () => {
   it('returns undefined when nothing in the reply crosses any boundary', () => {
     const boundaries = ['no knife play', 'hates being called cute']
     expect(detectBoundaryCrossing(boundaries, 'They walk along the river at sunset, holding hands.')).toBeUndefined()
+  })
+})
+
+describe('personaBoundaryPhrases', () => {
+  it('extracts sentences that read as a stated limit', () => {
+    const description = "I'm a grad student who loves hiking. I don't like being called pet names. My favorite color is green."
+    expect(personaBoundaryPhrases(description)).toEqual(["I don't like being called pet names."])
+  })
+
+  it('extracts more than one limit sentence when several are present', () => {
+    const description = "I never talk about my ex. I hate surprise parties. Nice to meet you."
+    expect(personaBoundaryPhrases(description)).toEqual(['I never talk about my ex.', 'I hate surprise parties.'])
+  })
+
+  it('is empty for an ordinary bio with no stated limit', () => {
+    expect(personaBoundaryPhrases('A quiet architecture student who likes tea and old buildings.')).toEqual([])
+  })
+
+  it('is empty for no description', () => {
+    expect(personaBoundaryPhrases(undefined)).toEqual([])
+    expect(personaBoundaryPhrases('   ')).toEqual([])
+  })
+})
+
+describe('detectAnyBoundaryCrossing', () => {
+  it('checks character boundaries first, same result as detectBoundaryCrossing alone', () => {
+    const result = detectAnyBoundaryCrossing(['hates being called cute'], undefined, 'He knows she hates being called cute, but does it anyway.')
+    expect(result).toBe('hates being called cute')
+  })
+
+  it('falls back to a persona-description limit when the character has none crossed', () => {
+    const result = detectAnyBoundaryCrossing(
+      ['hates being called cute'],
+      'I never do knife play.',
+      'She grabs a knife and wants to play with it against his skin.',
+    )
+    expect(result).toBe('I never do knife play.')
+  })
+
+  it('is undefined when neither source is crossed', () => {
+    expect(
+      detectAnyBoundaryCrossing(['hates being called cute'], 'I never do knife play.', 'They walk along the river at sunset.'),
+    ).toBeUndefined()
   })
 })
