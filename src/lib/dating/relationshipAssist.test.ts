@@ -769,6 +769,70 @@ describe('assessRelationshipMoment — aftercare', () => {
   })
 })
 
+describe('assessRelationshipMoment — intimacy scene phase (item 1)', () => {
+  const HISTORY: ChatMessage[] = [
+    { id: '1', role: 'user', name: 'Kai', text: '*pulls her close*' },
+    { id: '2', role: 'char', name: 'Sumire', text: 'She leans in.' },
+  ]
+  const base = {
+    history: HISTORY,
+    latestReply: 'She leans in.',
+    charName: 'Sumire',
+    userName: 'Kai',
+    current: deltas({}),
+  }
+
+  it('never asks for a phase read on an ordinary turn', async () => {
+    let sent = ''
+    const moment = await assessRelationshipMoment(
+      stubClient('{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"intimacyPhase":"peak"}', (p) => { sent = p.prompt as string }),
+      base,
+    )
+    expect(sent).not.toContain('intimacyPhase')
+    // ...and a phase volunteered anyway is ignored, since no scene is tracked as active.
+    expect(moment.intimacyPhase).toBeUndefined()
+  })
+
+  it('asks for a phase read, with its rubric, only while a scene is active', async () => {
+    let sent = ''
+    const moment = await assessRelationshipMoment(
+      stubClient('{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"intimacyPhase":"peak"}', (p) => { sent = p.prompt as string }),
+      { ...base, currentIntimacyPhase: 'building' },
+    )
+    expect(sent).toContain('intimacyPhase')
+    expect(sent).toContain('building, peak, resolved')
+    expect(moment.intimacyPhase).toBe('peak')
+  })
+
+  it('accepts a "resolved" read, meaning the scene has concluded', async () => {
+    const moment = await assessRelationshipMoment(
+      stubClient('{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"intimacyPhase":"resolved"}'),
+      { ...base, currentIntimacyPhase: 'peak' },
+    )
+    expect(moment.intimacyPhase).toBe('resolved')
+  })
+
+  it('rejects a phase outside the vocabulary', async () => {
+    const moment = await assessRelationshipMoment(
+      stubClient('{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"intimacyPhase":"climax"}'),
+      { ...base, currentIntimacyPhase: 'building' },
+    )
+    expect(moment.intimacyPhase).toBeUndefined()
+  })
+
+  it('rides along with aftercare scoring in the same call rather than replacing it', async () => {
+    let sent = ''
+    const moment = await assessRelationshipMoment(
+      stubClient('{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"aftercareVerdict":"tender","intimacyPhase":"resolved"}', (p) => { sent = p.prompt as string }),
+      { ...base, aftercareTurns: HISTORY, currentIntimacyPhase: 'peak' },
+    )
+    expect(sent).toContain('aftercareVerdict')
+    expect(sent).toContain('intimacyPhase')
+    expect(moment.aftercareVerdict).toBe('tender')
+    expect(moment.intimacyPhase).toBe('resolved')
+  })
+})
+
 describe('generateWithTimeout', () => {
   // The live repro this exists for: "End hangout"/"End date" awaits `assessDateOutcome` (which
   // calls this) directly, with no timeout of its own — a provider response that simply never

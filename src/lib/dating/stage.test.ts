@@ -453,6 +453,10 @@ describe('getRelationshipTrack / patchRelationshipTrack', () => {
       momentum: 1.4,
       plans: [{ id: 'plan-1', goal: 'finish the mural', kind: 'personal', formedTurn: 8 }],
       firstIntimateSceneAt: 12345,
+      initiativeBalance: 1.8,
+      recentRebuff: { startedAtTurn: 6, kind: 'commitment', severity: 'deflect' },
+      intimacyScene: { phase: 'building', activityLabel: 'spooning', category: 'position', updatedAtTurn: 4 },
+      giftLog: [{ giftId: 'rose', turn: 2 }],
     }
     // `Chat` stores `relationshipWarning` as `T | undefined` while the track accepts `T | null`
     // (null being the wire signal for "clear it"), so the spread needs the narrowing.

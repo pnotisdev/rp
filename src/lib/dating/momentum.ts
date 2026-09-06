@@ -69,3 +69,67 @@ export function relationshipPacingNote(charName: string, warmth: number, momentu
   }
   return undefined
 }
+
+/**
+ * Asymmetric pacing — momentum above answers "how fast is warmth moving", not "whose doing the
+ * moving". Two warmth-90 couples that got there the same way can still differ: one where the player
+ * carries every overture and the character barely reciprocates reads very differently from one
+ * where the character is visibly the one closing distance. This is that second axis: a decayed
+ * running balance of who has actually been initiating lately, same "decayed running sum" shape as
+ * `nextMomentum` (and the same decay constant — nothing about *how* it forgets a burst needs to
+ * differ from momentum's own tuning), just fed a different per-turn signal.
+ *
+ * Positive = the player has been the one reaching, without much coming back the other way (the
+ * character reads as reserved lately). Negative = the character has been initiating warmth on their
+ * own, unprompted by a tagged player overture (the character reads as the one leaning in).
+ */
+export const INITIATIVE_CLAMP = 6
+
+/**
+ * This turn's contribution to the balance. `hadPlayerIntent` is whether the player tagged their line
+ * with one of the romantic/emotional intent chips (`dating/intent.ts`) — a deliberate overture, not
+ * just an ordinary line. `warmthDelta` is this same turn's `warmthDeltaOf` reading.
+ *
+ * - A tagged overture that didn't move warmth: the player reached, the character didn't meet it —
+ *   +1 (player carrying it).
+ * - A tagged overture that did move warmth: reciprocated, balanced — 0.
+ * - No tagged overture, but warmth still moved up: the character initiated on their own — -1
+ *   (character carrying it).
+ * - No tagged overture and no warmth movement: nothing happened either way — 0.
+ */
+export function initiativeContribution(hadPlayerIntent: boolean, warmthDelta: number): number {
+  if (hadPlayerIntent) return warmthDelta <= 0 ? 1 : 0
+  return warmthDelta > 0 ? -1 : 0
+}
+
+/** The next balance after this turn's contribution — same decay/clamp/rounding shape as `nextMomentum`. */
+export function nextInitiativeBalance(prev: number | undefined, contribution: number): number {
+  const raw = (prev ?? 0) * MOMENTUM_DECAY + contribution
+  return Math.max(-INITIATIVE_CLAMP, Math.min(INITIATIVE_CLAMP, Math.round(raw * 100) / 100))
+}
+
+/**
+ * A `styleGuidance`-ready nudge once the imbalance is real and sustained, not a single lopsided
+ * turn — mirrors the two example phrasings from the brief almost verbatim. Uses `{{user}}`/`{{char}}`
+ * macros deliberately: unlike most of this module (folded into real-name `styleGuidance` strings by
+ * callers), this is meant to be read into `buildRelationshipDescription`'s output, which
+ * `buildPrompt` macro-substitutes (see that file's own doc comment). Returns `undefined` below the
+ * threshold, which is most of the time — a small, ordinary lopsidedness isn't worth a callout.
+ */
+/** A one-word-ish player-facing label for `RelationshipPanel`, same spirit as `describeMomentum`. */
+export function describeInitiativeBalance(balance: number | undefined): string | undefined {
+  const b = balance ?? 0
+  if (b >= 2) return "you've been carrying it lately"
+  if (b <= -2) return "they've been the one reaching lately"
+  return undefined
+}
+
+export function asymmetricPacingNote(charName: string, balance: number): string | undefined {
+  if (balance >= 2) {
+    return `${charName} has been more reserved than {{user}} has lately — {{user}}'s the one who keeps reaching first, without much coming back the other way. That's not nothing; it can read as real hesitation worth letting show, not just quiet shyness to smooth over.`
+  }
+  if (balance <= -2) {
+    return `${charName} has actually been the one initiating more than {{user}} lately — worth reflecting that ${charName} isn't only reacting here, they're the one closing the distance right now.`
+  }
+  return undefined
+}

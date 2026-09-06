@@ -9,6 +9,7 @@ import { describeIntentForJudge, describeIntentsForDate } from '@/lib/dating/int
 import { AFTERCARE_VERDICTS, isAftercareVerdict, type AftercareVerdict } from '@/lib/dating/aftercare'
 import { MOOD_VOCAB, NEED_VOCAB, type CharacterMood, type CharacterNeed } from '@/lib/prompt/mindGuidance'
 import { parsePlanUpdates, type PlanUpdate } from '@/lib/dating/plans'
+import type { IntimacyPhase } from '@/lib/dating/intimacyScene'
 
 // max_context_length is deliberately omitted here — every call site fetches the server's actual
 // loaded context via `client.getEffectiveMaxContext()` instead of hardcoding a guess.
@@ -247,6 +248,14 @@ export interface RelationshipMoment {
    * `applyPlanUpdates`.
    */
   planUpdates: PlanUpdate[]
+  /**
+   * Item 1's intimacy-scene phase read (`dating/intimacyScene.ts`) — only ever present on a turn
+   * the caller actually asked for one by passing `currentIntimacyPhase` (a scene is currently
+   * active), same conditional contract `aftercareVerdict` already has. `'resolved'` means the judge
+   * read the scene as having wound down/concluded; `undefined` (with a scene active) is read by the
+   * caller as "no change" and keeps the current phase, mirroring mood/need's own contract.
+   */
+  intimacyPhase?: IntimacyPhase | 'resolved'
 }
 
 /**
@@ -296,12 +305,20 @@ export async function assessRelationshipMoment(
     currentMood?: CharacterMood
     currentNeed?: CharacterNeed
     currentIntent?: string
+    /**
+     * Item 1's intimacy scene state machine (`dating/intimacyScene.ts`) — passed only while a scene
+     * is currently active, the same ride-along trick `aftercareTurns`/`pendingTasks` already use so
+     * this costs no extra model call. Asks the judge to read whether this turn's reply is still
+     * building, has reached its peak, or has wound down/concluded.
+     */
+    currentIntimacyPhase?: IntimacyPhase
   },
 ): Promise<RelationshipMoment> {
   const hasTasks = !!params.pendingTasks?.length
   const hasAftercare = !!params.aftercareTurns?.length
   const hasOpenThreads = !!params.unresolvedFacts?.length
   const hasPlans = !!params.activePlans?.length
+  const hasIntimacyScene = !!params.currentIntimacyPhase
   const prompt = [
     'You are scoring relationship momentum, tracking high-level romance route flags, noting durable facts worth remembering long-term, AND (separately) reading the character\'s own current emotional state, an underlying need, and private intentions, in an in-character roleplay.',
     `Current scores (0-100 each): ${DELTA_KEYS.map((k) => `${k}=${params.current[k]}`).join(', ')}.`,
@@ -318,11 +335,14 @@ export async function assessRelationshipMoment(
     hasAftercare
       ? `Separately: ${params.charName} and ${params.userName} were intimate a few turns ago, and you are also judging how the time SINCE went for ${params.charName} — the aftermath, not the act. Everything said since:\n${recentText(params.aftercareTurns!, params.charName, params.userName, 24)}`
       : '',
+    hasIntimacyScene
+      ? `Separately: an explicit intimate scene is currently in progress (currently read as "${params.currentIntimacyPhase}"). Judge whether the latest reply is still building, has reached its physical peak, or has now wound down/concluded (moving into its aftermath).`
+      : '',
     `${params.charName}'s mood going into this exchange: ${params.currentMood ?? 'not yet read'}. Their underlying need lately: ${params.currentNeed ?? 'not yet read'}. Their private intention going in: ${params.currentIntent ?? 'none noted'}.`,
     hasPlans
       ? `${params.charName}'s current standing plans — concrete intentions they're carrying between turns, not just this-turn reactions:\n${params.activePlans!.map((p, i) => `${i}: ${p}`).join('\n')}`
       : `${params.charName} has no standing plans on record yet.`,
-    `Return ONLY a minified JSON object: {"deltas":{ one integer -2..2 per dimension key },"newFlags":[ any newly-established flags from the known set, or [] ],"reason":"...","newFacts":[ any new durable facts, or [] ]${hasOpenThreads ? ',"resolvedFactIndices":[ open-thread index numbers this exchange clearly closed, or [] ]' : ''}${hasTasks ? ',"completedTaskIndices":[ pending task index numbers this exchange clearly and unambiguously accomplished, or [] ]' : ''}${hasAftercare ? `,"aftercareVerdict":"exactly one of [${AFTERCARE_VERDICTS.join(', ')}]"` : ''},"mood":"one of [${MOOD_VOCAB.join(', ')}], only if this exchange gives a clear enough read to state one — omit entirely otherwise","currentNeed":"one of [${NEED_VOCAB.join(', ')}], only if this stretch of the story clearly shows this need going unmet — omit entirely otherwise, and don't change it lightly","characterIntent":"a short (under 12 words) private thing ${params.charName} now wants, only if something concrete and new became clear this exchange — omit entirely otherwise","planUpdates":[ usually [] — see the plan rules below ]}.`,
+    `Return ONLY a minified JSON object: {"deltas":{ one integer -2..2 per dimension key },"newFlags":[ any newly-established flags from the known set, or [] ],"reason":"...","newFacts":[ any new durable facts, or [] ]${hasOpenThreads ? ',"resolvedFactIndices":[ open-thread index numbers this exchange clearly closed, or [] ]' : ''}${hasTasks ? ',"completedTaskIndices":[ pending task index numbers this exchange clearly and unambiguously accomplished, or [] ]' : ''}${hasAftercare ? `,"aftercareVerdict":"exactly one of [${AFTERCARE_VERDICTS.join(', ')}]"` : ''}${hasIntimacyScene ? ',"intimacyPhase":"exactly one of [building, peak, resolved]"' : ''},"mood":"one of [${MOOD_VOCAB.join(', ')}], only if this exchange gives a clear enough read to state one — omit entirely otherwise","currentNeed":"one of [${NEED_VOCAB.join(', ')}], only if this stretch of the story clearly shows this need going unmet — omit entirely otherwise, and don't change it lightly","characterIntent":"a short (under 12 words) private thing ${params.charName} now wants, only if something concrete and new became clear this exchange — omit entirely otherwise","planUpdates":[ usually [] — see the plan rules below ]}.`,
     'Only move a dimension if this specific exchange clearly affected it. Leave the rest at 0. Most turns should move only one or two dimensions and add no new flags.',
     '"reason" is a short (under 12 words) in-world one-liner naming what just happened, e.g. "Complimented her cooking unprompted". Give one only if at least one dimension moved or a flag was added, otherwise "".',
     `"newFacts" is for concrete, durable things worth recalling much later: a name, a stated preference, a piece of backstory, a promise made, a moment that landed hard. Not every line of dialogue. Most turns add none. Each fact is an object {"text": one short standalone sentence, "importance": 0-1, "valence": -1 to 1, "unresolved": true/false}. "importance": ~0.2 for a small detail, 0.8+ for something that reshapes how ${params.charName} sees ${params.userName}. "valence": how it felt to ${params.charName} — negative if it hurt or disappointed, positive if it meant a lot, 0 for neutral information. "unresolved": true only for an open wound or open question the story has NOT closed (a slight not addressed, a promise not yet kept, a question dodged) — most facts are false.`,
@@ -338,6 +358,9 @@ export async function assessRelationshipMoment(
       : '',
     hasTasks
       ? 'Be conservative about "completedTaskIndices": only include a task index if this exchange plainly and unambiguously accomplished it, not if it merely became more likely. Use [] if none did.'
+      : '',
+    hasIntimacyScene
+      ? '"intimacyPhase": "building" if the scene is still escalating (anticipation, teasing, not yet at full intensity); "peak" once it has clearly reached full intensity; "resolved" once it has visibly wound down or concluded this reply (moving into its aftermath). Judge only this specific reply, not the scene in the abstract.'
       : '',
     `Example (nothing much happened): {"deltas":{"affection":1,"trust":0,"chemistry":0,"comfort":1,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"Stayed to help clean up without being asked","newFacts":[]${hasOpenThreads ? ',"resolvedFactIndices":[]' : ''}${hasTasks ? ',"completedTaskIndices":[]' : ''},"planUpdates":[]}`,
     `Example (a fact landed hard): {"deltas":{"affection":-2,"trust":-1,"chemistry":0,"comfort":-1,"respect":0,"curiosity":0,"tension":2},"newFlags":[],"reason":"Forgot her birthday entirely","newFacts":[{"text":"Forgot ${params.charName}'s birthday","importance":0.75,"valence":-0.7,"unresolved":true}]${hasOpenThreads ? ',"resolvedFactIndices":[]' : ''}${hasTasks ? ',"completedTaskIndices":[]' : ''},"planUpdates":[]}`,
@@ -396,7 +419,13 @@ export async function assessRelationshipMoment(
   const planUpdates = parsePlanUpdates(obj.planUpdates).filter(
     (u) => u.action === 'add' || u.index < planCount,
   )
-  return { deltas, newFlags, reason, newFacts, resolvedFactIndices, completedTaskIndices, aftercareVerdict, mood, currentNeed, characterIntent, planUpdates }
+  // Only trusted when actually asked for, same guard `aftercareVerdict` above already applies — a
+  // model volunteering this unprompted is guessing about a scene that isn't tracked as active.
+  const intimacyPhase =
+    hasIntimacyScene && (obj.intimacyPhase === 'building' || obj.intimacyPhase === 'peak' || obj.intimacyPhase === 'resolved')
+      ? (obj.intimacyPhase as IntimacyPhase | 'resolved')
+      : undefined
+  return { deltas, newFlags, reason, newFacts, resolvedFactIndices, completedTaskIndices, aftercareVerdict, mood, currentNeed, characterIntent, planUpdates, intimacyPhase }
 }
 
 /**

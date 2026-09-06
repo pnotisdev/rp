@@ -309,6 +309,39 @@ export function DirectorPanel({ chat, character, world, onClose }: DirectorPanel
         </Section>
 
         <Section
+          title="Intimacy scene, pacing & rebuff"
+          description="Read-only state from this session's newer relationship-depth systems."
+          surface="sunken"
+        >
+          <div className="space-y-1.5 text-xs text-text-muted">
+            <div>
+              Intimacy scene:{' '}
+              {chat.intimacyScene ? (
+                <span className="text-text">
+                  {chat.intimacyScene.phase} — {chat.intimacyScene.activityLabel}
+                </span>
+              ) : (
+                'none active'
+              )}
+            </div>
+            <div>
+              Initiative balance: <span className="text-text">{(chat.initiativeBalance ?? 0).toFixed(2)}</span>
+              {' '}(positive = you've been carrying it, negative = they have)
+            </div>
+            <div>
+              Recent rebuff:{' '}
+              {chat.recentRebuff ? (
+                <span className="text-text">
+                  {chat.recentRebuff.kind} · {chat.recentRebuff.severity} (turn {chat.recentRebuff.startedAtTurn})
+                </span>
+              ) : (
+                'none on record'
+              )}
+            </div>
+          </div>
+        </Section>
+
+        <Section
           title="Hand over an item"
           description="A direct inventory grant for testing — doesn't send a chat message the way giving a gift in-scene does."
           surface="sunken"

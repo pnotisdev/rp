@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { afterglowGuidance, characterIntentGuidance, MOOD_VOCAB, moodGuidance, NEED_VOCAB, needGuidance } from './mindGuidance'
+import { afterglowGuidance, authoredStatePriorityNote, characterIntentGuidance, MOOD_VOCAB, moodGuidance, NEED_VOCAB, needGuidance } from './mindGuidance'
 
 describe('moodGuidance', () => {
   it('says nothing with no mood set', () => {
@@ -65,6 +65,49 @@ describe('characterIntentGuidance', () => {
 
   it('never emits a {{char}}/{{user}} macro', () => {
     expect(characterIntentGuidance('Sumire', 'wants space tonight')).not.toContain('{{')
+  })
+})
+
+describe('authoredStatePriorityNote', () => {
+  it('says nothing when mood is not resistant and the character is not holding back', () => {
+    expect(authoredStatePriorityNote('Sumire', 'content', false, false)).toBe('')
+    expect(authoredStatePriorityNote('Sumire', undefined, false, false)).toBe('')
+    expect(authoredStatePriorityNote('Sumire', 'playful', false, false)).toBe('')
+  })
+
+  it('fires on a resistant mood and names it as taking priority over generic romance', () => {
+    const note = authoredStatePriorityNote('Sumire', 'guarded', false, false)
+    expect(note).toContain('Sumire')
+    expect(note).toContain('guarded')
+    expect(note).toMatch(/generic romance/i)
+    expect(note).toMatch(/wins over generic romantic instinct/i)
+  })
+
+  it('fires when the character is deliberately holding back, even with a non-resistant mood', () => {
+    const note = authoredStatePriorityNote('Sumire', 'content', true, false)
+    expect(note).toContain('holding back')
+  })
+
+  it('names both reasons together when a resistant mood and holding-back co-occur', () => {
+    const note = authoredStatePriorityNote('Sumire', 'hurt', true, false)
+    expect(note).toContain('hurt')
+    expect(note).toContain('holding back')
+  })
+
+  it('adds an explicit boundaries clause only when the character has authored boundaries', () => {
+    const withBoundaries = authoredStatePriorityNote('Sumire', 'anxious', false, true)
+    const without = authoredStatePriorityNote('Sumire', 'anxious', false, false)
+    expect(withBoundaries).toMatch(/boundaries/i)
+    expect(without).not.toMatch(/boundaries/i)
+  })
+
+  it('explicitly says warmth/affection does not override the authored state', () => {
+    const note = authoredStatePriorityNote('Sumire', 'annoyed', false, false)
+    expect(note).toMatch(/warmth or affection/i)
+  })
+
+  it('never emits a {{char}}/{{user}} macro — styleGuidance strings are not macro-substituted', () => {
+    expect(authoredStatePriorityNote('Sumire', 'tense', true, true)).not.toContain('{{')
   })
 })
 

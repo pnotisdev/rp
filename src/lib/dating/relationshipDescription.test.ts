@@ -34,3 +34,22 @@ describe('buildRelationshipDescription — momentum', () => {
     expect(buildRelationshipDescription({ affection: undefined } as never, undefined, character)).toBeUndefined()
   })
 })
+
+describe('buildRelationshipDescription — asymmetric pacing (item 2)', () => {
+  it('folds in a "player carrying it" note once the imbalance is real', () => {
+    const out = buildRelationshipDescription(chat({ initiativeBalance: 3 }), undefined, character)!
+    expect(out).toMatch(/more reserved/i)
+    expect(out).toContain('{{user}}')
+  })
+
+  it('folds in a "character carrying it" note the other direction', () => {
+    const out = buildRelationshipDescription(chat({ initiativeBalance: -3 }), undefined, character)!
+    expect(out).toMatch(/closing the distance/i)
+  })
+
+  it('adds nothing extra when the balance is unset or small', () => {
+    const out = buildRelationshipDescription(chat({}), undefined, character)!
+    expect(out).not.toMatch(/more reserved/i)
+    expect(out).not.toMatch(/closing the distance/i)
+  })
+})

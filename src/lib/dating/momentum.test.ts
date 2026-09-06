@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { describeMomentum, nextMomentum, relationshipPacingNote, warmthDeltaOf } from './momentum'
+import {
+  asymmetricPacingNote,
+  describeInitiativeBalance,
+  describeMomentum,
+  initiativeContribution,
+  nextInitiativeBalance,
+  nextMomentum,
+  relationshipPacingNote,
+  warmthDeltaOf,
+} from './momentum'
 
 describe('warmthDeltaOf', () => {
   it('averages the warmth-relevant deltas and ignores tension / curiosity', () => {
@@ -65,6 +74,76 @@ describe('relationshipPacingNote', () => {
 
   it('says nothing for a quiet early-stage relationship', () => {
     expect(relationshipPacingNote('Sumire', 20, 0, 5)).toBeUndefined()
+  })
+})
+
+describe('initiativeContribution', () => {
+  it('a tagged overture that moved nothing counts as the player carrying it', () => {
+    expect(initiativeContribution(true, 0)).toBe(1)
+    expect(initiativeContribution(true, -0.4)).toBe(1)
+  })
+
+  it('a tagged overture that landed reads as reciprocated, not lopsided', () => {
+    expect(initiativeContribution(true, 1)).toBe(0)
+  })
+
+  it('unprompted warmth movement counts as the character carrying it', () => {
+    expect(initiativeContribution(false, 0.6)).toBe(-1)
+  })
+
+  it('a flat, untagged turn contributes nothing either way', () => {
+    expect(initiativeContribution(false, 0)).toBe(0)
+    expect(initiativeContribution(false, -1)).toBe(0)
+  })
+})
+
+describe('nextInitiativeBalance', () => {
+  it('decays the previous value and adds this turn, same shape as nextMomentum', () => {
+    expect(nextInitiativeBalance(3, 1)).toBeCloseTo(3 * 0.65 + 1)
+  })
+
+  it('treats undefined previous as 0', () => {
+    expect(nextInitiativeBalance(undefined, 1)).toBe(1)
+  })
+
+  it('clamps to a sane band in both directions', () => {
+    let up = 0
+    let down = 0
+    for (let i = 0; i < 50; i++) {
+      up = nextInitiativeBalance(up, 1)
+      down = nextInitiativeBalance(down, -1)
+    }
+    expect(up).toBeLessThanOrEqual(6)
+    expect(down).toBeGreaterThanOrEqual(-6)
+  })
+})
+
+describe('asymmetricPacingNote', () => {
+  it('names the player carrying it once the imbalance is real and sustained', () => {
+    const note = asymmetricPacingNote('Sumire', 3)!
+    expect(note).toContain('Sumire')
+    expect(note).toMatch(/more reserved/i)
+    expect(note).toContain('{{user}}')
+  })
+
+  it('names the character carrying it the other direction', () => {
+    const note = asymmetricPacingNote('Sumire', -3)!
+    expect(note).toMatch(/closing the distance/i)
+    expect(note).toContain('Sumire')
+  })
+
+  it('says nothing for an ordinary, small imbalance', () => {
+    expect(asymmetricPacingNote('Sumire', 0.5)).toBeUndefined()
+    expect(asymmetricPacingNote('Sumire', -1)).toBeUndefined()
+  })
+})
+
+describe('describeInitiativeBalance', () => {
+  it('labels the notable bands and stays quiet in the middle', () => {
+    expect(describeInitiativeBalance(3)).toMatch(/you/i)
+    expect(describeInitiativeBalance(-3)).toMatch(/they/i)
+    expect(describeInitiativeBalance(0.5)).toBeUndefined()
+    expect(describeInitiativeBalance(undefined)).toBeUndefined()
   })
 })
 

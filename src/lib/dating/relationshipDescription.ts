@@ -1,5 +1,5 @@
 import { getRelationshipStats, computeWarmth, relationshipStageForWarmth, relationshipMilestonesFor, formatRelationshipStage, formatCommitmentStatus } from '@/lib/dating/stage'
-import { relationshipPacingNote } from '@/lib/dating/momentum'
+import { asymmetricPacingNote, relationshipPacingNote } from '@/lib/dating/momentum'
 import type { Character } from '@/lib/characters/cardSpec'
 import type { Chat, WorldCard } from '@/lib/types'
 
@@ -19,7 +19,10 @@ export function buildGiftTasteNote(character: Character): string | undefined {
 }
 
 export function buildRelationshipDescription(
-  chat: Pick<Chat, 'affection' | 'relationshipStats' | 'commitmentStatus' | 'relationshipWarning' | 'breakupCount' | 'momentum'>,
+  chat: Pick<
+    Chat,
+    'affection' | 'relationshipStats' | 'commitmentStatus' | 'relationshipWarning' | 'breakupCount' | 'momentum' | 'initiativeBalance'
+  >,
   world: WorldCard | undefined,
   character: Character,
 ): string | undefined {
@@ -52,6 +55,11 @@ export function buildRelationshipDescription(
   // Momentum: how fast (and which way) things have been moving recently, separate from where they
   // are — the "how quickly should this relationship be moving" the level-only lines can't give.
   const pacingNote = relationshipPacingNote(primaryName, warmth, chat.momentum ?? 0, stats.tension)
+  // Item 2's asymmetric-pacing signal: who's actually been initiating lately, not just how fast
+  // warmth is moving overall (that's `pacingNote` above). `{{user}}` is a real macro here — this
+  // return value is one of the few `buildPrompt` fields that IS macro-substituted (see this file's
+  // own doc comment on `giftTasteNote`), unlike ordinary `styleGuidance` strings.
+  const asymmetryNote = asymmetricPacingNote(primaryName, chat.initiativeBalance ?? 0)
   // `primaryName` is spelled out rather than left as a `{{char}}` macro — this stays about the
   // scene's primary/relationship-tracked character even in a group chat, where `{{char}}` would
   // otherwise resolve to whoever's currently speaking instead (see resolveSpeaker/buildCurrentPrompt).
@@ -59,6 +67,7 @@ export function buildRelationshipDescription(
     `Relationship: {{user}} and ${primaryName} are at the "${formatRelationshipStage(stage)}" stage${notes.length ? `: ${notes.join('; ')}` : ''}.`,
     '(Let this colour tone, warmth, and what feels earned right now. Never state a number, "affection", or "stage" out loud.)',
     pacingNote,
+    asymmetryNote,
     commitmentNote,
     warningNote,
     breakupNote,

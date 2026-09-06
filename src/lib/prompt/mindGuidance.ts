@@ -120,6 +120,56 @@ export function characterIntentGuidance(charName: string, intent?: string): stri
  * Names no physical detail whatsoever: this steers *emotional* aftermath, and the content dial
  * (`intimacyGuidance`) remains the only thing that governs explicitness.
  */
+/**
+ * Moods that pull *against* a generic romance scene's trained instinct to soften, lean in, or
+ * escalate — a model's own RLHF'd romantic defaults are strong enough that a high warmth/affection
+ * number can quietly overrule an authored `guarded`/`hurt`/`annoyed` mood into "but they're so close,
+ * surely she'd give in here" (item 5's own concern: generic model-default romance overriding actually-
+ * authored character state). `content`/`affectionate`/`playful`/`excited`/`confident`/`curious`/
+ * `proud`/`relieved` are left out on purpose — those already point the same direction a generic
+ * romance scene would, so there's no trained instinct to override there.
+ */
+const RESISTANT_MOODS: readonly CharacterMood[] = [
+  'anxious',
+  'guarded',
+  'annoyed',
+  'hurt',
+  'sad',
+  'lonely',
+  'jealous',
+  'embarrassed',
+  'exhausted',
+  'bored',
+  'tense',
+]
+
+/**
+ * A concrete, testable override instruction for the exact failure this item exists to fix: a
+ * model's own trained romantic defaults winning over this specific character's actually-authored
+ * state (mood, need, boundaries, a plan to hold back) — producing generic "model-default romance"
+ * instead of this character. Deliberately narrow rather than a blanket "stay in character" restated
+ * everywhere (that's already implicit and, per this app's own experience, not strong enough on a
+ * weak or heavily RLHF'd model on its own): this only fires when there's an actual, nameable tension
+ * between the authored state and what a generic romance beat would do, and it says in plain terms
+ * which one wins. Returns `''` when nothing here is currently in tension with anything — most turns.
+ */
+export function authoredStatePriorityNote(
+  charName: string,
+  mood: CharacterMood | undefined,
+  isHoldingBack: boolean,
+  hasAuthoredBoundaries: boolean,
+): string {
+  const resistantMood = mood && RESISTANT_MOODS.includes(mood)
+  if (!resistantMood && !isHoldingBack) return ''
+  const because = [resistantMood ? `currently ${mood}` : '', isHoldingBack ? 'deliberately holding back right now' : '']
+    .filter(Boolean)
+    .join(' and ')
+  const boundaryClause = hasAuthoredBoundaries
+    ? ` This includes ${charName}'s own authored boundaries — those are not softened by how warm things generally are.`
+    : ''
+  return `${charName} is ${because}. A generic romance story would have a character soften, lean in, or escalate anyway just because the moment invites it — resist that trained instinct here. ${charName}'s actual authored state wins over generic romantic instinct: however high warmth or affection reads right now, it does not override a mood like this, an unmet need, or what ${charName} is actually doing right now.${boundaryClause} Write the character who is actually anxious/guarded/holding back, not the version of this scene a stock romance would write.`
+}
+
 export function afterglowGuidance(
   charName: string,
   userName: string,

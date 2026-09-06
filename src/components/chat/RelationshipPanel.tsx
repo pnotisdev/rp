@@ -25,7 +25,9 @@ import {
 import { allowedIntimacyCategories, getUnlockedIntimacyOptions, nextLockedInCategory, type IntimacyCategory, type IntimacyUnlockable } from '@/lib/dating/intimacyCatalog'
 import { resolveIntimacyLevel } from '@/lib/prompt/intimacyGuidance'
 import { AFTERGLOW_TURNS, afterglowTurnsSince } from '@/lib/dating/aftercare'
-import { describeMomentum } from '@/lib/dating/momentum'
+import { describeInitiativeBalance, describeMomentum } from '@/lib/dating/momentum'
+import { isRebuffActive } from '@/lib/dating/rebuff'
+import { isIntimacySceneActive } from '@/lib/dating/intimacyScene'
 import type { CommitmentStatus } from '@/lib/types'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
@@ -343,17 +345,23 @@ export function RelationshipPanel({
         ) : (
           <p className="mt-2 text-xs text-text-muted">Max stage reached.</p>
         )}
-        {(track.mood || track.currentNeed || describeMomentum(track.momentum)) && (
+        {(track.mood || track.currentNeed || describeMomentum(track.momentum) || describeInitiativeBalance(track.initiativeBalance)) && (
           <p className="mt-2 border-t border-bg-elevated pt-2 text-xs italic text-text-muted">
             Right now:{' '}
             {[
               track.mood ?? '',
               track.currentNeed ? `could use more ${track.currentNeed}` : '',
               describeMomentum(track.momentum) ?? '',
+              describeInitiativeBalance(track.initiativeBalance) ?? '',
             ]
               .filter(Boolean)
               .join(' · ')}
             {' — '}a passing read, separate from the bond above.
+          </p>
+        )}
+        {isIntimacySceneActive(track.intimacyScene, charReplyCount) && (
+          <p className="mt-2 border-t border-bg-elevated pt-2 text-xs italic text-romance">
+            Currently {track.intimacyScene!.phase === 'peak' ? 'at its peak' : 'building'}: {track.intimacyScene!.activityLabel}
           </p>
         )}
         {afterglowRemaining !== null && (
@@ -363,6 +371,13 @@ export function RelationshipPanel({
           <p className="mt-2 border-t border-bg-elevated pt-2 text-xs italic text-romance">
             Still in the hours after being intimate — {afterglowRemaining} more{' '}
             {afterglowRemaining === 1 ? 'reply' : 'replies'} before it settles into how it felt.
+          </p>
+        )}
+        {isRebuffActive(track.recentRebuff, charReplyCount) && (
+          // Same restraint as the afterglow line above: says what's true, not what to do about it.
+          <p className="mt-2 border-t border-bg-elevated pt-2 text-xs italic text-text-muted">
+            Still a little guarded since {track.recentRebuff!.kind === 'commitment' ? 'the last ask' : 'last time'} was put off
+            {track.recentRebuff!.severity === 'backfire' ? ' — that one genuinely stung' : ''}.
           </p>
         )}
       </div>

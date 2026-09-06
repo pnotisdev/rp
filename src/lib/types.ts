@@ -9,6 +9,9 @@ import type { IntimacyUnlockable } from '@/lib/dating/intimacyCatalog'
 import type { Afterglow } from '@/lib/dating/aftercare'
 import type { Trigger } from '@/lib/world/triggers'
 import type { IntimacyDetailLevel } from '@/lib/store/useSettingsStore'
+import type { IntimacyScene } from '@/lib/dating/intimacyScene'
+import type { RecentRebuff } from '@/lib/dating/rebuff'
+import type { GiftLogEntry } from '@/lib/dating/gifts'
 
 export interface Persona {
   id: string
@@ -209,6 +212,33 @@ export interface RelationshipTrack {
   plans?: CharacterPlan[]
   /** Set (to when it happened) the first time this relationship reaches a deliberately-initiated "first time together" milestone (see `stage.ts`'s `canInitiateFirstTime` and `useChatSession.ts`'s `initiateFirstTime`) — undefined means it hasn't happened yet. A real fact about this specific relationship, not chat-wide. */
   firstIntimateSceneAt?: number
+  /**
+   * Item 2's asymmetric-pacing signal — a decayed running balance of who's actually been initiating
+   * lately, not just how fast warmth is moving overall (that's `momentum` above). Positive = the
+   * player has been carrying the reaching-out; negative = the character has. See
+   * `dating/momentum.ts`'s `nextInitiativeBalance`/`asymmetricPacingNote`.
+   */
+  initiativeBalance?: number
+  /**
+   * Item 2's "missed opportunity" cost — a still-live, decaying cue after a deflected or backfired
+   * commitment/intimacy-milestone ask (`dating/rebuff.ts`), distinct from `relationshipWarning`'s
+   * hard breakup-risk banner. `null` clears it, same convention as `afterglow`/`relationshipWarning`.
+   */
+  recentRebuff?: RecentRebuff | null
+  /**
+   * Item 1's intimacy scene state machine (`dating/intimacyScene.ts`) — where an explicit intimate
+   * scene currently stands (building/at its peak) and what's physically happening right now, kept
+   * separate from `afterglow` above (which judges the aftermath once the scene has already
+   * concluded). `null` clears it, same convention as `afterglow`.
+   */
+  intimacyScene?: IntimacyScene | null
+  /**
+   * Item 3's recency log for gift-giving (`dating/gifts.ts`) — a small, bounded, append-only record
+   * of the last few gifts given to this specific character, distinct from `giftsGiven`'s lifetime
+   * tally: this is what lets a re-gift or a repeated pattern be recognized as such, rather than only
+   * ever knowing "given N times total" with no sense of recency.
+   */
+  giftLog?: GiftLogEntry[]
 }
 
 /**
@@ -495,6 +525,14 @@ export interface Chat {
   firstIntimateSceneAt?: number
   /** The primary's own copy of `RelationshipTrack.afterglow` — see that field, and `getRelationshipTrack`. */
   afterglow?: Afterglow | null
+  /** The primary's own copy of `RelationshipTrack.initiativeBalance` — see that field. */
+  initiativeBalance?: number
+  /** The primary's own copy of `RelationshipTrack.recentRebuff` — see that field. */
+  recentRebuff?: RecentRebuff | null
+  /** The primary's own copy of `RelationshipTrack.intimacyScene` — see that field. */
+  intimacyScene?: IntimacyScene | null
+  /** The primary's own copy of `RelationshipTrack.giftLog` — see that field. */
+  giftLog?: GiftLogEntry[]
   /** Ids of one-shot world triggers this chat has already fired (`world/triggers.ts`). Per chat, not per world, so two chats in the same world progress through it independently and a fork inherits the parent's history. */
   firedTriggerIds?: string[]
   activeEvent?: DateEventCard
