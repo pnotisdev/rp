@@ -174,7 +174,7 @@ export function ChatsPanel({
         >
           <Plus size={18} strokeWidth={1.75} />
         </button>
-        <div className="flex-1 space-y-1 overflow-y-auto">
+        <div className="flex-1 space-y-1 overflow-y-auto px-1">
           {chats.map((chat) => {
             const character = charFor(chat.characterId)
             return (

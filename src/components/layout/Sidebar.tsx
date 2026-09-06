@@ -71,8 +71,8 @@ export function Sidebar({
           title={item.label}
           aria-label={item.label}
           className={`flex flex-1 items-center justify-center rounded-xl text-xs transition-colors md:flex-initial ${
-            expanded ? 'md:justify-start md:gap-3 md:px-3 md:py-2.5' : 'md:h-10 md:w-10'
-          } h-11 w-11 md:w-auto ${
+            expanded ? 'md:w-auto md:justify-start md:gap-3 md:px-3 md:py-2.5' : 'md:h-10 md:w-10'
+          } h-11 w-11 ${
             view === item.id
               ? 'bg-accent/10 text-accent font-medium'
               : 'text-text-muted hover:bg-bg-sunken hover:text-text'

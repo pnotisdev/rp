@@ -658,7 +658,7 @@ export function VNStage({
                 viewport (its own `top` past `window.innerHeight`), making the app unable to send a
                 message at all. A tall choice row now scrolls in place instead of growing the panel. */}
             {choiceListSlot && (
-              <div className="max-h-[15vh] overflow-y-auto border-t border-white/10 px-3 pt-2.5 sm:px-5">{choiceListSlot}</div>
+              <div className="max-h-[15vh] overflow-y-auto border-t border-white/10 px-3 pb-2.5 pt-2.5 sm:px-5">{choiceListSlot}</div>
             )}
             {assistSlot}
             <div className="border-t border-white/10 p-2.5 sm:px-4">{composerSlot}</div>

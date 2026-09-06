@@ -155,7 +155,7 @@ export function Composer({
             disabled
               ? 'Select a character to begin…'
               : isEmpty && canContinue
-                ? 'Write a message, or press Send to continue the last reply…'
+                ? 'Write a message, or press Enter to continue the last reply…'
                 : 'Write a message… (Enter to send, Shift+Enter for newline)'
           }
           disabled={disabled}
