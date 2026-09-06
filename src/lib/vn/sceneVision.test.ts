@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { KoboldClient } from '@/lib/api/kobold'
-import { classifyAttachedImageScene, detectExpressionFromSprites, detectGreetingScene, shortlistExpressions } from './sceneVision'
+import {
+  classifyAttachedImageScene,
+  detectExpressionFromSprites,
+  detectExpressionTextMismatch,
+  detectGreetingScene,
+  shortlistExpressions,
+} from './sceneVision'
 
 /** Never resolves or rejects on its own — only reacts to the caller's abort signal. */
 function hangingClient(): KoboldClient {
@@ -311,6 +317,126 @@ describe('detectGreetingScene', () => {
     expect(
       await detectGreetingScene(throwing, { text: GREETING, expressionIds: ['neutral'], backgroundIds: ['classroom'] }),
     ).toBeNull()
+  })
+})
+
+describe('detectExpressionTextMismatch', () => {
+  const CANDIDATES = [
+    { id: 'blush', label: 'Blush' },
+    { id: 'angry', label: 'Angry' },
+    { id: 'happy', label: 'Happy' },
+  ]
+
+  it('a stale tag against clearly conflicting text: the classifier corrects it', async () => {
+    // The exact scenario item 2 describes: the model wrote a scowl/slam-the-door beat but the tag
+    // still says "blush" from an earlier, unrelated turn.
+    const got = await detectExpressionTextMismatch(stubClient('{"expression":"angry"}'), {
+      charName: 'Sumire',
+      replyText: '*She scowls and slams the door behind her.* "Get out. Now."',
+      taggedExpression: 'blush',
+      candidates: CANDIDATES,
+    })
+    expect(got).toBe('angry')
+  })
+
+  it('text that genuinely matches the tag: no correction, even though the model was asked', async () => {
+    const got = await detectExpressionTextMismatch(stubClient('{"expression":"blush"}'), {
+      charName: 'Sumire',
+      replyText: '*Her cheeks go pink.* "I-it\'s not like I was waiting for you."',
+      taggedExpression: 'blush',
+      candidates: CANDIDATES,
+    })
+    expect(got).toBeNull()
+  })
+
+  it('an id outside the candidate set is rejected, not passed through as a correction', async () => {
+    const got = await detectExpressionTextMismatch(stubClient('{"expression":"disgusted"}'), {
+      charName: 'X',
+      replyText: 'Ugh, that smell.',
+      taggedExpression: 'blush',
+      candidates: CANDIDATES,
+    })
+    expect(got).toBeNull()
+  })
+
+  it('unparseable model output: fails open to no correction', async () => {
+    const got = await detectExpressionTextMismatch(stubClient('just vibes, no json'), {
+      charName: 'X',
+      replyText: 'She looks away.',
+      taggedExpression: 'blush',
+      candidates: CANDIDATES,
+    })
+    expect(got).toBeNull()
+  })
+
+  it('a thrown client error fails open to no correction', async () => {
+    const client = {
+      generate: async () => {
+        throw new Error('offline')
+      },
+      getEffectiveMaxContext: async () => 4096,
+    } as unknown as KoboldClient
+    expect(
+      await detectExpressionTextMismatch(client, {
+        charName: 'X',
+        replyText: 'She looks away.',
+        taggedExpression: 'blush',
+        candidates: CANDIDATES,
+      }),
+    ).toBeNull()
+  })
+
+  it('does not call the model with fewer than two candidates — nothing to choose between', async () => {
+    let called = false
+    const got = await detectExpressionTextMismatch(
+      stubClient('{"expression":"angry"}', () => {
+        called = true
+      }),
+      { charName: 'X', replyText: 'She scowls.', taggedExpression: 'blush', candidates: [CANDIDATES[0]] },
+    )
+    expect(got).toBeNull()
+    expect(called).toBe(false)
+  })
+
+  it('does not call the model with no tagged expression to check against', async () => {
+    let called = false
+    const got = await detectExpressionTextMismatch(
+      stubClient('{"expression":"angry"}', () => {
+        called = true
+      }),
+      { charName: 'X', replyText: 'She scowls.', taggedExpression: '', candidates: CANDIDATES },
+    )
+    expect(got).toBeNull()
+    expect(called).toBe(false)
+  })
+
+  it('does not call the model with empty reply text', async () => {
+    let called = false
+    const got = await detectExpressionTextMismatch(
+      stubClient('{"expression":"angry"}', () => {
+        called = true
+      }),
+      { charName: 'X', replyText: '   ', taggedExpression: 'blush', candidates: CANDIDATES },
+    )
+    expect(got).toBeNull()
+    expect(called).toBe(false)
+  })
+
+  it('falls back to null after 45s when the backend never responds', async () => {
+    vi.useFakeTimers()
+    try {
+      const pending = detectExpressionTextMismatch(hangingClient(), {
+        charName: 'X',
+        replyText: 'She scowls and slams the door.',
+        taggedExpression: 'blush',
+        candidates: CANDIDATES,
+      })
+      const assertion = expect(pending).resolves.toBeNull()
+      await vi.advanceTimersByTimeAsync(45_000)
+      await assertion
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 

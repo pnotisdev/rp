@@ -252,6 +252,79 @@ const GREETING_SCENE_PARAMS = {
 }
 
 /**
+ * Closes the loop the other direction from every pass above: those correct a *tag* using an image
+ * (the character's own sprites, or a photo the player attached). This corrects a tag using nothing
+ * but the *text that was just written* — for the much more common case where no vision-capable
+ * model is loaded at all, which is most of this app's actual local-KoboldCpp usage.
+ *
+ * The gap this closes: the model's own blind `<<scene:>>` self-tag (`sceneTag.ts`) is written by
+ * the same generation that wrote the reply, but nothing stops it from being lazy — repeating
+ * whatever expression was tagged last turn out of habit even when the prose it just wrote clearly
+ * shows something else ("she smiled" while the tag still says `blush` from three turns ago). Text
+ * and tag can drift apart with no correction today unless a vision-capable model happens to be
+ * loaded (`detectExpressionFromSprites`, gated on real sprite art and `visionSceneDetection`).
+ *
+ * Deliberately expression-only, never outfit: an outfit tag is sticky by design (`sceneTag.ts`'s own
+ * "an absent tag means unchanged" contract) and `manualOnly`/intimate outfits exist specifically so
+ * the model can't move a character into one just because a reply *read* suggestive — auto-correcting
+ * outfit from text content would defeat that guarantee outright. Background is left for a later pass
+ * for the same reason `detectGreetingScene` only ever handles expression+background together when
+ * there's an actual location description to read; a single reply rarely re-describes where a scene
+ * is set the way it re-describes an expression.
+ *
+ * Deliberately biased toward "no change": the prompt asks for a correction only on a *clear,
+ * obvious* mismatch, and repeating the current tag is explicitly offered as the right answer when
+ * it still fits — a subtle or ambiguous line should never cause churn just because a cheap
+ * classifier's judgment differs slightly from the writing model's own. Returns `null` (meaning
+ * "keep the current tag") on no signal, an invalid answer, a parse failure, or a thrown/timed-out
+ * client error — the same fail-safe-to-no-change contract every pass in this file follows.
+ */
+export async function detectExpressionTextMismatch(
+  client: ChatBackend,
+  params: {
+    charName: string
+    replyText: string
+    taggedExpression: string
+    candidates: ExpressionCandidate[]
+  },
+): Promise<string | null> {
+  const reply = params.replyText.trim().slice(0, 900)
+  const tagged = params.taggedExpression.trim()
+  // Needs the current tag plus at least one real alternative to be worth asking about, same
+  // "nothing to choose" guard `detectExpressionFromSprites` uses for sprites.
+  if (!reply || !tagged || params.candidates.length < 2) return null
+
+  const allowed = new Set(params.candidates.map((c) => c.id))
+  const roster = params.candidates.map((c) => `${c.id} — ${c.label}`).join('\n')
+
+  const prompt = [
+    `${params.charName} was just tagged with the expression "${tagged}" after writing this line:`,
+    `"""\n${reply}\n"""`,
+    `Available expression ids:\n${roster}`,
+    `Only pick a different id when the text is a CLEAR, obvious mismatch — it plainly shows a different emotion than "${tagged}" (tagged "blush" but the line is openly furious, say). A subtle, ambiguous, or merely-imperfect fit is NOT a mismatch: repeat "${tagged}" itself in that case.`,
+    'Return ONLY a minified JSON object naming the expression id that actually fits: {"expression":"<id>"}.',
+    'JSON:',
+  ].join('\n')
+
+  let text: string
+  try {
+    text = await generateWithTimeout(
+      client,
+      { ...GREETING_SCENE_PARAMS, max_context_length: await client.getEffectiveMaxContext(), prompt },
+      'Detect expression/text mismatch',
+    )
+  } catch {
+    return null
+  }
+
+  const parsed = tryParseJson(text)
+  const obj = (parsed && typeof parsed === 'object' ? parsed : {}) as Record<string, unknown>
+  const picked = typeof obj.expression === 'string' ? obj.expression.trim() : ''
+  if (!picked || !allowed.has(picked) || picked === tagged) return null
+  return picked
+}
+
+/**
  * A brand-new chat's opening line is the character's static `first_mes` — nobody generates it, so
  * unlike every later reply it never gets the trailing `<<scene:>>` tag (`sceneTag.ts`) that lets VN
  * mode pick an expression/background. Without this, VN mode's very first screen is always a bare
