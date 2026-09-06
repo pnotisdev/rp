@@ -204,6 +204,161 @@ export function resolveReplyLength(
   return { band: derived.band, instruction, derived: true, measuredWords: derived.measuredWords }
 }
 
+/**
+ * Automated "voice fingerprint" extraction (see `VoiceFingerprint` in `cardSpec.ts`) — a deterministic,
+ * zero-cost heuristic pass over the card's own authored dialogue, in the same spirit as
+ * `deriveCardReplyBand` above: the ground truth for how this character actually talks is what the
+ * author already wrote, not a fresh model call reinterpreting it. Purely mechanical properties
+ * (a word repeating, a sentence running long, an ellipsis habit) are exactly the kind of thing a
+ * small local model counts unreliably and a `String.split` counts perfectly, so this never touches
+ * `ChatBackend` — the "Detect from examples" button in `CharacterEditor` calls it directly and gets
+ * a result instantly, with no backend, no failure mode, and nothing to mock in a test.
+ */
+export interface DetectedVoiceFingerprint {
+  /** Filler words/phrases from a curated candidate list that recur across at least two distinct turns. */
+  verbalTics: string[]
+  /** Multi-word phrases (2-4 words) that repeat verbatim across at least two distinct turns, excluding stopword-only combinations. */
+  catchphrases: string[]
+  /** A plain-English read on average sentence length, or undefined when there isn't enough measurable prose. */
+  sentenceRhythm?: string
+  /** Ellipsis/exclamation/question habits that show up often enough across turns to be a pattern, or undefined. */
+  punctuationNotes?: string
+  /** How many of the character's own turns were available to analyze — 0 or 1 means "not enough data," surfaced by the editor rather than shown as a confident (but meaningless) empty result. */
+  turnsAnalyzed: number
+}
+
+/** Common English function words, excluded from n-gram candidates so a repeated "of the" or "and I"
+ *  never gets surfaced as a "catchphrase" — a catchphrase has to carry actual content. */
+const STOPWORDS = new Set([
+  'a', 'an', 'the', 'of', 'in', 'on', 'at', 'to', 'for', 'and', 'or', 'but', 'is', 'are', 'was',
+  'were', 'be', 'been', 'it', 'this', 'that', 'i', 'you', 'he', 'she', 'they', 'we', 'my', 'your',
+  'his', 'her', 'their', 'our', 'me', 'him', 'them', 'us', 'with', 'as', 'so', 'if', 'not', 'no',
+  'do', 'did', 'does', 'have', 'has', 'had', 'will', 'would', 'can', 'could', 'then', 'than',
+  'there', 'here', 'what', 'who', 'how', 'why', 'when', 'where', 'which', 'from', 'by', 'out',
+  'up', 'down', 'over', 'about', 'into', 'some', 'all', 'any', 'one', 'get', 'got', 'im', "i'm",
+])
+
+/** Curated filler words/discourse markers worth flagging as a possible verbal tic — deliberately not
+ *  an open-ended n-gram scan like catchphrases below, since single common words ("well", "look")
+ *  are only meaningful as a *tic* when a candidate list keeps them from drowning in ordinary prose. */
+const TIC_CANDIDATES = [
+  'well', 'i mean', 'you know', 'look', 'listen', 'honestly', 'anyway', 'huh', 'hmph', 'hmm',
+  'ugh', 'tch', 'geez', 'whatever', 'seriously', 'obviously', 'frankly', 'i guess', 'sort of',
+  'kind of', 'or something', 'and stuff', 'basically', 'i suppose', 'i swear', 'for what it\'s worth',
+]
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/** Lowercased word tokens, punctuation stripped except an internal apostrophe (so "don't" stays one token). */
+function tokenizeWords(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[*_~]/g, ' ')
+    .split(/[^a-z0-9']+/i)
+    .filter(Boolean)
+}
+
+/** Text inside "double quotes" (straight or curly) — what the character actually said, as opposed to
+ *  the narration/action text wrapped in asterisks around it. Falls back to the whole turn when a
+ *  card writes unquoted dialogue, since some do. */
+function spokenText(turn: string): string {
+  const quoted = [...turn.matchAll(/["“]([^"”]+)["”]/g)].map((m) => m[1])
+  return quoted.length ? quoted.join(' ') : turn
+}
+
+/**
+ * Every stretch of this character's own authored dialogue available to measure: their `mes_example`
+ * turns (the same extraction `deriveCardReplyBand` uses), plus `first_mes` and every
+ * `alternate_greetings` entry — greetings are prose rather than the `<START>`/`{{char}}:` convention,
+ * but they're still the character's own voice and often the only text a brand-new card has.
+ */
+export function collectCharacterTurns(
+  card: Pick<CharacterCardData, 'mes_example' | 'first_mes' | 'alternate_greetings'>,
+): string[] {
+  const exampleTurns = extractExampleCharTurns(card.mes_example)
+  const greetings = [card.first_mes, ...(card.alternate_greetings ?? [])]
+    .map((t) => t?.trim())
+    .filter((t): t is string => !!t)
+  return [...exampleTurns, ...greetings]
+}
+
+/** Detects a `VoiceFingerprint` draft from what the card's own examples/greetings already show. Needs
+ *  at least two turns to say anything about *recurring* patterns; with fewer, only `turnsAnalyzed`
+ *  is meaningful and every list comes back empty rather than a guess dressed up as a finding. */
+export function detectVoiceFingerprint(
+  card: Pick<CharacterCardData, 'mes_example' | 'first_mes' | 'alternate_greetings'>,
+): DetectedVoiceFingerprint {
+  const turns = collectCharacterTurns(card)
+  if (turns.length < 2) return { verbalTics: [], catchphrases: [], turnsAnalyzed: turns.length }
+
+  const spokenPerTurn = turns.map(spokenText)
+
+  // Verbal tics: a candidate appearing in at least two distinct turns, most-recurring first.
+  const ticHits = TIC_CANDIDATES.map((tic) => {
+    const re = new RegExp(`(^|[^a-z'])${escapeRegExp(tic)}([^a-z']|$)`, 'i')
+    const count = spokenPerTurn.filter((s) => re.test(s)).length
+    return { tic, count }
+  })
+    .filter((h) => h.count >= 2)
+    .sort((a, b) => b.count - a.count || a.tic.localeCompare(b.tic))
+  const verbalTics = ticHits.slice(0, 6).map((h) => h.tic)
+
+  // Catchphrases: 2-4-word n-grams repeated verbatim across at least two distinct turns, longest
+  // and most-recurring first, skipping a shorter gram already covered by a longer accepted one.
+  const gramTurns = new Map<string, Set<number>>()
+  spokenPerTurn.forEach((s, idx) => {
+    const words = tokenizeWords(s)
+    for (let n = 4; n >= 2; n--) {
+      for (let i = 0; i + n <= words.length; i++) {
+        const gram = words.slice(i, i + n)
+        if (gram.every((w) => STOPWORDS.has(w))) continue
+        const key = gram.join(' ')
+        if (!gramTurns.has(key)) gramTurns.set(key, new Set())
+        gramTurns.get(key)!.add(idx)
+      }
+    }
+  })
+  const candidates = [...gramTurns.entries()]
+    .filter(([, turnSet]) => turnSet.size >= 2)
+    .sort((a, b) => b[1].size - a[1].size || b[0].length - a[0].length)
+  const catchphrases: string[] = []
+  for (const [gram] of candidates) {
+    if (catchphrases.some((c) => c.includes(gram))) continue
+    catchphrases.push(gram)
+    if (catchphrases.length >= 5) break
+  }
+
+  // Sentence rhythm: average words/sentence across all spoken text, banded into a plain-English read.
+  const sentenceLengths = spokenPerTurn
+    .flatMap((s) => s.split(/(?<=[.!?])\s+/))
+    .map(countProseWords)
+    .filter((n) => n > 0)
+  let sentenceRhythm: string | undefined
+  if (sentenceLengths.length >= 2) {
+    const avg = sentenceLengths.reduce((a, b) => a + b, 0) / sentenceLengths.length
+    sentenceRhythm =
+      avg <= 6
+        ? 'Short, clipped sentences.'
+        : avg >= 16
+          ? 'Long, winding sentences.'
+          : 'Medium-length, even sentences.'
+  }
+
+  // Punctuation habits: only surfaced when a clear majority of turns share the habit, so one dramatic
+  // line in an otherwise plain card doesn't get generalized into a "trait".
+  const total = spokenPerTurn.length
+  const share = (re: RegExp) => spokenPerTurn.filter((s) => re.test(s)).length / total
+  const punctuationBits: string[] = []
+  if (share(/\.\.\.|…/) >= 0.4) punctuationBits.push('trails off with ellipses often')
+  if (share(/!/) >= 0.5) punctuationBits.push('frequent exclamation points')
+  if (share(/\?/) >= 0.5) punctuationBits.push('asks a lot of questions')
+  const punctuationNotes = punctuationBits.length ? punctuationBits.join('; ') : undefined
+
+  return { verbalTics, catchphrases, sentenceRhythm, punctuationNotes, turnsAnalyzed: turns.length }
+}
+
 /** Words to tokens, plus room to finish the sentence the model is in when it reaches the band's target. */
 const TOKENS_PER_WORD = 1.6
 const SENTENCE_HEADROOM = 1.5

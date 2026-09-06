@@ -1,4 +1,4 @@
-import type { Character } from './cardSpec'
+import type { Character, VoiceFingerprint } from './cardSpec'
 
 /** Caps for the more open-ended, free-typed profile lists — an author who keeps adding "likes"
  *  over time shouldn't silently grow this note forever (10f's "ever-growing character card"
@@ -10,6 +10,8 @@ const MAX_LIKES = 8
 const MAX_GOALS = 5
 const MAX_LOCATIONS = 5
 const MAX_SOCIAL_CONNECTIONS = 6
+const MAX_TICS = 6
+const MAX_CATCHPHRASES = 5
 
 /**
  * Composes 10e's life-context fields (occupation, home/frequented locations, likes/goals/
@@ -18,7 +20,7 @@ const MAX_SOCIAL_CONNECTIONS = 6
  * actually reach the model, not just sit in the editor. `undefined` when nothing is set, so it
  * adds nothing to the prompt for a character with none of these fields authored.
  */
-export function buildCharacterProfileNote(character: Character): string | undefined {
+function buildLifeContextNote(character: Character): string | undefined {
   const { occupation, workplace, homeLocation, frequentedLocations, likes, goals, boundaries, socialConnections } = character
   const parts: string[] = []
   if (occupation?.trim() || workplace?.trim()) {
@@ -42,4 +44,42 @@ export function buildCharacterProfileNote(character: Character): string | undefi
   }
   if (parts.length === 0) return undefined
   return `Life beyond this scene: ${parts.join('. ')}.`
+}
+
+/**
+ * Folds an authored `VoiceFingerprint` (`cardSpec.ts`) into one compact instruction line — the
+ * mechanism that makes it more than an editor field nobody reads. Deliberately its own sentence
+ * rather than appended into `buildLifeContextNote`'s "Life beyond this scene" line: those are
+ * in-fiction facts, this is a style directive, and folding them together would bury a "keep this
+ * consistent every turn" instruction inside a paragraph about backstory. `undefined` when the
+ * character has no fingerprint authored, so it costs nothing for every character that predates
+ * this field (which is all of them).
+ */
+function buildVoiceFingerprintNote(fingerprint: VoiceFingerprint | undefined): string | undefined {
+  if (!fingerprint) return undefined
+  const bits: string[] = []
+  if (fingerprint.verbalTics?.length) {
+    bits.push(`verbal tics: ${fingerprint.verbalTics.slice(0, MAX_TICS).map((t) => `"${t}"`).join(', ')}`)
+  }
+  if (fingerprint.catchphrases?.length) {
+    bits.push(`catchphrases they reuse: ${fingerprint.catchphrases.slice(0, MAX_CATCHPHRASES).map((c) => `"${c}"`).join(', ')}`)
+  }
+  if (fingerprint.dialectNotes?.trim()) bits.push(`dialect/register: ${fingerprint.dialectNotes.trim()}`)
+  if (fingerprint.sentenceRhythm?.trim()) bits.push(`sentence rhythm: ${fingerprint.sentenceRhythm.trim()}`)
+  if (bits.length === 0) return undefined
+  return `Speech patterns to stay consistent with, every turn: ${bits.join('; ')}.`
+}
+
+/**
+ * The single note folded into the identity block alongside description/personality/scenario
+ * (`PromptBuildInput.characterProfile`, `builder.ts`) — everything here lives on `Character`, not
+ * the portable `CharacterCardData` the builder otherwise reads from directly. Two independent
+ * sub-notes (life context, voice fingerprint) are combined so either can be present alone without
+ * the other leaving a stray separator behind.
+ */
+export function buildCharacterProfileNote(character: Character): string | undefined {
+  const blocks = [buildLifeContextNote(character), buildVoiceFingerprintNote(character.voiceFingerprint)].filter(
+    (b): b is string => !!b,
+  )
+  return blocks.length ? blocks.join('\n') : undefined
 }

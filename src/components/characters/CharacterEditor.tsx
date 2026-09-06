@@ -4,7 +4,13 @@ import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { charactersApi, instructTemplatesApi, worldsApi } from '@/lib/api/client'
 import type { Character, GalleryEntry, OutreachFrequency, RelationshipStarter, SocialConnection } from '@/lib/characters/cardSpec'
 import { blankCharacterData } from '@/lib/characters/cardSpec'
-import { REPLY_LENGTH_HINTS, REPLY_LENGTH_LABELS, deriveCardReplyBand, type ReplyLength } from '@/lib/characters/voice'
+import {
+  REPLY_LENGTH_HINTS,
+  REPLY_LENGTH_LABELS,
+  deriveCardReplyBand,
+  detectVoiceFingerprint,
+  type ReplyLength,
+} from '@/lib/characters/voice'
 import { downloadJson, downloadPng, fileToDataUrl, importCharacterFile } from '@/lib/characters/importExport'
 import { buildCharacterPack, downloadCharacterPack, importCharacterPack, parseCharacterPackFile } from '@/lib/characters/pack'
 import { DEFAULT_EXPRESSIONS, slugifyExpressionId, type CustomExpression } from '@/lib/vn/expressions'
@@ -21,7 +27,7 @@ import { ListEditor } from '@/components/ui/ListEditor'
 import { FileButton } from '@/components/ui/FileButton'
 import { GenerateImageButton } from '@/components/ui/GenerateImageButton'
 import { GenerateExpressionSetDialog } from './GenerateExpressionSetDialog'
-import { errorMessage, toastError, toastSuccess } from '@/lib/store/useToastStore'
+import { errorMessage, toastError, toastInfo, toastSuccess } from '@/lib/store/useToastStore'
 import { confirmDialog } from '@/lib/store/useConfirmStore'
 import { TTS_PROVIDER_LABELS, type TtsProviderId } from '@/lib/voice/ttsProviders'
 import { BUILTIN_INSTRUCT_TEMPLATES } from '@/lib/prompt/instructTemplates'
@@ -86,6 +92,10 @@ export function CharacterEditor({
   const [schedule, setSchedule] = useState<ScheduleEntry[]>(character?.schedule ?? [])
   const [voiceProvider, setVoiceProvider] = useState<TtsProviderId | ''>(character?.voice?.provider ?? '')
   const [voiceId, setVoiceId] = useState(character?.voice?.voiceId ?? '')
+  const [verbalTics, setVerbalTics] = useState<string[]>(character?.voiceFingerprint?.verbalTics ?? [])
+  const [catchphrases, setCatchphrases] = useState<string[]>(character?.voiceFingerprint?.catchphrases ?? [])
+  const [dialectNotes, setDialectNotes] = useState(character?.voiceFingerprint?.dialectNotes ?? '')
+  const [sentenceRhythm, setSentenceRhythm] = useState(character?.voiceFingerprint?.sentenceRhythm ?? '')
   const [sfxWords, setSfxWords] = useState<string[]>(character?.sfxWords ?? [])
   const [instructTemplateId, setInstructTemplateId] = useState(character?.instructTemplateId ?? '')
   const [replyLength, setReplyLength] = useState<ReplyLength>(character?.replyLength ?? 'auto')
@@ -125,6 +135,10 @@ export function CharacterEditor({
     setRelationshipStarters(character?.relationshipStarters ?? [])
     setVoiceProvider(character?.voice?.provider ?? '')
     setVoiceId(character?.voice?.voiceId ?? '')
+    setVerbalTics(character?.voiceFingerprint?.verbalTics ?? [])
+    setCatchphrases(character?.voiceFingerprint?.catchphrases ?? [])
+    setDialectNotes(character?.voiceFingerprint?.dialectNotes ?? '')
+    setSentenceRhythm(character?.voiceFingerprint?.sentenceRhythm ?? '')
     setSfxWords(character?.sfxWords ?? [])
     setInstructTemplateId(character?.instructTemplateId ?? '')
     setReplyLength(character?.replyLength ?? 'auto')
@@ -151,6 +165,15 @@ export function CharacterEditor({
   // entirely, so an `undefined` here would make the update request omit the field altogether and
   // silently leave the character's previous value in place instead of actually clearing it.
   const voice = voiceProvider || voiceId.trim() ? { provider: voiceProvider || undefined, voiceId: voiceId.trim() || undefined } : null
+  const voiceFingerprint =
+    verbalTics.length || catchphrases.length || dialectNotes.trim() || sentenceRhythm.trim()
+      ? {
+          verbalTics: verbalTics.length ? verbalTics : undefined,
+          catchphrases: catchphrases.length ? catchphrases : undefined,
+          dialectNotes: dialectNotes.trim() || undefined,
+          sentenceRhythm: sentenceRhythm.trim() || undefined,
+        }
+      : null
   const weatherPreferences =
     weatherLoves.length || weatherHates.length ? { loves: weatherLoves, hates: weatherHates } : null
 
@@ -177,6 +200,39 @@ export function CharacterEditor({
     )
   }
 
+  /**
+   * The "Detect from examples" button — a deterministic, zero-cost heuristic over the card's own
+   * `mes_example`/`first_mes`/alternate greetings (`detectVoiceFingerprint`, `voice.ts`), not a model
+   * call: repeated words/phrases, sentence length, and punctuation habits are exactly the kind of
+   * mechanical property a `String.split` measures perfectly and a small local model counts
+   * unreliably, so there's nothing to await, nothing to fail, and nothing to mock in a test. Merges
+   * into whatever's already authored rather than overwriting it — new tics/catchphrases are added
+   * (deduped), and prose fields are only filled when empty, so re-running this after hand-editing
+   * never clobbers a deliberate edit.
+   */
+  const detectVoiceFromExamples = () => {
+    const detected = detectVoiceFingerprint(form)
+    if (detected.turnsAnalyzed < 2) {
+      toastInfo('Not enough example dialogue or greetings to detect a pattern — write a couple of example turns first.')
+      return
+    }
+    const foundAnything =
+      detected.verbalTics.length || detected.catchphrases.length || detected.sentenceRhythm || detected.punctuationNotes
+    if (!foundAnything) {
+      toastInfo(`Looked at ${detected.turnsAnalyzed} turns but found nothing that clearly recurs — try adding more example dialogue.`)
+      return
+    }
+    setVerbalTics((cur) => [...new Set([...cur, ...detected.verbalTics])])
+    setCatchphrases((cur) => [...new Set([...cur, ...detected.catchphrases])])
+    setSentenceRhythm((cur) => cur.trim() || detected.sentenceRhythm || cur)
+    setDialectNotes((cur) => (cur.trim() ? cur : detected.punctuationNotes ? detected.punctuationNotes : cur))
+    toastSuccess(
+      `Detected from ${detected.turnsAnalyzed} turns: ${detected.verbalTics.length} verbal tic(s), ${detected.catchphrases.length} catchphrase(s)${
+        detected.sentenceRhythm ? ', sentence rhythm' : ''
+      }${detected.punctuationNotes ? ', punctuation habits' : ''}. Review and edit below.`,
+    )
+  }
+
   const addSocialConnection = () => setSocialConnections((list) => [...list, { id: newId(), name: '', relation: '' }])
   const updateSocialConnection = (id: string, patch: Partial<SocialConnection>) =>
     setSocialConnections((list) => list.map((c) => (c.id === id ? { ...c, ...patch } : c)))
@@ -198,6 +254,7 @@ export function CharacterEditor({
       gallery,
       relationshipStarters,
       voice,
+      voiceFingerprint,
       sfxWords: sfxWords.length ? sfxWords : null,
       instructTemplateId: instructTemplateId || null,
       replyLength: replyLength !== 'auto' ? replyLength : null,
@@ -1182,6 +1239,56 @@ export function CharacterEditor({
               placeholder="Leave blank to use the global voice"
             />
           </div>
+        </Section>
+      )}
+
+      {tab === 'voice' && (
+        <Section
+          title="Voice fingerprint"
+          description="Concrete, recurring speech patterns — not a general impression like personality, but the actual repeatable tells that make a line unmistakably theirs. Reaches the model every turn alongside their description and personality."
+          surface="bare"
+          action={
+            <Button variant="ghost" onClick={detectVoiceFromExamples} className="inline-flex items-center">
+              <Sparkles className="mr-1 h-3.5 w-3.5" /> Detect from examples
+            </Button>
+          }
+        >
+          <div className="grid grid-cols-1 gap-x-3 sm:grid-cols-2">
+            <TextField
+              label="Verbal tics / filler words"
+              value={verbalTics.join(', ')}
+              onChange={(e) => setVerbalTics(e.target.value.split(',').map((v) => v.trim()).filter(Boolean))}
+              placeholder="well,, I mean, you know?"
+              hint="Words or short phrases they lean on, comma separated."
+            />
+            <TextField
+              label="Catchphrases"
+              value={catchphrases.join(', ')}
+              onChange={(e) => setCatchphrases(e.target.value.split(',').map((v) => v.trim()).filter(Boolean))}
+              placeholder="you're impossible, don't push it"
+              hint="Signature phrases they reuse across scenes, not just once."
+            />
+            <TextAreaField
+              label="Dialect / register notes"
+              rows={2}
+              value={dialectNotes}
+              onChange={(e) => setDialectNotes(e.target.value)}
+              placeholder="Clipped and formal, never contracts a verb. Or: Kansai-ben, drops word endings."
+              className="sm:col-span-2"
+            />
+            <TextField
+              label="Sentence rhythm"
+              value={sentenceRhythm}
+              onChange={(e) => setSentenceRhythm(e.target.value)}
+              placeholder="Short and clipped. Or: long, winding, rarely a full stop."
+              className="sm:col-span-2"
+            />
+          </div>
+          <p className="mt-2 text-[11px] text-text-muted">
+            "Detect from examples" reads this card's own example dialogue and greetings for patterns that actually recur —
+            it never calls the model, so it's instant and never wrong about what's on the page, but it can only find what's
+            already written. It adds to what's here rather than replacing it; edit or remove anything it gets wrong.
+          </p>
         </Section>
       )}
 

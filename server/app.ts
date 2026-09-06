@@ -318,6 +318,22 @@ function normalizeSocialConnections(raw: unknown): { id: string; name: string; r
   return entries.length > 0 ? entries : undefined
 }
 
+/** `Character.voiceFingerprint` (src/lib/characters/cardSpec.ts) — free-typed speech-pattern fields, same shape discipline as the rest of this file: trim, drop empties, undefined when nothing survives. */
+function normalizeVoiceFingerprint(
+  raw: unknown,
+): { verbalTics?: string[]; catchphrases?: string[]; dialectNotes?: string; sentenceRhythm?: string } | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const obj = raw as Record<string, unknown>
+  const result: { verbalTics?: string[]; catchphrases?: string[]; dialectNotes?: string; sentenceRhythm?: string } = {}
+  const verbalTics = normalizeStringArray(obj.verbalTics)
+  const catchphrases = normalizeStringArray(obj.catchphrases)
+  if (verbalTics) result.verbalTics = verbalTics
+  if (catchphrases) result.catchphrases = catchphrases
+  if (typeof obj.dialectNotes === 'string' && obj.dialectNotes.trim()) result.dialectNotes = obj.dialectNotes.trim()
+  if (typeof obj.sentenceRhythm === 'string' && obj.sentenceRhythm.trim()) result.sentenceRhythm = obj.sentenceRhythm.trim()
+  return Object.keys(result).length > 0 ? result : undefined
+}
+
 const OUTREACH_FREQUENCIES = new Set(['never', 'rare', 'normal', 'eager'])
 
 /** 10f's authored outreach trait — rejects an unrecognized frequency (e.g. from a hand-edited backup) rather than letting it silently fall through as `undefined` in a threshold lookup, which would make an unrecognized character permanently eligible. */
@@ -377,6 +393,7 @@ app.post('/api/characters', (req, res) => {
     gallery,
     relationshipStarters: req.body.relationshipStarters ?? [],
     voice: req.body.voice ?? undefined,
+    voiceFingerprint: normalizeVoiceFingerprint(req.body.voiceFingerprint),
     sfxWords: normalizeStringArray(req.body.sfxWords),
     instructTemplateId: typeof req.body.instructTemplateId === 'string' ? req.body.instructTemplateId : undefined,
     replyLength: normalizeReplyLength(req.body.replyLength),
@@ -417,6 +434,7 @@ app.put('/api/characters/:id', (req, res) => {
   if ('gallery' in req.body) patch.gallery = normalizeGalleryEntries(id, req.body.gallery)
   if ('relationshipStarters' in req.body) patch.relationshipStarters = req.body.relationshipStarters ?? []
   if ('voice' in req.body) patch.voice = req.body.voice ?? undefined
+  if ('voiceFingerprint' in req.body) patch.voiceFingerprint = normalizeVoiceFingerprint(req.body.voiceFingerprint)
   if ('sfxWords' in req.body) patch.sfxWords = normalizeStringArray(req.body.sfxWords)
   if ('instructTemplateId' in req.body) patch.instructTemplateId = typeof req.body.instructTemplateId === 'string' ? req.body.instructTemplateId : undefined
   if ('replyLength' in req.body) patch.replyLength = normalizeReplyLength(req.body.replyLength)

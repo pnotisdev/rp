@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
+  collectCharacterTurns,
   countProseWords,
   deriveCardReplyBand,
+  detectVoiceFingerprint,
   extractExampleCharTurns,
   replyMaxTokens,
   resolveReplyLength,
@@ -72,6 +74,116 @@ describe('resolveReplyLength', () => {
     expect(r.band).toBe('brief')
     expect(r.derived).toBe(true)
     expect(r.instruction).toContain('example dialogue')
+  })
+})
+
+describe('collectCharacterTurns', () => {
+  it('combines example turns, first_mes, and alternate greetings, dropping blanks', () => {
+    const turns = collectCharacterTurns({
+      mes_example: TERSE_EXAMPLES,
+      first_mes: 'Hey there.',
+      alternate_greetings: ['Oh, it\'s you.', '  ', undefined as unknown as string].filter(Boolean),
+    })
+    expect(turns).toEqual(['Fine.', "*shrugs* If you're paying.", 'Hey there.', "Oh, it's you."])
+  })
+
+  it('returns just the example turns when there is no greeting', () => {
+    expect(collectCharacterTurns({ mes_example: TERSE_EXAMPLES, first_mes: '' })).toHaveLength(2)
+  })
+})
+
+describe('detectVoiceFingerprint', () => {
+  it('reports zero turns analyzed and finds nothing for a blank card', () => {
+    const d = detectVoiceFingerprint({ mes_example: '', first_mes: '' })
+    expect(d).toEqual({ verbalTics: [], catchphrases: [], turnsAnalyzed: 0 })
+  })
+
+  it('does not treat a single turn as "recurring" anything, even if it repeats a word internally', () => {
+    // One turn, however distinctive, cannot demonstrate a *recurring* pattern across turns.
+    const d = detectVoiceFingerprint({
+      mes_example: '',
+      first_mes: '"Well, well, well, look who it is. Well I never."',
+    })
+    expect(d.turnsAnalyzed).toBe(1)
+    expect(d.verbalTics).toEqual([])
+    expect(d.catchphrases).toEqual([])
+  })
+
+  const TSUNDERE = [
+    '<START>',
+    '{{user}}: Did you make this for me?',
+    '{{char}}: "Well, it\'s not like I wanted to make it for you or anything." *She shoves the box into his hands without looking at him.*',
+    '<START>',
+    '{{user}}: You waited outside for an hour?',
+    '{{char}}: "Well, it\'s not like I have anywhere better to be." *She looks away, ears red.*',
+    '<START>',
+    '{{user}}: Thanks for helping me study.',
+    '{{char}}: "Fine! Whatever! Just don\'t expect me to do it again!" *She huffs and crosses her arms.*',
+  ].join('\n')
+
+  it('detects a recurring verbal tic across distinct turns', () => {
+    const d = detectVoiceFingerprint({
+      mes_example: TSUNDERE,
+      first_mes: '"Well, it\'s not like I asked you to come over, you know."',
+    })
+    expect(d.turnsAnalyzed).toBe(4)
+    expect(d.verbalTics).toContain('well')
+  })
+
+  it('detects a repeated multi-word catchphrase across distinct turns, not just a single one', () => {
+    const d = detectVoiceFingerprint({
+      mes_example: TSUNDERE,
+      first_mes: '"Well, it\'s not like I asked you to come over, you know."',
+    })
+    expect(d.catchphrases.some((c) => c.includes("it's not like i"))).toBe(true)
+  })
+
+  it('does not surface a phrase that only appears in one turn', () => {
+    const d = detectVoiceFingerprint({
+      mes_example: TSUNDERE,
+      first_mes: '"Well, it\'s not like I asked you to come over, you know."',
+    })
+    expect(d.catchphrases.some((c) => c.includes('do it again'))).toBe(false)
+    expect(d.catchphrases.some((c) => c.includes('helping me study'))).toBe(false)
+  })
+
+  it('excludes a repeated stopword-only n-gram from catchphrases', () => {
+    const d = detectVoiceFingerprint({
+      mes_example: '',
+      first_mes: '"I stood at the edge of the lake for a long while."',
+      alternate_greetings: ['"He handed me the key of the door and said nothing."'],
+    })
+    expect(d.catchphrases.some((c) => c === 'of the')).toBe(false)
+  })
+
+  it('reads a terse card as short, clipped sentence rhythm', () => {
+    const d = detectVoiceFingerprint({ mes_example: TERSE_EXAMPLES, first_mes: 'Hi. Sit.' })
+    expect(d.sentenceRhythm).toBe('Short, clipped sentences.')
+  })
+
+  it('reads a verbose card as long, winding sentence rhythm', () => {
+    const d = detectVoiceFingerprint({
+      mes_example: VERBOSE_EXAMPLES,
+      first_mes:
+        '"I have spent a very long time thinking about the particular quality of light that falls across this harbour in the early evening, and I am still not sure I have found the words for it, even after all these years of trying."',
+    })
+    expect(d.sentenceRhythm).toBe('Long, winding sentences.')
+  })
+
+  it('flags a genuine majority ellipsis/question habit but not an isolated one', () => {
+    const ellipsisHeavy = detectVoiceFingerprint({
+      mes_example: '',
+      first_mes: '"I mean... I guess... it could work..."',
+      alternate_greetings: ['"Maybe... if you really want to..."', '"I suppose... why not..."'],
+    })
+    expect(ellipsisHeavy.punctuationNotes).toContain('ellipses')
+
+    const mostlyPlain = detectVoiceFingerprint({
+      mes_example: '',
+      first_mes: '"Sure, that works."',
+      alternate_greetings: ['"Sounds good to me."', '"Wait... are you serious?"'],
+    })
+    expect(mostlyPlain.punctuationNotes ?? '').not.toContain('ellipses')
   })
 })
 

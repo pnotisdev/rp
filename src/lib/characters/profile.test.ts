@@ -57,4 +57,47 @@ describe('buildCharacterProfileNote', () => {
     expect(note).toContain('Person 5')
     expect(note).not.toContain('Person 6')
   })
+
+  it('folds an authored voice fingerprint in as its own sentence, not merged into life context', () => {
+    const note = buildCharacterProfileNote(
+      character({
+        occupation: 'barista',
+        voiceFingerprint: { verbalTics: ['well', 'you know'], catchphrases: ["it's not like i"] },
+      }),
+    )
+    expect(note).toContain('Works as barista')
+    expect(note).toContain('Speech patterns to stay consistent with')
+    expect(note).toContain('"well"')
+    expect(note).toContain('"you know"')
+    expect(note).toContain(`"it's not like i"`)
+  })
+
+  it('includes dialect notes and sentence rhythm when authored', () => {
+    const note = buildCharacterProfileNote(
+      character({
+        voiceFingerprint: { dialectNotes: 'clipped, never contracts a verb', sentenceRhythm: 'Short, clipped sentences.' },
+      }),
+    )
+    expect(note).toContain('clipped, never contracts a verb')
+    expect(note).toContain('Short, clipped sentences.')
+  })
+
+  it('caps verbal tics and catchphrases in the note rather than growing without bound', () => {
+    const verbalTics = Array.from({ length: 10 }, (_, i) => `tic${i}`)
+    const catchphrases = Array.from({ length: 10 }, (_, i) => `phrase ${i}`)
+    const note = buildCharacterProfileNote(character({ voiceFingerprint: { verbalTics, catchphrases } }))
+    expect(note).toContain('"tic5"')
+    expect(note).not.toContain('"tic6"')
+    expect(note).toContain('"phrase 4"')
+    expect(note).not.toContain('"phrase 5"')
+  })
+
+  it('returns undefined for an empty voice fingerprint object with nothing set', () => {
+    expect(buildCharacterProfileNote(character({ voiceFingerprint: {} }))).toBeUndefined()
+  })
+
+  it('still returns a note when only the voice fingerprint is set, with no life-context fields at all', () => {
+    const note = buildCharacterProfileNote(character({ voiceFingerprint: { dialectNotes: 'blunt, one-word answers' } }))
+    expect(note).toBe('Speech patterns to stay consistent with, every turn: dialect/register: blunt, one-word answers.')
+  })
 })

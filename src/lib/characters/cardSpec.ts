@@ -10,6 +10,25 @@ import type { Outfit } from '@/lib/vn/outfits'
 
 export type WorldInfoActivationMode = 'always' | 'keyword' | 'manual'
 
+/**
+ * Concrete, recurring speech patterns an author fills in directly — the structured complement to
+ * the free-text `personality`/`mes_example`, which only ever describe voice in the abstract ("she's
+ * blunt") rather than naming the actual, repeatable tells that make a line unmistakably this
+ * character's. `detectVoiceFingerprint` (`src/lib/characters/voice.ts`) can seed a first draft of
+ * this from the card's own examples; every field here stays freely editable afterward regardless of
+ * where it came from.
+ */
+export interface VoiceFingerprint {
+  /** Filler words/discourse markers this character leans on — "well,", "I mean", "you know?" */
+  verbalTics?: string[]
+  /** Signature phrases they reuse across scenes, not just once — "you're impossible", "don't push it". */
+  catchphrases?: string[]
+  /** Dialect, register, and formality notes in the author's own words — e.g. "clipped and formal, never contracts a verb" or "Kansai-ben, drops word endings". */
+  dialectNotes?: string
+  /** How their sentences tend to run, in the author's own words — e.g. "short and clipped" or "long, winding, rarely a full stop". */
+  sentenceRhythm?: string
+}
+
 export interface RelationshipStarter {
   id: string
   /** Short picker label, e.g. "Childhood friends". */
@@ -135,6 +154,8 @@ export interface Character {
   relationshipStarters?: RelationshipStarter[]
   /** Per-character TTS override — unset fields fall back to the global Settings → Voice config. */
   voice?: { provider?: TtsProviderId; voiceId?: string }
+  /** Structured speech patterns (verbal tics, catchphrases, dialect, sentence rhythm) — reaches the model via `buildCharacterProfileNote` (`profile.ts`), the same "Character-only field folded into the identity block" path `likes`/`goals`/`socialConnections` already use. */
+  voiceFingerprint?: VoiceFingerprint
   /** Extra comic sound-effect words this character's messages get the manga-style "burst" styling on, beyond the built-in list — e.g. "nya", "mrrp" for a catgirl, or an imouto's own vocalisations. Display-only; never sent to the model. */
   sfxWords?: string[]
   /** Per-character instruct-template override (builtin or custom id) — unset falls back to the global Settings → Generation default. */
