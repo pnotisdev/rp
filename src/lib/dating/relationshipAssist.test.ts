@@ -412,6 +412,78 @@ describe('assessRelationshipMoment: persistent plans', () => {
   })
 })
 
+// Standing impressions of/expectations of the player (`dating/beliefs.ts`/`dating/expectations.ts`)
+// plus the character's own private fear (`prompt/mindGuidance.ts`'s fearGuidance) — all three ride
+// along in this same judge call, same shape as plans/mood/need/intent above.
+describe('assessRelationshipMoment: beliefs, expectations, and fear', () => {
+  const baseParams = { history: TRANSCRIPT, latestReply: 'Thanks for helping me pack up.', charName: 'Sumire', userName: 'Kai', current: currentStats }
+  const EMPTY_REPLY =
+    '{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"beliefUpdates":[],"expectationUpdates":[]}'
+
+  it('always asks for beliefUpdates/expectationUpdates, and numbers the active lists only when some were passed', async () => {
+    let withLists = ''
+    await assessRelationshipMoment(
+      stubClient(EMPTY_REPLY, (p) => {
+        withLists = p.prompt as string
+      }),
+      { ...baseParams, activeBeliefs: ['He is unusually patient with me.'], activeExpectations: ['expects a check-in most Sundays'] },
+    )
+    expect(withLists).toContain('"beliefUpdates"')
+    expect(withLists).toContain('"expectationUpdates"')
+    expect(withLists).toContain('0: He is unusually patient with me.')
+    expect(withLists).toContain('0: expects a check-in most Sundays')
+
+    let without = ''
+    await assessRelationshipMoment(
+      stubClient(EMPTY_REPLY, (p) => {
+        without = p.prompt as string
+      }),
+      baseParams,
+    )
+    expect(without).toContain("hasn't formed any standing impressions")
+    expect(without).toContain('no standing expectations')
+  })
+
+  it('returns a parsed belief add update', async () => {
+    const reply =
+      '{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"beliefUpdates":[{"action":"add","text":"He avoids hard conversations."}]}'
+    const moment = await assessRelationshipMoment(stubClient(reply), baseParams)
+    expect(moment.beliefUpdates).toEqual([{ action: 'add', text: 'He avoids hard conversations.' }])
+  })
+
+  it('drops a belief revise/drop update whose index is past the beliefs actually passed in', async () => {
+    const reply =
+      '{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"beliefUpdates":[{"action":"drop","index":4},{"action":"revise","index":0,"text":"sharper"}]}'
+    const moment = await assessRelationshipMoment(stubClient(reply), { ...baseParams, activeBeliefs: ['He is patient.'] })
+    expect(moment.beliefUpdates).toEqual([{ action: 'revise', index: 0, text: 'sharper' }])
+  })
+
+  it('returns a parsed expectation resolve update, and drops one with no valid outcome', async () => {
+    const reply =
+      '{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"expectationUpdates":[{"action":"resolve","index":0,"outcome":"violated"},{"action":"resolve","index":5,"outcome":"met"}]}'
+    const moment = await assessRelationshipMoment(stubClient(reply), { ...baseParams, activeExpectations: ['expects a Sunday check-in'] })
+    expect(moment.expectationUpdates).toEqual([{ action: 'resolve', index: 0, outcome: 'violated' }])
+  })
+
+  it('is [] for both when the model omits them entirely', async () => {
+    const reply = '{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[]}'
+    const moment = await assessRelationshipMoment(stubClient(reply), baseParams)
+    expect(moment.beliefUpdates).toEqual([])
+    expect(moment.expectationUpdates).toEqual([])
+  })
+
+  it('accepts and trims a currentFear, capped at 160 chars, and treats an empty string as no change', async () => {
+    const longFear = 'w'.repeat(300)
+    const reply = `{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"currentFear":"  ${longFear}  "}`
+    const moment = await assessRelationshipMoment(stubClient(reply), baseParams)
+    expect(moment.currentFear?.length).toBe(160)
+
+    const blank =
+      '{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"currentFear":""}'
+    expect((await assessRelationshipMoment(stubClient(blank), baseParams)).currentFear).toBeUndefined()
+  })
+})
+
 // The user's own direct follow-up to the intimacy catalog: a deliberate "first time together" ask,
 // same three-outcome shape as assessCommitmentAsk (untested itself, so this establishes the
 // pattern for both).

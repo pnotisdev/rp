@@ -10,6 +10,8 @@ import { AFTERCARE_VERDICTS, isAftercareVerdict, type AftercareVerdict } from '@
 import { MOOD_VOCAB, NEED_VOCAB, type CharacterMood, type CharacterNeed } from '@/lib/prompt/mindGuidance'
 import { parsePlanUpdates, type PlanUpdate } from '@/lib/dating/plans'
 import type { IntimacyPhase } from '@/lib/dating/intimacyScene'
+import { parseBeliefUpdates, type BeliefUpdate } from '@/lib/dating/beliefs'
+import { parseExpectationUpdates, type ExpectationUpdate } from '@/lib/dating/expectations'
 
 // max_context_length is deliberately omitted here — every call site fetches the server's actual
 // loaded context via `client.getEffectiveMaxContext()` instead of hardcoding a guess.
@@ -256,6 +258,20 @@ export interface RelationshipMoment {
    * caller as "no change" and keeps the current phase, mirroring mood/need's own contract.
    */
   intimacyPhase?: IntimacyPhase | 'resolved'
+  /**
+   * Changes to the character's standing impressions of {{user}} (`dating/beliefs.ts`) — form,
+   * revise, or drop one. `[]` on most turns. `revise`/`drop` indices point into the
+   * `activeBeliefs` list passed in.
+   */
+  beliefUpdates: BeliefUpdate[]
+  /**
+   * Changes to the character's standing expectations of {{user}} (`dating/expectations.ts`) —
+   * form, annotate, or resolve one (naming whether it was met or violated). `[]` on most turns.
+   * `note`/`resolve` indices point into the `activeExpectations` list passed in.
+   */
+  expectationUpdates: ExpectationUpdate[]
+  /** See `prompt/mindGuidance.ts`'s `fearGuidance` — sticky like `mood`/`currentNeed`/`characterIntent`; undefined means no change this turn. */
+  currentFear?: string
 }
 
 /**
@@ -312,6 +328,12 @@ export async function assessRelationshipMoment(
      * building, has reached its peak, or has wound down/concluded.
      */
     currentIntimacyPhase?: IntimacyPhase
+    /** The character's standing impressions of {{user}} (`dating/beliefs.ts`), pre-formatted one per line, in the caller's index order — the judge revises or drops one by that index, and can always add new ones. Omit when there are none. */
+    activeBeliefs?: string[]
+    /** The character's standing expectations of {{user}} (`dating/expectations.ts`), pre-formatted one per line (note baked in), in the caller's index order — the judge annotates or resolves one by that index. Omit when there are none. */
+    activeExpectations?: string[]
+    /** The character's current private fear going into this exchange, if one's been read — see `prompt/mindGuidance.ts`'s `fearGuidance`. */
+    currentFear?: string
   },
 ): Promise<RelationshipMoment> {
   const hasTasks = !!params.pendingTasks?.length
@@ -319,6 +341,8 @@ export async function assessRelationshipMoment(
   const hasOpenThreads = !!params.unresolvedFacts?.length
   const hasPlans = !!params.activePlans?.length
   const hasIntimacyScene = !!params.currentIntimacyPhase
+  const hasBeliefs = !!params.activeBeliefs?.length
+  const hasExpectations = !!params.activeExpectations?.length
   const prompt = [
     'You are scoring relationship momentum, tracking high-level romance route flags, noting durable facts worth remembering long-term, AND (separately) reading the character\'s own current emotional state, an underlying need, and private intentions, in an in-character roleplay.',
     `Current scores (0-100 each): ${DELTA_KEYS.map((k) => `${k}=${params.current[k]}`).join(', ')}.`,
@@ -338,11 +362,17 @@ export async function assessRelationshipMoment(
     hasIntimacyScene
       ? `Separately: an explicit intimate scene is currently in progress (currently read as "${params.currentIntimacyPhase}"). Judge whether the latest reply is still building, has reached its physical peak, or has now wound down/concluded (moving into its aftermath).`
       : '',
-    `${params.charName}'s mood going into this exchange: ${params.currentMood ?? 'not yet read'}. Their underlying need lately: ${params.currentNeed ?? 'not yet read'}. Their private intention going in: ${params.currentIntent ?? 'none noted'}.`,
+    `${params.charName}'s mood going into this exchange: ${params.currentMood ?? 'not yet read'}. Their underlying need lately: ${params.currentNeed ?? 'not yet read'}. Their private intention going in: ${params.currentIntent ?? 'none noted'}. Their private fear going in: ${params.currentFear ?? 'none noted'}.`,
     hasPlans
       ? `${params.charName}'s current standing plans — concrete intentions they're carrying between turns, not just this-turn reactions:\n${params.activePlans!.map((p, i) => `${i}: ${p}`).join('\n')}`
       : `${params.charName} has no standing plans on record yet.`,
-    `Return ONLY a minified JSON object: {"deltas":{ one integer -2..2 per dimension key },"newFlags":[ any newly-established flags from the known set, or [] ],"reason":"...","newFacts":[ any new durable facts, or [] ]${hasOpenThreads ? ',"resolvedFactIndices":[ open-thread index numbers this exchange clearly closed, or [] ]' : ''}${hasTasks ? ',"completedTaskIndices":[ pending task index numbers this exchange clearly and unambiguously accomplished, or [] ]' : ''}${hasAftercare ? `,"aftercareVerdict":"exactly one of [${AFTERCARE_VERDICTS.join(', ')}]"` : ''}${hasIntimacyScene ? ',"intimacyPhase":"exactly one of [building, peak, resolved]"' : ''},"mood":"one of [${MOOD_VOCAB.join(', ')}], only if this exchange gives a clear enough read to state one — omit entirely otherwise","currentNeed":"one of [${NEED_VOCAB.join(', ')}], only if this stretch of the story clearly shows this need going unmet — omit entirely otherwise, and don't change it lightly","characterIntent":"a short (under 12 words) private thing ${params.charName} now wants, only if something concrete and new became clear this exchange — omit entirely otherwise","planUpdates":[ usually [] — see the plan rules below ]}.`,
+    hasBeliefs
+      ? `${params.charName}'s standing impressions of ${params.userName} as a person — not the relationship stats, an actual judgment of who ${params.userName} is:\n${params.activeBeliefs!.map((b, i) => `${i}: ${b}`).join('\n')}`
+      : `${params.charName} hasn't formed any standing impressions of ${params.userName} yet.`,
+    hasExpectations
+      ? `${params.charName}'s standing expectations of ${params.userName} — things ${params.charName} has started counting on, whether or not ${params.userName} knows it:\n${params.activeExpectations!.map((e, i) => `${i}: ${e}`).join('\n')}`
+      : `${params.charName} has no standing expectations of ${params.userName} on record yet.`,
+    `Return ONLY a minified JSON object: {"deltas":{ one integer -2..2 per dimension key },"newFlags":[ any newly-established flags from the known set, or [] ],"reason":"...","newFacts":[ any new durable facts, or [] ]${hasOpenThreads ? ',"resolvedFactIndices":[ open-thread index numbers this exchange clearly closed, or [] ]' : ''}${hasTasks ? ',"completedTaskIndices":[ pending task index numbers this exchange clearly and unambiguously accomplished, or [] ]' : ''}${hasAftercare ? `,"aftercareVerdict":"exactly one of [${AFTERCARE_VERDICTS.join(', ')}]"` : ''}${hasIntimacyScene ? ',"intimacyPhase":"exactly one of [building, peak, resolved]"' : ''},"mood":"one of [${MOOD_VOCAB.join(', ')}], only if this exchange gives a clear enough read to state one — omit entirely otherwise","currentNeed":"one of [${NEED_VOCAB.join(', ')}], only if this stretch of the story clearly shows this need going unmet — omit entirely otherwise, and don't change it lightly","characterIntent":"a short (under 12 words) private thing ${params.charName} now wants, only if something concrete and new became clear this exchange — omit entirely otherwise","currentFear":"a short (under 12 words) private fear ${params.charName} has right now, only if this exchange makes one genuinely clear — omit entirely otherwise, and don't change it lightly","planUpdates":[ usually [] — see the plan rules below ],"beliefUpdates":[ usually [] — see the belief rules below ],"expectationUpdates":[ usually [] — see the expectation rules below ]}.`,
     'Only move a dimension if this specific exchange clearly affected it. Leave the rest at 0. Most turns should move only one or two dimensions and add no new flags.',
     '"reason" is a short (under 12 words) in-world one-liner naming what just happened, e.g. "Complimented her cooking unprompted". Give one only if at least one dimension moved or a flag was added, otherwise "".',
     `"newFacts" is for concrete, durable things worth recalling much later: a name, a stated preference, a piece of backstory, a promise made, a moment that landed hard. Not every line of dialogue. Most turns add none. Each fact is an object {"text": one short standalone sentence, "importance": 0-1, "valence": -1 to 1, "unresolved": true/false}. "importance": ~0.2 for a small detail, 0.8+ for something that reshapes how ${params.charName} sees ${params.userName}. "valence": how it felt to ${params.charName} — negative if it hurt or disappointed, positive if it meant a lot, 0 for neutral information. "unresolved": true only for an open wound or open question the story has NOT closed (a slight not addressed, a promise not yet kept, a question dodged) — most facts are false.`,
@@ -353,6 +383,8 @@ export async function assessRelationshipMoment(
     `"currentNeed" is steadier than mood — a psychological undercurrent this stretch of the story hasn't been meeting (e.g. "reassurance" after being flaky, "recognition" after going unnoticed, "solitude" after being crowded). Omit it almost every turn; it shouldn't flip as readily as mood does, and should only be set or changed on a genuinely clear, sustained signal, not one line of dialogue.`,
     `"characterIntent" is a private thing ${params.charName} wants that the player hasn't necessarily been told — a small hidden agenda that can quietly color future turns (wanting reassurance, wanting space, planning a surprise, wanting an apology first). Omit it on almost every turn; once set it should usually stay omitted (meaning "no change") for a while rather than being reset every exchange.`,
     `"planUpdates" changes ${params.charName}'s standing plans — bigger and longer-lived than "characterIntent": a real intention that spans many turns and can be entirely about ${params.charName}'s own life. Each entry is one of: {"action":"add","goal":"short, in ${params.charName}'s own terms","kind":"personal"|"together"|"distance","note":"optional"} to form a new one; {"action":"note","index":N,"note":"..."} to record progress or a setback on plan N; {"action":"resolve","index":N} to close plan N (finished, abandoned, or overtaken by events). "personal" = ${params.charName}'s own life independent of ${params.userName}; "together" = something they want to do with ${params.userName}; "distance" = deliberately holding back or protecting themselves. Use [] on almost every turn. Only "add" when this exchange genuinely gave ${params.charName} a new reason to want something lasting — a plan formed on a whim and never mentioned again is noise. Resolve a plan the moment the story has clearly moved past it.`,
+    `"beliefUpdates" changes ${params.charName}'s standing impressions of ${params.userName} as a person — a judgment about who ${params.userName} *is*, not a one-off event (that's "newFacts") and not a relationship stat. Each entry is one of: {"action":"add","text":"the impression in ${params.charName}'s own voice, e.g. 'He's unusually patient with me.'"} to form a new one; {"action":"revise","index":N,"text":"..."} to correct or sharpen belief N once it's proven wrong or too simple; {"action":"drop","index":N} to abandon one that's been clearly disproven. Use [] on almost every turn — only add one when this exchange gives real, repeated-pattern evidence, not from a single isolated moment.`,
+    `"expectationUpdates" changes ${params.charName}'s standing expectations of ${params.userName} — something ${params.charName} has started quietly counting on, whether or not ${params.userName} has ever been told. Each entry is one of: {"action":"add","text":"the expectation, e.g. 'expects a check-in most Sundays'"}; {"action":"note","index":N,"note":"..."} to record it playing out; {"action":"resolve","index":N,"outcome":"met"|"violated"} once it's clearly been met or clearly been missed. Use [] on almost every turn. "violated" should be reserved for a real, noticeable letdown, not a trivial miss.`,
     hasAftercare
       ? `"aftercareVerdict" judges only how ${params.userName} treated ${params.charName} in the turns since they were intimate. "tender" = stayed present and warm, gave reassurance or closeness, took ${params.charName} seriously. "cold" = pulled away, went distant or dismissive, changed the subject, or acted as if it had not happened. "awkward" = anything in between, including a fumbled or self-conscious aftermath that was still well meant. Judge ${params.userName}'s behaviour, not ${params.charName}'s, and not whether the intimacy itself went well. Most aftermaths are "awkward" — reserve "cold" for a real, visible withdrawal, not merely for a quiet stretch.`
       : '',
@@ -362,9 +394,10 @@ export async function assessRelationshipMoment(
     hasIntimacyScene
       ? '"intimacyPhase": "building" if the scene is still escalating (anticipation, teasing, not yet at full intensity); "peak" once it has clearly reached full intensity; "resolved" once it has visibly wound down or concluded this reply (moving into its aftermath). Judge only this specific reply, not the scene in the abstract.'
       : '',
-    `Example (nothing much happened): {"deltas":{"affection":1,"trust":0,"chemistry":0,"comfort":1,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"Stayed to help clean up without being asked","newFacts":[]${hasOpenThreads ? ',"resolvedFactIndices":[]' : ''}${hasTasks ? ',"completedTaskIndices":[]' : ''},"planUpdates":[]}`,
-    `Example (a fact landed hard): {"deltas":{"affection":-2,"trust":-1,"chemistry":0,"comfort":-1,"respect":0,"curiosity":0,"tension":2},"newFlags":[],"reason":"Forgot her birthday entirely","newFacts":[{"text":"Forgot ${params.charName}'s birthday","importance":0.75,"valence":-0.7,"unresolved":true}]${hasOpenThreads ? ',"resolvedFactIndices":[]' : ''}${hasTasks ? ',"completedTaskIndices":[]' : ''},"planUpdates":[]}`,
-    `Example (a plan forms — ${params.charName} decides on something lasting): {"deltas":{"affection":0,"trust":1,"chemistry":0,"comfort":0,"respect":1,"curiosity":0,"tension":0},"newFlags":[],"reason":"Opened up about the gallery showcase deadline","newFacts":[]${hasOpenThreads ? ',"resolvedFactIndices":[]' : ''}${hasTasks ? ',"completedTaskIndices":[]' : ''},"planUpdates":[{"action":"add","goal":"finish the mural before the showcase","kind":"personal","note":"three weeks out, behind on it"}]}`,
+    `Example (nothing much happened): {"deltas":{"affection":1,"trust":0,"chemistry":0,"comfort":1,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"Stayed to help clean up without being asked","newFacts":[]${hasOpenThreads ? ',"resolvedFactIndices":[]' : ''}${hasTasks ? ',"completedTaskIndices":[]' : ''},"planUpdates":[],"beliefUpdates":[],"expectationUpdates":[]}`,
+    `Example (a fact landed hard): {"deltas":{"affection":-2,"trust":-1,"chemistry":0,"comfort":-1,"respect":0,"curiosity":0,"tension":2},"newFlags":[],"reason":"Forgot her birthday entirely","newFacts":[{"text":"Forgot ${params.charName}'s birthday","importance":0.75,"valence":-0.7,"unresolved":true}]${hasOpenThreads ? ',"resolvedFactIndices":[]' : ''}${hasTasks ? ',"completedTaskIndices":[]' : ''},"planUpdates":[],"beliefUpdates":[],"expectationUpdates":[]}`,
+    `Example (a plan forms — ${params.charName} decides on something lasting): {"deltas":{"affection":0,"trust":1,"chemistry":0,"comfort":0,"respect":1,"curiosity":0,"tension":0},"newFlags":[],"reason":"Opened up about the gallery showcase deadline","newFacts":[]${hasOpenThreads ? ',"resolvedFactIndices":[]' : ''}${hasTasks ? ',"completedTaskIndices":[]' : ''},"planUpdates":[{"action":"add","goal":"finish the mural before the showcase","kind":"personal","note":"three weeks out, behind on it"}],"beliefUpdates":[],"expectationUpdates":[]}`,
+    `Example (a pattern becomes a real impression, and an expectation is broken): {"deltas":{"affection":-1,"trust":0,"chemistry":0,"comfort":-1,"respect":0,"curiosity":0,"tension":1},"newFlags":[],"reason":"Third Sunday in a row with no check-in","newFacts":[]${hasOpenThreads ? ',"resolvedFactIndices":[]' : ''}${hasTasks ? ',"completedTaskIndices":[]' : ''},"planUpdates":[],"beliefUpdates":[{"action":"add","text":"He means well but tends to go quiet when things get busy for him."}],"expectationUpdates":[{"action":"resolve","index":0,"outcome":"violated"}]}`,
     'JSON:',
   ]
     .filter(Boolean)
@@ -413,11 +446,20 @@ export async function assessRelationshipMoment(
   const currentNeed = NEED_VOCAB.includes(obj.currentNeed as CharacterNeed) ? (obj.currentNeed as CharacterNeed) : undefined
   const characterIntent =
     typeof obj.characterIntent === 'string' && obj.characterIntent.trim() ? obj.characterIntent.trim().slice(0, 160) : undefined
+  const currentFear =
+    typeof obj.currentFear === 'string' && obj.currentFear.trim() ? obj.currentFear.trim().slice(0, 160) : undefined
   // `note`/`resolve` updates that point past the plans actually passed in are dropped — a stale
   // index from a model that miscounted must not silently rewrite or delete the wrong plan.
   const planCount = params.activePlans?.length ?? 0
   const planUpdates = parsePlanUpdates(obj.planUpdates).filter(
     (u) => u.action === 'add' || u.index < planCount,
+  )
+  // Same stale-index guard as `planUpdates` above, for each of the two new lifecycles.
+  const beliefCount = params.activeBeliefs?.length ?? 0
+  const beliefUpdates = parseBeliefUpdates(obj.beliefUpdates).filter((u) => u.action === 'add' || u.index < beliefCount)
+  const expectationCount = params.activeExpectations?.length ?? 0
+  const expectationUpdates = parseExpectationUpdates(obj.expectationUpdates).filter(
+    (u) => u.action === 'add' || u.index < expectationCount,
   )
   // Only trusted when actually asked for, same guard `aftercareVerdict` above already applies — a
   // model volunteering this unprompted is guessing about a scene that isn't tracked as active.
@@ -425,7 +467,23 @@ export async function assessRelationshipMoment(
     hasIntimacyScene && (obj.intimacyPhase === 'building' || obj.intimacyPhase === 'peak' || obj.intimacyPhase === 'resolved')
       ? (obj.intimacyPhase as IntimacyPhase | 'resolved')
       : undefined
-  return { deltas, newFlags, reason, newFacts, resolvedFactIndices, completedTaskIndices, aftercareVerdict, mood, currentNeed, characterIntent, planUpdates, intimacyPhase }
+  return {
+    deltas,
+    newFlags,
+    reason,
+    newFacts,
+    resolvedFactIndices,
+    completedTaskIndices,
+    aftercareVerdict,
+    mood,
+    currentNeed,
+    characterIntent,
+    planUpdates,
+    intimacyPhase,
+    beliefUpdates,
+    expectationUpdates,
+    currentFear,
+  }
 }
 
 /**

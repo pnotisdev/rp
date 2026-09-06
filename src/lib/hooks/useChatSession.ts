@@ -24,6 +24,14 @@ import {
 } from '@/lib/dating/relationshipAssist'
 import { initiativeContribution, nextInitiativeBalance, nextMomentum, warmthDeltaOf } from '@/lib/dating/momentum'
 import { applyPlanUpdates, planLinesForJudge, plansChanged, plansGuidance } from '@/lib/dating/plans'
+import { applyBeliefUpdates, beliefLinesForJudge, beliefsChanged, beliefsGuidance } from '@/lib/dating/beliefs'
+import {
+  applyExpectationUpdates,
+  expectationLinesForJudge,
+  expectationsChanged,
+  expectationsGuidance,
+  violatedExpectationTexts,
+} from '@/lib/dating/expectations'
 import { repeatedIntentNudge, trailingIntentRun } from '@/lib/dating/intent'
 import { isRebuffActive, rebuffGuidance, type RecentRebuff } from '@/lib/dating/rebuff'
 import {
@@ -124,7 +132,7 @@ import {
   isExplicitCategory,
   resolveIntimacyPromptNote,
 } from '@/lib/dating/intimacyCatalog'
-import { afterglowGuidance, authoredStatePriorityNote, characterIntentGuidance, moodGuidance, needGuidance } from '@/lib/prompt/mindGuidance'
+import { afterglowGuidance, authoredStatePriorityNote, characterIntentGuidance, fearGuidance, moodGuidance, needGuidance } from '@/lib/prompt/mindGuidance'
 import { classifyAttachedImageScene, detectExpressionFromSprites, shortlistExpressions } from '@/lib/vn/sceneVision'
 import { assessRapport } from '@/lib/dating/rapport'
 import { bookAppliesToChat } from '@/lib/worldinfo/scope'
@@ -687,9 +695,15 @@ export function useChatSession(chatId: string | null) {
       const moodLine = moodGuidance(speaker.card.name, persona?.name || 'You', speakerTrack.mood)
       const needLine = needGuidance(speaker.card.name, speakerTrack.currentNeed)
       const intentLine = characterIntentGuidance(speaker.card.name, speakerTrack.characterIntent)
+      // The third leg alongside need/intent — see `mindGuidance.ts`'s `fearGuidance` doc comment.
+      const fearLine = fearGuidance(speaker.card.name, speakerTrack.currentFear)
       // The persistent agency layer — a few turn-spanning intentions the character carries of their
       // own (`dating/plans.ts`), formed and retired by the same judge call that sets mood/need/intent.
       const plansLine = plansGuidance(speaker.card.name, persona?.name || 'You', speakerTrack.plans)
+      // Standing impressions of, and expectations of, {{user}} — the "what does she think of him"
+      // layer `plans`/`mood`/`need` didn't cover (`dating/beliefs.ts`/`dating/expectations.ts`).
+      const beliefsLine = beliefsGuidance(speaker.card.name, persona?.name || 'You', speakerTrack.beliefsAboutUser)
+      const expectationsLine = expectationsGuidance(speaker.card.name, persona?.name || 'You', speakerTrack.expectationsOfUser)
       // Item 5: a concrete, testable override for a model's own trained romantic defaults winning
       // over this specific character's authored state. Only fires on an actual tension worth naming
       // — a resistant mood, or a `distance`-kind plan (the character deliberately holding back) —
@@ -808,7 +822,10 @@ export function useChatSession(chatId: string | null) {
             moodLine,
             needLine,
             intentLine,
+            fearLine,
             plansLine,
+            beliefsLine,
+            expectationsLine,
             priorityLine,
             intimacySceneLine,
             rebuffLine,
@@ -1028,7 +1045,27 @@ export function useChatSession(chatId: string | null) {
       // currently active (same ride-along trick `aftercareTurns`/`pendingTasks` already use).
       const openScene = track.intimacyScene ?? undefined
       const sceneActive = isIntimacySceneActive(openScene, charRepliesNow)
-      const { deltas: rawDeltas, newFlags, reason, newFacts, resolvedFactIndices, completedTaskIndices, aftercareVerdict, mood, currentNeed, characterIntent, planUpdates, intimacyPhase } = await assessRelationshipMoment(client, {
+      // Beliefs/expectations go to the judge in the same stable numbered-list shape as plans, so
+      // their own updates can revise/resolve one by index (and always add new ones).
+      const activeBeliefs = track.beliefsAboutUser ?? []
+      const activeExpectations = track.expectationsOfUser ?? []
+      const {
+        deltas: rawDeltas,
+        newFlags,
+        reason,
+        newFacts,
+        resolvedFactIndices,
+        completedTaskIndices,
+        aftercareVerdict,
+        mood,
+        currentNeed,
+        characterIntent,
+        planUpdates,
+        intimacyPhase,
+        beliefUpdates,
+        expectationUpdates,
+        currentFear,
+      } = await assessRelationshipMoment(client, {
         history,
         latestReply,
         charName: speaker.card.name,
@@ -1043,8 +1080,11 @@ export function useChatSession(chatId: string | null) {
         currentMood: track.mood,
         currentNeed: track.currentNeed,
         currentIntent: track.characterIntent,
+        currentFear: track.currentFear,
         aftercareTurns: aftercareWindow,
         currentIntimacyPhase: sceneActive ? openScene!.phase : undefined,
+        activeBeliefs: beliefLinesForJudge(activeBeliefs),
+        activeExpectations: expectationLinesForJudge(activeExpectations),
       })
       // A due window always closes, even if the model declined to name a verdict — leaving it open
       // would keep the aftermath guidance running forever. An unusable answer is read as the
@@ -1180,6 +1220,17 @@ export function useChatSession(chatId: string | null) {
       const nextPlans = applyPlanUpdates(activePlans, planUpdates, messages.length)
       const noPlanChange = !plansChanged(activePlans, nextPlans)
 
+      // Standing impressions of/expectations of {{user}} — same cap-and-age lifecycle as plans,
+      // applied via their own small modules (`dating/beliefs.ts`/`dating/expectations.ts`).
+      const nextBeliefs = applyBeliefUpdates(activeBeliefs, beliefUpdates, messages.length)
+      const noBeliefChange = !beliefsChanged(activeBeliefs, nextBeliefs)
+      // A violated expectation is memorable enough to earn a durable fact (negative valence) — read
+      // off the *pre*-update list, since `applyExpectationUpdates` has already dropped a resolved
+      // entry from the list it returns by the time this runs.
+      const violatedTexts = violatedExpectationTexts(activeExpectations, expectationUpdates)
+      const nextExpectations = applyExpectationUpdates(activeExpectations, expectationUpdates, messages.length)
+      const noExpectationChange = !expectationsChanged(activeExpectations, nextExpectations)
+
       // Item 1's intimacy scene phase advance — only recomputed while a scene is actually active;
       // otherwise carried forward unchanged (including a stale one, which every reader already
       // treats as inactive via `isIntimacySceneActive`, so there's nothing to actively clear here).
@@ -1191,7 +1242,8 @@ export function useChatSession(chatId: string | null) {
       const noMindChange =
         (!mood || mood === track.mood) &&
         (!currentNeed || currentNeed === track.currentNeed) &&
-        (!characterIntent || characterIntent === track.characterIntent)
+        (!characterIntent || characterIntent === track.characterIntent) &&
+        (!currentFear || currentFear === track.currentFear)
       // Coins are NOT granted here — a flat per-turn trickle was tried and deliberately removed
       // (see the "Quiet, player-facing rewards" comment a few lines down): it was silent (no toast)
       // and gated only on `isPrimary`, nothing about whether this turn was actually eventful, so it
@@ -1210,6 +1262,8 @@ export function useChatSession(chatId: string | null) {
         noInitiativeChange &&
         noPlanChange &&
         noSceneChange &&
+        noBeliefChange &&
+        noExpectationChange &&
         // A resolved window must always be written, even if its verdict happened to score flat —
         // otherwise `afterglow` stays set and the aftermath guidance runs forever.
         !resolvedAftercare &&
@@ -1240,9 +1294,12 @@ export function useChatSession(chatId: string | null) {
           // and it may already have noticed something better than "reassurance".
           currentNeed: currentNeed ?? (resolvedAftercare ? aftercareNeed(resolvedAftercare) : undefined) ?? track.currentNeed,
           characterIntent: characterIntent ?? track.characterIntent,
+          currentFear: currentFear ?? track.currentFear,
           momentum,
           initiativeBalance,
           plans: nextPlans,
+          beliefsAboutUser: nextBeliefs,
+          expectationsOfUser: nextExpectations,
           // `null`, not `undefined` — `JSON.stringify` drops undefined-valued keys, so an
           // undefined here would silently leave the window open. Same trap `relationshipWarning`
           // one field up already documents.
@@ -1251,6 +1308,18 @@ export function useChatSession(chatId: string | null) {
         }),
         sceneFlags: [...existingFlags],
       })
+      // A broken expectation is a real, memorable letdown, not a quiet removal — give it the same
+      // durable-fact treatment a hard-landing event already gets, negative valence baked in.
+      for (const text of violatedTexts) {
+        chatFactsApi
+          .create({
+            chatId: chatIdForRelationship,
+            text: `${speaker.card.name} had started expecting ${text}, and it didn't happen.`,
+            importance: 0.6,
+            valence: -0.5,
+          })
+          .catch(() => {})
+      }
       if (resolvedAftercare) {
         const changed = Object.fromEntries(
           Object.entries(aftercareDeltas(resolvedAftercare)).filter(([, v]) => v !== 0),

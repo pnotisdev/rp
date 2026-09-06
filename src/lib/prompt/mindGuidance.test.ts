@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { afterglowGuidance, authoredStatePriorityNote, characterIntentGuidance, MOOD_VOCAB, moodGuidance, NEED_VOCAB, needGuidance } from './mindGuidance'
+import { afterglowGuidance, authoredStatePriorityNote, characterIntentGuidance, fearGuidance, MOOD_VOCAB, moodGuidance, NEED_VOCAB, needGuidance } from './mindGuidance'
 
 describe('moodGuidance', () => {
   it('says nothing with no mood set', () => {
@@ -65,6 +65,23 @@ describe('characterIntentGuidance', () => {
 
   it('never emits a {{char}}/{{user}} macro', () => {
     expect(characterIntentGuidance('Sumire', 'wants space tonight')).not.toContain('{{')
+  })
+})
+
+describe('fearGuidance', () => {
+  it('says nothing with no fear set', () => {
+    expect(fearGuidance('Sumire', undefined)).toBe('')
+  })
+
+  it('names the character and the fear, without a mandate to announce it', () => {
+    const line = fearGuidance('Sumire', 'being seen as too much')
+    expect(line).toContain('Sumire')
+    expect(line).toContain('being seen as too much')
+    expect(line).toMatch(/without.*naming it outright/)
+  })
+
+  it('never emits a {{char}}/{{user}} macro', () => {
+    expect(fearGuidance('Sumire', 'being left behind')).not.toContain('{{')
   })
 })
 

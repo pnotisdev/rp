@@ -342,6 +342,35 @@ export function DirectorPanel({ chat, character, world, onClose }: DirectorPanel
         </Section>
 
         <Section
+          title="Beliefs, expectations & fear"
+          description="What the character has come to think of you, what they've quietly started counting on, and what they're privately afraid of — formed and retired by the per-turn judge, read-only."
+          surface="sunken"
+        >
+          <div className="space-y-1.5">
+            <div className="text-xs text-text-muted">
+              Fear right now: {chat.currentFear ? <span className="text-text">{chat.currentFear}</span> : 'none on record'}
+            </div>
+            {(chat.beliefsAboutUser ?? []).map((b) => (
+              <div key={b.id} className="rounded-lg bg-bg-elevated px-3 py-1.5 text-xs text-text-muted">
+                <span className="text-text">{b.text}</span>
+                <div className="mt-0.5 text-[10px]">belief · formed turn {b.formedTurn}</div>
+              </div>
+            ))}
+            {(chat.expectationsOfUser ?? []).map((e) => (
+              <div key={e.id} className="rounded-lg bg-bg-elevated px-3 py-1.5 text-xs text-text-muted">
+                <span className="text-text">{e.text}</span>
+                <div className="mt-0.5 text-[10px]">
+                  expectation{typeof e.note === 'string' && e.note ? ` · ${e.note}` : ''}
+                </div>
+              </div>
+            ))}
+            {(chat.beliefsAboutUser ?? []).length === 0 && (chat.expectationsOfUser ?? []).length === 0 && (
+              <span className="text-xs text-text-muted">Nothing formed yet.</span>
+            )}
+          </div>
+        </Section>
+
+        <Section
           title="Hand over an item"
           description="A direct inventory grant for testing — doesn't send a chat message the way giving a gift in-scene does."
           surface="sunken"

@@ -23,10 +23,16 @@
  * their own life entirely — now lives in `dating/plans.ts`, driven by the same judge call and read
  * back as its own `styleGuidance` line (`plansGuidance`).
  *
- * The rest of the mindmap (desires, fears, beliefs, opinions, secrets-as-entities, the social
- * graph beyond `socialConnections`, rumors, internal conflicts) stays a documented follow-up (see
- * ROADMAP) — those are each a structurally different, standalone system (their own storage shape,
- * often their own UI), not another field on this one judge call.
+ * `fear` (this file's `fearGuidance`) rides the same judge call as a fourth sticky field, the same
+ * shape as `characterIntent`. `beliefsAboutUser`/`expectationsOfUser` — standing impressions of and
+ * expectations of the *player*, as opposed to this file's fields which are all about the character's
+ * own inner state — live in their own small modules (`dating/beliefs.ts`/`dating/expectations.ts`)
+ * since each has a real multi-entry lifecycle, not a single sticky value.
+ *
+ * The rest of the mindmap (opinions, secrets-as-entities, the social graph beyond
+ * `socialConnections`, rumors, internal conflicts) stays a documented follow-up (see ROADMAP) —
+ * those are each a structurally different, standalone system (their own storage shape, often their
+ * own UI), not another field on this one judge call.
  */
 
 /** A closed vocabulary, not free text — keeps the classifier's output legible and stops it drifting into paragraph-length "moods." */
@@ -103,6 +109,19 @@ export function needGuidance(charName: string, need?: CharacterNeed): string {
 export function characterIntentGuidance(charName: string, intent?: string): string {
   if (!intent) return ''
   return `${charName} is privately holding onto something right now: ${intent}. It can quietly shape what they say or do, but they don't have to act on it or announce it this exact turn.`
+}
+
+/**
+ * A `styleGuidance` line naming the character's current private fear — the third leg alongside
+ * `currentNeed` (a steadier undercurrent) and `characterIntent` (a want): a fear is what actually
+ * explains defensiveness, avoidance, or over-caution in a way neither of those two quite does on
+ * its own. Same sticky-until-replaced contract as the other two (see `mood`'s own doc comment).
+ * Never named to the player as "a fear" — the model shows it, doesn't announce it, same restraint
+ * `characterIntentGuidance` already asks for.
+ */
+export function fearGuidance(charName: string, fear?: string): string {
+  if (!fear) return ''
+  return `Underneath things, ${charName} is quietly afraid of this right now: ${fear}. It can show up as defensiveness, deflection, or over-carefulness in the right moment, without ${charName} ever naming it outright.`
 }
 
 /**

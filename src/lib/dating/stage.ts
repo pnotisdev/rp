@@ -228,6 +228,9 @@ type TrackHost = Pick<
   | 'recentRebuff'
   | 'intimacyScene'
   | 'giftLog'
+  | 'beliefsAboutUser'
+  | 'expectationsOfUser'
+  | 'currentFear'
   | 'participantRelationships'
 >
 
@@ -263,6 +266,9 @@ export function getRelationshipTrack(chat: TrackHost, characterId: string): Rela
       recentRebuff: chat.recentRebuff,
       intimacyScene: chat.intimacyScene,
       giftLog: chat.giftLog,
+      beliefsAboutUser: chat.beliefsAboutUser,
+      expectationsOfUser: chat.expectationsOfUser,
+      currentFear: chat.currentFear,
     }
   }
   return chat.participantRelationships?.[characterId] ?? {}

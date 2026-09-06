@@ -144,6 +144,38 @@ export interface CharacterPlan {
 }
 
 /**
+ * One durable impression the character has formed *about the player as a person* — "he's unusually
+ * patient," "she isn't sure whether {{user}} really understands her ambition" — as distinct from a
+ * `ChatFact` (a discrete remembered *event*) or `characterIntent` (the character's own private
+ * want). Nothing else in the mind-state stack tracks a standing judgment about who {{user}} *is*;
+ * this is that missing piece. Small and capped (`dating/beliefs.ts`'s `MAX_ACTIVE_BELIEFS`) — a
+ * character forms a few real impressions, not a running commentary. `formedTurn` lets a stale,
+ * never-reinforced belief age out the same way a plan does.
+ */
+export interface CharacterBelief {
+  id: string
+  /** The impression itself, in the character's own voice: "He's unusually patient with me." */
+  text: string
+  formedTurn: number
+}
+
+/**
+ * A standing expectation the character has developed *of the player* — "she's started expecting
+ * him to check in on Sundays" — with a real lifecycle: it can be met (quietly retired, usually not
+ * worth dwelling on) or violated (which matters enough that the caller turns it into a durable
+ * `ChatFact` with negative valence, not just a silent removal). Distinct from `CharacterPlan`, which
+ * is the character's own intention, not a standing belief about what the *player* will do.
+ */
+export interface UserExpectation {
+  id: string
+  /** The expectation itself, in the character's own terms: "expects a check-in most Sundays." */
+  text: string
+  formedTurn: number
+  /** Optional running annotation as it plays out — mirrors `CharacterPlan.note`. */
+  note?: string
+}
+
+/**
  * The bundle of relationship state that used to live only as `Chat`'s own top-level fields —
  * always the primary's, even in a group chat, per that field's own original doc comment. A
  * non-primary participant needs the exact same shape to be tracked as a real person rather than an
@@ -239,6 +271,24 @@ export interface RelationshipTrack {
    * ever knowing "given N times total" with no sense of recency.
    */
   giftLog?: GiftLogEntry[]
+  /**
+   * Durable impressions the character has formed about who {{user}} *is* — see `CharacterBelief`'s
+   * own doc comment. Capped and aged out the same way `plans` is (`dating/beliefs.ts`).
+   */
+  beliefsAboutUser?: CharacterBelief[]
+  /**
+   * Standing expectations the character has developed of {{user}} — see `UserExpectation`'s own doc
+   * comment. Capped and aged out the same way `plans` is (`dating/expectations.ts`).
+   */
+  expectationsOfUser?: UserExpectation[]
+  /**
+   * The character's own private fear right now, going into this exchange — the missing third leg
+   * alongside `characterIntent` (a want) and `currentNeed` (an undercurrent): a fear is what makes a
+   * character defensive, avoidant, or overly careful in a way neither of those two quite explains.
+   * Same sticky-until-replaced contract as `mood`/`currentNeed`/`characterIntent` — see `mood`'s own
+   * doc comment. Undefined means no clear read yet, not "fearless".
+   */
+  currentFear?: string
 }
 
 /**
@@ -533,6 +583,12 @@ export interface Chat {
   intimacyScene?: IntimacyScene | null
   /** The primary's own copy of `RelationshipTrack.giftLog` — see that field. */
   giftLog?: GiftLogEntry[]
+  /** The primary's own copy of `RelationshipTrack.beliefsAboutUser` — see that field. */
+  beliefsAboutUser?: CharacterBelief[]
+  /** The primary's own copy of `RelationshipTrack.expectationsOfUser` — see that field. */
+  expectationsOfUser?: UserExpectation[]
+  /** The primary's own copy of `RelationshipTrack.currentFear` — see that field. */
+  currentFear?: string
   /** Ids of one-shot world triggers this chat has already fired (`world/triggers.ts`). Per chat, not per world, so two chats in the same world progress through it independently and a fork inherits the parent's history. */
   firedTriggerIds?: string[]
   activeEvent?: DateEventCard
