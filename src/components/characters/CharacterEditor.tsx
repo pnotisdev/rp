@@ -36,6 +36,8 @@ import { TemplateGallery } from './TemplateGallery'
 import { RegenerateFieldButton } from './RegenerateFieldButton'
 import { LorebookEditor } from '@/components/worldinfo/LorebookEditor'
 import { getGiftCatalog } from '@/lib/dating/gifts'
+import { useSettingsStore } from '@/lib/store/useSettingsStore'
+import { maximumImmersionChecklist, maximumImmersionSamplerParams, maximumImmersionSystemPrompt } from '@/lib/prompt/immersionPreset'
 import {
   PHASES,
   WEATHER_KINDS,
@@ -230,6 +232,29 @@ export function CharacterEditor({
       `Detected from ${detected.turnsAnalyzed} turns: ${detected.verbalTics.length} verbal tic(s), ${detected.catchphrases.length} catchphrase(s)${
         detected.sentenceRhythm ? ', sentence rhythm' : ''
       }${detected.punctuationNotes ? ', punctuation habits' : ''}. Review and edit below.`,
+    )
+  }
+
+  /**
+   * The "Maximum Immersion" one-click bundle (`immersionPreset.ts`) — curation over invention: every
+   * piece here already exists (a system-prompt preset, a sampler preset, two global toggles). This
+   * character's own `system_prompt` override is the one piece that lives on the card; the sampler
+   * and the two global toggles only exist in Settings (`useSettingsStore`), so this reaches into its
+   * already-exported setters directly rather than duplicating them here or asking the user to hunt
+   * them down one at a time. World template is deliberately only *recommended* (see the checklist),
+   * not applied: `WorldTemplateId` is a closed enum threaded through `WorldCard`/`types.ts`, a
+   * reserved file this pass doesn't touch, and silently rewriting an unrelated World record as a
+   * side effect of a character-editor button would be a bigger, riskier change than this one click
+   * should make.
+   */
+  const applyMaximumImmersion = () => {
+    set('system_prompt', maximumImmersionSystemPrompt())
+    const settings = useSettingsStore.getState()
+    settings.setSampler(maximumImmersionSamplerParams())
+    if (!settings.slowBurnPacing) settings.setSlowBurnPacing(true)
+    if (!settings.visualNovelMode) settings.toggleFlag('visualNovelMode')
+    toastSuccess(
+      'Applied Maximum Immersion: this character\'s system prompt is now "Immersive, no meta", and the global sampler/slow-burn pacing/VN mode settings are updated. Bind this character to a "Dating Sim" world for the full mechanic set.',
     )
   }
 
@@ -1294,6 +1319,30 @@ export function CharacterEditor({
 
       {tab === 'advanced' && (
         <div className="space-y-10">
+          <Section
+            title="Maximum Immersion"
+            description="One-click bundle for an author who wants the deepest, most immersive setup this app can offer, curated from settings that already exist rather than new mechanics."
+            surface="bare"
+            action={
+              <Button variant="secondary" onClick={applyMaximumImmersion} className="inline-flex items-center">
+                <Sparkles className="mr-1 h-3.5 w-3.5" /> Apply Maximum Immersion
+              </Button>
+            }
+          >
+            <ul className="space-y-1.5 rounded-xl bg-bg-sunken p-3 text-xs text-text-muted">
+              {maximumImmersionChecklist().applied.map((item) => (
+                <li key={item.label}>
+                  <span className="font-medium text-text">{item.label}:</span> {item.detail}
+                </li>
+              ))}
+              {maximumImmersionChecklist().recommended.map((item) => (
+                <li key={item.label} className="opacity-80">
+                  <span className="font-medium text-text">{item.label} (not applied for you):</span> {item.detail}
+                </li>
+              ))}
+            </ul>
+          </Section>
+
           <Section title="Prompt overrides" description="Replaces or reinforces the default instruction sent to the model for this character." surface="bare">
             <TextAreaField
               label="System prompt override"
