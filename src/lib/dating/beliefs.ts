@@ -1,29 +1,23 @@
 import type { CharacterBelief } from '@/lib/types'
 
-/**
- * The missing "what does she think of *him*" layer — `mood`/`currentNeed`/`characterIntent`
- * (mindGuidance.ts) all describe the character's own inner state, and `plans` (plans.ts) describes
- * what she intends to do, but nothing tracked a standing *impression of the player as a person*
- * until this. Deliberately small and capped: a character forms a few real impressions over a long
- * story, not a running commentary on every exchange. Lifecycle mirrors `plans.ts` closely (the
- * judge call that already runs every turn forms/revises/drops these, no extra AI cost) with one
- * difference: `revise` in place of `note`, since an impression is corrected or sharpened as new
- * evidence comes in, it doesn't accumulate a log the way a plan's progress does.
- */
+// Tracks a character's standing impressions of the player as a person — separate from `mood`/
+// `currentNeed`/`characterIntent` (mindGuidance.ts, the character's own inner state) and `plans`
+// (plans.ts, what she intends to do). Lifecycle mirrors plans.ts: the per-turn judge call
+// forms/revises/drops entries, no extra AI cost.
 
-/** Never more than this many live at once — the same "a handful of real impressions, not a backlog" reasoning as `plans.ts`'s `MAX_ACTIVE_PLANS`. */
+/** Never more than this many live at once. */
 export const MAX_ACTIVE_BELIEFS = 4
 
-/** A belief never reinforced or revised in this many turns ages out — generous, but finite, so a one-off impression doesn't shape every future turn forever. */
+/** A belief never reinforced or revised in this many turns ages out. */
 export const BELIEF_STALE_TURNS = 80
 
-/** One entry in the judge's `beliefUpdates` output. `index` refers to the numbered list `beliefLinesForJudge` produced. */
+/** One entry in the judge's `beliefUpdates` output. `index` refers to `beliefLinesForJudge`'s order. */
 export type BeliefUpdate =
   | { action: 'add'; text: string }
   | { action: 'revise'; index: number; text: string }
   | { action: 'drop'; index: number }
 
-/** Parses (and hard-validates) the judge's raw `beliefUpdates` array — anything malformed is dropped rather than trusted. */
+/** Parses and validates the judge's raw `beliefUpdates` array; malformed entries are dropped. */
 export function parseBeliefUpdates(raw: unknown): BeliefUpdate[] {
   if (!Array.isArray(raw)) return []
   const out: BeliefUpdate[] = []
@@ -47,12 +41,7 @@ export function parseBeliefUpdates(raw: unknown): BeliefUpdate[] {
 
 const defaultIdGen = () => `belief-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 
-/**
- * Applies a turn's `beliefUpdates` to the current list — same shape as `plans.ts`'s
- * `applyPlanUpdates`: `revise`/`drop` indices resolve against the list's original order (the one
- * `beliefLinesForJudge` numbered) before any `add` shifts things, stale beliefs age out, then the
- * result is trimmed to `MAX_ACTIVE_BELIEFS` keeping the most recent.
- */
+/** Applies a turn's `beliefUpdates`: resolves revise/drop against the original order, ages out stale beliefs, then trims to `MAX_ACTIVE_BELIEFS` keeping the most recent. */
 export function applyBeliefUpdates(
   beliefs: CharacterBelief[] | undefined,
   updates: BeliefUpdate[],
@@ -81,7 +70,7 @@ export function applyBeliefUpdates(
   return next
 }
 
-/** True when applying a turn's updates actually changed the stored list — lets the caller skip a PUT on the common no-op turn. */
+/** True when a turn's updates actually changed the stored list — lets the caller skip a PUT on a no-op turn. */
 export function beliefsChanged(before: CharacterBelief[] | undefined, after: CharacterBelief[]): boolean {
   const a = before ?? []
   if (a.length !== after.length) return true
@@ -89,16 +78,12 @@ export function beliefsChanged(before: CharacterBelief[] | undefined, after: Cha
   return after.some((b) => byId.get(b.id)?.text !== b.text)
 }
 
-/** One line per active belief for the judge — NOT numbered (the judge prompt adds indices, matching `planLinesForJudge`/`unresolvedFacts`). */
+/** One line per active belief for the judge — not numbered; the judge prompt adds indices. */
 export function beliefLinesForJudge(beliefs: CharacterBelief[] | undefined): string[] {
   return (beliefs ?? []).map((b) => b.text)
 }
 
-/**
- * The `styleGuidance` line carrying a character's standing impressions of {{user}} into
- * generation. Real names, no `{{macros}}` — `styleGuidance` strings are never macro-substituted
- * (see `mindGuidance.ts`). Returns `''` with no beliefs held, the common case for a new relationship.
- */
+/** `styleGuidance` line carrying a character's standing impressions of the player. Real names, no `{{macros}}`. Returns `''` when none are held. */
 export function beliefsGuidance(charName: string, userName: string, beliefs: CharacterBelief[] | undefined): string {
   const active = beliefs ?? []
   if (active.length === 0) return ''

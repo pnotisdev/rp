@@ -19,10 +19,11 @@ const BASE_REQUEST: GenerateRequest = {
   max_context_length: 4096,
 }
 
-function jsonResponse(status: number, body: unknown): Response {
+function jsonResponse(status: number, body: unknown, headers?: Record<string, string>): Response {
   return {
     ok: status >= 200 && status < 300,
     status,
+    headers: new Headers(headers ?? {}),
     json: async () => body,
     text: async () => JSON.stringify(body),
   } as Response
@@ -198,6 +199,38 @@ describe('OpenAICompatibleClient — generate()', () => {
     controller.abort()
     const client = new OpenAICompatibleClient('https://api.example.com/v1', '', 'gpt-4o-mini')
     await expect(client.generate(BASE_REQUEST, controller.signal)).rejects.toBe(abortError)
+  })
+
+  // FIXES_TODO.md item #14 — a 429's own body text can overclaim permanence (a provider's "Daily
+  // limit reached" wording, confirmed live to sometimes clear in under a minute). These lock in that
+  // the provider's own message is never dropped or rewritten, only ever appended to.
+  describe('429 rate-limit hint', () => {
+    it("appends the provider's own Retry-After seconds when the header is present", async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(jsonResponse(429, { error: { message: 'Daily limit reached.' } }, { 'retry-after': '45' })),
+      )
+      const client = new OpenAICompatibleClient('https://api.example.com/v1', 'key', 'gpt-4o-mini')
+      await expect(client.generate(BASE_REQUEST)).rejects.toThrow(/Daily limit reached\..*retry in about 45s/)
+    })
+
+    it('renders a Retry-After of 60+ seconds in minutes, not seconds', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(429, { error: { message: 'Rate limited.' } }, { 'retry-after': '125' })))
+      const client = new OpenAICompatibleClient('https://api.example.com/v1', 'key', 'gpt-4o-mini')
+      await expect(client.generate(BASE_REQUEST)).rejects.toThrow(/retry in about 3m/)
+    })
+
+    it('falls back to a soft, honest hedge — never a fabricated time — when no Retry-After header comes back', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(429, { error: { message: 'Daily limit reached. Credits do not affect this cap.' } })))
+      const client = new OpenAICompatibleClient('https://api.example.com/v1', 'key', 'gpt-4o-mini')
+      await expect(client.generate(BASE_REQUEST)).rejects.toThrow(/Daily limit reached\. Credits do not affect this cap\..*can sometimes clear on its own/)
+    })
+
+    it('never adds a rate-limit hint for a non-429 error', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(500, { error: { message: 'Internal error' } })))
+      const client = new OpenAICompatibleClient('https://api.example.com/v1', 'key', 'gpt-4o-mini')
+      await expect(client.generate(BASE_REQUEST)).rejects.toThrow(/Internal error$/)
+    })
   })
 })
 

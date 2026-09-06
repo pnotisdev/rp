@@ -1,12 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import {
   advanceIntimacyScene,
+  appendSceneShapeLog,
+  detectExplicitAntiPatternUsed,
+  explicitAftercareGuidance,
+  explicitSceneGuidance,
   intimacyAnticipationGuidance,
   intimacyConsentTensionGuidance,
   intimacyPaceFor,
   intimacySceneGuidance,
   isIntimacySceneActive,
   isIntimacySceneStale,
+  repeatedEscalationShapeGuidance,
+  SCENE_SHAPE_LOG_CAP,
   startOrShiftIntimacyScene,
   type IntimacyScene,
 } from './intimacyScene'
@@ -31,6 +37,32 @@ describe('startOrShiftIntimacyScene', () => {
   it('re-centering mid-scene resets phase back to building rather than inheriting peak', () => {
     const shifted = startOrShiftIntimacyScene('a new activity', 'activity', 12)
     expect(shifted.phase).toBe('building')
+  })
+
+  // Item 12's escalation-shape memory: `categoryHistory` is the running record `RelationshipTrack
+  // .intimacySceneShapeLog` gets built from once the scene resolves.
+  it('starts a fresh single-entry categoryHistory when nothing was live before', () => {
+    const s = startOrShiftIntimacyScene('a kiss', 'kissing_spot', 5)
+    expect(s.categoryHistory).toEqual(['kissing_spot'])
+  })
+
+  it('appends onto the prior live scene\'s categoryHistory when re-centering, rather than resetting it', () => {
+    const first = startOrShiftIntimacyScene('a kiss', 'kissing_spot', 5)
+    const second = startOrShiftIntimacyScene('a position', 'position', 6, first)
+    expect(second.categoryHistory).toEqual(['kissing_spot', 'position'])
+  })
+
+  it("builds a starting history from the prior scene's own category when it predates categoryHistory existing", () => {
+    const priorWithoutHistory = scene({ category: 'toy', categoryHistory: undefined })
+    const shifted = startOrShiftIntimacyScene('an activity', 'activity', 8, priorWithoutHistory)
+    expect(shifted.categoryHistory).toEqual(['toy', 'activity'])
+  })
+
+  it('never carries a stale/inactive prior scene\'s history forward when the caller passes none', () => {
+    // The caller's own job (see the function's doc comment) — passing `undefined` for an inactive
+    // prior scene, exactly as if none had ever existed.
+    const s = startOrShiftIntimacyScene('a fresh start', 'position', 20, undefined)
+    expect(s.categoryHistory).toEqual(['position'])
   })
 })
 
@@ -170,6 +202,148 @@ describe('intimacySceneGuidance', () => {
     expect(building).toMatch(/lean into this more readily/)
     expect(peak).toBe(intimacySceneGuidance('Sumire', scene({ phase: 'peak' }), 'neutral'))
   })
+
+  it('nudges variety once peak has held for a few turns running, not on a fresh peak', () => {
+    const freshPeak = intimacySceneGuidance('Sumire', scene({ phase: 'peak', updatedAtTurn: 10, phaseSinceTurn: 10 }))
+    const heldPeak = intimacySceneGuidance('Sumire', scene({ phase: 'peak', updatedAtTurn: 13, phaseSinceTurn: 10 }))
+    expect(freshPeak).not.toMatch(/held at its peak/)
+    expect(heldPeak).toMatch(/held at its peak/)
+  })
+
+  it('never nudges variety while still building, regardless of how long it has held', () => {
+    const heldBuilding = intimacySceneGuidance('Sumire', scene({ phase: 'building', updatedAtTurn: 20, phaseSinceTurn: 10 }))
+    expect(heldBuilding).not.toMatch(/held at its peak/)
+  })
+})
+
+describe('explicitSceneGuidance', () => {
+  it('names both characters and never emits a macro (styleGuidance is never macro-substituted)', () => {
+    const line = explicitSceneGuidance('Sumire', 'Kai', 'peak')
+    expect(line).toContain('Sumire')
+    expect(line).toContain('Kai')
+    expect(line).not.toContain('{{')
+  })
+
+  it('reads differently for building vs peak', () => {
+    const building = explicitSceneGuidance('Sumire', 'Kai', 'building')
+    const peak = explicitSceneGuidance('Sumire', 'Kai', 'peak')
+    expect(building).not.toBe(peak)
+  })
+
+  it('names every anti-pattern phrase, so the model has something concrete to avoid', () => {
+    const line = explicitSceneGuidance('Sumire', 'Kai', 'peak')
+    for (const phrase of [
+      'waves of pleasure',
+      'lost in the sensation',
+      'their bodies became one',
+      'ecstasy',
+      'rapture',
+      'bliss',
+      'ministrations',
+      'he entered her',
+      'she took him in',
+      'he filled her',
+    ]) {
+      expect(line).toContain(phrase)
+    }
+  })
+
+  it('only sequences pre/during/after-climax physical detail at peak, not while still building', () => {
+    const building = explicitSceneGuidance('Sumire', 'Kai', 'building').toLowerCase()
+    const peak = explicitSceneGuidance('Sumire', 'Kai', 'peak').toLowerCase()
+    expect(peak).toMatch(/clamping|pulsing/)
+    expect(peak).toMatch(/oversensitive|twitching/)
+    expect(building).not.toMatch(/clamping|pulsing/)
+  })
+
+  it('reinforces character-specific voice under strain, not a generic register swap', () => {
+    const line = explicitSceneGuidance('Sumire', 'Kai', 'peak')
+    expect(line).toMatch(/voice doesn't reset/i)
+  })
+
+  it("guards against narrating the other person's own sensations/climax", () => {
+    const line = explicitSceneGuidance('Sumire', 'Kai', 'peak')
+    expect(line.toLowerCase()).toMatch(/never kai's sensations, reactions, or climax/)
+  })
+
+  it('includes the newer anti-patterns too', () => {
+    const line = explicitSceneGuidance('Sumire', 'Kai', 'peak')
+    expect(line).toContain('buried himself')
+    expect(line).toContain('moaned in pleasure')
+  })
+
+  it('requires the edge signs to show before climax is named, and allows intensity to vary at peak', () => {
+    const line = explicitSceneGuidance('Sumire', 'Kai', 'peak').toLowerCase()
+    expect(line).toMatch(/rhythm that keeps breaking/)
+    expect(line).toMatch(/before anything is named as climax/)
+    expect(line).toMatch(/doesn't have to sit at maximum/)
+  })
+
+  it('covers focused touch (breasts/nipples) beyond penetration, only at peak', () => {
+    const building = explicitSceneGuidance('Sumire', 'Kai', 'building').toLowerCase()
+    const peak = explicitSceneGuidance('Sumire', 'Kai', 'peak').toLowerCase()
+    expect(peak).toMatch(/breasts, nipples/)
+    expect(building).not.toMatch(/breasts, nipples/)
+  })
+
+  it("keeps dirty talk/vocalization tied to the character's own register", () => {
+    const line = explicitSceneGuidance('Sumire', 'Kai', 'peak')
+    expect(line).toMatch(/dirty talk, begging, wordless sounds/)
+  })
+
+  it('defaults to no reserved clause for a neutral/eager pace', () => {
+    const neutral = explicitSceneGuidance('Sumire', 'Kai', 'peak', 'neutral')
+    const eager = explicitSceneGuidance('Sumire', 'Kai', 'peak', 'eager')
+    expect(neutral).not.toMatch(/checking in, smaller/)
+    expect(eager).not.toMatch(/checking in, smaller/)
+  })
+
+  it('adds a reserved-pace prose clause at peak, distinct from neutral', () => {
+    const reserved = explicitSceneGuidance('Sumire', 'Kai', 'peak', 'reserved')
+    expect(reserved).toMatch(/checking in, smaller/)
+    expect(reserved).toMatch(/dirty talk or a confident running commentary would read false/)
+  })
+
+  // Item 13's per-character explicit-voice note.
+  it("appends an author-written voice note when the character card has one, naming the character specifically", () => {
+    const withNote = explicitSceneGuidance('Sumire', 'Kai', 'peak', 'neutral', 'Goes quieter and shorter, not louder.')
+    expect(withNote).toMatch(/For Sumire specifically: Goes quieter and shorter, not louder\./)
+  })
+
+  it('omits the voice-note clause entirely when unset or blank, falling back to the generic instruction alone', () => {
+    const unset = explicitSceneGuidance('Sumire', 'Kai', 'peak')
+    const blank = explicitSceneGuidance('Sumire', 'Kai', 'peak', 'neutral', '   ')
+    expect(unset).not.toMatch(/For Sumire specifically/)
+    expect(blank).not.toMatch(/For Sumire specifically/)
+  })
+})
+
+describe('detectExplicitAntiPatternUsed', () => {
+  it('catches a named anti-pattern phrase at peak, case-insensitively', () => {
+    expect(detectExplicitAntiPatternUsed('She was lost in the sensation of it all.', 'peak')).toBe('lost in the sensation')
+    expect(detectExplicitAntiPatternUsed('ECSTASY washed over her.', 'peak')).toBe('ecstasy')
+  })
+
+  it('is undefined when the reply contains none of the named phrases', () => {
+    expect(detectExplicitAntiPatternUsed('She gasped, hips rocking against his hand.', 'peak')).toBeUndefined()
+  })
+
+  it('never checks building-phase text, even if it happens to contain a listed phrase', () => {
+    expect(detectExplicitAntiPatternUsed('She was lost in the sensation already.', 'building')).toBeUndefined()
+  })
+
+  it('returns undefined for empty input', () => {
+    expect(detectExplicitAntiPatternUsed('', 'peak')).toBeUndefined()
+  })
+})
+
+describe('explicitAftercareGuidance', () => {
+  it('names the character, stays physical, and never emits a macro', () => {
+    const line = explicitAftercareGuidance('Sumire')
+    expect(line).toContain('Sumire')
+    expect(line).toMatch(/oversensitive/i)
+    expect(line).not.toContain('{{')
+  })
 })
 
 describe('intimacyConsentTensionGuidance', () => {
@@ -200,5 +374,58 @@ describe('intimacyAnticipationGuidance', () => {
   it('is undefined when either chemistry or comfort falls short of the floor', () => {
     expect(intimacyAnticipationGuidance('Sumire', 'Kai', 40, 70)).toBeUndefined()
     expect(intimacyAnticipationGuidance('Sumire', 'Kai', 70, 40)).toBeUndefined()
+  })
+})
+
+describe('appendSceneShapeLog', () => {
+  it('appends a resolved scene\'s own shape onto an empty/unset log', () => {
+    expect(appendSceneShapeLog(undefined, ['kissing_spot', 'position'])).toEqual([['kissing_spot', 'position']])
+  })
+
+  it('keeps the most recent entries, trimming back to SCENE_SHAPE_LOG_CAP once exceeded', () => {
+    const log = [['a'], ['b'], ['c']]
+    const next = appendSceneShapeLog(log, ['d'])
+    expect(next.length).toBe(SCENE_SHAPE_LOG_CAP)
+    expect(next).toEqual([['b'], ['c'], ['d']])
+  })
+})
+
+describe('repeatedEscalationShapeGuidance', () => {
+  it('is undefined with fewer than two logged scenes', () => {
+    expect(repeatedEscalationShapeGuidance('Sumire', undefined)).toBeUndefined()
+    expect(repeatedEscalationShapeGuidance('Sumire', [['kissing_spot', 'position']])).toBeUndefined()
+  })
+
+  it('is undefined when the last two logged shapes differ', () => {
+    const log = [
+      ['kissing_spot', 'position'],
+      ['kissing_spot', 'toy'],
+    ]
+    expect(repeatedEscalationShapeGuidance('Sumire', log)).toBeUndefined()
+  })
+
+  it('is undefined for a single-step shape, even if repeated — too short to read as a real curve', () => {
+    const log = [['position'], ['position']]
+    expect(repeatedEscalationShapeGuidance('Sumire', log)).toBeUndefined()
+  })
+
+  it('names the character and the repeated sequence when the last two logged shapes are identical', () => {
+    const log = [
+      ['kissing_spot', 'position', 'toy'],
+      ['kissing_spot', 'position', 'toy'],
+    ]
+    const line = repeatedEscalationShapeGuidance('Sumire', log)!
+    expect(line).toContain('Sumire')
+    expect(line).toMatch(/kissing_spot → position → toy/)
+    expect(line).toMatch(/third time running/)
+  })
+
+  it('only ever compares the LAST two entries, ignoring an older non-matching one', () => {
+    const log = [
+      ['kissing_spot', 'toy'],
+      ['position', 'act'],
+      ['position', 'act'],
+    ]
+    expect(repeatedEscalationShapeGuidance('Sumire', log)).toBeTruthy()
   })
 })

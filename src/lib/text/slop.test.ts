@@ -7,6 +7,7 @@ import {
   endsCleanly,
   findSlop,
   findSlopAcross,
+  isDuplicateOfRecentText,
   isVerbatimEcho,
   trimToLastSentence,
 } from './slop'
@@ -78,6 +79,30 @@ describe('cleanModelOutput — meta/preamble removal', () => {
     const raw = 'Sumire: Certainly!\n\n## Scene\n"Hello."\n(OOC: note)'
     const once = cleanModelOutput(raw, { charName: 'Sumire' })
     expect(cleanModelOutput(once, { charName: 'Sumire' })).toBe(once)
+  })
+
+  it("strips a leaked relationship-guidance block (FIXES_TODO.md's live-reproduced bug), leaving real dialogue around it intact", () => {
+    const leaked =
+      '*She glances up.* "Hey."\n' +
+      'Relationship: Kai and Sumire are at the "near strangers" stage.\n' +
+      '(Let this colour tone, warmth, and what feels earned right now. Never state a number, "affection", or "stage" out loud.)\n' +
+      '"Took you long enough."'
+    expect(cleanModelOutput(leaked)).toBe('*She glances up.* "Hey."\n"Took you long enough."')
+  })
+
+  it('strips the leaked block even when it is the ENTIRE reply, leaving nothing behind (so the existing empty-reply check catches it)', () => {
+    const onlyLeak =
+      'Relationship: Kai and Sumire are at the "near strangers" stage.\n' +
+      '(Let this colour tone, warmth, and what feels earned right now. Never state a number, "affection", or "stage" out loud.)'
+    expect(cleanModelOutput(onlyLeak)).toBe('')
+  })
+
+  it("does NOT catch every possible line of the leaked block on its own (e.g. the pacing/gift-taste notes) — that broader case is `useChatSession.ts`'s job via `isDuplicateOfRecentText` against the reconstructed relationshipDescription text, not this function's", () => {
+    const partialSurvivor =
+      'Relationship: Kai and Sumire are at the "near strangers" stage.\n' +
+      '(Let this colour tone, warmth, and what feels earned right now. Never state a number, "affection", or "stage" out loud.)\n' +
+      "Sumire feels most loved through Quality time."
+    expect(cleanModelOutput(partialSurvivor)).toBe('Sumire feels most loved through Quality time.')
   })
 })
 
@@ -236,5 +261,47 @@ describe('isVerbatimEcho', () => {
 
   it('does not flag a reply that merely starts the same way as the prior message but genuinely continues differently', () => {
     expect(isVerbatimEcho(`${priorText} That's not a complaint.`, priorText)).toBe(false)
+  })
+})
+
+describe('isDuplicateOfRecentText', () => {
+  const oldCharTurn =
+    "Her grip tightens on the paperback. She turns a page she hasn't read, the sound of paper louder than it needs to be. \"...Fine.\" Flat. Final. \"Then sit across from the door. Quietly.\""
+  const nextCharTurn =
+    "She doesn't look up from the book for a long time. When she finally speaks, her voice is flat. \"...It's not raining yet.\" She turns a page."
+  const oldUserTurn =
+    "I don't push it, just smile and go back to unpacking the last of her boxes into the shelf we built together. \"Okay. Whenever. This is already more than I used to let myself want.\""
+
+  it("live shape 1: catches a reply that's just the tail end of an earlier message", () => {
+    expect(isDuplicateOfRecentText(oldCharTurn.slice(-50), [oldCharTurn])).toBe(true)
+  })
+
+  it('live shape 2: catches a reply that concatenates the last two char turns with nothing new written', () => {
+    const concatenated = oldCharTurn + '\n' + nextCharTurn.slice(0, 60)
+    expect(isDuplicateOfRecentText(concatenated, [oldCharTurn, nextCharTurn])).toBe(true)
+  })
+
+  it("live shape 3: catches an exact copy of the PLAYER's own earlier line presented as the character's turn", () => {
+    expect(isDuplicateOfRecentText(oldUserTurn, [oldUserTurn])).toBe(true)
+  })
+
+  it('does not flag a genuinely new reply that merely continues the same scene', () => {
+    const genuinelyNew =
+      "Sumire's fingers tightened in his, once. Just once. Her shoulders dropped a little, like something she'd been holding unclenched. \"...All right.\""
+    expect(isDuplicateOfRecentText(genuinelyNew, [oldCharTurn, nextCharTurn, oldUserTurn])).toBe(false)
+  })
+
+  it('never flags a short reply, even one that legitimately recurs verbatim ("...Fine." twice in one chat is normal)', () => {
+    expect(isDuplicateOfRecentText('...Fine.', ['...Fine.', oldCharTurn])).toBe(false)
+  })
+
+  it('ignores undefined/empty entries in the comparison list', () => {
+    expect(isDuplicateOfRecentText(oldCharTurn, [undefined, '', oldCharTurn])).toBe(true)
+    expect(isDuplicateOfRecentText('a genuinely fresh reply, long enough to be checked at all here', [undefined, ''])).toBe(false)
+  })
+
+  it('is insensitive to whitespace differences between what was stored and what was just produced', () => {
+    const withDifferentSpacing = oldCharTurn.replace(/\s+/g, '\n')
+    expect(isDuplicateOfRecentText(withDifferentSpacing, [oldCharTurn])).toBe(true)
   })
 })

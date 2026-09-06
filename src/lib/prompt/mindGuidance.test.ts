@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   afterglowGuidance,
+  agencyGuardNote,
   authoredStatePriorityNote,
   characterIntentGuidance,
   desireGuidance,
@@ -170,6 +171,24 @@ describe('authoredStatePriorityNote', () => {
 
   it('never emits a {{char}}/{{user}} macro — styleGuidance strings are not macro-substituted', () => {
     expect(authoredStatePriorityNote('Sumire', 'tense', true, true)).not.toContain('{{')
+  })
+})
+
+describe('agencyGuardNote', () => {
+  it('says nothing outside a romantic/intimate moment', () => {
+    expect(agencyGuardNote(false, 'Sumire', 'Kai')).toBe('')
+  })
+
+  it('names both characters and never emits a macro', () => {
+    const line = agencyGuardNote(true, 'Sumire', 'Kai')
+    expect(line).toContain('Sumire')
+    expect(line).toContain('Kai')
+    expect(line).not.toContain('{{')
+  })
+
+  it("guards against writing the user's own actions/words/feelings", () => {
+    const line = agencyGuardNote(true, 'Sumire', 'Kai').toLowerCase()
+    expect(line).toMatch(/only kai's own actions, words, and choices belong to kai/)
   })
 })
 

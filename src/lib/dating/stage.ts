@@ -169,8 +169,30 @@ export const RELATIONSHIP_DIMENSIONS: RelationshipDimension[] = [
   'tension',
 ]
 
-/** Dimensions (including `affection`) that count toward `warmth` — `curiosity` and `tension` don't. */
-const WARMTH_DIMENSIONS: RelationshipDimension[] = ['trust', 'chemistry', 'comfort', 'respect']
+/**
+ * Dimensions (including `affection`) that count toward `warmth` — `curiosity` and `tension` don't.
+ * Exported (not just used internally by `computeWarmth` below) so `RelationshipPanel.tsx` can name
+ * whichever of these is lagging once a commitment ask keeps deflecting despite warmth itself
+ * already clearing the threshold — see `lowestWarmthDimension`.
+ */
+export const WARMTH_DIMENSIONS: RelationshipDimension[] = ['trust', 'chemistry', 'comfort', 'respect']
+
+/**
+ * FIXES_TODO.md's "no in-app signal for why a commitment ask keeps deflecting" item — live-repro'd
+ * at 10 straight deflects on "exclusive" despite affection maxed and trust/chemistry/respect all
+ * high: `comfort` specifically was the dimension quietly lagging the whole time, confirmed by
+ * watching it recover right before the very next ask landed. `canActuallyAskForCommitment`/
+ * `commitmentLockReason` only ever gate on warmth as a single blended number (plus the kiss/
+ * first-time physical-reality checks) — nothing surfaces which *specific* tracked dimension is
+ * actually dragging that blend down once it's already past the threshold, which is exactly the
+ * situation a repeatedly-deflecting player is in. Ties (more than one dimension sharing the lowest
+ * value) resolve to the first in `WARMTH_DIMENSIONS`'s own order, arbitrarily but deterministically
+ * — there's no principled way to prefer one over another when they're genuinely equal, and a stable
+ * pick beats one that flickers between renders.
+ */
+export function lowestWarmthDimension(stats: Record<RelationshipDimension, number>): RelationshipDimension {
+  return WARMTH_DIMENSIONS.reduce((lowest, dim) => (stats[dim] < stats[lowest] ? dim : lowest))
+}
 
 /** Applies a world's `relationshipThresholds` overrides on top of the default milestones. */
 export function relationshipMilestonesFor(
@@ -228,6 +250,7 @@ type TrackHost = Pick<
   | 'recentRebuff'
   | 'intimacyScene'
   | 'giftLog'
+  | 'intimacySceneShapeLog'
   | 'beliefsAboutUser'
   | 'expectationsOfUser'
   | 'currentFear'
@@ -268,6 +291,7 @@ export function getRelationshipTrack(chat: TrackHost, characterId: string): Rela
       recentRebuff: chat.recentRebuff,
       intimacyScene: chat.intimacyScene,
       giftLog: chat.giftLog,
+      intimacySceneShapeLog: chat.intimacySceneShapeLog,
       beliefsAboutUser: chat.beliefsAboutUser,
       expectationsOfUser: chat.expectationsOfUser,
       currentFear: chat.currentFear,

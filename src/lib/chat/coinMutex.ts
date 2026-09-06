@@ -1,31 +1,13 @@
 /**
- * Serializes read-modify-write operations against a chat's shared `giftCoins` wallet.
- *
- * Every coin-touching call site (`buyGift`, `buyItem`, `buyToy`, `useItem`'s currency effect, the
- * per-turn relationship judge's +2 reward, and a date/hangout's end-of-scene payout) follows the
- * same shape: `GET` the chat, read `giftCoins` off that snapshot, compute a new value, `PUT` the
- * whole patch back. None of that round-trip is atomic — the server's `PUT /api/chats/:id` is a
- * shallow merge of whatever patch it's handed, not a compare-and-swap, so two of these in flight at
- * once race: whichever `PUT` lands second silently overwrites the first's coin delta with a value
- * computed from the *same stale snapshot*, and the first purchase's cost (or reward) evaporates
- * while its inventory/other-field write (a different key in the same shallow merge) still lands.
- *
- * Live repro that found this: buying a 20-coin gift and an 8-coin item back-to-back from the Shop
- * tab (two ordinary, non-frantic clicks) left both items owned but only deducted 8 coins total —
- * the 20-coin purchase's cost vanished because its `PUT` was overwritten by the second purchase's,
- * which had read its `giftCoins` baseline before the first purchase's `PUT` committed.
- *
- * This mutex doesn't change any call site's read-then-write shape — it just guarantees only one
- * such critical section runs at a time *for a given chat*, so every read inside one is guaranteed
- * to see the previous section's write. A caller queued behind the current holder still runs (unlike
- * `GenerationLock`, which refuses a second claim outright) — a purchase clicked while a turn's
- * background reward is mid-flight should still go through, just after, with the right balance.
- *
- * Keyed per chat (via `getCoinMutex`) so two different open chats never block each other.
+ * Serializes read-modify-write operations against a chat's shared `giftCoins` wallet. Every
+ * coin-touching call site (buys, `useItem`'s currency effect, the judge's reward, a date payout)
+ * does a GET-then-PUT round trip against a non-atomic server endpoint (shallow merge, not
+ * compare-and-swap), so two in flight at once can silently overwrite each other's coin delta. This
+ * mutex just guarantees only one such critical section runs at a time per chat — a queued caller
+ * still runs after, unlike `GenerationLock`, which refuses a second claim outright.
  */
 export interface CoinMutex {
-  /** Queues `fn` behind whatever's currently holding the mutex, runs it alone, then releases —
-   *  even if `fn` throws, so one failed purchase can't wedge every later one. */
+  /** Queues `fn` behind the current holder, runs it alone, then releases (even if `fn` throws). */
   run<T>(fn: () => Promise<T>): Promise<T>
 }
 
@@ -34,8 +16,7 @@ export function createCoinMutex(): CoinMutex {
   return {
     run<T>(fn: () => Promise<T>): Promise<T> {
       const result = tail.then(fn, fn)
-      // Swallow the outcome in the chained tail so one rejection doesn't poison every later queued
-      // caller — each caller still gets its own `result` promise with the real value or rejection.
+      // Swallow the outcome in the chained tail so one rejection can't poison later queued callers.
       tail = result.then(
         () => undefined,
         () => undefined,

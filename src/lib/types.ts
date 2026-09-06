@@ -1,3 +1,9 @@
+/**
+ * Core persisted data model: chats, characters' relationship state, world/lorebook content,
+ * messages, and the smaller supporting types (gifts, items, scenes, regex scripts, etc.) that
+ * make up what gets stored to and read from the SQLite-backed store.
+ */
+
 import type { Lorebook } from '@/lib/characters/cardSpec'
 import type { ChatMessage } from '@/lib/prompt/builder'
 import type { InstructTemplate } from '@/lib/prompt/instructTemplates'
@@ -21,7 +27,7 @@ export interface Persona {
   createdAt: number
 }
 
-/** A six-stage warmth ladder, replacing the old 4-stage strangers/curious/close/romance union. */
+/** Six-stage warmth ladder (replaces the old 4-stage strangers/curious/close/romance union). */
 export type RelationshipStage =
   | 'near_strangers'
   | 'acquaintances'
@@ -30,128 +36,69 @@ export type RelationshipStage =
   | 'close'
   | 'sweethearts'
 
-/**
- * The six dimensions tracked alongside `Chat.affection` (which stays a top-level field — it's
- * the oldest and most load-bearing of the seven, gating lorebook/sprite/background/gallery
- * unlocks — so it isn't folded in here to avoid a breaking rename of every unlock threshold).
- * `warmth` (see `stage.ts`) is a derived average of five of these seven, not stored separately.
- */
+/** The six dimensions tracked alongside `Chat.affection`, which stays top-level and separate since it gates unlocks. `warmth` (`stage.ts`) is a derived average of five of these seven. */
 export type RelationshipDimension = 'trust' | 'chemistry' | 'comfort' | 'respect' | 'curiosity' | 'tension'
 
-/**
- * Not a closed literal union — `stage.ts`'s `SCENE_FLAGS` still names the 4 built-in defaults
- * (first_date/confession/jealousy/promise, each with a glossary entry the AI classifier reads),
- * but a flag actually stored here can also be the `id` of a world's own `CustomSceneFlag` (see
- * below). Mirrors how `GalleryEntry.requiredFlags` was already a plain `string[]` — nothing that
- * reads a stored flag ever assumed a fixed 4-value set, so widening this to `string` needed no
- * changes anywhere flags are read, only where new ones are authored/glossaried.
- */
+/** Not a closed union — also matches a `CustomSceneFlag.id`. `stage.ts`'s `SCENE_FLAGS` names the 4 built-in defaults. */
 export type SceneFlag = string
 
-/**
- * A world-authored scene flag beyond the 4 built-in defaults (10c's original "scene-flag
- * authoring" gap) — additive, the same shape as `CustomExpression`: the built-in defaults keep
- * working exactly as before, this just gives a world its own extra ones on top. `description` is
- * the classifier-facing bar for when it should fire (mirrors `FLAG_GLOSSARY`'s built-in entries);
- * `label` is the player-facing name shown in the Relationship panel's checklist.
- */
+/** A world-authored scene flag beyond the 4 built-ins. `description` is the classifier-facing bar for when it fires; `label` is player-facing. */
 export interface CustomSceneFlag {
   id: string
   label: string
   description: string
 }
 
-/**
- * Section 14's "Quick Replies bar" — the cheap, independently-useful subset of SillyTavern's
- * STscript/Quick Replies without committing to an actual scripting language: a user-configurable
- * button that sends `message` verbatim, exactly as if the player had typed and sent it themselves.
- * Global (Settings → Generation), not per-chat/per-character — the whole point is a small fixed
- * toolbar of narrative utility actions ("describe my surroundings," "let some time pass") that
- * makes sense in any chat, not authored content tied to one world or card.
- */
+/** Section 14's Quick Replies bar — a user-configurable button that sends `message` verbatim, as if typed by the player. Global, not per-chat/per-character. */
 export interface QuickReply {
   id: string
   label: string
   message: string
 }
 
-/**
- * 10c's "Define-the-Relationship ladder" — a player-driven progression, separate from the
- * warmth-derived `RelationshipStage` above (which only ever tracks how close things *feel*, never
- * an explicit status). Warmth gates which tier can be *asked for* (see `stage.ts`'s
- * `commitmentTierThreshold`); actually reaching a tier always requires asking and the character
- * accepting — never an automatic side effect of warmth crossing a number.
- */
+/** 10c's Define-the-Relationship ladder — player-driven, separate from the warmth-derived `RelationshipStage`. Warmth only gates which tier can be *asked for* (`stage.ts`'s `commitmentTierThreshold`); reaching one always requires asking and acceptance. */
 export type CommitmentStatus = 'none' | 'dating' | 'exclusive' | 'living_together' | 'married'
 
-/**
- * A committed relationship under real strain (10c's "Breakups & reconciliation") — a grace period
- * before neglect or tension actually breaks things, rather than an instant, unwarned snap. Cleared
- * the moment the underlying strain resolves; if it doesn't within the grace period, the
- * relationship breaks on its own the next time relationship state is evaluated.
- */
+/** A committed relationship under strain (10c's breakups/reconciliation) — a grace period before it breaks. Cleared once the strain resolves; otherwise the relationship breaks on its own once the grace period lapses. */
 export interface RelationshipWarning {
   startedAt: number
   reason: string
 }
 
-/**
- * One turn's worth of relationship movement, logged append-only alongside the overwritten
- * running totals on `Chat` — answers "why is trust 62 now" instead of only ever showing the
- * current number. `deltas` holds only the dimensions that actually moved that turn (zeros
- * omitted); `reason` is the AI classifier's short one-line account of what happened.
- */
+/** One turn's relationship movement, logged append-only alongside the running totals on `Chat`. */
 export interface RelationshipEvent {
   id: string
   chatId: string
   createdAt: number
   reason: string
+  /** Only the dimensions that actually moved that turn; zeros omitted. */
   deltas: Partial<Record<'affection' | RelationshipDimension, number>>
   newFlags?: SceneFlag[]
   sourceMessageId?: string
-  /** Which character this event belongs to — unset means the chat's primary, the only character this ever applied to before multi-character relationship tracking existed. See `RelationshipTrack`. */
+  /** Unset means the chat's primary character (the only case before multi-character tracking). */
   characterId?: string
 }
 
 /**
- * One entry in a character's persistent *agency layer* (`RelationshipTrack.plans`) — a concrete
- * intention the character carries between turns, so the model can act on its own initiative
- * rather than only react to the player. Where `characterIntent` is one transient private want,
- * reset every turn, a plan persists and has a lifecycle: the judge call (`assessRelationshipMoment`)
- * forms it, annotates it as things happen, and eventually resolves or drops it. Read back into the
- * prompt by `mindGuidance.ts`'s `plansGuidance`; capped at 3 active per character (`dating/plans.ts`).
- *
- * Deliberately small — a short `goal` in the character's own framing, a coarse `kind` so guidance
- * phrases it right, the turn it formed (for age-based pruning), and an optional running `note` the
- * judge appends to. No status enum: a plan that's done or abandoned is removed, not kept; the
- * `ChatFact` log is where the durable "she did X" trace lives.
+ * One entry in a character's persistent agency layer (`RelationshipTrack.plans`) — a concrete
+ * intention that persists across turns, formed/annotated/resolved by the judge call
+ * (`assessRelationshipMoment`) and read back by `mindGuidance.ts`'s `plansGuidance`. Capped at 3
+ * active per character (`dating/plans.ts`). Contrast `characterIntent`, which is transient and
+ * reset every turn.
  */
 export interface CharacterPlan {
   id: string
-  /** The intention in the character's own terms, short: "finish the mural before the showcase", "stop letting the pace be set for her", "introduce {{user}} to her sister". */
+  /** The intention in the character's own terms, short: "finish the mural before the showcase". */
   goal: string
-  /**
-   * What the plan is oriented around, so `plansGuidance` frames it correctly:
-   * - `personal` — the character's own life, independent of the player ("get the studio lease signed").
-   * - `together` — something the character wants to do *with* the player ("take {{user}} to the coast").
-   * - `distance` — the character deliberately holding back or protecting themselves ("keep things light until {{user}} is honest about the ex").
-   */
+  /** `personal` = the character's own life; `together` = wants to do it *with* the player; `distance` = deliberately holding back. Lets `plansGuidance` frame it correctly. */
   kind: 'personal' | 'together' | 'distance'
   /** `Chat.messages.length` when the judge formed this — lets stale plans age out. */
   formedTurn: number
-  /** Optional running annotation the judge appends as the plan progresses or hits friction. */
+  /** Running annotation the judge appends as the plan progresses or hits friction. */
   note?: string
 }
 
-/**
- * One durable impression the character has formed *about the player as a person* — "he's unusually
- * patient," "she isn't sure whether {{user}} really understands her ambition" — as distinct from a
- * `ChatFact` (a discrete remembered *event*) or `characterIntent` (the character's own private
- * want). Nothing else in the mind-state stack tracks a standing judgment about who {{user}} *is*;
- * this is that missing piece. Small and capped (`dating/beliefs.ts`'s `MAX_ACTIVE_BELIEFS`) — a
- * character forms a few real impressions, not a running commentary. `formedTurn` lets a stale,
- * never-reinforced belief age out the same way a plan does.
- */
+/** A durable impression the character has formed about the player as a person (`dating/beliefs.ts`), distinct from a `ChatFact` (an event) or `characterIntent` (a private want). Capped; ages out like `CharacterPlan`. */
 export interface CharacterBelief {
   id: string
   /** The impression itself, in the character's own voice: "He's unusually patient with me." */
@@ -159,248 +106,132 @@ export interface CharacterBelief {
   formedTurn: number
 }
 
-/**
- * A standing expectation the character has developed *of the player* — "she's started expecting
- * him to check in on Sundays" — with a real lifecycle: it can be met (quietly retired, usually not
- * worth dwelling on) or violated (which matters enough that the caller turns it into a durable
- * `ChatFact` with negative valence, not just a silent removal). Distinct from `CharacterPlan`, which
- * is the character's own intention, not a standing belief about what the *player* will do.
- */
+/** A standing expectation the character has developed of the player — met (quietly retired) or violated (logged as a `ChatFact` with negative valence). Distinct from `CharacterPlan`, which is the character's own intention. */
 export interface UserExpectation {
   id: string
-  /** The expectation itself, in the character's own terms: "expects a check-in most Sundays." */
+  /** The expectation itself: "expects a check-in most Sundays." */
   text: string
   formedTurn: number
-  /** Optional running annotation as it plays out — mirrors `CharacterPlan.note`. */
+  /** Running annotation as it plays out — mirrors `CharacterPlan.note`. */
   note?: string
 }
 
 /**
- * The bundle of relationship state that used to live only as `Chat`'s own top-level fields —
- * always the primary's, even in a group chat, per that field's own original doc comment. A
- * non-primary participant needs the exact same shape to be tracked as a real person rather than an
- * untracked NPC, so this is that shape, extracted once and reused by both: the primary keeps
- * reading/writing these fields directly off `Chat` (byte-for-byte unchanged, zero migration risk
- * for every existing single-character chat), while anyone else's copy lives in
- * `Chat.participantRelationships`, keyed by character id. See `getRelationshipTrack`/
- * `patchRelationshipTrack` in `stage.ts` — the one place that resolves which bag of fields a given
- * character reads/writes through, so no other code has to know the difference.
+ * The relationship-state bundle that used to live only as `Chat`'s own top-level fields. The
+ * primary character keeps reading/writing those `Chat` fields directly (unchanged, no migration);
+ * any other participant's copy lives in `Chat.participantRelationships`, keyed by character id.
+ * See `getRelationshipTrack`/`patchRelationshipTrack` in `stage.ts`.
  *
- * Deliberately NOT per-character: `sceneFlags` (describes the scene/story, not one relationship),
- * `giftCoins`/`giftInventory` (a shared wallet and stock, not owed by any one character), and
- * `ChatFact`s (the durable-memory log stays chat-wide). A live date/hangout (10b) also stays
- * primary-only for now — `DateEventCard` has no concept of "which participant this date is with."
+ * Deliberately NOT per-character: `sceneFlags`, `giftCoins`/`giftInventory` (shared wallet/stock),
+ * and `ChatFact`s (chat-wide log) all stay on `Chat` only. A live date/hangout also stays
+ * primary-only — `DateEventCard` has no concept of which participant it's with.
  */
 export interface RelationshipTrack {
   affection?: number
   relationshipStats?: Partial<Record<RelationshipDimension, number>>
   relationshipStage?: RelationshipStage
   commitmentStatus?: CommitmentStatus
-  /** `null` clears a standing warning — same "JSON.stringify drops `undefined` keys" reason `Chat.activeEvent`/`Chat.authorNote` accept it for; a bare `undefined` here would silently fail to overwrite an existing one. */
+  /** `null` clears it; `undefined` is dropped by `JSON.stringify` and won't overwrite a stored value. */
   relationshipWarning?: RelationshipWarning | null
   breakupCount?: number
   unlockedGalleryIds?: string[]
-  /** Per-gift-id tally of how many of that gift this specific character has received — separate from `Chat.giftInventory`, which is the player's shared, unspent stock. */
+  /** Per-gift-id tally received by this character — separate from `Chat.giftInventory` (the player's shared stock). */
   giftsGiven?: Record<string, number>
-  /**
-   * The open post-intimacy window, if any (`dating/aftercare.ts`). Set when an explicit intimacy
-   * action or the "first time together" milestone happens, read back as prompt guidance for the
-   * next few turns, and cleared the moment its outcome is judged and applied. `null` clears it —
-   * `JSON.stringify` drops undefined-valued keys, the same trap `relationshipWarning` above
-   * documents.
-   */
+  /** Open post-intimacy window (`dating/aftercare.ts`); cleared once judged. `null` clears it (see `relationshipWarning`). */
   afterglow?: Afterglow | null
-  /**
-   * The "Character Mind" scoped slice — a transient emotional read, an underlying need, and a
-   * private intention, all deliberately separate from the warmth-driving fields above (a character
-   * can love/trust someone while currently `annoyed`, per the user's own "Emotion ≠ relationship"
-   * point). All three are set by `assessRelationshipMoment`'s judge call (no extra AI cost) and
-   * read back by `prompt/mindGuidance.ts`, whose own doc comment explains how the three differ.
-   * Undefined means no clear read yet, not "neutral" — a fresh chat says nothing here rather than
-   * asserting a mood/need/intention that was never actually inferred.
-   */
+  /** Transient emotional read; can differ from the warmth-driving fields above (e.g. `annoyed` while still close). Set by the judge call, read by `prompt/mindGuidance.ts`. Undefined means no read yet, not "neutral". */
   mood?: CharacterMood
-  /** See `mood`'s doc comment — a steadier undercurrent than mood, not shown as a "need" to the player but not a secret either (see `RelationshipPanel`). */
+  /** Steadier undercurrent than `mood` — see `mood`. Not shown to the player as a "need", but not fully hidden either (`RelationshipPanel`). */
   currentNeed?: CharacterNeed
-  /** A short, hidden thing this character currently privately wants — never shown to the player, only shapes tone via `mindGuidance.ts`. See `mood`'s own doc comment. */
+  /** A private thing the character currently wants — never shown to the player; shapes tone via `mindGuidance.ts`. */
   characterIntent?: string
-  /**
-   * A deeper, steadier underlying drive — the want-axis counterpart to `currentNeed` (`characterIntent`
-   * is to `currentDesire` what `mood` is to `currentNeed`). Never shown to the player, same as
-   * `characterIntent`/`currentFear`. See `mindGuidance.ts`'s `desireGuidance` for the full three-way
-   * (need/intent/desire) distinction.
-   */
+  /** A deeper, steadier drive — the counterpart to `currentNeed` that `characterIntent` is to `mood`. Never shown to the player. See `mindGuidance.ts`'s `desireGuidance`. */
   currentDesire?: string
-  /**
-   * Relationship *momentum* — the recent rate of change of warmth, not its level. A decayed
-   * running sum of each turn's warmth movement (`dating/momentum.ts`'s `nextMomentum`): positive =
-   * deepening fast, negative = cooling off, ~0 = settled. Fed to the generation layer as a pacing
-   * clause ("moving fast, likely to want to slow down" / "cooled off lately, more guarded than the
-   * closeness suggests") — the "how quickly is this particular relationship moving" the state-only
-   * model couldn't answer. Undefined/0 for a chat from before this existed.
-   */
+  /** Decayed running rate of warmth change (`dating/momentum.ts`'s `nextMomentum`): positive = deepening fast, negative = cooling, ~0 = settled. */
   momentum?: number
-  /**
-   * The character's persistent *agency layer* — a few concrete intentions they're carrying that
-   * outlast a single turn, so the model can write "given what she wants, what she's doing, and what
-   * just happened, what would she naturally do" rather than only "what should she say back". The
-   * richer sibling of `characterIntent` (one transient private want): `plans` are several, have a
-   * lifecycle (the judge forms, annotates, and resolves them), and can be entirely about the
-   * character's own life. Max 3 active; see `dating/plans.ts`.
-   */
+  /** Persistent agency layer — a few concrete intentions outlasting a turn. Max 3 active; see `dating/plans.ts`. */
   plans?: CharacterPlan[]
-  /** Set (to when it happened) the first time this relationship reaches a deliberately-initiated "first time together" milestone (see `stage.ts`'s `canInitiateFirstTime` and `useChatSession.ts`'s `initiateFirstTime`) — undefined means it hasn't happened yet. A real fact about this specific relationship, not chat-wide. */
+  /** Set when this relationship first reaches a deliberately-initiated "first time together" milestone (`stage.ts`'s `canInitiateFirstTime`). Undefined = hasn't happened. */
   firstIntimateSceneAt?: number
-  /**
-   * Item 2's asymmetric-pacing signal — a decayed running balance of who's actually been initiating
-   * lately, not just how fast warmth is moving overall (that's `momentum` above). Positive = the
-   * player has been carrying the reaching-out; negative = the character has. See
-   * `dating/momentum.ts`'s `nextInitiativeBalance`/`asymmetricPacingNote`.
-   */
+  /** Item 2's asymmetric-pacing signal: who's been initiating lately. Positive = the player; negative = the character. See `dating/momentum.ts`. */
   initiativeBalance?: number
-  /**
-   * Item 2's "missed opportunity" cost — a still-live, decaying cue after a deflected or backfired
-   * commitment/intimacy-milestone ask (`dating/rebuff.ts`), distinct from `relationshipWarning`'s
-   * hard breakup-risk banner. `null` clears it, same convention as `afterglow`/`relationshipWarning`.
-   */
+  /** Item 2's "missed opportunity" cue after a deflected commitment/intimacy ask (`dating/rebuff.ts`) — distinct from `relationshipWarning`'s hard breakup risk. `null` clears it. */
   recentRebuff?: RecentRebuff | null
-  /**
-   * Item 1's intimacy scene state machine (`dating/intimacyScene.ts`) — where an explicit intimate
-   * scene currently stands (building/at its peak) and what's physically happening right now, kept
-   * separate from `afterglow` above (which judges the aftermath once the scene has already
-   * concluded). `null` clears it, same convention as `afterglow`.
-   */
+  /** Item 1's intimacy scene state machine (`dating/intimacyScene.ts`) — where a scene currently stands, separate from `afterglow` (the aftermath once it's concluded). `null` clears it. */
   intimacyScene?: IntimacyScene | null
-  /**
-   * Item 3's recency log for gift-giving (`dating/gifts.ts`) — a small, bounded, append-only record
-   * of the last few gifts given to this specific character, distinct from `giftsGiven`'s lifetime
-   * tally: this is what lets a re-gift or a repeated pattern be recognized as such, rather than only
-   * ever knowing "given N times total" with no sense of recency.
-   */
+  /** Item 3's recency log of gifts given to this character (`dating/gifts.ts`) — distinct from `giftsGiven`'s lifetime tally; lets a re-gift pattern be recognized. */
   giftLog?: GiftLogEntry[]
-  /**
-   * Durable impressions the character has formed about who {{user}} *is* — see `CharacterBelief`'s
-   * own doc comment. Capped and aged out the same way `plans` is (`dating/beliefs.ts`).
-   */
+  /** FIXES_TODO #12's escalation-shape memory (`dating/intimacyScene.ts`) — recent resolved scenes' catalog-category sequences, e.g. `['kissing_spot', 'position', 'toy']`. Bare `string[][]`, not `IntimacyCategory[][]`, to avoid a circular import back through `intimacyCatalog.ts`. */
+  intimacySceneShapeLog?: string[][]
+  /** See `CharacterBelief`. Capped/aged out the same way `plans` is (`dating/beliefs.ts`). */
   beliefsAboutUser?: CharacterBelief[]
-  /**
-   * Standing expectations the character has developed of {{user}} — see `UserExpectation`'s own doc
-   * comment. Capped and aged out the same way `plans` is (`dating/expectations.ts`).
-   */
+  /** See `UserExpectation`. Capped/aged out the same way `plans` is (`dating/expectations.ts`). */
   expectationsOfUser?: UserExpectation[]
-  /**
-   * The character's own private fear right now, going into this exchange — the missing third leg
-   * alongside `characterIntent` (a want) and `currentNeed` (an undercurrent): a fear is what makes a
-   * character defensive, avoidant, or overly careful in a way neither of those two quite explains.
-   * Same sticky-until-replaced contract as `mood`/`currentNeed`/`characterIntent` — see `mood`'s own
-   * doc comment. Undefined means no clear read yet, not "fearless".
-   */
+  /** The character's own private fear right now — the third leg alongside `characterIntent` (a want) and `currentNeed` (an undercurrent). Same sticky-until-replaced contract as `mood`. Undefined means no read yet, not "fearless". */
   currentFear?: string
-  /**
-   * Item 6's character-initiated gift reciprocity — a still-live, decaying cue (`dating/gifts.ts`'s
-   * `ReciprocityCue`) after warmth/circumstance has genuinely earned it (a meaningful gift received
-   * recently, or a relationship stage just crossed), same "turn-stamped window" shape as `afterglow`/
-   * `recentRebuff`. `null` clears it, same convention as those two.
-   */
+  /** Item 6's character-initiated gift reciprocity cue (`dating/gifts.ts`) after warmth/circumstance has earned it. `null` clears it. */
   reciprocityCue?: ReciprocityCue | null
 }
 
 /**
- * Section 4/12's "proper Scene entity" — deliberately narrow: location/atmosphere framing (folded
- * into the prompt the same way `DateEventCard.title`/`description` already are) plus a turn
- * policy, which is the genuinely new piece with no existing analog. Objective-setting stays on the
- * existing `Objective`/`activeObjective` system rather than being duplicated here.
+ * Section 4/12's Scene entity — location/atmosphere framing plus a turn policy. Objective-setting
+ * stays on the existing `Objective`/`activeObjective` system rather than being duplicated here.
  *
- * - `'manual'` — today's exact behavior: the Composer's "reply as ▾" picker decides, unchanged.
- * - `'round_robin'` — cycles through the primary and every participant in a fixed order.
- * - `'director'` — a cheap judge call (same "model plays the character, code applies the result"
- *   shape as `assessRelationshipMoment`) reads the scene and picks who'd naturally respond;
- *   falls back to the primary on any parse/network failure, never blocking the reply.
- * - `'mention'` — an `@Name` in the player's own message routes the reply to them; no mention
- *   found falls back to the primary.
+ * - `'manual'` — today's behavior: the Composer's "reply as ▾" picker decides.
+ * - `'round_robin'` — cycles through the primary and every participant in order.
+ * - `'director'` — a judge call reads the scene and picks who'd respond; falls back to the primary on failure.
+ * - `'mention'` — an `@Name` in the player's message routes to them; no mention falls back to the primary.
  *
- * Only meaningful once a chat actually has participants — a single-character chat has nobody to
- * choose between, so the UI for this stays hidden until then, same gating as the reply-as picker
- * itself already uses.
+ * Only meaningful once a chat has participants; the UI stays hidden until then.
  */
 export type ScenePolicy = 'manual' | 'round_robin' | 'director' | 'mention'
 
 export interface Scene {
-  /** `null` clears just this field via `updateScene`'s partial-patch merge — same "JSON.stringify drops `undefined`" reason as `RelationshipTrack.relationshipWarning`. */
+  /** `null` clears just this field via `updateScene`'s partial-patch merge. */
   location?: string | null
   atmosphere?: string | null
   turnPolicy: ScenePolicy
-  /** Round-robin bookkeeping only: index into `[primaryId, ...participantIds]` whose turn is next. Read defensively (clamped/modulo) since the roster can shrink out from under a stale index. */
+  /** Round-robin bookkeeping: index into `[primaryId, ...participantIds]`. Read defensively (clamped/modulo) since the roster can shrink. */
   roundRobinIndex?: number
 }
 
-/**
- * A discrete, durable fact about the user worth recalling much later — a name, a stated
- * preference, a promise made — distinct from `Chat.summary`'s one rolling prose blob, which is
- * lossy and gets rewritten wholesale on every resummarization. Fed into the prompt as a synthetic
- * constant lorebook entry (see `useChatSession.ts`'s `buildCurrentPrompt`), reusing World Info's
- * existing token-budget/placement machinery rather than adding a new prompt section.
- */
+/** A discrete, durable fact about the user worth recalling later, distinct from `Chat.summary`'s lossy rolling prose. Fed into the prompt as a synthetic lorebook entry (`useChatSession.ts`'s `buildCurrentPrompt`). */
 export interface ChatFact {
   id: string
   chatId: string
   text: string
-  /** false once retired (superseded/contradicted/no longer relevant) — kept, not deleted, for the audit trail. */
+  /** False once retired (superseded/contradicted/no longer relevant) — kept, not deleted, for the audit trail. */
   active: boolean
   sourceMessageId?: string
   createdAt: number
-  /**
-   * "Memory emotion" — the same event should be carried differently depending on how it landed and
-   * how much it matters, so a callback can happen later without the model re-deriving the whole
-   * thing from prose. All three are set by `assessRelationshipMoment`'s judge call and read back by
-   * `buildFactsLorebook`. All optional: a fact from before this existed, or a plain informational
-   * one, simply omits them and behaves as it always did.
-   */
-  /** 0-1: how much this matters long-term. Unset is treated as ~0.5. Drives which facts keep a prompt slot when the budget is tight, over pure recency. */
+  /** 0-1: how much this matters long-term. Unset ~0.5. Drives which facts keep a prompt slot when budget is tight. */
   importance?: number
-  /** -1..1: how the event felt to the character — negative if it hurt or disappointed, positive if it meant something, ~0 for neutral information. Unset is neutral. */
+  /** -1..1: how the event felt to the character. Unset is neutral. */
   valence?: number
-  /** An open thread the story hasn't closed: a slight not addressed, a promise not kept, a question dodged. Gets a stronger prompt treatment ("Still unsettled: …") until the judge marks it resolved. */
+  /** An open thread the story hasn't closed (a slight, an unkept promise). Gets stronger prompt treatment until the judge marks it resolved. */
   unresolved?: boolean
 }
 
-/**
- * A per-chat steering note injected into the prompt at a chosen position — SillyTavern's
- * Author's Note. Distinct from `CharacterCardData.post_history_instructions`, which is card-level
- * (shared by every chat with that character) and not editable mid-conversation: this is scoped to
- * one `Chat`, editable any time, and never rendered as something a character "said". A blank
- * `text` is inert (the whole field is cleared to `null` rather than persisted empty).
- */
+/** A per-chat steering note (SillyTavern's Author's Note) — distinct from card-level `post_history_instructions`. A blank `text` is cleared to `null` rather than persisted empty. */
 export interface AuthorNote {
   text: string
-  /**
-   * Where in the assembled prompt the note lands:
-   * - `before_char` — just before the character's identity block; lightest, setting-level framing.
-   * - `after_char` — after the card/examples, before the chat history; medium.
-   * - `at_depth` — inserted `depth` messages up from the latest turn; strongest, and `depth` 0-2
-   *   is the most immediate steer (mirrors ST's default "in-chat @ depth 4").
-   */
+  /** `before_char` = lightest, before the identity block. `after_char` = medium, before chat history. `at_depth` = strongest, inserted `depth` messages up (mirrors ST's default depth 4). */
   position: 'before_char' | 'after_char' | 'at_depth'
-  /** Only meaningful for `position: 'at_depth'` — how many messages up from the latest to insert it. */
+  /** Only meaningful for `position: 'at_depth'`. */
   depth: number
 }
 
-/**
- * A user-defined find/replace rule applied to message text — SillyTavern's and RisuAI's regex
- * scripts. `target` decides where it runs: `display` rewrites only what's shown on screen (trim
- * artifacts, restyle narration), `prompt` rewrites only the history text fed back to the model
- * (strip a persistent tic the model keeps copying), `both` does each. The stored message is never
- * altered, so a rule is always reversible by disabling it.
- */
+/** A user-defined find/replace rule (SillyTavern/RisuAI regex scripts). The stored message is never altered, so a rule is always reversible by disabling it. */
 export interface RegexScript {
   id: string
   name: string
-  /** A JS regex source string. Applied globally (an implicit `g` flag); add other flags in `flags`. */
+  /** JS regex source string; applied with an implicit `g` flag (add others via `flags`). */
   find: string
-  /** Replacement string — supports `$1`/`$<name>` backrefs, and `\n` for a newline. */
+  /** Replacement string — supports `$1`/`$<name>` backrefs and `\n`. */
   replace: string
   /** Extra regex flags beyond the implicit `g` (e.g. `i`, `s`, `m`). */
   flags?: string
+  /** `display` rewrites only what's shown; `prompt` rewrites only history text sent to the model; `both` does each. */
   target: 'display' | 'prompt' | 'both'
   enabled: boolean
 }
@@ -415,13 +246,7 @@ export interface GiftItem {
   tags: string[]
 }
 
-/**
- * 10d's "Item catalog beyond gifts" — deliberately the deterministic subset of the originally
- * envisioned effect model: an immediate, permanent relationship nudge, a scene flag, or coins.
- * "Permanently raise a character's base dating stat" isn't included — there's no such concept
- * distinct from the tracked `relationshipStats` today — and "grant a time-limited buff" isn't
- * either, since that needs a whole new active-effects-with-expiry system. Both stay open.
- */
+/** 10d's item catalog — deliberately the deterministic subset (immediate relationship nudge, scene flag, or coins). Permanent stat boosts and time-limited buffs aren't modeled yet. */
 export type ItemEffect =
   | { kind: 'relationship'; dimension: 'affection' | RelationshipDimension; amount: number }
   | { kind: 'flag'; flag: SceneFlag }
@@ -454,25 +279,11 @@ export interface DateEventCard {
   objectiveDescription?: string
   backgroundId?: string
   affectionRequirement?: number
-  /** `hangout` is `date`'s lower-stakes sibling (10b) — same live/end-of-scene-scored machinery, deliberately without its stakes: no hidden agenda, no walkout risk, gentle comfort/trust-led growth instead of a real verdict. See `isLiveScene`. */
+  /** `hangout` is `date`'s lower-stakes sibling (10b) — same live/scored machinery, no hidden agenda or walkout risk. See `isLiveScene`. */
   kind?: 'date' | 'gift' | 'milestone' | 'hangout'
-  /**
-   * Set the moment a `kind: 'date'` or `kind: 'hangout'` event actually starts — marks it as a
-   * *live, scored* scene (10b), not just the original lightweight event-card flow. Its presence
-   * (rather than a separate boolean) does double duty: it's both the "this is a live scene" flag
-   * AND the cutoff timestamp used to gather the scene's own transcript for end-of-scene scoring.
-   * Stamped on every new event regardless of kind (harmless metadata for gift/milestone cards,
-   * which never read it) — see `isLiveScene` for the one place that decides which kinds count.
-   */
+  /** Set the moment a `date`/`hangout` event starts — marks it a live, scored scene (10b) and doubles as the cutoff timestamp for gathering its transcript. Stamped on every new event; see `isLiveScene`. */
   startedAt?: number
-  /**
-   * 10b's "real stakes" — drafted once when a `kind: 'date'` scene starts (never for a `hangout`,
-   * which deliberately carries no relationship-defining stakes), from the character's own card
-   * (personality/goals/boundaries), never shown to the player. Fed to `assessDateOutcome` at the
-   * end so the recap/deltas reflect whether it was actually read and met, not just whether the
-   * date "went fine" on the surface. Best-effort: a card too thin to draft one from, or a judge
-   * call that fails, just leaves this unset — the date still runs, only without this extra texture.
-   */
+  /** 10b's hidden stakes — drafted once from the character's card when a `date` starts (never for `hangout`), never shown to the player. Fed to `assessDateOutcome` at the end. Best-effort: may stay unset if a card's too thin or the draft call fails. */
   hiddenAgenda?: string
 }
 
@@ -483,16 +294,11 @@ export interface StoredMessage extends ChatMessage {
   swipes?: string[]
   activeSwipe?: number
   tokenCount?: number
-  /** Expression/background the model tagged this reply with (Visual Novel mode) — undefined for user messages. */
+  /** Expression/background tag (Visual Novel mode) — undefined for user messages. */
   scene?: SceneTag
-  /** Parallel to `swipes` — each alternate reply can carry its own scene. */
+  /** Parallel to `swipes` — each alternate reply's own scene. */
   swipeScenes?: (SceneTag | undefined)[]
-  /**
-   * The model's exact output for the active swipe, before scene-tag extraction ever touches it —
-   * `text`/`swipes` already have that (and any display regex scripts) applied. Undefined for
-   * messages generated before this field existed, and for user messages. Debug-only: shown in the
-   * Prompt Inspector's raw/processed toggle, never read by prompt-building or anything gameplay-facing.
-   */
+  /** The model's raw output before scene-tag extraction (and display regex) is applied. Debug-only — shown in the Prompt Inspector, never read by prompt-building. */
   rawText?: string
   /** Parallel to `swipes` — each alternate reply's own pre-extraction raw output. */
   swipeRawTexts?: (string | undefined)[]
@@ -500,56 +306,39 @@ export interface StoredMessage extends ChatMessage {
   choices?: string[]
   /** Structured branch options that can include direct lines, actions, or gifts. */
   choiceCards?: ChoiceOption[]
-  /** Bookmarked as a favorite moment — surfaced in the chat's "Pinned" panel. */
+  /** Bookmarked as a favorite moment — surfaced in the chat's Pinned panel. */
   pinned?: boolean
-  /**
-   * Which character "said" this (role: 'char' only) — undefined means the chat's primary
-   * `characterId`, so every message from before group chats existed stays valid with no
-   * migration. Only set when a non-primary participant generated the reply.
-   */
+  /** Which character "said" this (role: 'char' only) — undefined means the chat's primary `characterId`. */
   speakerId?: string
-  /**
-   * True when this (char) message's generation attempt failed outright — `text` stays empty
-   * rather than persisting an error string as the character's actual dialogue, which would
-   * otherwise get fed back into every future prompt as something they genuinely said. The UI
-   * renders a "Generation failed" indicator itself, driven by this flag, not by message text.
-   */
+  /** True when this (char) message's generation attempt failed outright — `text` stays empty rather than persisting an error string as dialogue. UI renders "Generation failed" from this flag. */
   failed?: boolean
-  /** Set when the world tick (10f's proactive outreach) generated this message unprompted, rather than as a reply to a player message in the same turn. */
+  /** Set when the world tick (10f's proactive outreach) generated this message unprompted. */
   initiatedBy?: 'character'
-  /** 10b's intent chips — how the player meant this line. User messages only; fed to the relationship judge as interpretation context, never a direct stat move. See `src/lib/dating/intent.ts`. */
+  /** 10b's intent chips — how the player meant this line. User messages only; fed to the relationship judge as context. See `src/lib/dating/intent.ts`. */
   intent?: MessageIntent
-  /**
-   * Item 8: the boundary phrase `dating/boundaryGuard.ts`'s `detectAnyBoundaryCrossing` flagged
-   * this reply as having likely crossed, persisted onto the message itself rather than only shown
-   * as a toast at generation time. A toast disappears; a player who steps away or is mid-scene can
-   * easily miss it and never know to regenerate. This makes the flag durable and visible on the
-   * message itself (see `MessageBubble.tsx`'s small warning badge) for as long as the reply stands.
-   * Deliberately NOT an automatic reroll — see that file's own doc comment for why an unverifiable
-   * false-positive risk makes a player-reviewed flag the safer default; this only makes that
-   * existing, safe design harder to miss, not more aggressive. Cleared (set to `undefined`) the
-   * moment the message is edited or regenerated, since a new attempt deserves its own fresh check.
-   * `null` clears it — `JSON.stringify` drops an undefined-valued key, so a bare `undefined` here
-   * would silently fail to overwrite a flag a previous attempt left standing.
-   */
+  /** Set when this (user) message was sent via a Relationship-panel Unlocks-tab action rather than typed. `label`/`category` are frozen at send time so it stays accurate if the catalog changes later. `category` is a bare string (not `IntimacyCategory`) to avoid a circular import. See `MessageBubble.tsx`'s badge. */
+  intimacyAction?: { label: string; category: string }
+  /** Item 8: boundary phrase `dating/boundaryGuard.ts` flagged, persisted so it stays visible past the generation-time toast. Not an automatic reroll — see that file. Cleared on edit/regenerate. `null` clears it (see `RelationshipTrack.afterglow`). */
   boundaryFlag?: string | null
+  /** FIXES_TODO "regenerate doesn't undo the damage": true once the per-turn judge has scored THIS message, so a regenerate doesn't reapply its delta again. `char` messages only. */
+  relationshipJudged?: boolean
+  /** FIXES_TODO #8: `dating/agencyGuard.ts` flagged this as narrating the player persona's own climax. Same durable, player-reviewed pattern as `boundaryFlag`, kept separate since it's a different kind of concern. `null` clears it. */
+  povFlag?: string | null
+  /** FIXES_TODO #11: `dating/intimacyScene.ts` flagged this reply for using one of `EXPLICIT_ANTI_PATTERNS`. Own field since it's a prose-quality miss, not a boundary/POV violation. `null` clears it. */
+  explicitQualityFlag?: string | null
 }
 
-/** 10b: how a player meant a tagged line, distinct from what it literally says. Specs (labels, how the judge reads each) live in `src/lib/dating/intent.ts`. */
+/** 10b: how a player meant a tagged line. Labels/judge behavior live in `src/lib/dating/intent.ts`. */
 export type MessageIntent = 'flirt' | 'tease' | 'open_up' | 'reassure' | 'apologize'
 
-/** 10b's live rapport trajectory — how a date scene is trending. Labels/tone live in `src/lib/dating/rapport.ts`. */
+/** 10b's live rapport trajectory during a date scene. Labels/tone live in `src/lib/dating/rapport.ts`. */
 export type RapportTrajectory = 'lighting_up' | 'warming' | 'at_ease' | 'pulling_back' | 'on_edge'
 
 export interface RapportRead {
   trajectory: RapportTrajectory
-  /** A short in-world observation from the judge, e.g. "keeps finding reasons to lean in". */
+  /** A short in-world observation, e.g. "keeps finding reasons to lean in". */
   note?: string
-  /**
-   * 10b's walkout signal — true only for a genuine dealbreaker this turn (overt hostility, a
-   * crude/explicit proposition), never for ordinary friction or a bad joke. `useChatSession`
-   * ends the date for real the moment this comes back true; it is never shown as a raw flag.
-   */
+  /** 10b's walkout signal — true only for a genuine dealbreaker, never ordinary friction. `useChatSession` ends the date the moment this is true; never shown as a raw flag. */
   walkOut?: boolean
   /** When this read was taken, so a stale one from a finished date can be ignored. */
   updatedAt: number
@@ -557,13 +346,13 @@ export interface RapportRead {
 
 export interface Chat {
   id: string
-  /** The primary character. VN sprite/expression staging still stays keyed on this one (a separate, larger lift — see ROADMAP §1/§4); relationship stats/gifts/gallery no longer do, see `participantRelationships`. */
+  /** The primary character. VN sprite/expression staging still keys on this one; relationship stats/gifts/gallery no longer do — see `participantRelationships`. */
   characterId: string
-  /** Extra characters who can also speak in this chat (group scenes). Unset/empty = today's single-character chat. */
+  /** Extra characters who can also speak (group scenes). Unset/empty = today's single-character chat. */
   participants?: string[]
-  /** Multi-character relationship tracking: a non-primary participant's own `RelationshipTrack`, keyed by their character id — the primary's own copy stays on this `Chat`'s own top-level fields (affection/relationshipStats/etc.) unchanged, for backward compatibility with every chat that predates this. Unset/empty for every chat with no participants. See `getRelationshipTrack`/`patchRelationshipTrack` in `stage.ts`. */
+  /** Non-primary participants' own `RelationshipTrack`, keyed by character id — the primary keeps using this `Chat`'s top-level fields. See `getRelationshipTrack`/`patchRelationshipTrack` in `stage.ts`. */
   participantRelationships?: Record<string, RelationshipTrack>
-  /** Section 4/12's "proper Scene entity" — location/atmosphere framing plus who replies next in a group chat, beyond the fully-manual "reply as" picker. Unset = today's exact behavior (manual, no framing). See `Scene`/`src/lib/chat/scene.ts`. */
+  /** Location/atmosphere framing plus who replies next in a group chat. Unset = today's manual behavior. See `Scene`. */
   scene?: Scene
   personaId: string
   title: string
@@ -573,97 +362,74 @@ export interface Chat {
   /** The six dimensions beyond `affection` — see `RelationshipDimension`. Missing keys read as 0. */
   relationshipStats?: Partial<Record<RelationshipDimension, number>>
   relationshipStage?: RelationshipStage
-  /** 10c's Define-the-Relationship ladder — unset/'none' until the player asks and the character accepts. */
+  /** 10c's Define-the-Relationship ladder — unset/'none' until asked for and accepted. */
   commitmentStatus?: CommitmentStatus
-  /** Set while a committed relationship is under real strain and hasn't yet broken or recovered. */
+  /** Set while a committed relationship is under strain and hasn't yet broken or recovered. */
   relationshipWarning?: RelationshipWarning
-  /** How many times this relationship has broken up (deliberately or from unresolved strain) — the "lasting scar" persists as this counter plus a one-time stat hit at break time, not a literal permanent ceiling. */
+  /** Break-up count — the "lasting scar" is this counter plus a one-time stat hit, not a hard ceiling. */
   breakupCount?: number
   sceneFlags?: SceneFlag[]
-  /** Per-lorebook-entry sticky/cooldown bookkeeping, keyed `${book.sourceKey}:${entry.id}` — written back after each generation, read on the next. Unset = fresh. */
+  /** Per-lorebook-entry sticky/cooldown bookkeeping, keyed `${book.sourceKey}:${entry.id}`. Unset = fresh. */
   worldInfoState?: Record<string, { activeUntil?: number; blockedUntil?: number; activeAt?: number }>
-  /** Per-chat steering note (SillyTavern's Author's Note) — see `AuthorNote`. Unset = none. */
+  /** Per-chat steering note (SillyTavern's Author's Note) — see `AuthorNote`. */
   authorNote?: AuthorNote
   giftCoins?: number
   giftInventory?: Record<string, number>
   giftsGiven?: Record<string, number>
-  /** Owned quantity per `ItemDef.id` — 10d's item catalog, separate from `giftInventory` since items are used/consumed, not given to a character. */
+  /** Owned quantity per `ItemDef.id` — separate from `giftInventory` since items are used/consumed. */
   itemInventory?: Record<string, number>
-  /** Owned quantity per `IntimacyUnlockable.id` (toy-category only in practice) — a shared, chat-wide stock exactly like `giftInventory`/`itemInventory`, not owed to any one character. Warmth/commitment (see `intimacyCatalog.ts`) only ever gate *eligibility to buy*; this is actual possession. */
+  /** Owned quantity per `IntimacyUnlockable.id` (toy-category) — shared chat-wide stock like `giftInventory`. Warmth/commitment only gate eligibility to buy; this is actual possession. */
   toyInventory?: Record<string, number>
   unlockedGalleryIds?: string[]
-  /** The primary's own mood/need/intention — see `RelationshipTrack.mood`'s doc comment for what these are and why they're separate from the relationship fields above. */
   mood?: CharacterMood
   currentNeed?: CharacterNeed
   characterIntent?: string
-  /** The primary's relationship momentum — see `RelationshipTrack.momentum`. */
   momentum?: number
-  /** The primary's persistent agency layer — see `RelationshipTrack.plans`. */
   plans?: CharacterPlan[]
   firstIntimateSceneAt?: number
-  /** The primary's own copy of `RelationshipTrack.afterglow` — see that field, and `getRelationshipTrack`. */
+  /**
+   * The following are the primary character's own copies of the same-named `RelationshipTrack`
+   * fields, kept as top-level `Chat` fields for backward compatibility with chats that predate
+   * multi-character tracking. See `RelationshipTrack` and `getRelationshipTrack`.
+   */
   afterglow?: Afterglow | null
-  /** The primary's own copy of `RelationshipTrack.initiativeBalance` — see that field. */
   initiativeBalance?: number
-  /** The primary's own copy of `RelationshipTrack.recentRebuff` — see that field. */
   recentRebuff?: RecentRebuff | null
-  /** The primary's own copy of `RelationshipTrack.intimacyScene` — see that field. */
   intimacyScene?: IntimacyScene | null
-  /** The primary's own copy of `RelationshipTrack.giftLog` — see that field. */
   giftLog?: GiftLogEntry[]
-  /** The primary's own copy of `RelationshipTrack.beliefsAboutUser` — see that field. */
+  intimacySceneShapeLog?: string[][]
   beliefsAboutUser?: CharacterBelief[]
-  /** The primary's own copy of `RelationshipTrack.expectationsOfUser` — see that field. */
   expectationsOfUser?: UserExpectation[]
-  /** The primary's own copy of `RelationshipTrack.currentFear` — see that field. */
   currentFear?: string
-  /** The primary's own copy of `RelationshipTrack.currentDesire` — see that field. */
   currentDesire?: string
-  /** The primary's own copy of `RelationshipTrack.reciprocityCue` — see that field. */
   reciprocityCue?: ReciprocityCue | null
-  /** Ids of one-shot world triggers this chat has already fired (`world/triggers.ts`). Per chat, not per world, so two chats in the same world progress through it independently and a fork inherits the parent's history. */
+  /** One-shot world triggers already fired (`world/triggers.ts`). Per chat, so a fork inherits the parent's history and progresses independently after. */
   firedTriggerIds?: string[]
   activeEvent?: DateEventCard
-  /** 10b's live rapport read — how the scene is trending, refreshed each turn *only* while a live date is active, cleared when it ends. Qualitative only; never affects affection or the tracked dimensions. See `src/lib/dating/rapport.ts`. */
+  /** 10b's live rapport read, refreshed each turn only while a date is active, cleared when it ends. Qualitative only — never affects tracked stats. See `src/lib/dating/rapport.ts`. */
   rapport?: RapportRead
-  /** Running long-term memory log covering everything older than summaryUpToTimestamp. */
+  /** Long-term memory log covering everything older than `summaryUpToTimestamp`. */
   summary?: string
-  /** Messages with createdAt <= this are represented by `summary`, not sent verbatim. */
+  /** Messages with `createdAt <=` this are represented by `summary`, not sent verbatim. */
   summaryUpToTimestamp?: number
   /** Set when this chat was created by forking another one — the source chat's id. */
   parentChatId?: string
   /** The message (in the parent chat) this fork branched off from. */
   forkedFromMessageId?: string
-  /**
-   * Per-chat overrides for the global relationship-tracking/choice-suggestion assist toggles
-   * (Settings → Generation) — an unset field falls back to that global default, same precedence
-   * style as `Character.instructTemplateId`. Seeded once from the bound world's template at chat
-   * creation (`NewChatDialog`) so a Freeform/Slice of Life world's chats genuinely don't carry a
-   * relationship-tracking prompt line even if the user's global default has it on — not
-   * live-recomputed if the world's template changes later, the same "picks a default, doesn't
-   * retroactively enforce it" contract world templates (10e) already has for hiding editor tabs.
-   */
+  /** Per-chat overrides for the global relationship-tracking/choice-suggestion toggles (Settings → Generation); unset falls back to the global default. Seeded once from the bound world's template at chat creation, not live-recomputed later. */
   assistOverrides?: {
     autoTrackRelationship?: boolean
     autoSuggestChoices?: boolean
-    /** Same precedence — unset falls back to the global Settings → Appearance default. Seeded
-     *  from the bound world's template (Visual Novel forces it on) same as the two flags above,
-     *  editable afterward from `RelationshipPanel`. */
+    /** Same fallback; seeded from the bound world's template (Visual Novel forces it on), editable afterward from `RelationshipPanel`. */
     visualNovelMode?: boolean
   }
-  /** 10f's proactive outreach: real-time bookkeeping for the world tick, written every time it evaluates this chat regardless of outcome — prevents re-rolling on every app reopen. Independent of the in-fiction world clock. */
+  /** 10f's proactive outreach bookkeeping — written every world-tick evaluation regardless of outcome, to avoid re-rolling on every app reopen. */
   lastOutreachCheckedAt?: number
-  /** True once the world tick has inserted an unprompted message the player hasn't opened this chat to see yet. Cleared when the chat is opened. */
+  /** True once the world tick has inserted an unprompted message the player hasn't seen yet. Cleared when the chat is opened. */
   hasUnreadOutreach?: boolean
-  /** Section 9's chat-pinning gap: keeps a chat at the top of `ChatsPanel` regardless of `updatedAt` — the chat-level analog of `StoredMessage.pinned`. */
+  /** Keeps a chat at the top of `ChatsPanel` regardless of `updatedAt` — the chat-level analog of `StoredMessage.pinned`. */
   pinned?: boolean
-  /**
-   * Set the moment a chat is deleted from the normal chat list — a soft delete, not the end of it.
-   * `GET /api/chats` excludes anything with this set; `GET /api/chats/trash` returns only chats
-   * with this set, newest-deleted first. A trashed chat purges for real (see `purgeChat` in
-   * `server/app.ts`) either on request or automatically once it's sat here past the retention
-   * window — see `TRASH_RETENTION_MS`. Restoring just clears this field back to unset.
-   */
+  /** Soft-delete timestamp. `GET /api/chats` excludes it, `GET /api/chats/trash` returns only it. Purges for real (`purgeChat` in `server/app.ts`) on request or after `TRASH_RETENTION_MS`. Restoring clears this back to unset. */
   deletedAt?: number
 }
 
@@ -671,13 +437,7 @@ export interface WorldInfoBook {
   id: string
   name: string
   book: Lorebook
-  /**
-   * Scoping for this standalone book. When `boundChatIds`, `boundCharacterIds`, and
-   * `boundWorldIds` are ALL empty the book is global — active in every chat (the original
-   * behaviour, and what every book created before scoping existed still gets). Otherwise the book
-   * is active only for a chat that matches: its own id is in `boundChatIds`, its primary
-   * character is in `boundCharacterIds`, or that character's world is in `boundWorldIds`.
-   */
+  /** When `boundChatIds`/`boundCharacterIds`/`boundWorldIds` are all empty the book is global (active everywhere). Otherwise active only for a matching chat/character/world. */
   boundChatIds: string[]
   boundCharacterIds?: string[]
   boundWorldIds?: string[]
@@ -689,49 +449,44 @@ export interface WorldCard {
   name: string
   /** Setting, tone, general facts — always included in the prompt for any character in this world. */
   description: string
-  /** Hard constraints: magic system, tech level, taboos — things the model should never contradict. */
+  /** Hard constraints (magic system, tech level, taboos) the model should never contradict. */
   rules?: string
   lorebook: Lorebook
   avatarDataUrl?: string
-  /** Scene art keyed by background id (src/lib/vn/backgrounds.ts) — falls back to a placeholder gradient when missing. */
+  /** Scene art keyed by background id (`src/lib/vn/backgrounds.ts`) — falls back to a placeholder gradient when missing. */
   backgrounds?: Record<string, string>
   /** Minimum affection required before a tagged background can be selected/displayed. */
   backgroundUnlocks?: Record<string, number>
-  /** World-authored scene locations beyond the 12 built-in defaults — see `CustomBackground`. */
+  /** World-authored scene locations beyond the 12 built-ins — see `CustomBackground`. */
   customBackgrounds?: CustomBackground[]
-  /** Background-music track URLs keyed by scene mood id (src/lib/vn/moods.ts), plus a `default` key played when no mood-specific track applies. VN mode only. */
+  /** Background-music URLs keyed by scene mood id (`src/lib/vn/moods.ts`), plus a `default` key. VN mode only. */
   music?: Record<string, string>
-  /** Overrides the default gift catalog for characters living here. Empty/unset falls back to the built-in default catalog. */
+  /** Overrides the default gift catalog for characters here. Empty/unset falls back to the built-in catalog. */
   gifts?: GiftItem[]
-  /** Per-world item catalog (10d) — no built-in default catalog the way gifts have one, since items are optional; empty/unset just means no items exist yet. */
+  /** Per-world item catalog (10d) — no built-in default; empty/unset just means no items yet. */
   items?: ItemDef[]
-  /** World-authored additions to the built-in intimacy catalog (kissing spots/positions/toys/activities) beyond the ~30 defaults — additive, same pattern as `customBackgrounds`. See `intimacyCatalog.ts`. */
+  /** World-authored additions to the built-in intimacy catalog beyond the ~30 defaults — additive. See `intimacyCatalog.ts`. */
   customIntimacyOptions?: IntimacyUnlockable[]
-  /** When true, `customIntimacyOptions` entirely REPLACES the built-in catalog instead of adding to it — the escape hatch for a non-humanoid or otherwise very different character/setting the built-in (humanoid-anatomy) defaults don't fit. Ignored when `customIntimacyOptions` is empty. See `intimacyCatalog.ts`'s `getIntimacyCatalog`. */
+  /** When true, `customIntimacyOptions` REPLACES the built-in catalog instead of adding to it — for non-humanoid or otherwise very different settings. Ignored when `customIntimacyOptions` is empty. */
   replaceIntimacyCatalog?: boolean
   /**
-   * This world's own content rating, overriding the global Settings value for every chat in it —
-   * one dial can't serve a wholesome world and an explicit one at the same time. Unset means
-   * "inherit the global setting", which is deliberately distinct from explicitly choosing
-   * `'default'` (that pins this world to sending no instruction at all). See
-   * `resolveIntimacyLevel` in `prompt/intimacyGuidance.ts` for why it overrides rather than clamps.
-   *
-   * `null` is accepted on the wire to mean "clear it back to inherit" — `JSON.stringify` drops an
-   * `undefined`-valued key, so sending undefined would leave an existing rating untouched. Same
-   * convention as `Chat.activeEvent`/`Chat.authorNote`; it is never `null` once read back.
+   * This world's own content rating, overriding the global Settings value. Unset means "inherit
+   * global", distinct from explicitly choosing `'default'` (pins this world to no instruction at
+   * all). See `resolveIntimacyLevel` in `prompt/intimacyGuidance.ts`.
+   * `null` on the wire means "clear back to inherit"; never `null` once read back.
    */
   intimacyLevel?: IntimacyDetailLevel | null
-  /** Author-defined "when X, then Y" rules (`world/triggers.ts`) — the one place a world can hang behaviour off the signals the app already produces. */
+  /** Author-defined "when X, then Y" rules (`world/triggers.ts`). */
   triggers?: Trigger[]
-  /** Overrides the default warmth thresholds for characters living here. Unset stages fall back to the default. */
+  /** Overrides the default warmth thresholds for characters here. Unset stages fall back to the default. */
   relationshipThresholds?: Partial<Record<Exclude<RelationshipStage, 'near_strangers'>, number>>
-  /** World-authored scene flags beyond the 4 built-in defaults — see `CustomSceneFlag`. */
+  /** World-authored scene flags beyond the 4 built-ins — see `CustomSceneFlag`. */
   customSceneFlags?: CustomSceneFlag[]
-  /** Absolute day count in the shared 112-day calendar (src/lib/world/calendar.ts) — 0 if the clock has never been advanced. */
+  /** Absolute day count in the shared 112-day calendar (`src/lib/world/calendar.ts`) — 0 if never advanced. */
   currentDay?: number
-  /** Index into calendar.ts's PHASES (morning/afternoon/evening/night) — 0 if never advanced. */
+  /** Index into `calendar.ts`'s `PHASES` (morning/afternoon/evening/night) — 0 if never advanced. */
   currentPhaseIndex?: number
-  /** Picked at creation (src/lib/world/worldTemplates.ts), editable after — narrows which editor tabs are shown. Unset behaves exactly like 'dating_sim' (the full feature set, matching every world created before this field existed). */
+  /** Picked at creation (`src/lib/world/worldTemplates.ts`), editable after — narrows which editor tabs show. Unset behaves like 'dating_sim' (full feature set). */
   template?: WorldTemplateId
   createdAt: number
   updatedAt: number

@@ -1,3 +1,8 @@
+/**
+ * Reads/writes avatar, sprite, gallery, background, and world-music files under data/avatars/.
+ * Handles data: URL decoding, size limits, and pruning stale files on re-upload/delete.
+ */
+
 import fs from 'node:fs'
 import path from 'node:path'
 import { avatarsDir } from './db.ts'
@@ -9,19 +14,12 @@ const EXT_BY_MIME: Record<string, string> = {
   'image/gif': 'gif',
 }
 
-// A generous ceiling for a single avatar/sprite/background/CG image — well above anything a
-// real portrait needs, but small enough that one oversized upload can't fill the disk or blow
-// past the request in a way that's hard to diagnose. Applies to the decoded (raw) byte size, not
-// the base64 text length (which runs ~33% larger).
+// Max decoded byte size for a single avatar/sprite/background/CG image.
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-/**
- * Parses a `data:<mime>;base64,<data>` URL, rejecting anything that isn't one of the image
- * mime types this app actually serves as static files, or that decodes larger than
- * `MAX_IMAGE_BYTES`. Returns the extension to save under and the decoded buffer.
- */
+/** Parses a `data:<mime>;base64,<data>` URL into an extension + decoded buffer, enforcing MAX_IMAGE_BYTES. */
 function decodeImageDataUrl(dataUrl: string): { ext: string; buffer: Buffer } {
   const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/s)
   if (!match) throw new Error('Malformed image data URL.')
@@ -30,8 +28,7 @@ function decodeImageDataUrl(dataUrl: string): { ext: string; buffer: Buffer } {
   if (!ext) {
     throw new Error(`Unsupported image type "${mime}" — expected PNG, JPEG, WebP, or GIF.`)
   }
-  // Every 4 base64 characters decode to 3 bytes (minus 1-2 for trailing '=' padding) — cheap to
-  // check before actually allocating the buffer.
+  // Cheap approx check (base64 -> bytes) before allocating the buffer.
   const approxBytes = Math.floor((base64.length * 3) / 4)
   if (approxBytes > MAX_IMAGE_BYTES) {
     throw new Error(`Image is too large (max ${Math.floor(MAX_IMAGE_BYTES / (1024 * 1024))}MB).`)
@@ -59,42 +56,25 @@ const AUDIO_EXT_BY_MIME: Record<string, string> = {
   'audio/x-m4a': 'm4a',
 }
 
-// A looping BGM track is legitimately larger than any image — a few minutes of compressed audio.
-// Still bounded so one bad upload can't wedge the request or fill the disk unnoticed.
+// Larger cap for BGM tracks (a few minutes of compressed audio).
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024
 
-/**
- * Everything belonging to one character or world — its portrait, every sprite/expression, every
- * gallery CG or background — lives under one folder for that entity
- * (data/avatars/<kind>/<id>/...), so it's browsable as a single unit on disk and can be deleted in
- * one shot. Personas never have more than the one image, so they stay a flat
- * data/avatars/personas/<id>.<ext> instead of a folder-per-persona.
- */
+/** Per-entity folder: data/avatars/<kind>/<id>/. Personas are the exception — a flat data/avatars/personas/<id>.<ext>. */
 function entityDir(kind: AvatarEntityKind, id: string): string {
   return path.join(avatarsDir, kind, id)
 }
 
-/**
- * `avatarDataUrl` from the client is either a fresh `data:...;base64,...` upload (write it to
- * disk and return a servable path) or an already-served `/avatars/...` path from a previous save
- * (nothing changed — keep it as-is). Anything else (undefined, cleared) is passed through
- * untouched.
- */
+/** Writes a fresh `data:` upload to disk and returns its servable path; passes through anything else (already-resolved path, undefined) untouched. */
 export function resolveAvatar(kind: AvatarEntityKind, id: string, avatarDataUrl: unknown): string | undefined {
   if (typeof avatarDataUrl !== 'string' || !avatarDataUrl.startsWith('data:')) {
     return avatarDataUrl as string | undefined
   }
-  // `id` reaches here from a URL param — every id in this app is server-generated via
-  // crypto.randomUUID(), so a non-UUID value is never legitimate. Reject it before it
-  // can reach a filesystem path (route params can carry '\', which path.join treats as
-  // a separator on Windows, allowing writes outside data/avatars).
+  // ids are always server-generated UUIDs; reject anything else before it reaches a filesystem path.
   if (!UUID_RE.test(id)) {
     throw new Error('Invalid id')
   }
   const { ext, buffer } = decodeImageDataUrl(avatarDataUrl)
-  // Re-uploading in a different image format (e.g. png -> jpg) writes a new file rather than
-  // overwriting the old one, since the extension is part of the filename — without this, the
-  // previous format's file just lingers on disk forever, unreferenced by anything.
+  // Re-uploading in a different format writes a new file rather than overwriting; delete the stale one below.
   const staleExts = Object.values(EXT_BY_MIME).filter((e) => e !== ext)
   if (kind === 'personas') {
     const dir = path.join(avatarsDir, 'personas')

@@ -14,8 +14,12 @@ import type { IntimacyPhase } from '@/lib/dating/intimacyScene'
 import { parseBeliefUpdates, type BeliefUpdate } from '@/lib/dating/beliefs'
 import { parseExpectationUpdates, type ExpectationUpdate } from '@/lib/dating/expectations'
 
-// max_context_length is deliberately omitted here — every call site fetches the server's actual
-// loaded context via `client.getEffectiveMaxContext()` instead of hardcoding a guess.
+// Builds the relationship-judge prompts/schemas: per-turn deltas, scene flags, durable facts,
+// date/hangout outcomes, and the commitment/intimacy-milestone asks. Each exported function
+// assembles a prompt, calls the model with a timeout, and parses+validates the JSON reply.
+
+// max_context_length is omitted — callers fetch the server's actual context via
+// `client.getEffectiveMaxContext()` instead of hardcoding a guess.
 const REL_PARAMS = {
   max_length: 220,
   temperature: 0.35,
@@ -38,20 +42,11 @@ const EVENT_PARAMS = {
   min_p: 0.05,
 }
 
-// None of this file's `client.generate` calls ever passed a `signal`, so a slow or hanging
-// provider response (confirmed live against a rate-limited free OpenRouter model: a request that
-// simply never resolved) left the *caller* stuck forever too — worst-observed case was "End
-// hangout"/"End date", whose button reads "Ending…" with no way to cancel or retry, because
-// `endDateEvent` awaits `assessDateOutcome` directly and its promise never settles either way.
-// Every one of this file's assist calls shares the same shape (build prompt, `generate`, parse),
-// so the fix lives once, here: race the call against a timeout that aborts the underlying request
-// (via the `signal` every backend's `generate` already accepts) and rejects with a message the
-// caller's existing catch/toastError path already knows how to surface.
-// Exported for `relationshipAssist.test.ts` — every other symbol here is a small pure helper this
-// file uses internally, but this one has real timing behavior worth locking in directly rather
-// than only indirectly through whichever exported function happens to call it.
+// Aborts a hung `generate` call instead of leaving the caller stuck forever (e.g. a rate-limited
+// provider that never resolves). Every assist call below shares this shape.
 export const ASSIST_TIMEOUT_MS = 45_000
 
+/** Races `client.generate` against `ASSIST_TIMEOUT_MS`, rejecting with a caller-surfaceable message on timeout. */
 export async function generateWithTimeout(client: ChatBackend, params: GenerateRequest, label: string): Promise<string> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), ASSIST_TIMEOUT_MS)
@@ -90,11 +85,7 @@ const DIMENSION_GLOSSARY: Record<RelationshipDeltaKey, string> = {
   tension: 'friction or unresolved conflict. A positive delta here means MORE tension, which is not automatically a bad thing dramatically',
 }
 
-/**
- * Bare flag names with no definition invited false positives (e.g. "first_date" firing for an
- * ordinary friendly hangout with a small gift, nothing either party understood as a date) — one
- * short line per flag gives the classifier an actual bar to clear instead of guessing from the name.
- */
+/** One-line definition per flag, so the classifier has an actual bar to clear instead of guessing from the name. */
 const FLAG_GLOSSARY: Record<SceneFlag, string> = {
   first_date: 'an explicit, mutually understood date has now happened, not just a friendly hangout, chance encounter, or a gift given in passing',
   confession: 'one of them stated real romantic feelings out loud, not just flirted or hinted',
@@ -103,28 +94,17 @@ const FLAG_GLOSSARY: Record<SceneFlag, string> = {
   first_kiss: 'they actually kissed — lips meeting mouth, forehead, cheek, hand, or anywhere else — not just closeness, a lingering look, or an almost-kiss that did not quite happen',
 }
 
-/**
- * Flags a hangout structurally cannot establish, no matter how the scene goes. `first_date`'s own
- * glossary line above already spells out that a friendly hangout doesn't qualify, and it fired on
- * a scene explicitly started and scored as a hangout anyway — a prose bar is a request, not a
- * gate, and this app's whole design premise is that outcomes are judged by the model but *applied*
- * deterministically. So the flag is withheld from the classifier's menu for a hangout and dropped
- * on the way back in if it shows up regardless.
- *
- * Built-ins only. A world's own `CustomSceneFlag`s have no date/hangout marker to key off (see
- * `CustomSceneFlag` in `types.ts`), so they keep relying on their `description` the way they
- * always have — adding a per-flag "dates only" switch is a world-editor change, not this one.
- */
+/** Flags a hangout can never establish — withheld from its classifier menu and stripped if the model sets one anyway. Built-ins only. */
 const DATE_ONLY_FLAGS: ReadonlySet<SceneFlag> = new Set<SceneFlag>(['first_date'])
 
 const NO_EXCLUSIONS: ReadonlySet<SceneFlag> = new Set<SceneFlag>()
 
-/** The flags a scene of this kind is allowed to establish. `undefined` (an ordinary chat turn or an unspecified scene) means "all of them" — only a hangout narrows the set. */
+/** Flags allowed for this scene kind; only a hangout narrows the set. */
 function excludedFlagsFor(sceneKind?: 'date' | 'hangout'): ReadonlySet<SceneFlag> {
   return sceneKind === 'hangout' ? DATE_ONLY_FLAGS : NO_EXCLUSIONS
 }
 
-/** World-authored flags (see `CustomSceneFlag`) get the same glossary treatment as the built-in 4 — their own `description` is the classifier's bar for firing, same idea as `FLAG_GLOSSARY`. */
+/** Formats built-in + world-authored flags with their glossary/description text for the prompt. */
 function describeFlags(customFlags?: CustomSceneFlag[], exclude: ReadonlySet<SceneFlag> = NO_EXCLUSIONS): string {
   const builtIn = SCENE_FLAGS.filter((f) => !exclude.has(f)).map((f) => `${f} (${FLAG_GLOSSARY[f]})`)
   const custom = (customFlags ?? []).map((f) => `${f.id} (${f.description})`)
@@ -137,7 +117,7 @@ function allowedFlagIds(customFlags?: CustomSceneFlag[], exclude: ReadonlySet<Sc
 
 const ZERO_DELTAS: RelationshipDeltas = Object.fromEntries(DELTA_KEYS.map((k) => [k, 0])) as RelationshipDeltas
 
-/** Gentle/Normal/Harsh — a global scale on how far consequences swing (10b), never what a character says or how a scene opens. */
+/** Global scale on how far relationship consequences swing — never what a character says or how a scene opens. */
 export type RelationshipDifficulty = 'gentle' | 'normal' | 'harsh'
 
 const DIFFICULTY_MULTIPLIERS: Record<RelationshipDifficulty, number> = {
@@ -146,22 +126,14 @@ const DIFFICULTY_MULTIPLIERS: Record<RelationshipDifficulty, number> = {
   harsh: 1.6,
 }
 
-/** Applied once, right before judge-returned deltas are added to the running totals — everything upstream (the judge call itself, prompts, scene generation) stays difficulty-agnostic. */
+/** Scales judge-returned deltas by difficulty before adding to running totals; prompts stay difficulty-agnostic. */
 export function scaleDeltasForDifficulty(deltas: RelationshipDeltas, difficulty: RelationshipDifficulty): RelationshipDeltas {
   const factor = DIFFICULTY_MULTIPLIERS[difficulty]
   if (factor === 1) return deltas
   return Object.fromEntries(DELTA_KEYS.map((k) => [k, Math.round(deltas[k] * factor)])) as RelationshipDeltas
 }
 
-/**
- * "Repeated same interaction → diminishing returns" (part of the momentum/friction work): when the
- * player keeps playing the exact same move (the same intent chip three turns running), a positive
- * warmth gain is scaled toward nothing — a compliment that landed the first time is just noise by
- * the fifth. Negative deltas and `tension` pass through untouched: a repeated *bad* move shouldn't
- * be softened, and rising friction from the repetition is a real reaction. `curiosity` is left
- * alone too (it's not warmth). Applied after `scaleDeltasForDifficulty`, on the same "adjust the
- * numbers, not the judge" principle.
- */
+/** Diminishing returns for repeating the same move: scales down positive warmth deltas, leaves negative deltas, tension, and curiosity untouched. */
 export function dampenRepeatedDeltas(deltas: RelationshipDeltas): RelationshipDeltas {
   const out = { ...deltas }
   for (const k of ['affection', 'trust', 'chemistry', 'comfort', 'respect'] as const) {
@@ -170,12 +142,7 @@ export function dampenRepeatedDeltas(deltas: RelationshipDeltas): RelationshipDe
   return out
 }
 
-/**
- * A durable memory with its emotional colouring ("memory emotion") — so a later callback can be
- * triggered by the *feel* of a remembered event without the model re-deriving it from prose. All
- * three numbers are defaulted, so a model that regresses to a bare string still produces a usable
- * fact.
- */
+/** A durable memory plus its emotional colouring, so a later callback can key off feel, not just prose. */
 export interface RememberedFact {
   text: string
   /** 0-1: long-term weight. */
@@ -188,11 +155,7 @@ export interface RememberedFact {
 
 const clamp = (v: number, lo: number, hi: number) => (Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : 0)
 
-/**
- * Parses the judge's `newFacts` — either the current `["short sentence", ...]` form or the richer
- * `[{"text","importance","valence","unresolved"}, ...]` form (models drift between the two). A bare
- * string gets neutral defaults: importance 0.5, valence 0, not unresolved.
- */
+/** Parses `newFacts` in either the plain-string or richer object form; a bare string gets neutral defaults. */
 export function parseRememberedFacts(raw: unknown): RememberedFact[] {
   if (!Array.isArray(raw)) return []
   const out: RememberedFact[] = []

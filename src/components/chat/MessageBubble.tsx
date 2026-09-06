@@ -1,5 +1,5 @@
 import { memo, useState } from 'react'
-import { ChevronLeft, ChevronRight, Compass, GitFork, History, RotateCcw, Star, TriangleAlert, X } from 'lucide-react'
+import { AlertCircle, ChevronLeft, ChevronRight, Compass, GitFork, Heart, History, MessageSquareWarning, RotateCcw, Star, TriangleAlert, X } from 'lucide-react'
 import type { StoredMessage } from '@/lib/types'
 import { useSettingsStore, type AvatarShape } from '@/lib/store/useSettingsStore'
 import { messageAnchorId } from '@/lib/scrollToMessage'
@@ -98,6 +98,12 @@ export const MessageBubble = memo(function MessageBubble({
   // Additive, not a replacement for the text (unlike the failed indicator above): the reply itself
   // is still real, just flagged for the player's own judgment call.
   const showBoundaryFlag = !isUser && !!message.boundaryFlag && !isStreaming
+  // Item 8: same durable, player-reviewed pattern as `boundaryFlag` above — see `types.ts`'s
+  // `povFlag` doc comment and `dating/agencyGuard.ts`'s `detectPersonaClimaxNarration`.
+  const showPovFlag = !isUser && !!message.povFlag && !isStreaming
+  // Item 11: same durable, player-reviewed pattern again — see `types.ts`'s `explicitQualityFlag`
+  // doc comment and `dating/intimacyScene.ts`'s `detectExplicitAntiPatternUsed`.
+  const showExplicitQualityFlag = !isUser && !!message.explicitQualityFlag && !isStreaming
 
   const startEdit = () => {
     if (!clickToEdit || isStreaming) return
@@ -316,6 +322,27 @@ export const MessageBubble = memo(function MessageBubble({
       <TriangleAlert size={12} strokeWidth={2} />
     </span>
   ) : null
+  // Distinct icon from `boundaryBadge` (a circle, not a triangle) so the two read as different
+  // categories of flag at a glance, even though both share the same "worth a regenerate" severity
+  // and styling otherwise.
+  const povBadge = showPovFlag ? (
+    <span
+      className="inline-flex text-warning"
+      title={`May have narrated your own reaction on your behalf: "${message.povFlag}". Worth a regenerate if it reads wrong.`}
+    >
+      <AlertCircle size={12} strokeWidth={2} />
+    </span>
+  ) : null
+  // A third, distinct icon again — this one a prose-quality miss (the model actually used a phrase
+  // it was told to avoid), not a boundary or POV violation, so it reads as its own category too.
+  const explicitQualityBadge = showExplicitQualityFlag ? (
+    <span
+      className="inline-flex text-warning"
+      title={`This reply used the stock phrase "${message.explicitQualityFlag}" it was told to avoid. Worth a regenerate if it reads wrong.`}
+    >
+      <MessageSquareWarning size={12} strokeWidth={2} />
+    </span>
+  ) : null
   // 10b: how the player tagged this line's intent. Shown at rest (not hover-only) — it's real
   // context for how the exchange should read.
   const intentBadge = (() => {
@@ -327,6 +354,21 @@ export const MessageBubble = memo(function MessageBubble({
       </span>
     )
   })()
+  // The user's own direct question: once sent, a line drafted from the Relationship panel's
+  // Unlocks tab (a kiss spot/position/toy/activity) reads exactly like ordinary freeform text —
+  // nothing marked which catalog entry it came from, so a player scrolling back later (or who just
+  // forgot) had no way to tell. Same "stays visible at rest" reasoning as `intentBadge` above, not
+  // hover-only, since this is exactly the kind of thing a player wants to spot while skimming, not
+  // hunt for.
+  const intimacyActionBadge = message.intimacyAction ? (
+    <span
+      className="inline-flex items-center gap-1 rounded-full bg-romance/12 px-1.5 py-px text-[10px] font-medium text-romance"
+      title={`Sent from the Relationship panel's Unlocks tab (${message.intimacyAction.category.replace('_', ' ')}): "${message.intimacyAction.label}"`}
+    >
+      <Heart size={9} strokeWidth={2.25} className="shrink-0" />
+      {message.intimacyAction.label}
+    </span>
+  ) : null
   const anchorId = messageAnchorId(message.id)
   const highlightClass = isHighlighted ? 'bg-accent/10' : ''
 
@@ -334,7 +376,7 @@ export const MessageBubble = memo(function MessageBubble({
     return (
       <div id={anchorId} className={`group rounded-lg py-2 transition-colors duration-1000 ${highlightClass}`}>
         <span className={`font-display ${isUser ? 'text-accent' : 'text-text'}`}>{message.name}: </span>
-        {pinBadge} {boundaryBadge} {intentBadge}{' '}
+        {pinBadge} {boundaryBadge} {povBadge} {explicitQualityBadge} {intentBadge} {intimacyActionBadge}{' '}
         {imageStrip}
         <span className="prose-rp whitespace-pre-wrap break-words text-sm leading-relaxed">
           {editing ? (
@@ -379,7 +421,10 @@ export const MessageBubble = memo(function MessageBubble({
           <div className="flex items-center gap-1.5">
             {pinBadge}
             {boundaryBadge}
+            {povBadge}
+            {explicitQualityBadge}
             {intentBadge}
+            {intimacyActionBadge}
             {metaHoverable}
           </div>
         </div>
@@ -396,7 +441,10 @@ export const MessageBubble = memo(function MessageBubble({
           {message.name}
           {pinBadge}
           {boundaryBadge}
+          {povBadge}
+          {explicitQualityBadge}
           {intentBadge}
+          {intimacyActionBadge}
         </div>
         {imageStrip}
         {textBlock}

@@ -1,18 +1,12 @@
 import type { SceneTag } from '@/lib/vn/sceneTag'
 
 /**
- * How many consecutive turns (from the end backward) share the current scene's background before
- * `sceneProgressionNudge` starts saying anything — long enough that a real scene (a date, a tense
- * conversation) isn't interrupted mid-beat, short enough that "the whole roleplay is stuck in the
- * library" is felt within one sitting, not just eventually.
+ * Nudges the model to move the scene along once it's stayed in the same background for too long
+ * — ordinary chat has no other push to do this, unlike a hangout/date event.
  */
 const STATIC_SCENE_THRESHOLD = 6
 
-/**
- * Counts how many of the most recent character turns, walking backward, share the same scene
- * background as the latest tagged one — `count: 0` if the latest character turn has no background
- * tag at all (nothing to compare against, e.g. a chat that's never used VN mode/scene tags).
- */
+/** Counts consecutive trailing char turns sharing the latest scene background. `count: 0` if untagged. */
 export function countStaticSceneTurns(
   messages: { role: string; scene?: SceneTag | null }[],
 ): { count: number; currentBackground?: string } {
@@ -27,21 +21,7 @@ export function countStaticSceneTurns(
   return { count, currentBackground: current }
 }
 
-/**
- * A `styleGuidance` line nudging the model to actually move the scene once it's been static for a
- * while — ordinary chat has no such push otherwise: the scene-tag instruction (`sceneTag.ts`'s
- * `buildSceneInstruction`) only ever asks the model to *label* whichever setting the story is
- * already in, never to progress it, and only a hangout/date event (a `DateEventCard`) injects a
- * genuinely new premise. This closes that gap for ordinary chat the same way — a deterministic
- * trigger (a turn count), with the model still writing the actual transition, same split as
- * `slowBurnPacing`/`intimacyGuidance`. Returns `''` below the threshold, so a chat that's already
- * moving around fine pays nothing for this.
- *
- * `scheduleLocation`, when given, is preferred over `alternateBackgroundLabels` — a character's own
- * authored routine ("she should be at the café about now") is a more in-world, specific reason to
- * move than a generic list of unlocked backgrounds, and reusing it doubles up on state the world
- * already tracks rather than inventing a parallel "where should the scene go" system.
- */
+/** A `styleGuidance` line prompting a scene change past the threshold; `''` otherwise. */
 export function sceneProgressionNudge(
   staticTurns: number,
   opts: { scheduleLocation?: string; alternateBackgroundLabels?: string[] },

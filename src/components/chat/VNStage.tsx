@@ -25,27 +25,23 @@ import { resolveExpressionSprite } from '@/lib/vn/expressions'
 import { currentOutfitFrom } from '@/lib/vn/outfits'
 import { vnArtHint } from '@/lib/vn/artHint'
 
-/** Falling petals only make sense for scenes actually outdoors — never indoors (kitchen, office, a bedroom). */
+/**
+ * Visual-novel presentation of a chat: full-bleed scene background, each cast member's sprite,
+ * and one glass panel docked to the bottom edge carrying the dialogue, choices, and composer
+ * together like a real VN's ADV box. The ordinary transcript is available as a collapsible log.
+ */
+
+// Petals only make sense outdoors.
 const OUTDOOR_BACKGROUNDS = new Set(['park', 'forest', 'rooftop', 'city-street', 'beach'])
 
-/**
- * Horizontal room each cast member's slot gets. Every slot is also given an explicit percentage
- * height by `VNCharacterSprite` (taller for the speaker), so a sprite is normalised to a
- * consistent on-screen height regardless of its source resolution — `object-contain` does the
- * fitting, so a 64px avatar and a 1216px sprite now stand roughly the same height instead of the
- * low-res one rendering as a thumbnail. The `max-w` caps keep a solo portrait from ballooning on
- * a wide monitor and a three-shot's figures from drifting apart; `basis` + `shrink` share the row.
- */
+/** Horizontal width per cast slot; height is set separately so sprites of any source resolution normalize to the same on-screen height. */
 function slotWidthClass(castSize: number): string {
   if (castSize <= 1) return 'basis-[62%] max-w-[460px]'
   if (castSize === 2) return 'basis-[47%] max-w-[370px]'
   return 'basis-[32%] max-w-[290px]'
 }
 
-/** A stable, deliberately muted identity hue for a group scene's nameplate + slot accents — the
- *  classic VN "each speaker has their own name colour" cue. Solo chats never call this: their one
- *  nameplate keeps the relationship-pink it has always used, since there's no one to disambiguate
- *  from. Same tiny string hash as `placeholderGradient`. */
+/** Stable muted identity hue per speaker, used for group-scene nameplates/accents. Solo chats keep the usual relationship-pink instead. */
 function nameplateHue(seed: string): number {
   let h = 0
   for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) | 0
@@ -59,17 +55,7 @@ function initialsOf(name: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
 }
 
-/**
- * One member of a group scene's "cast" — extracted so each character's sprite crossfades on its
- * own (`useSpriteCrossfade` can't be called a variable number of times from `VNStage` itself,
- * whose cast size changes with the roster). A solo scene is just a cast of one, so this is also
- * the only sprite-rendering path now — no separate single-character branch to keep in sync.
- *
- * Who's talking is carried three ways at once, because a single cue kept reading as broken: the
- * speaker stands at full height and full colour with a soft floor-light; everyone else is pushed
- * back a step (`scale`) and dropped to a dim, desaturated near-silhouette. In a solo scene the one
- * member is always "the speaker", so none of the dimming applies.
- */
+/** One cast member's sprite, split out so each can crossfade independently. The speaker stands full-height/colour with a floor-light; everyone else steps back, dimmed. */
 function VNCharacterSprite({
   spriteUrl,
   name,
@@ -81,13 +67,13 @@ function VNCharacterSprite({
 }: {
   spriteUrl: string | undefined
   name: string
-  /** Identity hue for the monogram placeholder + floor-light — matches this speaker's nameplate. */
+  /** Identity hue matching this speaker's nameplate. */
   hue: number
   isActive: boolean
-  /** Darken + step back: true only for a non-speaking member of a 2+ cast. */
+  /** True for a non-speaking member of a 2+ cast. */
   dim: boolean
   slotClass: string
-  /** Doubles a group scene's cast as the "reply as" picker — omitted (turn policy isn't manual, or there's nobody else to pick) leaves the sprite inert. */
+  /** Doubles as the "reply as" picker; omitted when turn policy isn't manual. */
   onClick?: () => void
 }) {
   const { displaySrc, visible, fadeMs } = useSpriteCrossfade(spriteUrl)
@@ -102,9 +88,7 @@ function VNCharacterSprite({
       style={{ transitionDuration: `${fadeMs}ms` }}
     />
   ) : (
-    // No sprite and no avatar drawn for this character yet — a calm standing "presence": a soft
-    // pillar with a monogram where the head would be and the name at its base, so a mixed-art
-    // group scene still composes as two figures rather than one real portrait beside an empty gap.
+    // No sprite/avatar yet — a standing placeholder: monogram pillar + name.
     <div className="relative flex h-full w-full items-end justify-center">
       <div
         className="relative flex h-[94%] w-full max-w-[150px] flex-col items-center rounded-t-[46%] pt-[16%] sm:max-w-[210px]"
@@ -131,16 +115,12 @@ function VNCharacterSprite({
           : !dim
             ? 'z-0 h-[88%]'
             : showingPlaceholder
-              ? // a dimmed placeholder is already abstract — just nudge it back
-                'z-0 h-[82%] scale-[0.96] opacity-75 [filter:brightness(0.78)_saturate(0.8)]'
-              : // a non-speaking sprite steps back into shadow but stays readable as themselves —
-                // real ADV scenes recess the listener, they don't black them out
-                'z-0 h-[80%] scale-[0.95] [filter:brightness(0.5)_saturate(0.72)]'
+              ? 'z-0 h-[82%] scale-[0.96] opacity-75 [filter:brightness(0.78)_saturate(0.8)]'
+              : 'z-0 h-[80%] scale-[0.95] [filter:brightness(0.5)_saturate(0.72)]'
       }`}
     >
       {isActive && dim && (
-        // A soft floor-light under the speaker — only when there's someone else on stage to be
-        // told apart from. Sits behind the sprite (`-z-10`) so it reads as light, not a halo.
+        // Floor-light under the speaker, only shown when there's someone else to contrast against.
         <div className="pointer-events-none absolute inset-x-[2%] bottom-0 -z-10 h-20 rounded-[50%] bg-white/20 blur-2xl" />
       )}
       {inner}
@@ -160,59 +140,40 @@ function VNCharacterSprite({
 interface VNStageProps {
   character?: Character
   persona?: Persona
-  /** Other characters able to speak in this chat (group scenes) — the whole roster stands on
-   *  stage at once, with the turn's actual speaker (`activeSpeakerId` below) lit and named while
-   *  the rest recede; the VN-art-hint nag still checks the primary only, since "the relationship"
-   *  a dating-sim chat tracks is theirs (the Bond HUD does follow the active speaker). */
+  /** Other speakable characters in a group scene; the whole roster stands on stage, with the active speaker lit. */
   participantCharacters?: Character[]
   chat: Chat
   world?: WorldCard
   messages: StoredMessage[]
   streamingText: string
   generatingMessageId: string | null
-  /** Message id to scroll to and briefly flash — opens the backlog drawer if it's collapsed. */
+  /** Message id to scroll to and flash; opens the log drawer if collapsed. */
   highlightedMessageId?: string | null
   onSwipe: (id: string, dir: 'left' | 'right') => void
   onRegenerate: (id: string) => void
-  /** Item 4's mid-scene correction — only reaches a `MessageBubble` via the backlog drawer's `MessageLog`; the VN dialogue box's own inline regenerate/swipe row (below) stays as-is. */
+  /** Mid-scene correction, reachable via the backlog drawer's MessageLog only. */
   onSteer: (id: string, steerText: string) => void
   onDelete: (id: string) => void
   onRewind: (id: string) => void
   onEdit: (id: string, text: string) => void
   onFork: (id: string) => void
   onTogglePin: (id: string) => void
-  /**
-   * Lets a group scene's cast double as the "reply as" picker — click whoever should speak next
-   * instead of only the composer's dropdown. Omitted (as it is under any turn policy but manual)
-   * makes every sprite inert: a scene that's deciding automatically has nothing for a click to
-   * mean, the same reasoning the composer's own picker gives way to a read-only hint for.
-   */
+  /** Lets the cast double as the "reply as" picker; omitted under any non-manual turn policy. */
   onSelectSpeaker?: (id: string | null) => void
-  /**
-   * VN mode folds the app's own chrome into the scene itself, rather than framing it with a
-   * separate white toolbar — these render as glass overlays. `topBarExtra` is the icon toolbar
-   * (relationship/event/objective/etc + the connection dot), placed left of the log toggle.
-   */
+  /** Icon toolbar rendered as a glass overlay, left of the log toggle. */
   topBarExtra?: ReactNode
-  /** Mobile-only "back to chat list" — the chats panel is a full-screen overlay under `md`, so VN mode needs its own way back besides the desktop-only side panel. Hidden at `md` and above. */
+  /** Mobile-only "back to chat list"; hidden at md and above. */
   onBack?: () => void
-  /** Small "original chat" jump-back link — only meaningful when this chat was forked. */
+  /** "Original chat" jump-back link, shown only for forked chats. */
   parentChatLink?: ReactNode
-  /** The next-move suggestion chips for the current turn, pre-built with variant="vn" — omitted when there are none. */
+  /** Next-move suggestion chips (variant="vn"), omitted when none. */
   choiceListSlot?: ReactNode
-  /** A thin "background assists running" strip, pre-built — omitted when nothing is running. */
+  /** "Background assists running" strip, omitted when nothing is running. */
   assistSlot?: ReactNode
-  /** The message composer, pre-built with variant="vn" — docked at the very bottom of the same glass panel as the dialogue text. */
+  /** Message composer (variant="vn"), docked at the bottom of the glass panel. */
   composerSlot: ReactNode
 }
 
-/**
- * Visual-novel presentation: full-bleed scene background, the character's sprite for whatever
- * expression the model tagged its reply with, and a single glass panel docked to the bottom edge
- * — carrying the dialogue, the next-move choices, and the composer as one continuous textbox,
- * the way a real VN's ADV box does, rather than three separate app-chrome widgets stacked below
- * the scene. The ordinary scrolling transcript is available as a collapsible backlog.
- */
 export function VNStage({
   character,
   persona,
@@ -246,9 +207,8 @@ export function VNStage({
     if (showLog) logRef.current?.scrollTo({ top: logRef.current.scrollHeight })
   }, [showLog])
 
-  // A jump from search/the pinned panel opens the backlog drawer (if collapsed) and scrolls to
-  // the target once it's actually mounted — deliberately separate effects since the drawer must
-  // render before its content can be queried for the target message's anchor.
+  // Opening the drawer and scrolling to the target are separate effects since the drawer must
+  // mount before its content can be queried.
   useEffect(() => {
     if (highlightedMessageId) setShowLog(true)
   }, [highlightedMessageId])
@@ -262,8 +222,7 @@ export function VNStage({
   const lastCharMsg = [...messages].reverse().find((m) => m.role === 'char')
   const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user')
   const isStreamingThis = !!lastCharMsg && generatingMessageId === lastCharMsg.id
-  // Failed-generation messages keep empty text (see useChatSession.ts) rather than an error string
-  // baked into the dialogue — shown here instead, so VN mode doesn't just go silently blank.
+  // A failed generation keeps empty text (see useChatSession.ts); show a message instead of going blank.
   const displayText = isStreamingThis
     ? streamingText
     : lastCharMsg?.failed
@@ -272,20 +231,10 @@ export function VNStage({
 
   const activeSwipe = lastCharMsg?.activeSwipe ?? 0
   const scene = lastCharMsg?.swipeScenes?.[activeSwipe] ?? lastCharMsg?.scene
-  // Cast computed here (ahead of the Bond calc below, not just the sprite row further down) so
-  // `activeSpeakerId` can be validated against who's actually still in the scene.
   const cast = character ? [character, ...(participantCharacters ?? [])] : (participantCharacters ?? [])
-  // In a group scene the Bond card now follows whoever's actually speaking, not always the
-  // primary — gifting a participant updates *their* track (`RelationshipPanel` already has a tab
-  // per cast member for this), and a HUD that never budged from the primary's own number would
-  // just be showing a stat nothing currently on screen changed. Naming who it's for once there's
-  // someone else it could be read as belongs to the header render below, not this calc.
-  //
-  // Falls back to the primary when the raw id isn't actually in the current cast, not only when
-  // it's nullish — the roster can shrink out from under an old message (the new "Who's in this
-  // scene" picker in `ScenePanel.tsx` lets a participant be removed after they last spoke), and
-  // without this fallback nobody would match, leaving every sprite in the dimmed "not speaking"
-  // state and the header below rendering a dangling "Bond · " with no name after it.
+  // The Bond HUD follows whoever's actually speaking in a group scene, not always the primary.
+  // Falls back to the primary if the stored speaker id isn't in the current cast (roster can
+  // shrink after they last spoke).
   const rawActiveSpeakerId = lastCharMsg ? (lastCharMsg.speakerId ?? character?.id) : character?.id
   const activeSpeakerId = cast.some((m) => m.id === rawActiveSpeakerId) ? rawActiveSpeakerId : character?.id
   const activeTrack = activeSpeakerId ? getRelationshipTrack(chat, activeSpeakerId) : {}
@@ -295,27 +244,16 @@ export function VNStage({
   const liveDateActive = isLiveScene(chat.activeEvent)
   const isHangoutEvent = chat.activeEvent?.kind === 'hangout'
   const expression = scene?.expression || 'neutral'
-  // Guaranteed coverage (section 10): an unlocked/missing exact tag falls through to a
-  // same-family expression before the plain avatar, rather than hard-swapping to the avatar the
-  // moment the exact tag isn't available — see `resolveExpressionSprite`'s own doc comment.
-  // Outfits (`outfits.ts`) are sticky across turns — read from the last reply that actually set
-  // one, not from this message's tag, so a model that stops repeating the field doesn't undress
-  // anyone. Resolution degrades outfit art -> base art -> avatar, so a half-drawn outfit still
-  // shows a real character.
+  // Sprite resolution degrades unlocked tag -> same-family expression -> avatar (see resolveExpressionSprite).
+  // Outfits are sticky across turns, read from the last message that set one.
   const outfitId = currentOutfitFrom(messages)
-  // A group scene now shows everyone actually in the roster at once — a two- or three-shot, the
-  // way a real VN holds a conversation — rather than one sprite hard-cutting to whoever spoke
-  // last (confirmed live as a real gap: Kestrel's whole turn used to render under Sumire's
-  // portrait, and even once that was fixed to show the right character, only one face at a time
-  // ever showed at all). The turn's actual speaker still gets the live expression tag and full
-  // prominence; everyone else in the scene rests at a calm neutral, slightly dimmed, so the
-  // "who's talking right now" read stays clear without anyone vanishing between their own turns.
+  // Everyone in the roster is shown at once (a two/three-shot); the active speaker gets the live
+  // expression and full prominence, everyone else rests dimmed at neutral.
   const canPickSpeaker = !!onSelectSpeaker && cast.length > 1
   const isGroupScene = cast.length > 1
   const castMembers = cast.map((member) => {
     const isActive = member.id === activeSpeakerId
-    // The active member's own affection is already computed above (`affection`); anyone else's
-    // sprite/expression unlocks gate against *their own* progress, not whoever's currently talking.
+    // Non-active members gate their sprite/expression unlocks on their own affection, not the active speaker's.
     const memberAffection = isActive ? affection : Math.max(0, Math.min(100, getRelationshipTrack(chat, member.id).affection ?? 0))
     const spriteUrl = isActive
       ? resolveExpressionSprite(member.sprites, member.spriteUnlocks, member.avatarDataUrl, expression, memberAffection, outfitId)
@@ -333,10 +271,7 @@ export function VNStage({
   const slotClass = slotWidthClass(castMembers.length)
   const activeMember = castMembers.find((m) => m.isActive) ?? castMembers[0]
   const speakerName = lastCharMsg?.name ?? activeMember?.name ?? character?.card.name ?? ''
-  // The nameplate's palette. A group scene gives each speaker their own muted identity hue (the
-  // strongest single "who's talking" cue there is — the plate changes colour the instant the turn
-  // passes); a solo chat keeps the relationship-pink the plate has always used, since there's no
-  // second speaker to tell it apart from.
+  // Group scenes get a per-speaker identity hue; solo chats keep the usual relationship-pink.
   const plateHue = activeMember?.hue ?? 320
   const plate = isGroupScene
     ? {
@@ -363,8 +298,7 @@ export function VNStage({
   const swipes = lastCharMsg?.swipes ?? []
   const canSwipe = !!lastCharMsg && swipes.length > 0 && !isStreamingThis
 
-  // "VN mode reads as broken before art exists" — see `vnArtHint`. Dismiss is per-character so a
-  // deliberately art-less one stops nagging while a new one still gets told.
+  // See vnArtHint; dismissal is per-character.
   const vnArtHintDismissed = useSettingsStore((s) => s.vnArtHintDismissed)
   const dismissVnArtHint = useSettingsStore((s) => s.dismissVnArtHint)
   const artHint = vnArtHint(character, world, vnArtHintDismissed)
@@ -387,19 +321,15 @@ export function VNStage({
     <div className="relative flex flex-1 flex-col overflow-hidden">
       <div className="absolute inset-0 transition-[background] duration-500" style={bgStyle} />
       <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/10 to-black/35" />
-      {/* A cinematic vignette rather than a flat scrim — corners recede, the character stays lit. */}
+      {/* Cinematic vignette rather than a flat scrim. */}
       <div
         className="pointer-events-none absolute inset-0"
         style={{ background: 'radial-gradient(ellipse 80% 65% at 50% 40%, transparent 55%, rgb(0 0 0 / 0.32) 100%)' }}
       />
       {showPetals && <SakuraPetals />}
 
-      {/* HUD card and toolbar share one flex row rather than two independent `absolute` overlays —
-          on a phone the two used to collide (the Bond card painting over the back button and the
-          first toolbar icons). The card takes the slack and truncates; the toolbar never shrinks. */}
+      {/* One flex row (not two absolute overlays) so the HUD card and toolbar don't collide on phones. */}
       <div className="absolute inset-x-4 top-4 z-20 flex items-start justify-between gap-3">
-        {/* One cohesive HUD card — persona, bond, and the active event as internal sections
-            divided by hairlines, rather than three separate chiclets stacked with gaps. */}
         <div className="min-w-0 overflow-hidden rounded-xl bg-black/40 text-white backdrop-blur-sm sm:max-w-[65%]">
           {(personaName || parentChatLink) && (
             <div className="flex items-center gap-2 px-3 pb-1.5 pt-2 text-[11px] text-white/70">
@@ -411,9 +341,7 @@ export function VNStage({
             <div className="mb-1 flex min-w-0 items-center gap-1.5">
               <Heart size={11} strokeWidth={2.25} className="shrink-0 text-romance" fill="currentColor" fillOpacity={0.4} />
               <span className="shrink-0 uppercase tracking-wide text-white/70">
-                {/* Named only once there's more than one cast member to disambiguate — this card
-                    follows whoever's actually speaking in a group scene, so a bare "Bond" would be
-                    ambiguous the moment it could mean either of two people. */}
+                {/* Named only when there's more than one cast member to disambiguate. */}
                 Bond{isGroupScene ? ` · ${activeMember?.name ?? ''}` : ''}
               </span>
               <span className="truncate font-semibold capitalize text-romance">{formatRelationshipStage(relationshipStage)}</span>
@@ -488,18 +416,10 @@ export function VNStage({
         </div>
       ) : (
         <>
-          {/* min-h-[190px] (rather than min-h-0) both overrides the flex default of
-              min-height:auto — without which this flex-1 child refuses to shrink below the
-              sprite's natural size on a short viewport, silently clipped by overflow-hidden
-              instead of scaling down — AND gives the scene art a guaranteed floor, so the
-              docked panel below never squeezes it down to near-nothing. `pt-*` keeps the
-              (bottom-anchored) sprites clear of the floating HUD card up top; the sprites
-              themselves stand right down onto the dialogue panel's top edge below. */}
+          {/* min-h floor keeps the sprite area from being squeezed to nothing on a short viewport. */}
           <div
             className={`relative z-0 flex min-h-[190px] flex-1 items-end justify-center px-4 sm:px-6 ${
-              // A two-shot's outer figure sits under the top-left HUD card unless the row is
-              // pushed down; a solo portrait is centred and clears it with far less headroom.
-              // Kept small on a phone, where vertical room between the HUD and the panel is scarce.
+              // Extra top padding for group scenes so the outer figure clears the HUD card.
               isGroupScene ? 'pt-8 sm:pt-14 md:pt-20' : 'pt-3 sm:pt-6 md:pt-10'
             }`}
           >
@@ -518,11 +438,7 @@ export function VNStage({
                 </div>
               </div>
             )}
-            {/* `h-full` matters, not just decoration: a CSS percentage height only resolves against
-                a containing block with a *definite* height, and a plain content-sized flex div
-                doesn't count as one. The parent above *is* definite (`flex-1` in a bounded column
-                layout), so `h-full` here is what lets each slot's `h-[NN%]` resolve — and that
-                per-slot percentage is what normalises every sprite to a consistent height. */}
+            {/* h-full is required for each slot's h-[NN%] to resolve against a definite height. */}
             <div className="flex h-full w-full items-end justify-center gap-2 sm:gap-5">
               {castMembers.map((m) => (
                 <VNCharacterSprite
@@ -540,28 +456,29 @@ export function VNStage({
           </div>
 
           {lastUserMsg && (
-            // `mb-5` keeps the bubble clear of the speaker nameplate that overlaps the panel's top
-            // edge just below — without it a long (wrapped) player line renders behind the plate.
-            <div className="relative z-10 mx-4 mb-5 flex justify-end sm:mx-6 sm:mb-3">
+            // mb-5 keeps the bubble clear of the speaker nameplate overlapping the panel below.
+            <div className="relative z-10 mx-4 mb-5 flex flex-col items-end gap-1 sm:mx-6 sm:mb-3">
               <div className="vn-user-bubble prose-rp themed-shadow max-w-[74%] whitespace-pre-wrap rounded-2xl bg-msg-user px-3.5 py-2 text-sm text-accent-text">
                 {renderMessageText(lastUserMsg.text, regexScripts)}
               </div>
+              {lastUserMsg.intimacyAction && (
+                <span
+                  className="inline-flex items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-medium text-white/80"
+                  title={`Sent from the Relationship panel's Unlocks tab (${lastUserMsg.intimacyAction.category.replace('_', ' ')}): "${lastUserMsg.intimacyAction.label}"`}
+                >
+                  <Heart size={9} strokeWidth={2.25} className="shrink-0" />
+                  {lastUserMsg.intimacyAction.label}
+                </span>
+              )}
             </div>
           )}
 
-          {/* Docked flush to the bottom edge, full width — the real-VN textbox placement the
-              floating, margin-all-around card (the previous design) didn't have. Dialogue,
-              choices, and the composer all live in this one continuous glass panel, divided by
-              hairlines, instead of three separate app-chrome widgets stacked below the scene. */}
+          {/* Docked flush to the bottom edge, full width, like a real VN textbox. */}
           <div
             className="group/vnpanel relative z-10 flex flex-col border-t border-white/10 bg-black/65 backdrop-blur-md"
             style={{ borderTopColor: plate.edge }}
           >
-            {/* The speaker's nameplate — a tab overlapping the panel's top edge, the way a real
-                VN's ADV box tags who's talking, rather than a plain text line sharing the swipe/
-                regenerate control row. Carries the speaker's face and, in a group scene, their own
-                identity colour — so the single glance that reads "the dialogue box" also reads
-                "and it's Kestrel talking now", without hunting for a sprite that may not be drawn. */}
+            {/* Speaker nameplate tab, overlapping the panel's top edge. */}
             <div
               className="absolute -top-9 left-3 z-20 flex items-center gap-2.5 rounded-t-xl rounded-br-xl py-2 pl-2 pr-4 backdrop-blur-md sm:left-5"
               style={{ backgroundColor: plate.bg, boxShadow: `inset 0 1px 0 ${plate.edge}, 0 10px 22px -10px rgb(0 0 0 / 0.6)` }}
@@ -580,9 +497,7 @@ export function VNStage({
                 {speakerName}
               </span>
             </div>
-            {/* Swipe/regen/fork/pin are utility, not scene — recede to near-invisible at rest and
-                come back on hover or keyboard focus, so a settled scene reads as the art and the
-                dialogue, not a control strip. */}
+            {/* Utility controls recede to near-invisible at rest, appear on hover/focus. */}
             <div className="flex items-center justify-end gap-1 px-3 pt-3 opacity-30 transition-opacity duration-200 focus-within:opacity-100 group-hover/vnpanel:opacity-100 sm:px-5">
               {canSwipe && (
                 <>
@@ -641,9 +556,7 @@ export function VNStage({
                 </>
               )}
             </div>
-            {/* Capped rather than left to grow with the reply's length — a long generation would
-                otherwise balloon this panel and squeeze the sprite area above it down to nothing;
-                a long reply now scrolls in place instead. */}
+            {/* Capped height, not left to grow with reply length — scrolls in place instead. */}
             <div className="max-h-[22vh] overflow-y-auto px-4 pb-3 pt-1.5 sm:max-h-[26vh] sm:px-6">
               <p
                 className="vn-dialogue whitespace-pre-wrap text-[15px] leading-relaxed text-white/95"
@@ -653,10 +566,7 @@ export function VNStage({
                 {isStreamingThis && <span className="cursor-blink font-mono">▋</span>}
               </p>
             </div>
-            {/* Capped the same way the dialogue box above is — three chips wrapping to two lines
-                on a narrow phone screen was measured pushing the composer entirely below the
-                viewport (its own `top` past `window.innerHeight`), making the app unable to send a
-                message at all. A tall choice row now scrolls in place instead of growing the panel. */}
+            {/* Same capped-height treatment as the dialogue box above. */}
             {choiceListSlot && (
               <div className="max-h-[15vh] overflow-y-auto border-t border-white/10 px-3 pb-2.5 pt-2.5 sm:px-5">{choiceListSlot}</div>
             )}

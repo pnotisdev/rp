@@ -1,39 +1,14 @@
 import type { IntimacyDetailLevel } from '@/lib/store/useSettingsStore'
 
 /**
- * The user's own direct request: "add more romance, romantic scenes and more (NSFW)." This app
- * writes no narrative content itself — the connected model does, per its own capabilities — so the
- * actual feature is a real, user-controlled dial over how explicit that model gets once a scene
- * the story has genuinely built toward turns intimate, the same "deterministic code sets the
- * knob, the model writes the words" split as every other prompt-steering setting here
- * (`slowBurnPacing`, `styleGuidance`). Deliberately separate from `slowBurnPacing`, which is about
- * pacing (how *fast* affection is earned) — this is about register (how the prose reads once it's
- * been earned). `'default'` sends no instruction at all: the exact behavior every chat already had
- * before this setting existed, so nobody's existing output changes unless they deliberately pick a
- * level in either direction — towards less explicit, or more.
+ * User-controlled dial over how explicit the connected model gets once a scene turns intimate —
+ * deterministic code sets the knob, the model writes the words. Separate from `slowBurnPacing`
+ * (how fast affection is earned) — this is about register, not pace.
  */
-/**
- * The content rating actually in force for a chat: the world's own, when it has set one, else the
- * global Settings value.
- *
- * `intimacyLevel` was a single global switch, which is wrong the moment someone runs more than one
- * world — a wholesome slice-of-life world and an explicit one can't share one dial, and flipping
- * it in Settings between chats is both tedious and easy to forget in the direction that matters.
- * A world is the right scope: it's already where the gift catalog, intimacy catalog, scene flags,
- * and relationship thresholds are authored.
- *
- * An override, not a ceiling. Clamping to the stricter of the two reads safer but breaks the
- * actual use case: with the global left at its `'default'` (which sends no instruction at all,
- * and is what a user who never opened the setting has), an explicit world could never be explicit.
- * The world is the more specific, more deliberate statement of what it is, so it wins outright in
- * both directions — a `fade_to_black` world stays fade-to-black under a global `explicit`.
- *
- * `undefined` on the world means "inherit", which is deliberately distinct from the world
- * explicitly choosing `'default'` — the latter pins this world to sending no instruction even if
- * the global setting later changes.
- */
+
+/** The content rating in force for a chat: the world's own level, if set, else the global Settings value — the world wins outright either direction, not just the stricter one. */
 export function resolveIntimacyLevel(
-  /** `null` and `undefined` both mean "inherit" — see `WorldCard.intimacyLevel` for why the wire format needs the former. */
+  /** `null`/`undefined` both mean "inherit" — see `WorldCard.intimacyLevel` for why the wire format needs both. */
   worldLevel: IntimacyDetailLevel | null | undefined,
   globalLevel: IntimacyDetailLevel,
 ): IntimacyDetailLevel {

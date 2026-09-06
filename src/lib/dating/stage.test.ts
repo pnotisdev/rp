@@ -12,6 +12,7 @@ import {
   formatCommitmentStatus,
   getRelationshipTrack,
   isLiveScene,
+  lowestWarmthDimension,
   nextCommitmentTier,
   patchRelationshipTrack,
   relationshipAtRisk,
@@ -223,6 +224,35 @@ describe('commitmentLockReason', () => {
     expect(commitmentLockReason('dating', 39, notKissed, custom)).toBe('warmth')
     expect(commitmentLockReason('dating', 40, notKissed, custom)).toBe('kiss')
     expect(commitmentLockReason('dating', 40, kissed, custom)).toBeUndefined()
+  })
+})
+
+describe('lowestWarmthDimension', () => {
+  const stats = (over: Partial<Record<RelationshipDimension, number>>): Record<RelationshipDimension, number> => ({
+    trust: 80,
+    chemistry: 80,
+    comfort: 80,
+    respect: 80,
+    curiosity: 80,
+    tension: 80,
+    ...over,
+  })
+
+  it('picks whichever of the four warmth dimensions is actually lowest', () => {
+    expect(lowestWarmthDimension(stats({ comfort: 40 }))).toBe('comfort')
+    expect(lowestWarmthDimension(stats({ trust: 10 }))).toBe('trust')
+  })
+
+  it('ignores curiosity/tension entirely, even when they are the lowest of all six', () => {
+    expect(lowestWarmthDimension(stats({ curiosity: 0, tension: 0, comfort: 60 }))).toBe('comfort')
+  })
+
+  it('breaks a tie deterministically (first in WARMTH_DIMENSIONS order), not arbitrarily', () => {
+    expect(lowestWarmthDimension(stats({ trust: 40, comfort: 40 }))).toBe('trust')
+  })
+
+  it('handles every dimension at 100 (nothing actually lagging) without throwing', () => {
+    expect(lowestWarmthDimension(stats({}))).toBe('trust')
   })
 })
 
@@ -457,6 +487,7 @@ describe('getRelationshipTrack / patchRelationshipTrack', () => {
       recentRebuff: { startedAtTurn: 6, kind: 'commitment', severity: 'deflect' },
       intimacyScene: { phase: 'building', activityLabel: 'spooning', category: 'position', updatedAtTurn: 4 },
       giftLog: [{ giftId: 'rose', turn: 2 }],
+      intimacySceneShapeLog: [['kissing_spot', 'position']],
       beliefsAboutUser: [{ id: 'belief-1', text: 'He is unusually patient with me.', formedTurn: 6 }],
       expectationsOfUser: [{ id: 'expect-1', text: 'expects a check-in most Sundays', formedTurn: 10 }],
       currentFear: 'being seen as too much',

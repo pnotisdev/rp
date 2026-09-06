@@ -1,23 +1,9 @@
 /**
- * The "AI slop" layer: the recognisable tells of machine-written roleplay prose, plus the two
- * deterministic passes that act on them.
- *
- * Two different jobs live here, deliberately in one file because they share the corpus below:
- *
- *  1. `cleanModelOutput` — a *rewrite*. Runs once on the model's completion before it's stored, so
- *     it fixes what's displayed AND what gets fed back into every later prompt (a tell left in
- *     history is a tell the model imitates next turn). Strictly limited to artifacts that are
- *     never legitimate character speech: an echoed speaker prefix, an assistant preamble, an OOC
- *     aside, a markdown heading. It never touches phrasing inside the fiction, because a rewrite
- *     that guesses wrong silently corrupts an author's scene. `StoredMessage.rawText` keeps the
- *     untouched original, so the Prompt Inspector's raw/processed toggle always shows exactly what
- *     was removed.
- *
- *  2. `findSlop` + `buildSlopAvoidanceNote` — *steering*. Phrasing clichés get handled by telling
- *     the model to stop, not by editing them out. And crucially it only names the ones this
- *     character has actually just used: a generic "avoid clichés" line is weak and every model
- *     nods along to it, whereas "you have already written 'couldn't help but' twice in this chat,
- *     don't reach for it again" is specific enough to actually change the next completion.
+ * Detection and cleanup of "AI slop" — recognisable tells of machine-written RP prose.
+ * `cleanModelOutput` rewrites a completion before storage, stripping things that are never
+ * legitimate character speech (echoed prefixes, OOC asides, meta lines). `findSlop` /
+ * `buildSlopAvoidanceNote` instead detect clichéd phrasing and build a steering note naming
+ * back to the model the specific tells it has already used, rather than editing prose in place.
  */
 
 import { normalizeRpMarkup } from '@/lib/text/messageSegments'
@@ -25,24 +11,14 @@ import { normalizeRpMarkup } from '@/lib/text/messageSegments'
 /** One recognisable tell of machine-written prose. */
 export interface SlopPattern {
   id: string
-  /**
-   * How this gets named back to the model. Phrased as the offending phrasing itself wherever
-   * possible ("couldn't help but") rather than as a category ("cliché verb constructions"), since
-   * the concrete string is what a model can actually match against and avoid.
-   */
+  /** How this gets named back to the model — the offending phrase itself, not a category label. */
   label: string
   re: RegExp
 }
 
 /**
- * The corpus. Every entry is case-insensitive and global, and every one earns its place by being
- * a phrase that a local model reaches for constantly and a human writer almost never does twice.
- *
- * Deliberately NOT in here: anything that is merely *plain* ("she said", "he nodded"), anything
- * that depends on frequency rather than the phrase itself (rule-of-three lists, heavy
- * parallelism), and anything a character might plausibly say out loud as dialogue. This list is
- * read by `findSlop`, which is used for steering only, but a false positive still costs prompt
- * tokens and, worse, teaches the model to avoid ordinary English.
+ * The corpus, read by `findSlop` for steering only (never rewritten in place). Excludes plain
+ * wording ("she said"), frequency-dependent patterns, and anything a character might say aloud.
  */
 export const SLOP_PATTERNS: SlopPattern[] = [
   // --- Stock emotional shorthand: naming a feeling instead of showing it ---
@@ -93,15 +69,18 @@ export const SLOP_PATTERNS: SlopPattern[] = [
 ]
 
 /**
- * Text that is never part of a character's actual turn, only an artifact of the model slipping out
- * of the roleplay. Handled by `cleanModelOutput` as whole-line removals rather than by steering,
- * because unlike a cliché these have no legitimate reading inside the fiction.
+ * Text that is never part of a character's actual turn, only the model slipping out of the
+ * roleplay. Handled by `cleanModelOutput` as whole-line removals, not steering.
  */
 const META_LINE_PATTERNS: RegExp[] = [
   // An OOC aside in any of the conventional wrappers.
   /^\s*[([{]{1,2}\s*ooc\b[^\n]*$/i,
   /^\s*ooc\s*[:\-][^\n]*$/i,
   /^\s*[([{]{2}[^\n]*[)\]}]{2}\s*$/,
+  // Guards against the model echoing the injected relationship-guidance prompt text verbatim
+  // (see dating/relationshipDescription.ts's buildRelationshipDescription).
+  /^\s*relationship:\s*.+\bare at the ["“'].+["”'] stage\b.*$/i,
+  /^\s*\(let this colour tone, warmth, and what feels earned right now\.[^)]*\)\s*$/i,
   // An assistant addressing the user about the text it just wrote.
   /^\s*\(?\s*(let me know|i hope (this|that)|feel free to|would you like|shall i|do you want me to|if you('| wa)?nt me to)\b[^\n]*$/i,
   /^\s*\(?\s*(note|disclaimer|content warning|cw)\s*[:\-][^\n]*$/i,
@@ -128,14 +107,9 @@ export interface CleanModelOutputOptions {
 }
 
 /**
- * A stray turn marker in the model's completion — it started narrating a whole back-and-forth
- * exchange (or a `<START>`-style scene break) instead of writing one turn. Stop sequences catch
- * most of this at generation time (see `useChatSession.ts`'s `dynamicStops`); this is the backstop
- * for a server or template that doesn't honour them.
- *
- * Moved here from `src/lib/dating/outreach.ts`, where it shipped first for the proactive-outreach
- * path — the live chat path needs exactly the same defence, and duplicating the escaping was the
- * only alternative.
+ * Cuts off a stray turn marker — the model narrating a whole back-and-forth (or a `<START>`-style
+ * scene break) instead of one turn. Backstop for when stop sequences (`useChatSession.ts`'s
+ * `dynamicStops`) don't get honoured by the server/template.
  */
 export function truncateAtStrayTurnMarker(text: string, charName: string, personaName: string): string {
   const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -150,24 +124,14 @@ export function truncateAtStrayTurnMarker(text: string, charName: string, person
   return text.slice(0, cut).trim()
 }
 
-/** A leading name-shaped label a model sometimes glues onto an otherwise-verbatim echo — `"Kai: "`
- *  on text that's actually just the other party's own last line played back at them. Deliberately
- *  narrow (1-2 capitalized words, nothing else, right before the colon) so it only strips something
- *  that actually looks like a speaker tag, not the opening clause of a real sentence that happens to
- *  contain an early colon (e.g. "Chapter One: the beginning" stays untouched — two capitalized
- *  words is the edge of what this matches, and real prose essentially never opens exactly that way
- *  right before a colon). */
+/** A leading name-shaped label glued onto an echo (`"Kai: "`), narrow enough (1-2 capitalized
+ *  words right before a colon) to not strip a real sentence's opening clause. */
 const LEADING_SPEAKER_LABEL_RE = /^\s*[A-Z][A-Za-z'-]*(?:\s[A-Z][A-Za-z'-]*)?\s*:\s*/
 
 /**
- * True when `text` is nothing but the immediately-preceding message played back — bare, or with a
- * stray speaker-label glued on the front. Seen live: a weak/confused model occasionally parrots the
- * last line instead of writing a new one (see ROADMAP.md's playthrough report, bug #4). Deliberately
- * checks only the ONE immediately-preceding message, not a scan across history: a short line
- * legitimately recurring later in a real conversation ("Oh." "Fine.") is common and not something
- * this can safely flag without false-positiving on it, but an exact, *immediate* repeat essentially
- * never is legitimate dialogue. Both shapes were caught live: a bare echo of the just-sent message,
- * and the same thing with a stray "Kai: " label glued onto the front of it.
+ * True when `text` is nothing but the immediately-preceding message played back, bare or with a
+ * stray speaker-label glued on. Only checks the ONE prior message — a short line ("Oh." "Fine.")
+ * recurring later in real dialogue is common, but an exact *immediate* repeat never is.
  */
 export function isVerbatimEcho(text: string, priorText: string | undefined): boolean {
   const prior = priorText?.trim()
@@ -176,16 +140,34 @@ export function isVerbatimEcho(text: string, priorText: string | undefined): boo
   return trimmed === prior || trimmed.replace(LEADING_SPEAKER_LABEL_RE, '') === prior
 }
 
-const oddCount = (text: string, mark: string): boolean => (text.split(mark).length - 1) % 2 === 1
+/** Texts shorter than this are never compared — a short line ("Oh.") recurs legitimately in real dialogue. */
+const DUPLICATE_MIN_LENGTH = 40
+
+/** Collapses whitespace so a real duplicate isn't missed over a stray newline/spacing difference. */
+function normalizeForDuplicateCheck(text: string): string {
+  return text.trim().replace(/\s+/g, ' ')
+}
 
 /**
- * Whether `text` ends on a finished thought. Two ways it can fail: it stops mid-sentence (no
- * terminal punctuation and no closing quote/asterisk), or it leaves an action beat or a line of
- * dialogue open — an odd number of `*` or `"`, which means a stop sequence cut the reply off inside
- * the beat even if it happens to land on a period (`*She says it like a warning.` — the closing `*`
- * never came). Used by `trimToLastSentence` to skip a no-op, and by the generation loop to tell a
- * genuinely short reply from one that got cut. Empty counts as clean — nothing half-said to finish.
+ * Broader than `isVerbatimEcho`: catches a reply that's a tail-end repeat, a concatenation of
+ * recent turns, or a copy of the player's own earlier line — via a bidirectional substring check
+ * against both roles' recent messages.
  */
+export function isDuplicateOfRecentText(candidate: string, recentTexts: (string | undefined)[]): boolean {
+  const normalizedCandidate = normalizeForDuplicateCheck(candidate)
+  if (normalizedCandidate.length < DUPLICATE_MIN_LENGTH) return false
+  for (const raw of recentTexts) {
+    if (!raw) continue
+    const other = normalizeForDuplicateCheck(raw)
+    if (other.length < DUPLICATE_MIN_LENGTH) continue
+    if (normalizedCandidate.includes(other) || other.includes(normalizedCandidate)) return true
+  }
+  return false
+}
+
+const oddCount = (text: string, mark: string): boolean => (text.split(mark).length - 1) % 2 === 1
+
+/** Whether `text` ends on a finished thought — proper terminal punctuation and no unclosed `*`/`"`. */
 export function endsCleanly(text: string): boolean {
   const t = text.trimEnd()
   if (!t) return true
@@ -193,12 +175,7 @@ export function endsCleanly(text: string): boolean {
   return /[.!?…]["'’”*)\]]*$/.test(t) || /[*"”’]$/.test(t)
 }
 
-/**
- * Closes markup a stop sequence cut off mid-beat, as a last tidy once auto-continue can't finish it
- * properly: `*She says it like a warning.` → `*She says it like a warning.*`, `"Don't.` → `"Don't."`.
- * A bare trailing mark with nothing inside it (`She turns away. *`) is dropped instead. Quote before
- * asterisk, since a quote nests inside an action beat.
- */
+/** Closes markup a stop sequence cut off mid-beat (`*She says it` → `*She says it*`); drops a bare trailing mark with nothing inside it. */
 export function balanceTrailingMarkup(text: string): string {
   let out = text.trimEnd()
   for (const mark of ['"', '*']) {
@@ -211,13 +188,8 @@ export function balanceTrailingMarkup(text: string): string {
 }
 
 /**
- * Trims a reply back to its last complete sentence — for a generation that ran out of token budget
- * mid-word and has no continuation coming.
- *
- * Bails (returning the input unchanged) rather than cutting when the trim would lose more than
- * `maxLossRatio` of the text: a reply that is one long unpunctuated sentence is better shown whole
- * and slightly ragged than reduced to nothing. Treats a closing quote or asterisk after the
- * punctuation as part of the sentence, so `*she leaves.*` and `"fine."` survive intact.
+ * Trims a reply back to its last complete sentence, for a generation cut off mid-word. Bails
+ * (returns input unchanged) if the trim would lose more than `maxLossRatio` of the text.
  */
 export function trimToLastSentence(text: string, maxLossRatio = 0.35): string {
   const trimmed = text.trimEnd()
@@ -232,12 +204,8 @@ export function trimToLastSentence(text: string, maxLossRatio = 0.35): string {
 }
 
 /**
- * The deterministic scrub applied once to a completed generation before it's stored.
- *
- * Order matters: turn markers are cut first (everything after one is another speaker's text and
- * shouldn't be scanned at all), then the whole-line meta removals, then the cosmetic collapses.
- * Every step is idempotent, which matters because an auto-continue round re-runs this over the
- * already-cleaned earlier text plus the new tokens.
+ * The deterministic scrub applied once to a completed generation before it's stored. Order
+ * matters: turn markers cut first, then whole-line meta removals, then cosmetic collapses. Idempotent.
  */
 export function cleanModelOutput(text: string, opts: CleanModelOutputOptions = {}): string {
   if (!text) return text
@@ -247,18 +215,14 @@ export function cleanModelOutput(text: string, opts: CleanModelOutputOptions = {
     out = truncateAtStrayTurnMarker(out, opts.charName ?? '', opts.personaName ?? '')
   }
 
-  // An echoed speaker prefix. The generation cue already ends with `Sumire:`, so a model that
-  // restates it is duplicating the label, not saying its own name. Only stripped at the very
-  // start, and only for the actual speaker (never for an arbitrary `Name:`, which could be one
-  // character addressing another by name in dialogue).
+  // An echoed speaker prefix (the generation cue already ends with e.g. `Sumire:`). Only stripped
+  // at the very start, and only for the actual speaker.
   if (opts.charName?.trim()) {
     const escaped = opts.charName.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     out = out.replace(new RegExp(`^\\s*${escaped}\\s*:\\s*`, 'i'), '')
   }
 
   out = out.replace(LEADING_AFFIRMATION_RE, '')
-  // `<i>`/`<b>` action tags and `**`/`***` weight runs all become a single `*action*` — the app's
-  // one convention. A consistent history is a consistent next reply.
   out = normalizeRpMarkup(out)
 
   const kept = out
@@ -295,8 +259,7 @@ export function findSlopAcross(texts: string[]): SlopHit[] {
     let count = 0
     for (const text of texts) {
       if (!text) continue
-      // `re` is a shared global regex; matchAll consumes it safely, unlike .test/.exec which
-      // would carry lastIndex between calls.
+      // matchAll consumes the shared global regex safely, unlike .test/.exec (which carry lastIndex).
       count += [...text.matchAll(pattern.re)].length
     }
     if (count > 0) hits.push({ id: pattern.id, label: pattern.label, count })
@@ -327,14 +290,9 @@ export interface RepeatedPhrase {
 }
 
 /**
- * Word sequences a character has used more than once across `texts` — the actual mechanism behind
- * "this character keeps saying the same thing", which no sampler-level repetition penalty catches
- * because `rep_pen_range` only reaches a couple of thousand tokens back and DRY is off by default.
- *
- * Only returns the longest form of each repeat: if "she tilts her head" recurs, its sub-phrases
- * ("she tilts her", "tilts her head") are dropped rather than reported alongside it, so the prompt
- * line that carries these names one thing per habit instead of four overlapping fragments.
- * Sequences that are entirely stopwords are skipped ("and then she was").
+ * Word sequences a character has used more than once across `texts` — catches repetition no
+ * sampler-level penalty reaches. Only returns the longest form of each repeat (sub-phrases of a
+ * reported match are dropped); all-stopword sequences are skipped.
  */
 export function findRepeatedPhrases(
   texts: string[],
@@ -349,8 +307,7 @@ export function findRepeatedPhrases(
   for (const text of texts) {
     if (!text) continue
     const words = normalisePhrase(text)
-    // Count each n-gram at most once per message: a phrase repeated inside one long turn is a
-    // style choice, whereas the same phrase in three separate turns is the habit worth naming.
+    // Count each n-gram at most once per message — repetition within one turn is a style choice.
     const seenHere = new Set<string>()
     for (let n = minWords; n <= maxWords; n++) {
       for (let i = 0; i + n <= words.length; i++) {
@@ -368,8 +325,7 @@ export function findRepeatedPhrases(
     .filter(([, count]) => count >= minCount)
     .sort((a, b) => b[1] - a[1] || b[0].length - a[0].length)
 
-  // Keep only maximal phrases: drop any that is a substring of an already-kept longer one at the
-  // same count (its sub-phrases necessarily recur exactly as often as the whole).
+  // Keep only maximal phrases: drop any that's a substring of an already-kept one at the same count.
   const out: RepeatedPhrase[] = []
   for (const [phrase, count] of repeated) {
     if (out.some((k) => k.count === count && k.phrase.includes(phrase))) continue
@@ -390,12 +346,8 @@ export interface SlopAvoidanceOptions {
 }
 
 /**
- * The steering line: names back to the model the specific tells it has just used, so it has
- * something concrete to avoid instead of an abstract instruction it will agree with and ignore.
- *
- * Returns undefined when the recent turns are clean, which is the common case for a well-behaved
- * model and means this costs zero prompt tokens most turns. Pass the character's own recent turns
- * only (never the player's) — the player's phrasing is theirs to repeat if they like.
+ * The steering line naming back to the model the specific tells it has just used. Returns
+ * undefined when clean (the common case). Pass the character's own recent turns only.
  */
 export function buildSlopAvoidanceNote(recentCharTurns: string[], opts: SlopAvoidanceOptions = {}): string | undefined {
   const texts = recentCharTurns.filter((t) => t?.trim()).slice(-SLOP_SCAN_TURNS)

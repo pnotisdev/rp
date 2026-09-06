@@ -1,37 +1,22 @@
-/**
- * A deflected or backfired commitment/intimacy ask (`assessCommitmentAsk`/`assessIntimacyMilestone`
- * in `relationshipAssist.ts`) already costs something in the moment — the outcome's own `deltas` —
- * but that's a single-turn stat move, gone the instant the next line is written. A real "not right
- * now" doesn't actually stop mattering that fast: item 2's "missed opportunity" gap is exactly this,
- * a lingering, decaying cue that colors the next handful of turns, distinct from
- * `RelationshipWarning` (a standing, hard breakup-risk banner for a *committed* relationship under
- * real strain) — this is soft, temporary, and fires on an ordinary deflection, not only a crisis.
- *
- * Same "counted in the character's own replies" unit `dating/aftercare.ts`'s `Afterglow` already
- * uses, for the same reason: measuring in raw messages would let one long player turn or one
- * one-word reply close the window at very different real paces, and it keeps every one of this
- * app's turn-counted windows (`Afterglow`, plans' staleness, this) agreeing on what "N turns" means.
- */
+// A decaying "recently turned down" cue for a deflected/backfired commitment or intimacy ask —
+// colors the next handful of turns rather than stopping the instant the outcome's deltas apply.
+// Soft and temporary, distinct from `RelationshipWarning`'s standing breakup-risk banner. Counted
+// in the character's own replies, same unit as `dating/aftercare.ts`'s `Afterglow`.
 
 export const REBUFF_WINDOW_TURNS = 5
 
 export type RebuffKind = 'commitment' | 'intimacy_milestone'
 
-/** Stored per relationship (`RelationshipTrack.recentRebuff`). `null` clears it — same convention `Afterglow`/`relationshipWarning` already use for "JSON.stringify drops undefined keys". */
+/** Stored per relationship (`RelationshipTrack.recentRebuff`). `null` clears it. */
 export interface RecentRebuff {
   /** `countCharReplies` value when the ask was turned down. */
   startedAtTurn: number
   kind: RebuffKind
-  /** A plain deflect ("not right now, nothing damaged") reads much softer than a backfire (a real, earned cost) — see `rebuffGuidance`. */
+  /** A deflect reads softer than a backfire — see `rebuffGuidance`. */
   severity: 'deflect' | 'backfire'
 }
 
-/**
- * How many of the character's own replies since the rebuff, or `null` when there is none, or when
- * the stored one is stale — its start now *ahead* of the conversation, exactly what a rewind or a
- * fork-from-earlier produces. Treating a stale one as "0 turns in" would resurrect a rebuff for a
- * timeline where it never actually happened, the same trap `afterglowTurnsSince` already guards.
- */
+/** Turns since the rebuff, or `null` if none, or stale (start ahead of the conversation — a rewind/fork). */
 export function turnsSinceRebuff(rebuff: RecentRebuff | undefined | null, charReplyCount: number): number | null {
   if (!rebuff) return null
   const since = charReplyCount - rebuff.startedAtTurn
@@ -45,13 +30,7 @@ export function isRebuffActive(rebuff: RecentRebuff | undefined | null, charRepl
   return since !== null && since < REBUFF_WINDOW_TURNS
 }
 
-/**
- * A `styleGuidance` line for the still-live window — real names, no `{{macros}}` (this is meant to
- * be folded straight into `styleGuidance`, never macro-substituted; see `mindGuidance.ts`'s own
- * note on the same point). Deliberately doesn't say what to write, only what's true, same restraint
- * `RelationshipPanel`'s own afterglow copy already uses — printing "be extra guarded" would turn a
- * read of the character into a checklist rather than a texture.
- */
+/** `styleGuidance` line for the still-live window — real names, no `{{macros}}`. States what's true rather than what to write. */
 export function rebuffGuidance(charName: string, userName: string, rebuff: RecentRebuff): string {
   const askKind = rebuff.kind === 'commitment' ? 'define where things actually stood' : 'take things further, physically'
   if (rebuff.severity === 'backfire') {

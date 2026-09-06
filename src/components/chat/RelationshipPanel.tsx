@@ -18,11 +18,19 @@ import {
   FIRST_KISS_FLAG,
   getRelationshipStats,
   getRelationshipTrack,
+  lowestWarmthDimension,
   nextCommitmentTier,
   relationshipMilestonesFor,
   relationshipStageForWarmth,
 } from '@/lib/dating/stage'
-import { allowedIntimacyCategories, getUnlockedIntimacyOptions, nextLockedInCategory, type IntimacyCategory, type IntimacyUnlockable } from '@/lib/dating/intimacyCatalog'
+import {
+  allowedIntimacyCategories,
+  getIntimacyCatalog,
+  getUnlockedIntimacyOptions,
+  nextLockedInCategory,
+  type IntimacyCategory,
+  type IntimacyUnlockable,
+} from '@/lib/dating/intimacyCatalog'
 import { resolveIntimacyLevel } from '@/lib/prompt/intimacyGuidance'
 import { AFTERGLOW_TURNS, afterglowTurnsSince } from '@/lib/dating/aftercare'
 import { describeInitiativeBalance, describeMomentum } from '@/lib/dating/momentum'
@@ -183,6 +191,16 @@ export function RelationshipPanel({
   // (`useChatSession.ts`), which passes `ownedToyIds` to filter those out before the model ever
   // sees them.
   const intimacyUnlocked = getUnlockedIntimacyOptions(warmth, commitmentStatus, world)
+  // FIXES_TODO.md item #6: a not-yet-owned toy's only "Buy" affordance used to live on its own pill
+  // in the Unlocks tab — reasonable given that's where the warmth/commitment eligibility gate
+  // already lives, but it left toys genuinely invisible to a player who only ever checks the Shop
+  // tab (which explicitly has a whole "Item shop" section, a completely reasonable place to expect
+  // "buy toys" too). The FULL catalog (not just `intimacyUnlocked`, which already drops anything
+  // not yet warmth/commitment-eligible) so a locked toy can still be *shown*, with its requirement,
+  // rather than disappearing until the player stumbles onto it in Unlocks — same "discoverable
+  // before it's buyable" treatment `nextLockedInCategory` already gives the Unlocks tab itself.
+  const toyCatalogAll = getIntimacyCatalog(world).filter((i) => i.category === 'toy')
+  const unlockedToyIds = new Set(intimacyUnlocked.filter((i) => i.category === 'toy').map((i) => i.id))
   // The content rating governs this panel too, not just the prompt. Before this, a chat set to
   // fade-to-black still rendered position/toy/activity as clickable buttons that send an explicit
   // action line as the player's own message — the dial held on one surface and not the other.
@@ -227,7 +245,7 @@ export function RelationshipPanel({
   }
 
   const [tab, setTab] = useState<PanelTab>('overview')
-  const hasShop = giftCatalog.length > 0 || itemCatalog.length > 0
+  const hasShop = giftCatalog.length > 0 || itemCatalog.length > 0 || (allowedCategories.includes('toy') && toyCatalogAll.length > 0)
   const tabs: { id: PanelTab; label: string }[] = [
     { id: 'overview', label: 'Overview' },
     { id: 'unlocks', label: 'Unlocks' },
@@ -280,6 +298,14 @@ export function RelationshipPanel({
   // all belonged to the primary, so treat a missing id as a match for whichever character IS the
   // primary rather than only ever matching an explicit id.
   const events = allEvents.filter((e) => (e.characterId ?? chat.characterId) === viewingCharacter?.id)
+  // FIXES_TODO.md's "no in-app signal for why a commitment ask keeps deflecting" item — every ask
+  // at the current `nextTier` logs its own event with a `reason` starting "Asked to be {tier}:"
+  // (`askForCommitment` in `useChatSession.ts`), so counting them is exactly the deflect count for
+  // THIS tier: an acceptance would have already advanced `commitmentStatus`, making `nextTier` a
+  // different (higher) rung, so every logged attempt still under this same `nextTier` was
+  // necessarily a deflect. Never resets on its own — once the tier finally lands, `nextTier` moves
+  // up and this naturally recomputes to 0 for the new one.
+  const nextTierAskAttempts = nextTier ? events.filter((e) => e.reason.startsWith(`Asked to be ${formatCommitmentStatus(nextTier)}:`)).length : 0
   const facts = useApiQuery('chat-facts', () => chatFactsApi.listByChat(chat.id), [chat.id]) ?? []
   // `typeof f.text === 'string'` guards against a malformed row (e.g. one written during an HMR
   // half-edit) rendering an object as a React child and white-screening the panel.
@@ -430,9 +456,22 @@ export function RelationshipPanel({
               )}
               {nextTier &&
                 (eligibleForNextTier ? (
-                  <Button variant="primary" onClick={handleAsk} disabled={asking}>
-                    {asking ? 'Asking…' : `Ask to be ${formatCommitmentStatus(nextTier)}`}
-                  </Button>
+                  <div className="flex flex-col items-end gap-1">
+                    <Button variant="primary" onClick={handleAsk} disabled={asking}>
+                      {asking ? 'Asking…' : `Ask to be ${formatCommitmentStatus(nextTier)}`}
+                    </Button>
+                    {/* Warmth being eligible doesn't mean the character will say yes — a real
+                        deflect is a genuine judged outcome, not a bug. But after a few of them in a
+                        row, the player has no in-app signal at all for *why*: every tracked
+                        dimension could be maxed except one quietly lagging behind the others (the
+                        live-observed case this responds to), and there was nothing pointing at it. */}
+                    {nextTierAskAttempts >= 3 && (
+                      <p className="max-w-[16rem] text-right text-[11px] text-text-muted">
+                        Deflected {nextTierAskAttempts}× so far — {viewingCharacter?.card.name ?? 'their'}{' '}
+                        {DIMENSION_LABELS[lowestWarmthDimension(stats)].toLowerCase()} has been trailing the rest; worth warming that up before asking again.
+                      </p>
+                    )}
+                  </div>
                 ) : (
                   <div className="text-right text-xs text-text-muted">
                     {/* Warmth alone can't tell a player what to actually do next — once it's met,
@@ -616,6 +655,40 @@ export function RelationshipPanel({
                       <Button className="mt-2" onClick={() => onBuyItem(item.id)} disabled={(chat.giftCoins ?? 0) < item.price}>
                         Buy
                       </Button>
+                    </div>
+                  )
+                })}
+              </div>
+            </Section>
+          )}
+
+          {allowedCategories.includes('toy') && toyCatalogAll.length > 0 && (
+            <Section
+              title="Toy shop"
+              description="Warmth/commitment unlocks which of these are buyable — also reachable from the Unlocks tab once a toy is eligible."
+              surface="sunken"
+            >
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {toyCatalogAll.map((toy) => {
+                  const owned = (toyInventory[toy.id] ?? 0) > 0
+                  const eligible = unlockedToyIds.has(toy.id)
+                  const price = toy.price ?? 0
+                  return (
+                    <div key={toy.id} className={`rounded-lg bg-bg-elevated p-3 ${!eligible ? 'opacity-50' : ''}`}>
+                      <div className="text-sm capitalize text-text">{toy.label}</div>
+                      <div className="text-xs text-text-muted">
+                        {price > 0 ? `${price} coins` : 'Free'}
+                        {owned ? ' • owned' : !eligible ? ` • unlocks at ${toy.minWarmth} warmth${toy.minCommitment ? ` and ${formatCommitmentStatus(toy.minCommitment)}` : ''}` : ''}
+                      </div>
+                      {!owned && (
+                        <Button
+                          className="mt-2"
+                          onClick={() => handleBuyToy(toy.id)}
+                          disabled={!eligible || buyingToyId === toy.id || (chat.giftCoins ?? 0) < price}
+                        >
+                          {buyingToyId === toy.id ? 'Buying…' : 'Buy'}
+                        </Button>
+                      )}
                     </div>
                   )
                 })}

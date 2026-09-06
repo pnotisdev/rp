@@ -85,6 +85,7 @@ export function CharacterEditor({
   const [giftLikes, setGiftLikes] = useState<string[]>(character?.giftLikes ?? [])
   const [giftDislikes, setGiftDislikes] = useState<string[]>(character?.giftDislikes ?? [])
   const [loveLanguage, setLoveLanguage] = useState(character?.loveLanguage ?? '')
+  const [explicitVoiceNote, setExplicitVoiceNote] = useState(character?.explicitVoiceNote ?? '')
   const [gallery, setGallery] = useState<GalleryEntry[]>(character?.gallery ?? [])
   const [relationshipStarters, setRelationshipStarters] = useState<RelationshipStarter[]>(
     character?.relationshipStarters ?? [],
@@ -133,6 +134,7 @@ export function CharacterEditor({
     setGiftLikes(character?.giftLikes ?? [])
     setGiftDislikes(character?.giftDislikes ?? [])
     setLoveLanguage(character?.loveLanguage ?? '')
+    setExplicitVoiceNote(character?.explicitVoiceNote ?? '')
     setGallery(character?.gallery ?? [])
     setRelationshipStarters(character?.relationshipStarters ?? [])
     setVoiceProvider(character?.voice?.provider ?? '')
@@ -276,6 +278,7 @@ export function CharacterEditor({
       giftLikes: giftLikes.length ? giftLikes : null,
       giftDislikes: giftDislikes.length ? giftDislikes : null,
       loveLanguage: loveLanguage.trim() || null,
+      explicitVoiceNote: explicitVoiceNote.trim() || null,
       gallery,
       relationshipStarters,
       voice,
@@ -1329,6 +1332,16 @@ export function CharacterEditor({
             it never calls the model, so it's instant and never wrong about what's on the page, but it can only find what's
             already written. It adds to what's here rather than replacing it; edit or remove anything it gets wrong.
           </p>
+          <div className="mt-4">
+            <TextAreaField
+              label="Explicit-scene voice note"
+              rows={2}
+              value={explicitVoiceNote}
+              onChange={(e) => setExplicitVoiceNote(e.target.value)}
+              placeholder="Goes quieter and shorter, not louder — full sentences stop happening. Or: gets mouthier and more in control, not less."
+              hint="1-2 lines on how this specific voice holds up, cracks, or changes under strain during an explicit scene. Only used while the explicit content rating is on; leave blank to fall back to a generic stay-in-character instruction."
+            />
+          </div>
         </Section>
       )}
 

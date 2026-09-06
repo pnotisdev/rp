@@ -10,31 +10,17 @@ import type { Outfit } from '@/lib/vn/outfits'
 
 export type WorldInfoActivationMode = 'always' | 'keyword' | 'manual'
 
-/**
- * Concrete, recurring speech patterns an author fills in directly — the structured complement to
- * the free-text `personality`/`mes_example`, which only ever describe voice in the abstract ("she's
- * blunt") rather than naming the actual, repeatable tells that make a line unmistakably this
- * character's. `detectVoiceFingerprint` (`src/lib/characters/voice.ts`) can seed a first draft of
- * this from the card's own examples; every field here stays freely editable afterward regardless of
- * where it came from.
- */
+/** Concrete, recurring speech patterns an author fills in directly — the structured complement to
+ *  free-text `personality`/`mes_example`. `detectVoiceFingerprint` (`voice.ts`) can seed a first
+ *  draft from the card's own examples; every field stays freely editable afterward. */
 export interface VoiceFingerprint {
-  /** Filler words/discourse markers this character leans on — "well,", "I mean", "you know?" */
+  /** Filler words/discourse markers — "well,", "I mean", "you know?" */
   verbalTics?: string[]
-  /** Signature phrases they reuse across scenes, not just once — "you're impossible", "don't push it". */
+  /** Signature phrases reused across scenes — "you're impossible", "don't push it". */
   catchphrases?: string[]
-  /**
-   * Dialect, register, and formality notes in the author's own words — e.g. "clipped and formal,
-   * never contracts a verb" or "Kansai-ben, drops word endings". Also where formality level, slang
-   * density, sentence complexity, and taboo-language handling belong — e.g. "never swears, not even
-   * hurt" or "swears constantly, blunt to the point of crude" — free text rather than a fixed set of
-   * structured fields, since an author's actual voice rarely fits a small enum, and this field
-   * already reaches the model verbatim via `buildVoiceFingerprintNote`/`buildVoiceFingerprintReminder`
-   * (`profile.ts`), the latter restating it on its own line specifically so a rule like "never
-   * swears" survives a long chat instead of getting diluted.
-   */
+  /** Dialect, register, formality, and taboo-language notes in the author's own words. */
   dialectNotes?: string
-  /** How their sentences tend to run, in the author's own words — e.g. "short and clipped" or "long, winding, rarely a full stop". */
+  /** How their sentences tend to run — e.g. "short and clipped" or "long, winding". */
   sentenceRhythm?: string
 }
 
@@ -42,7 +28,7 @@ export interface RelationshipStarter {
   id: string
   /** Short picker label, e.g. "Childhood friends". */
   label: string
-  /** Seeds the chat's long-term memory (`Chat.summary`) so the model has this backstory from message one. */
+  /** Seeds the chat's long-term memory (`Chat.summary`) with this backstory from message one. */
   blurb: string
   startingAffection: number
 }
@@ -54,7 +40,7 @@ export interface GalleryEntry {
   unlockAffection: number
   unlockHint?: string
   requiredFlags?: string[]
-  /** A once-per-relationship epilogue (10c's "Endings gallery") — unlocks the moment warmth reaches the top "sweethearts" stage, not through `unlockAffection`/story-beat detection like an ordinary CG. */
+  /** A once-per-relationship epilogue, unlocked at the top affection stage rather than via `unlockAffection`. */
   isEnding?: boolean
 }
 
@@ -69,22 +55,22 @@ export interface LorebookEntry {
   insertion_order: number
   enabled: boolean
   position?: 'before_char' | 'after_char' | 'at_depth'
-  /** Only meaningful when `position` is `'at_depth'` — how many messages up from the latest to sit, same convention as `AuthorNote.depth`. 0 = immediately before the model replies. */
+  /** Only used when `position` is `'at_depth'` — messages up from the latest, same convention as `AuthorNote.depth`. */
   depth?: number
   case_sensitive?: boolean
-  /** Not part of the upstream spec — mirrors ST's always/when-relevant/manual radio. Kept in sync with `constant`. */
+  /** Mirrors ST's always/when-relevant/manual radio; kept in sync with `constant`. */
   activationMode?: WorldInfoActivationMode
-  /** 0-100 — a keyword match only fires this often even when otherwise matched. Doesn't apply to always/manual entries (see activation.ts). */
+  /** 0-100 odds a keyword match fires; doesn't apply to always/manual entries (see activation.ts). */
   probability?: number
-  /** Entries sharing a non-empty group name are mutually exclusive — only one match in the group fires. */
+  /** Entries sharing a non-empty group name are mutually exclusive — only one fires. */
   group?: string
-  /** Optional weighted-random pick within a `group`, mirroring ST — if ANY entry in the group sets this, the winner is a weighted random draw across the whole group (unset weight defaults to 1) instead of the deterministic highest-`insertion_order`-wins rule that applies when no entry in the group sets it. */
+  /** Optional weighted-random pick within a `group` (ST-style); unset weight defaults to 1. */
   groupWeight?: number
-  /** ST's "sticky": once a keyword-mode entry activates, it stays force-active for this many further turns even if the keyword stops appearing. 0/undefined = off. */
+  /** ST's "sticky" — turns a keyword entry stays force-active after matching. 0/undefined = off. */
   sticky?: number
-  /** ST's "cooldown": after a keyword-mode entry deactivates, it can't reactivate by keyword for this many turns. 0/undefined = off. */
+  /** ST's "cooldown" — turns before a keyword entry can reactivate. 0/undefined = off. */
   cooldown?: number
-  /** ST's "delay": the entry can't activate at all until the chat has at least this many messages. 0/undefined = off. Applies to every activation mode. */
+  /** ST's "delay" — chat must have at least this many messages before the entry can activate. */
   delay?: number
   extensions?: Record<string, unknown>
 }
@@ -95,7 +81,7 @@ export interface Lorebook {
   scan_depth?: number
   token_budget?: number
   recursive_scanning?: boolean
-  /** A stable id for this book across turns, set by the caller assembling the merged book list — the composite `${sourceKey}:${entry.id}` is what per-entry runtime state (sticky/cooldown) is keyed on, since `entry.id` alone is only unique within one book. */
+  /** Stable id for this book across turns; sticky/cooldown state is keyed on `${sourceKey}:${entry.id}`. */
   sourceKey?: string
   extensions?: Record<string, unknown>
   entries: LorebookEntry[]
@@ -130,81 +116,71 @@ export interface Character {
   id: string
   card: CharacterCardData
   avatarDataUrl?: string
-  /** The world this character lives in, if any — not part of the portable card spec, so it lives here rather than on `card`. */
+  /** The world this character lives in, if any. */
   worldId?: string
-  /**
-   * Expression art — falls back to the main avatar when missing. Keyed by expression id
-   * (src/lib/vn/expressions.ts) for the base outfit, or `<outfitId>--<expressionId>` for one of
-   * `outfits` below (src/lib/vn/outfits.ts). A character authored before outfits existed uses
-   * only bare keys, which is exactly the base outfit — hence no migration.
-   */
+  /** Expression art, keyed by expression id (vn/expressions.ts) for the base outfit, or
+   *  `<outfitId>--<expressionId>` for an outfit (vn/outfits.ts). Falls back to the avatar when missing. */
   sprites?: Record<string, string>
-  /** Minimum affection required before an expression sprite can be selected/displayed. Keyed the same way as `sprites`, so an individual outfit's expression can carry its own threshold. */
+  /** Minimum affection required before a sprite (keyed the same way as `sprites`) can be shown. */
   spriteUnlocks?: Record<string, number>
-  /** Wardrobe states beyond the base art (src/lib/vn/outfits.ts). The base outfit is implicit and never listed here. */
+  /** Wardrobe states beyond the base look (vn/outfits.ts); the base outfit is implicit. */
   outfits?: Outfit[]
-  /** Expression slots beyond the built-in default set (src/lib/vn/expressions.ts) — e.g. a signature expression unique to this character. Their sprites/unlocks live in the same `sprites`/`spriteUnlocks` maps as any default expression. */
+  /** Expression slots beyond the built-in default set (vn/expressions.ts). */
   customExpressions?: CustomExpression[]
-  /** Gift preference score per gift id (-2..3) used by the gift economy to affect relationship gain. */
+  /** Gift preference score per gift id (-2..3), used by the gift economy. */
   giftPreferences?: Record<string, number>
-  /**
-   * Authored gift taste (10d's "Authored reactions") — richer than the numeric `giftPreferences`
-   * score above, which only ever drives the affection delta, never the model's own reaction text.
-   * Free text rather than a fixed catalog, so it reads naturally in a fed-in prompt line and isn't
-   * limited to gifts already in the catalog (a character can love "anything handmade" in general).
-   */
+  /** Authored gift taste in free text — richer than the numeric `giftPreferences` score, which only drives the affection delta. */
   giftLikes?: string[]
   giftDislikes?: string[]
-  /** Free text — how this character feels most loved/appreciated, e.g. "quality time" or "acts of service". */
+  /** How this character feels most loved/appreciated, e.g. "quality time". */
   loveLanguage?: string
-  /** Unlockable CG-like gallery entries for this character. */
+  /** How this character's voice holds up under strain during an explicit scene, in the author's own
+   *  words. Unset falls back to a generic voice-consistency instruction (`intimacyScene.ts`). */
+  explicitVoiceNote?: string
+  /** Unlockable CG-like gallery entries. */
   gallery?: GalleryEntry[]
   /** Optional narrative starting points offered when creating a new chat with this character. */
   relationshipStarters?: RelationshipStarter[]
-  /** Per-character TTS override — unset fields fall back to the global Settings → Voice config. */
+  /** Per-character TTS override; unset falls back to the global Settings → Voice config. */
   voice?: { provider?: TtsProviderId; voiceId?: string }
-  /** Structured speech patterns (verbal tics, catchphrases, dialect, sentence rhythm) — reaches the model via `buildCharacterProfileNote` (`profile.ts`), the same "Character-only field folded into the identity block" path `likes`/`goals`/`socialConnections` already use. */
+  /** Structured speech patterns, folded into the prompt by `buildCharacterProfileNote` (profile.ts). */
   voiceFingerprint?: VoiceFingerprint
-  /** Extra comic sound-effect words this character's messages get the manga-style "burst" styling on, beyond the built-in list — e.g. "nya", "mrrp" for a catgirl, or an imouto's own vocalisations. Display-only; never sent to the model. */
+  /** Extra sound-effect words that get the manga-style "burst" styling, beyond the built-in list. Display-only. */
   sfxWords?: string[]
-  /** Per-character instruct-template override (builtin or custom id) — unset falls back to the global Settings → Generation default. */
+  /** Per-character instruct-template override; unset falls back to the global Settings → Generation default. */
   instructTemplateId?: string
-  /**
-   * How long this character's replies should run (src/lib/characters/voice.ts). Unset / 'auto'
-   * measures the card's own `mes_example` turn length and both instructs and hard-caps `max_length`
-   * to it, so a terse card stops getting essay-length replies; 'brief'/'moderate'/'detailed' are an
-   * explicit override for a card whose examples are unrepresentative or missing.
-   */
+  /** Reply length band (voice.ts). Unset/'auto' measures the card's own `mes_example` turn length;
+   *  the others are an explicit override for a card whose examples are unrepresentative or missing. */
   replyLength?: ReplyLength
-  /** Weather this character loves/hates (src/lib/world/calendar.ts) — nudges the world-moment prompt line, never dictates it. */
+  /** Weather this character loves/hates (world/calendar.ts); nudges the world-moment prompt line. */
   weatherPreferences?: WeatherPreferences
-  /** Daily/weekly routine (src/lib/world/calendar.ts) — where they are and what they're doing at a given world day/phase. Only meaningful for a world-bound character, since it reads the world's shared clock. */
+  /** Daily/weekly routine (world/calendar.ts); only meaningful for a world-bound character. */
   schedule?: ScheduleEntry[]
-  /** General interests/hobbies — distinct from `giftLikes` (gift-shopping taste specifically). Free text so it reads naturally in a fed-in prompt line. */
+  /** General interests/hobbies, distinct from `giftLikes` (gift-shopping taste specifically). */
   likes?: string[]
-  /** What this character wants or is working toward — motivations, not just personality color. */
+  /** What this character wants or is working toward. */
   goals?: string[]
-  /** Hard limits — things this character won't do or won't tolerate, in character. Informational for the model, not itself an enforcement mechanism (see `dateModeOptOut` for the one boundary this app actually gates mechanically). */
+  /** Hard limits, in character. Informational only — see `dateModeOptOut` for the one boundary this app enforces mechanically. */
   boundaries?: string[]
-  /** Who this character knows and how (10e's "social connections") — reaches the prompt as a compact roster line, the same idea as the group-chat participant roster but for people who aren't actually in the scene. */
+  /** Who this character knows and how; reaches the prompt as a compact roster line. */
   socialConnections?: SocialConnection[]
   /** Job title/role, e.g. "barista" or "second-year architecture student". */
   occupation?: string
-  /** Where they work/study, distinct from `occupation` (the role) — e.g. "Sakura Hill University". */
+  /** Where they work/study, distinct from `occupation` (the role). */
   workplace?: string
   /** Where they live, e.g. "a small apartment near the station". */
   homeLocation?: string
-  /** Places they're often found beyond home/work — cafes, parks, a favorite bench. */
+  /** Places they're often found beyond home/work. */
   frequentedLocations?: string[]
-  /** Content/feature flag (10e): excludes this character from the date/event system entirely — the "reaching for a boundary" case a numeric affection gate can't express, since it's an authorial opt-out rather than something that unlocks with more warmth. */
+  /** Excludes this character from the date/event system entirely (an authorial opt-out, not an affection gate). */
   dateModeOptOut?: boolean
-  /** How often this character might text the player first, unprompted (10f's proactive outreach) — an authored trait, not a global timer. Unset behaves as 'never' so shipping this doesn't retroactively change any already-scheduled character's behavior. */
+  /** How often this character texts the player first, unprompted. Unset behaves as 'never'. */
   outreach?: { frequency: OutreachFrequency }
   createdAt: number
   updatedAt: number
 }
 
-/** 10f: how readily a character initiates unprompted contact. A character that never reaches out is a valid, intentional choice, not a missing feature. */
+/** How readily a character initiates unprompted contact. */
 export type OutreachFrequency = 'never' | 'rare' | 'normal' | 'eager'
 
 export interface SocialConnection {

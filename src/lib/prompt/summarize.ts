@@ -1,3 +1,9 @@
+/**
+ * Folds aging messages into a running summary via the connected model itself — the actual
+ * long-term memory mechanism: once messages age out of the context window, their substance
+ * survives here instead of being silently dropped.
+ */
+
 import type { ChatMessage } from './builder'
 import type { VoiceFingerprint } from '@/lib/characters/cardSpec'
 
@@ -9,25 +15,12 @@ export interface SummarizeInput {
   charName: string
   userName: string
   detail?: SummaryDetail
-  /**
-   * The character's authored/detected voice fingerprint (`cardSpec.ts`), when there is one worth
-   * protecting through compression. The problem this fixes: a rolling summary only ever preserves
-   * *facts* ("she agreed to meet him"), never the specific lines that demonstrated a character's
-   * voice, and this summary is exactly what replaces the original turns in every later prompt. Once
-   * a chat is long enough that most of its history is summary rather than live messages, the
-   * fingerprint reminder in `buildCharacterProfileNote` (`profile.ts`) is left with nothing nearby
-   * in context to anchor it to — everything around it reads as flat third-person narration. Passing
-   * this in adds one instruction asking the summarizer to keep a short verbatim quote whenever the
-   * new batch actually demonstrates the voice, instead of paraphrasing every line away. Omitted
-   * (or a fingerprint with nothing set) adds nothing to the prompt, same as every other optional
-   * field here.
-   */
+  /** When set, asks the summarizer to keep a short verbatim quote whenever new events demonstrate the character's voice, instead of paraphrasing it away. */
   voiceFingerprint?: VoiceFingerprint
   generate: (prompt: string) => Promise<string>
 }
 
-/** The single most concrete, quotable example available on the fingerprint, so the instruction to
- *  the summarizer names an actual pattern to watch for rather than speaking only in the abstract. */
+/** Picks the single most concrete, quotable example off the fingerprint to name in the instruction. */
 function voiceRetentionInstruction(charName: string, fingerprint: VoiceFingerprint | undefined): string {
   if (!fingerprint) return ''
   const example = fingerprint.catchphrases?.[0]?.trim() || fingerprint.verbalTics?.[0]?.trim()
@@ -42,18 +35,12 @@ function voiceRetentionInstruction(charName: string, fingerprint: VoiceFingerpri
   return `${charName} has a distinctive voice worth protecting${namedExample}. If a line in the new events below clearly demonstrates it — a catchphrase, a verbal tic, their particular register — keep a brief exact quote of it rather than paraphrasing it into flat third-person prose; that quote is what keeps their voice from flattening out once this summary becomes the only record of what happened.`
 }
 
-/** Rough max_length to hand the API for each detail level — kept alongside the wording so callers can't drift out of sync. */
+/** Rough max_length to hand the API for each detail level. */
 export const SUMMARY_MAX_LENGTH: Record<SummaryDetail, number> = {
   concise: 220,
   detailed: 500,
 }
 
-/**
- * Folds a batch of older messages into a running summary via the connected
- * model itself — this is the actual long-term memory mechanism: once
- * messages age out of the context window, their substance survives here
- * instead of being silently dropped.
- */
 export async function summarizeMessages({
   existingSummary,
   messages,

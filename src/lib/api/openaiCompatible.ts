@@ -90,6 +90,25 @@ export class OpenAICompatibleClient implements ChatBackend {
     }
   }
 
+  /**
+   * FIXES_TODO.md item #14's live catch: a provider's own 429 body text can overclaim permanence
+   * (OpenRouter's free-tier message reads like a hard daily wall — "Daily limit reached... credits
+   * don't affect this cap" — confirmed live this session to sometimes clear on its own in under a
+   * minute, not actually a fixed-until-tomorrow cap every time). Deliberately does NOT rewrite or
+   * drop the provider's own message — it still carries real information (which cap, which key) worth
+   * keeping intact — this only ever *appends* a real, provider-stated retry time from the standard
+   * `Retry-After` header when one comes back, or a soft, honest hedge when it doesn't, rather than
+   * silently trusting whatever permanence the provider's own wording happens to imply.
+   */
+  private rateLimitHint(res: Response): string {
+    const retryAfterSeconds = Number(res.headers.get('retry-after'))
+    if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
+      const readable = retryAfterSeconds < 60 ? `${Math.ceil(retryAfterSeconds)}s` : `${Math.ceil(retryAfterSeconds / 60)}m`
+      return ` (the provider says to retry in about ${readable})`
+    }
+    return ' (this can sometimes clear on its own within a minute or two, despite the wording above)'
+  }
+
   async generate(params: GenerateRequest, signal?: AbortSignal): Promise<string> {
     let res: Response
     try {
@@ -104,7 +123,8 @@ export class OpenAICompatibleClient implements ChatBackend {
       throw new KoboldApiError(`Could not reach ${this.baseUrl}. Is the base URL and network correct?`)
     }
     if (!res.ok) {
-      throw new KoboldApiError(`Chat completion failed (${res.status}): ${(await this.parseErrorBody(res)).slice(0, 300)}`, res.status)
+      const hint = res.status === 429 ? this.rateLimitHint(res) : ''
+      throw new KoboldApiError(`Chat completion failed (${res.status}): ${(await this.parseErrorBody(res)).slice(0, 300)}${hint}`, res.status)
     }
     const data = (await res.json()) as { choices?: { message?: { content?: string } }[] }
     return data.choices?.[0]?.message?.content ?? ''
@@ -130,7 +150,8 @@ export class OpenAICompatibleClient implements ChatBackend {
       throw new KoboldApiError(`Could not reach ${this.baseUrl} for streaming.`)
     }
     if (!res.ok || !res.body) {
-      throw new KoboldApiError(`Chat completion stream failed (${res.status}): ${(await this.parseErrorBody(res)).slice(0, 300)}`)
+      const hint = res.status === 429 ? this.rateLimitHint(res) : ''
+      throw new KoboldApiError(`Chat completion stream failed (${res.status}): ${(await this.parseErrorBody(res)).slice(0, 300)}${hint}`)
     }
 
     const reader = res.body.getReader()

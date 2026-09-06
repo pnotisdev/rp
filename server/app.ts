@@ -390,6 +390,7 @@ app.post('/api/characters', (req, res) => {
     giftLikes: normalizeStringArray(req.body.giftLikes),
     giftDislikes: normalizeStringArray(req.body.giftDislikes),
     loveLanguage: typeof req.body.loveLanguage === 'string' ? req.body.loveLanguage : undefined,
+    explicitVoiceNote: typeof req.body.explicitVoiceNote === 'string' ? req.body.explicitVoiceNote : undefined,
     gallery,
     relationshipStarters: req.body.relationshipStarters ?? [],
     voice: req.body.voice ?? undefined,
@@ -431,6 +432,7 @@ app.put('/api/characters/:id', (req, res) => {
   if ('giftLikes' in req.body) patch.giftLikes = normalizeStringArray(req.body.giftLikes)
   if ('giftDislikes' in req.body) patch.giftDislikes = normalizeStringArray(req.body.giftDislikes)
   if ('loveLanguage' in req.body) patch.loveLanguage = typeof req.body.loveLanguage === 'string' ? req.body.loveLanguage : undefined
+  if ('explicitVoiceNote' in req.body) patch.explicitVoiceNote = typeof req.body.explicitVoiceNote === 'string' ? req.body.explicitVoiceNote : undefined
   if ('gallery' in req.body) patch.gallery = normalizeGalleryEntries(id, req.body.gallery)
   if ('relationshipStarters' in req.body) patch.relationshipStarters = req.body.relationshipStarters ?? []
   if ('voice' in req.body) patch.voice = req.body.voice ?? undefined

@@ -1,21 +1,8 @@
 /**
- * "Maximum Immersion" — a single opinionated bundle over settings this app already has, for an
- * author who wants the deepest, most immersive setup available without having to already know
- * which system-prompt preset reads as most immersive, which world template carries the full
- * mechanic set, or that slow-burn pacing and VN presentation are worth turning on together. Pure
- * curation: every piece named here already exists (`systemPrompts.ts`, `builtinPresets.ts`,
- * `worldTemplates.ts`, the settings store's own `slowBurnPacing`/`visualNovelMode`), nothing new is
- * invented.
- *
- * Deliberately not a fifth `WorldTemplateId` (`worldTemplates.ts`'s own union is a narrow enum
- * threaded through `WorldCard.template`/`types.ts`, a reserved file this pass doesn't touch, and
- * a new id would need every switch over that type updated too) and deliberately not a global
- * "profile" setting either. Instead this is a bundle a caller applies in one action: a
- * character-level `system_prompt` override (travels with the character, needs no reserved-file
- * change) plus the small set of *global* dials that only exist in Settings
- * (`useSettingsStore.ts` — not reserved, just shared; only its already-exported setters are
- * called, never its file). `CharacterEditor.tsx`'s "Apply Maximum Immersion" button is the one
- * concrete surface for this today; see that file's Advanced tab for the wiring.
+ * "Maximum Immersion" — a single opinionated bundle over settings this app already has, applied by
+ * `CharacterEditor.tsx`'s "Apply Maximum Immersion" button. Pure curation: system prompt, sampler
+ * preset, slow-burn pacing, and VN mode, all already-existing pieces from `systemPrompts.ts`,
+ * `builtinPresets.ts`, and the settings store — nothing new is invented.
  */
 
 import { BUILTIN_PRESETS } from './builtinPresets'
@@ -23,17 +10,8 @@ import { BUILTIN_SYSTEM_PROMPTS } from './systemPrompts'
 import type { GenerationParams } from '@/lib/api/types'
 import type { WorldTemplateId } from '@/lib/world/worldTemplates'
 
-/** "Immersive, no meta" — of the ten built-in system prompts, the one whose entire premise is
- *  strict character immersion (no narration slips, no out-of-character asides), which is exactly
- *  what "maximum immersion" means for the block that governs how every reply gets written. */
 export const MAXIMUM_IMMERSION_SYSTEM_PROMPT_ID = 'immersive'
-
-/** "Creative" — wider vocabulary and more varied phrasing while staying coherent, the sampler
- *  preset whose own `use` line calls out prose-heavy scenes specifically. */
 export const MAXIMUM_IMMERSION_SAMPLER_PRESET_ID = 'creative'
-
-/** "Dating Sim" — the one world template that keeps every mechanic (gifts, relationship
- *  thresholds, scene flags, the world clock) rather than deliberately dropping some of them. */
 export const MAXIMUM_IMMERSION_WORLD_TEMPLATE_ID: WorldTemplateId = 'dating_sim'
 
 function findOrThrow<T extends { id: string }>(list: T[], id: string): T {
@@ -47,9 +25,7 @@ export function maximumImmersionSystemPrompt(): string {
   return findOrThrow(BUILTIN_SYSTEM_PROMPTS, MAXIMUM_IMMERSION_SYSTEM_PROMPT_ID).prompt
 }
 
-/** The "Creative" sampler preset's opinionated fields, ready to merge via the settings store's own
- *  `setSampler(patch)` (a `Partial<GenerationParams>` merge — the exact shape every preset chip in
- *  Settings already applies). */
+/** The "Creative" sampler preset's fields, ready to merge via the settings store's `setSampler(patch)`. */
 export function maximumImmersionSamplerParams(): Partial<GenerationParams> {
   return findOrThrow(BUILTIN_PRESETS, MAXIMUM_IMMERSION_SAMPLER_PRESET_ID).params
 }
@@ -59,13 +35,7 @@ export interface MaximumImmersionBundleItem {
   detail: string
 }
 
-/**
- * A human-readable checklist of what applying the bundle does/recommends — mirrors
- * `GenerateCharacterDialog`'s own per-stage checklist UI (glyph + label), the established pattern
- * for "here's what this one action is about to do" in this codebase. Split into `applied` (this
- * action changes it directly) and `recommended` (named so the author knows to do it themselves,
- * reachable only from screens this pass doesn't own — the world editor's own template picker).
- */
+/** Checklist of what applying the bundle does (`applied`) vs. still recommends doing manually (`recommended`). */
 export function maximumImmersionChecklist(): { applied: MaximumImmersionBundleItem[]; recommended: MaximumImmersionBundleItem[] } {
   return {
     applied: [
