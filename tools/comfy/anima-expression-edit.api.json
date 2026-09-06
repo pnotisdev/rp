@@ -1,0 +1,88 @@
+{
+  "1": {
+    "class_type": "UNETLoader",
+    "inputs": { "unet_name": "ccDreamIsland_kirazuri_rotate.safetensors", "weight_dtype": "default" },
+    "_meta": { "title": "Anima model (ccDreamIsland_kirazuri_rotate = Anima aesthetic merge)" }
+  },
+  "2": {
+    "class_type": "CLIPLoader",
+    "inputs": { "clip_name": "qwen_3_06b_base.safetensors", "type": "cosmos", "device": "default" },
+    "_meta": { "title": "Qwen3-0.6B text encoder" }
+  },
+  "3": {
+    "class_type": "VAELoader",
+    "inputs": { "vae_name": "qwen_image_vae.safetensors" },
+    "_meta": { "title": "Qwen-Image VAE" }
+  },
+  "4": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": { "model": ["1", 0], "lora_name": "AnimeEditV2.safetensors", "strength_model": 1.0 },
+    "_meta": { "title": "AnimeEdit V2 LoRA (edit instruction adapter)" }
+  },
+
+  "10": {
+    "class_type": "LoadImage",
+    "inputs": { "image": "base_portrait.png" },
+    "_meta": { "title": "SLOT: base character portrait  (put file in ComfyUI/input/)" }
+  },
+  "11": {
+    "class_type": "ImageScaleToTotalPixels",
+    "inputs": { "image": ["10", 0], "upscale_method": "lanczos", "megapixels": 1.0, "resolution_steps": 16 },
+    "_meta": { "title": "Normalise reference to ~1 MP, dims rounded to /16" }
+  },
+  "12": {
+    "class_type": "VAEEncode",
+    "inputs": { "pixels": ["11", 0], "vae": ["3", 0] },
+    "_meta": { "title": "Encode reference -> latent" }
+  },
+
+  "20": {
+    "class_type": "ApplyCosmosReferenceLatent",
+    "inputs": { "model": ["4", 0], "ref_latent_1": ["12", 0] },
+    "_meta": { "title": "Lock identity/pose/style to the reference" }
+  },
+
+  "30": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": ["2", 0],
+      "text": "smile, happy, light blush, closed mouth, looking at viewer"
+    },
+    "_meta": { "title": "SLOT: EDIT INSTRUCTION (target expression tags)" }
+  },
+  "31": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": ["2", 0],
+      "text": "worst quality, low quality, blurry, jpeg artifacts, sketch, changed hairstyle, different outfit, different character, off-model, extra limbs, deformed face"
+    },
+    "_meta": { "title": "negative" }
+  },
+
+  "40": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": ["20", 0],
+      "positive": ["30", 0],
+      "negative": ["31", 0],
+      "latent_image": ["12", 0],
+      "seed": 0,
+      "steps": 28,
+      "cfg": 4.5,
+      "sampler_name": "er_sde",
+      "scheduler": "simple",
+      "denoise": 1.0
+    },
+    "_meta": { "title": "Sample  (denoise 1.0 - structure comes from node 20, not the latent)" }
+  },
+  "50": {
+    "class_type": "VAEDecode",
+    "inputs": { "samples": ["40", 0], "vae": ["3", 0] },
+    "_meta": { "title": "Decode" }
+  },
+  "60": {
+    "class_type": "SaveImage",
+    "inputs": { "images": ["50", 0], "filename_prefix": "rp-expression/portrait" },
+    "_meta": { "title": "Save -> ComfyUI/output/rp-expression/" }
+  }
+}

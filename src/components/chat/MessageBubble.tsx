@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import { ChevronLeft, ChevronRight, Compass, GitFork, History, RotateCcw, Star, TriangleAlert, X } from 'lucide-react'
 import type { StoredMessage } from '@/lib/types'
 import { useSettingsStore, type AvatarShape } from '@/lib/store/useSettingsStore'
@@ -39,18 +39,24 @@ interface MessageBubbleProps {
   isHighlighted?: boolean
   /** SFX-burst policy for this message's speaker (global toggle + their `sfxWords`). */
   sfx?: SfxConfig
-  onEdit: (text: string) => void
-  onDelete: () => void
-  onRewind: () => void
-  onRegenerate: () => void
+  // Every callback below takes this message's own id as its first argument, rather than
+  // `MessageLog` pre-binding a fresh `() => onX(m.id)` closure per message per render — the whole
+  // point of wrapping this component in `memo` below is to skip re-rendering a bubble whose props
+  // haven't really changed (most of them, on every token streamed into a DIFFERENT bubble); a
+  // freshly-allocated closure prop would defeat that by never comparing equal across renders.
+  // `MessageLog` passes its own already-stable, already-id-taking callbacks straight through.
+  onEdit: (id: string, text: string) => void
+  onDelete: (id: string) => void
+  onRewind: (id: string) => void
+  onRegenerate: (id: string) => void
   /** Item 4's mid-scene correction: re-generates this reply with a one-shot, explicit correction folded in (`dating/steer.ts`) — never touches the chat, the card, or any persistent prompt section. */
-  onSteer: (steerText: string) => void
-  onSwipe: (dir: 'left' | 'right') => void
-  onFork: () => void
-  onTogglePin: () => void
+  onSteer: (id: string, steerText: string) => void
+  onSwipe: (id: string, dir: 'left' | 'right') => void
+  onFork: (id: string) => void
+  onTogglePin: (id: string) => void
 }
 
-export function MessageBubble({
+export const MessageBubble = memo(function MessageBubble({
   message,
   avatarDataUrl,
   isStreaming,
@@ -100,7 +106,7 @@ export function MessageBubble({
   }
   const commitEdit = () => {
     setEditing(false)
-    if (draft !== message.text) onEdit(draft)
+    if (draft !== message.text) onEdit(message.id, draft)
   }
 
   const closeSteer = () => {
@@ -110,7 +116,7 @@ export function MessageBubble({
   const submitSteer = () => {
     const trimmed = steerDraft.trim()
     closeSteer()
-    if (trimmed) onSteer(trimmed)
+    if (trimmed) onSteer(message.id, trimmed)
   }
   // A small inline popover anchored to the Steer button itself — same click-outside-backdrop
   // technique `ChatsPanel.tsx`'s row menu uses, kept local here rather than a full `Modal` since
@@ -213,7 +219,7 @@ export function MessageBubble({
       {canSwipe && (
         <span className="mr-1 flex items-center gap-0.5">
           <button
-            onClick={() => onSwipe('left')}
+            onClick={() => onSwipe(message.id, 'left')}
             className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-bg-sunken hover:text-text disabled:opacity-30"
             disabled={(message.activeSwipe ?? 0) === 0}
             aria-label="Previous swipe"
@@ -224,7 +230,7 @@ export function MessageBubble({
             {(message.activeSwipe ?? 0) + 1}/{swipes.length}
           </span>
           <button
-            onClick={() => onSwipe('right')}
+            onClick={() => onSwipe(message.id, 'right')}
             className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-bg-sunken hover:text-text"
             aria-label="Next swipe"
           >
@@ -235,7 +241,7 @@ export function MessageBubble({
       {!isStreaming && (
         <>
           <button
-            onClick={onTogglePin}
+            onClick={() => onTogglePin(message.id)}
             className={`flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-bg-sunken ${message.pinned ? 'text-accent' : 'hover:text-text'}`}
             title={message.pinned ? 'Unpin' : 'Pin this moment'}
             aria-label={message.pinned ? 'Unpin message' : 'Pin message'}
@@ -243,7 +249,7 @@ export function MessageBubble({
             <Star size={13} strokeWidth={2} fill={message.pinned ? 'currentColor' : 'none'} />
           </button>
           <button
-            onClick={onRegenerate}
+            onClick={() => onRegenerate(message.id)}
             className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-bg-sunken hover:text-text"
             title="Regenerate"
             aria-label="Regenerate"
@@ -252,7 +258,7 @@ export function MessageBubble({
           </button>
           {steerControl}
           <button
-            onClick={onFork}
+            onClick={() => onFork(message.id)}
             className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-bg-sunken hover:text-text"
             title="Fork chat from here"
             aria-label="Fork chat from here"
@@ -267,7 +273,7 @@ export function MessageBubble({
                 confirmLabel: 'Rewind',
                 tone: 'danger',
               })
-              if (ok) onRewind()
+              if (ok) onRewind(message.id)
             }}
             className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-bg-sunken hover:text-danger"
             title="Rewind to here (delete this and everything after)"
@@ -276,7 +282,7 @@ export function MessageBubble({
             <History size={13} strokeWidth={2} />
           </button>
           <button
-            onClick={onDelete}
+            onClick={() => onDelete(message.id)}
             className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-bg-sunken hover:text-danger"
             title="Delete"
             aria-label="Delete message"
@@ -398,4 +404,4 @@ export function MessageBubble({
       </div>
     </div>
   )
-}
+})

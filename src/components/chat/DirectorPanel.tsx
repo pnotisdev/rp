@@ -182,7 +182,7 @@ export function DirectorPanel({ chat, character, world, onClose }: DirectorPanel
       size="2xl"
       scrollable
     >
-      <div className="grid grid-cols-1 gap-4 overflow-y-auto md:grid-cols-2">
+      <div className="grid flex-1 grid-cols-1 gap-4 overflow-y-auto md:grid-cols-2">
         <Section title="World & time" surface="sunken" className="md:col-span-2">
           {world ? (
             <>

@@ -1,0 +1,21 @@
+{
+  "name": "CHARNAME",
+  "characterId": "OPTIONAL - rp character uuid. Required for --apply. If set, --apply pushes sprites straight onto this character.",
+  "note": "Fill 'positive' with this character's look as danbooru tags. Keep the {{expression}} / {{outfit}} / {{framing}} slots. Anima tag order: [quality/meta/year] 1girl/1boy [name] [series] [@artist] [body] [framing] [expression] [hair] [eyes] [features] [outfit] [background]. Put hair accessories the character ALWAYS wears (a signature bow, glasses) in 'positive', not in an outfit. End with 'flat grey background, plain grey backdrop, simple background' for a clean matte.",
+  "framing": "headshot",
+  "positive": "masterpiece, best quality, very aesthetic, absurdres, newest, highres, 1girl, solo, BODY TAGS, {{framing}}, front view, looking at viewer, {{expression}}, HAIR TAGS, EYE TAGS, SIGNATURE ACCESSORIES, {{outfit}}, flat grey background, plain grey backdrop, simple background",
+  "negative": "score_1, score_2, score_3, bad anatomy, bad proportions, deformed anatomy, deformed face, deformed eyes, text, (censored, bar censor, mosaic censoring:1.3), error, anime coloring",
+  "outfit": "DEFAULT CLOTHING TAGS - what {{outfit}} becomes for the base look, e.g. 'school uniform, blazer, necktie'",
+  "outfits": [
+    { "id": "casual", "label": "Casual clothes", "prompt": "casual clothes, hoodie" },
+    { "id": "pajamas", "label": "Pajamas", "prompt": "pajamas, sleepwear", "unlockAffection": 25 }
+  ],
+  "seed": 0,
+  "width": 832,
+  "height": 1216,
+  "steps": 30,
+  "cfg": 5.0,
+  "sampler": "dpmpp_2m",
+  "scheduler": "simple",
+  "model": "ccDreamIsland_kirazuri_rotate.safetensors"
+}

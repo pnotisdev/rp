@@ -12,3 +12,7 @@ data/
 # Dropped-in SillyTavern preset library for reference / bulk import (Settings → Generation →
 # "Import ST preset"). Not part of the app; keep it out of the tree and out of Vite's watcher.
 presets/
+
+# ComfyUI sprite-generator scratch + backups
+tools/comfy/out/
+tools/comfy/backups/

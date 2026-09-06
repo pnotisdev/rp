@@ -1,0 +1,22 @@
+{
+  "name": "sumire",
+  "characterId": "a0000000-0000-4000-8000-000000000002",
+  "note": "{{expression}} and {{outfit}} are filled per sprite. Keep the seed fixed across the whole set. 'petite, flat chest' matches her reworked description; the white hair bow / hairband stay in every outfit since they're part of her, not clothing.",
+  "framing": "portrait, head and shoulders",
+  "positive": "@kuroshiro00, [@modare:@betanonbeet:0.5],(@masaki \\(ekakiningen\\):0.8),@rustle, @wlop, @ying yi, masterpiece, best quality, very aesthetic, absurdres, newest, highres, 1girl, solo, petite, small, flat chest, narrow shoulders, {{framing}}, front view, looking at viewer, {{expression}}, dark purple hair, low twintails, long hair, blunt bangs, hair between eyes, purple eyes, gradient eyes, thick eyebrows, long eyelashes, hair ribbon, twintails tied with white ribbons, thin white hairband, {{outfit}}, flat grey background, plain grey backdrop, simple background",
+  "negative": "score_1, score_2, score_3, bad anatomy, bad proportions, deformed anatomy, deformed face, deformed eyes, text, (censored, bar censor, mosaic censoring:1.3), extra ears, thick arms, thick thighs, plump, medium breasts, large breasts, error, anime coloring, (multiple views:1.4), (character sheet:1.4), split screen, grid, 2koma, 4koma, borders, panels, collage",
+  "outfit": "(school uniform:1.15), black blazer, white collared dress shirt, thin black necktie, pleated skirt",
+  "outfits": [
+    { "id": "casual", "label": "Casual clothes", "prompt": "casual clothes, oversized knit sweater, long sleeves" },
+    { "id": "pajamas", "label": "Pajamas", "prompt": "pajamas, oversized t-shirt, sleepwear, messy hair", "unlockAffection": 25 },
+    { "id": "yukata", "label": "Summer yukata", "prompt": "blue yukata, floral print, japanese clothes", "unlockAffection": 40 }
+  ],
+  "seed": 123456,
+  "width": 832,
+  "height": 1216,
+  "steps": 30,
+  "cfg": 5.0,
+  "sampler": "dpmpp_2m",
+  "scheduler": "simple",
+  "model": "ccDreamIsland_kirazuri_rotate.safetensors"
+}

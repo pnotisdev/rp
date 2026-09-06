@@ -4,7 +4,9 @@ import { fileURLToPath } from 'node:url'
 import { avatarsDir, characterStore, personaStore, worldInfoBookStore, worldStore } from './db.ts'
 import {
   SEED_BACKGROUND_KEYS,
+  SEED_CHARACTER_ID,
   SEED_PERSONA_ID,
+  SEED_SPRITE_KEYS,
   SEED_WORLD_ID,
   seedCharacter,
   seedPersona,
@@ -15,6 +17,7 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // Committed at the repo root (not under data/, which is gitignored) — these ship with the app.
 const seedAssetsDir = path.resolve(__dirname, '..', 'seed', 'backgrounds')
+const seedSpritesDir = path.resolve(__dirname, '..', 'seed', 'sprites', 'sumire')
 
 /**
  * Populates the one bundled world/character/World Info book on first run only. Idempotent by
@@ -43,6 +46,22 @@ export function runSeedIfNeeded(): void {
     copied++
   }
 
+  // Sumire's portrait + expression sprites, same idea as the backgrounds above — committed under
+  // seed/sprites/sumire/ and copied into her own avatars folder so she ships fully illustrated.
+  // Missing files just fall back to the main avatar for that expression, so a partial set is fine.
+  const characterDest = path.join(avatarsDir, 'characters', SEED_CHARACTER_ID)
+  const spritesDest = path.join(characterDest, 'sprites')
+  fs.mkdirSync(spritesDest, { recursive: true })
+  let spritesCopied = 0
+  for (const key of SEED_SPRITE_KEYS) {
+    const src = path.join(seedSpritesDir, `${key}.png`)
+    if (!fs.existsSync(src)) continue
+    fs.copyFileSync(src, path.join(spritesDest, `${key}.png`))
+    spritesCopied++
+  }
+  const avatarSrc = path.join(seedSpritesDir, 'avatar.png')
+  if (fs.existsSync(avatarSrc)) fs.copyFileSync(avatarSrc, path.join(characterDest, 'avatar.png'))
+
   // The stores are intentionally typed loosely (Record<string, unknown> in, out) since they're a
   // thin JSON-blob layer over SQLite shared by every entity kind — seedContent.ts's exports carry
   // the real, precise types for everything written by hand above.
@@ -52,6 +71,7 @@ export function runSeedIfNeeded(): void {
   personaStore.insert(seedPersona as unknown as Record<string, unknown>)
 
   console.log(
-    `[rp-server] seeded starter content: 1 world, 1 World Info book, 1 character, 1 persona (${copied}/${SEED_BACKGROUND_KEYS.length} backgrounds copied)`,
+    `[rp-server] seeded starter content: 1 world, 1 World Info book, 1 character, 1 persona ` +
+      `(${copied}/${SEED_BACKGROUND_KEYS.length} backgrounds, ${spritesCopied}/${SEED_SPRITE_KEYS.length} sprites copied)`,
   )
 }

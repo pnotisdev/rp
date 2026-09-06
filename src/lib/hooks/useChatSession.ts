@@ -608,6 +608,8 @@ export function useChatSession(chatId: string | null) {
         intent?: MessageIntent
         /** One-off addition to `styleGuidance`, for a generation shape none of the standing settings cover — e.g. 10b's live-scene opener, "you're breaking the ice, not replying to a message." Never persisted, never reused past this one call. */
         extraStyleGuidance?: string
+        /** Passed straight through to `buildPrompt` — the Prompt Inspector's "where did my tokens go" view opts into this; the real generation path never does. */
+        includeSectionBreakdown?: boolean
       },
     ) => {
       if (!character || !chat) return null
@@ -978,6 +980,7 @@ export function useChatSession(chatId: string | null) {
         countTokens,
         continueLastTurn: opts?.continueLastTurn,
         impersonateAsUser: opts?.impersonateAsUser,
+        includeSectionBreakdown: opts?.includeSectionBreakdown,
         worldInfoState: freshChat.worldInfoState ?? {},
         worldInfoTurn: messages.length,
         activeObjective: objectiveForPrompt,
@@ -1055,20 +1058,24 @@ export function useChatSession(chatId: string | null) {
           detail: summaryDetail,
           voiceFingerprint: character.voiceFingerprint,
           generate: (prompt) =>
-            client.generate({
-              prompt,
-              max_length: SUMMARY_MAX_LENGTH[summaryDetail],
-              max_context_length: sampler.max_context_length,
-              temperature: 0.4,
-              top_p: 1,
-              top_k: 0,
-              min_p: 0,
-              typical: 1,
-              tfs: 1,
-              rep_pen: 1.1,
-              rep_pen_range: 1024,
-              rep_pen_slope: 0.7,
-            }),
+            generateWithTimeout(
+              client,
+              {
+                prompt,
+                max_length: SUMMARY_MAX_LENGTH[summaryDetail],
+                max_context_length: sampler.max_context_length,
+                temperature: 0.4,
+                top_p: 1,
+                top_k: 0,
+                min_p: 0,
+                typical: 1,
+                tfs: 1,
+                rep_pen: 1.1,
+                rep_pen_range: 1024,
+                rep_pen_slope: 0.7,
+              },
+              'Update memory summary',
+            ),
         })
         const summaryUpToTimestamp = newBatch[newBatch.length - 1].createdAt
         await chatsApi.update(chat.id, { summary: updated, summaryUpToTimestamp })
@@ -1962,7 +1969,7 @@ export function useChatSession(chatId: string | null) {
       name: m.name,
       text: m.text,
     }))
-    return buildCurrentPrompt(historyForPrompt, { speakerId: replyAsCharacterId })
+    return buildCurrentPrompt(historyForPrompt, { speakerId: replyAsCharacterId, includeSectionBreakdown: true })
   }, [buildCurrentPrompt, messages, replyAsCharacterId])
 
   /**
@@ -1995,6 +2002,25 @@ export function useChatSession(chatId: string | null) {
       }
       const current: Scene = chat?.scene ?? { turnPolicy: 'manual' }
       await chatsApi.update(chatId, { scene: { ...current, ...patch } })
+    },
+    [chat?.scene, chatId],
+  )
+
+  /**
+   * The roster (`Chat.participants`) was previously only ever set once, at chat creation
+   * (`NewChatDialog.tsx`) — there was no way to bring in "a friend who walks in" later, or drop
+   * someone who left the scene, without abandoning the chat and starting a fresh one with the
+   * right roster from the start. Resets `roundRobinIndex` like a turn-policy change already does
+   * (`updateScene` callers, `ScenePanel.tsx`): a changed roster can shift what that index used to
+   * point at, onto someone else entirely.
+   */
+  const updateParticipants = useCallback(
+    async (ids: string[]) => {
+      if (!chatId) return
+      await chatsApi.update(chatId, {
+        participants: ids,
+        scene: chat?.scene ? { ...chat.scene, roundRobinIndex: 0 } : chat?.scene,
+      })
     },
     [chat?.scene, chatId],
   )
@@ -2204,9 +2230,11 @@ export function useChatSession(chatId: string | null) {
       if (!character || !chat) return
       const { active: speaker } = resolveSpeaker(opts?.speakerId)
       if (!speaker) return
-      // Relationship tracking, objective-progress-driven choices, and gift-aware choice
-      // suggestions are all scoped to the primary's relationship — skip them for a turn a
-      // non-primary participant spoke, rather than silently attributing their lines to it.
+      // Relationship tracking and the live-date rapport read stay scoped to the primary's
+      // relationship — skip them for a turn a non-primary participant spoke, rather than silently
+      // attributing their lines to it. Choice suggestions are *not* in that set: they only read
+      // the recent transcript (now labelled per-speaker) plus the shared gift wallet, so they're
+      // just as useful a prompt after anyone's turn.
       const isPrimarySpeaker = speaker.id === character.id
       // This speaker's reply-length band, turned into a hard `max_length` ceiling for every round
       // below — so a terse character stays terse even if the model ignores the prose instruction
@@ -2605,7 +2633,7 @@ export function useChatSession(chatId: string | null) {
             await chatsApi.update(chat.id, { rapport: { ...read, updatedAt: Date.now() } })
           })
         }
-        if (effectiveAssistFlag(chat.assistOverrides?.autoSuggestChoices, autoSuggestChoices) && isPrimarySpeaker) {
+        if (effectiveAssistFlag(chat.assistOverrides?.autoSuggestChoices, autoSuggestChoices)) {
           runAssist('choices', 'Suggesting replies', () => suggestChoicesForMessage(targetMessageId, relationshipHistory))
         }
         if (autoDetectTasks && !tasksHandledByMerge) {
@@ -3565,6 +3593,7 @@ export function useChatSession(chatId: string | null) {
     previewPrompt,
     updateAuthorNote,
     updateScene,
+    updateParticipants,
     updateMemorySummary,
     continueMessage,
     canContinue,

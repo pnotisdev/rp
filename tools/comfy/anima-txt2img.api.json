@@ -1,0 +1,58 @@
+{
+  "1": {
+    "class_type": "UNETLoader",
+    "inputs": { "unet_name": "ccDreamIsland_kirazuri_rotate.safetensors", "weight_dtype": "default" },
+    "_meta": { "title": "Anima model" }
+  },
+  "2": {
+    "class_type": "CLIPLoader",
+    "inputs": { "clip_name": "qwen_3_06b_base.safetensors", "type": "cosmos", "device": "default" },
+    "_meta": { "title": "Qwen3-0.6B text encoder" }
+  },
+  "3": {
+    "class_type": "VAELoader",
+    "inputs": { "vae_name": "qwen_image_vae.safetensors" },
+    "_meta": { "title": "Qwen-Image VAE (loads as WanVAE)" }
+  },
+  "5": {
+    "class_type": "EmptySD3LatentImage",
+    "inputs": { "width": 832, "height": 1216, "batch_size": 1 },
+    "_meta": { "title": "Empty latent 832x1216 (16ch / Wan21)" }
+  },
+  "6": {
+    "class_type": "CLIPTextEncode",
+    "inputs": { "clip": ["2", 0], "text": "SLOT_POSITIVE" },
+    "_meta": { "title": "SLOT: positive (character + expression)" }
+  },
+  "7": {
+    "class_type": "CLIPTextEncode",
+    "inputs": { "clip": ["2", 0], "text": "SLOT_NEGATIVE" },
+    "_meta": { "title": "SLOT: negative" }
+  },
+  "4": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": ["1", 0],
+      "positive": ["6", 0],
+      "negative": ["7", 0],
+      "latent_image": ["5", 0],
+      "seed": 0,
+      "steps": 30,
+      "cfg": 5.0,
+      "sampler_name": "dpmpp_2m",
+      "scheduler": "simple",
+      "denoise": 1.0
+    },
+    "_meta": { "title": "Sample" }
+  },
+  "8": {
+    "class_type": "VAEDecode",
+    "inputs": { "samples": ["4", 0], "vae": ["3", 0] },
+    "_meta": { "title": "Decode" }
+  },
+  "9": {
+    "class_type": "SaveImage",
+    "inputs": { "images": ["8", 0], "filename_prefix": "rp-sprites/portrait" },
+    "_meta": { "title": "Save" }
+  }
+}

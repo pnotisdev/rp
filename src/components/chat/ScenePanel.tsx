@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { Scene, ScenePolicy } from '@/lib/types'
 import { Button } from '@/components/ui/Button'
+import { Chip } from '@/components/ui/Chip'
 import { TextAreaField } from '@/components/ui/Field'
 import { Modal } from '@/components/ui/Modal'
 
@@ -29,21 +30,40 @@ const POLICIES: { id: ScenePolicy; label: string; hint: string }[] = [
 
 export function ScenePanel({
   scene,
+  participantIds,
+  otherCharacters,
   onClose,
   onSave,
+  onSaveParticipants,
 }: {
   scene: Scene | undefined
+  /** Who's currently in the roster (`Chat.participants`) besides the primary. */
+  participantIds: string[]
+  /** Every character that could be invited in — the primary is never in this list. */
+  otherCharacters: { id: string; name: string }[]
   onClose: () => void
   onSave: (patch: Partial<Scene> | null) => Promise<void>
+  /** Previously there was no way to change `Chat.participants` after the chat was created at all —
+   *  "a friend walks in" mid-scene, or someone leaving, meant abandoning the chat and starting a
+   *  fresh one with the right roster from the start. */
+  onSaveParticipants: (ids: string[]) => Promise<void>
 }) {
   const [location, setLocation] = useState(scene?.location ?? '')
   const [atmosphere, setAtmosphere] = useState(scene?.atmosphere ?? '')
   const [turnPolicy, setTurnPolicy] = useState<ScenePolicy>(scene?.turnPolicy ?? 'manual')
+  const [participants, setParticipants] = useState<string[]>(participantIds)
   const [busy, setBusy] = useState(false)
+
+  const toggleParticipant = (id: string) =>
+    setParticipants((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]))
+
+  const participantsChanged =
+    participants.length !== participantIds.length || participants.some((id) => !participantIds.includes(id))
 
   const save = async (payload: Partial<Scene> | null) => {
     setBusy(true)
     try {
+      if (participantsChanged) await onSaveParticipants(participants)
       await onSave(payload)
       onClose()
     } finally {
@@ -60,6 +80,23 @@ export function ScenePanel({
       scrollable
     >
       <div className="flex-1 overflow-y-auto">
+        {otherCharacters.length > 0 && (
+          <div className="mb-4">
+            <span className="mb-1 block text-xs font-medium text-text-muted">Who's in this scene</span>
+            <div className="flex flex-wrap gap-1.5">
+              {otherCharacters.map((c) => (
+                <Chip key={c.id} on={participants.includes(c.id)} onClick={() => toggleParticipant(c.id)}>
+                  {c.name}
+                </Chip>
+              ))}
+            </div>
+            <p className="mt-1.5 text-[11px] text-text-muted">
+              Add someone mid-scene, or drop someone who's left — past messages keep the name/art they were sent
+              with either way, this only changes who can speak next.
+            </p>
+          </div>
+        )}
+
         <TextAreaField
           label="Location"
           rows={2}
@@ -117,7 +154,7 @@ export function ScenePanel({
                 turnPolicy,
                 // A fresh policy pick starts its own bookkeeping from scratch rather than
                 // inheriting a stale round-robin index from a previous policy.
-                roundRobinIndex: turnPolicy === scene?.turnPolicy ? scene?.roundRobinIndex : 0,
+                roundRobinIndex: turnPolicy === scene?.turnPolicy && !participantsChanged ? scene?.roundRobinIndex : 0,
               })
             }
             disabled={busy}

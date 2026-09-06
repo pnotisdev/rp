@@ -55,7 +55,9 @@ export function TrashPanel({ onClose, onRestored }: { onClose: () => void; onRes
       title="Trash"
       description="Deleted chats sit here for 30 days before they're purged automatically — restore one, or delete it for good right away."
       size="lg"
+      scrollable
     >
+      <div className="flex-1 overflow-y-auto">
       {trashed.length === 0 ? (
         <p className="py-6 text-center text-sm text-text-muted">Nothing in the trash.</p>
       ) : (
@@ -108,7 +110,8 @@ export function TrashPanel({ onClose, onRestored }: { onClose: () => void; onRes
           })}
         </div>
       )}
-      <div className="mt-4 flex justify-end">
+      </div>
+      <div className="mt-4 flex shrink-0 justify-end">
         <Button onClick={onClose}>Close</Button>
       </div>
     </Modal>

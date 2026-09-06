@@ -1,0 +1,31 @@
+{
+  "_comment": "rp DEFAULT_EXPRESSIONS (src/lib/vn/expressions.ts) -> danbooru-style expression tags. make-sprites.mjs substitutes one value per sprite into a character spec's {{expression}} slot. lowercase, spaces not underscores.",
+  "expressions": {
+    "neutral": "neutral expression, calm, closed mouth",
+    "happy": "smile, happy, soft blush, closed mouth",
+    "smirk": "smirk, smug, half-closed eyes, one eyebrow raised, closed mouth",
+    "laughing": "laughing, open mouth, wide grin, eyes closed, tilting head back, joyful, upper teeth visible",
+    "sad": "sad, frown, downcast eyes, drooping eyebrows",
+    "crying": "crying, tears, crying with eyes open, streaming tears, sad frown",
+    "angry": "angry, scowl, furrowed brow, v-shaped eyebrows, gritted teeth",
+    "annoyed": "annoyed, pout, half-closed eyes, unamused, slight frown",
+    "surprised": "surprised, wide eyes, raised eyebrows, open mouth, shocked",
+    "scared": "scared, fear, wide eyes, trembling, nervous, pale",
+    "blush": "heavy blush, shy, embarrassed, averting eyes, closed mouth",
+    "love": "in love, heart-shaped pupils, blush, tender smile",
+    "flirty": "seductive smile, flirty, wink, half-closed eyes, playful",
+    "smitten": "smitten, sparkling eyes, warm smile, blush",
+    "yearning": "yearning, longing gaze, parted lips, wistful, looking away",
+    "sultry": "sultry, bedroom eyes, half-closed eyes, parted lips, seductive smile",
+    "aroused": "flushed face, heavy breathing, half-closed eyes, parted lips, needy expression",
+    "embarrassed": "embarrassed, flustered, blush, wavy mouth, nervous smile",
+    "thinking": "thinking, pensive, looking up, thoughtful, closed mouth",
+    "determined": "determined, serious, furrowed brow, clenched jaw",
+    "sleepy": "sleepy, drowsy, half-closed eyes, tired, small yawn"
+  },
+  "notes": [
+    "If a face barely changes vs neutral, bump cfg to 6 in the character spec, or add stronger tags (e.g. 'open mouth', ';)', 'clenched teeth').",
+    "If the character drifts between expressions, the seed is doing its job least on the big changes (laughing, surprised) - regenerate just those with a different seed until they match, via: make-sprites.mjs --only laughing,surprised --seed <n>.",
+    "sultry / aroused stay face-only; the base prompt has no nsfw/explicit tag so framing stays safe."
+  ]
+}

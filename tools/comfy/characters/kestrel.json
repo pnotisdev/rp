@@ -1,0 +1,22 @@
+{
+  "name": "kestrel",
+  "characterId": "5cd87364-f997-404c-a0c6-ad1f66e8d84d",
+  "note": "Blonde/blue-eyed second-year, Sumire's polar opposite — assertive, teasing. Wears the uniform sloppily. Same artist tags + framing as sumire.json so the two read as one VN's cast. small fang is a deliberate mesugaki cue.",
+  "framing": "portrait, head and shoulders",
+  "positive": "@kuroshiro00, [@modare:@betanonbeet:0.5],(@masaki \\(ekakiningen\\):0.8),@rustle, @wlop, @ying yi, masterpiece, best quality, very aesthetic, absurdres, newest, highres, 1girl, solo, petite, small breasts, {{framing}}, front view, looking at viewer, {{expression}}, blonde hair, high ponytail, sidelocks, blunt bangs, blue eyes, sharp eyes, small fang, {{outfit}}, flat grey background, plain grey backdrop, simple background",
+  "negative": "score_1, score_2, score_3, bad anatomy, bad proportions, deformed anatomy, deformed face, deformed eyes, text, (censored, bar censor, mosaic censoring:1.3), extra ears, thick arms, error, anime coloring, twintails, medium breasts, large breasts, cleavage, midriff, mature female, old",
+  "outfit": "school uniform, black blazer worn open, white shirt, loosened necktie, unbuttoned collar, rolled-up sleeves",
+  "outfits": [
+    { "id": "casual", "label": "Casual clothes", "prompt": "cropped leather jacket, band t-shirt, choker" },
+    { "id": "gym", "label": "Gym clothes", "prompt": "track jacket, white t-shirt, whistle around neck" },
+    { "id": "yukata", "label": "Summer yukata", "prompt": "red yukata, goldfish print, japanese clothes", "unlockAffection": 40 }
+  ],
+  "seed": 88888,
+  "width": 832,
+  "height": 1216,
+  "steps": 30,
+  "cfg": 5.0,
+  "sampler": "dpmpp_2m",
+  "scheduler": "simple",
+  "model": "ccDreamIsland_kirazuri_rotate.safetensors"
+}

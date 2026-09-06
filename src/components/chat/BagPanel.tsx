@@ -49,7 +49,8 @@ export function BagPanel({
       size="lg"
       scrollable
     >
-        <div className="space-y-2 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto">
+        <div className="space-y-2">
           {ownedGifts.map((gift) => (
             <div key={gift.id} className="flex items-center justify-between rounded-xl bg-bg-sunken p-3">
               <div>
@@ -75,7 +76,7 @@ export function BagPanel({
             <p className="mb-3 mt-6 text-sm font-medium text-text">
               Items <span className="font-normal text-text-muted">— used on the spot for their effect, not given in a scene.</span>
             </p>
-            <div className="space-y-2 overflow-y-auto">
+            <div className="space-y-2">
               {ownedItems.map((item) => (
                 <div key={item.id} className="flex items-center justify-between rounded-xl bg-bg-sunken p-3">
                   <div>
@@ -97,6 +98,7 @@ export function BagPanel({
             </div>
           </>
         )}
+      </div>
     </Modal>
   )
 }

@@ -113,6 +113,20 @@ export interface PromptBuildInput {
   participants?: { name: string; description?: string; personality?: string }[]
   /** Whose turn is being generated — defaults to `character.name`. Only differs in a group chat where a non-primary participant is replying. */
   nextSpeakerName?: string
+  /**
+   * Adds `sectionBreakdown` to the result — a per-section token count for the Prompt Inspector's
+   * "where did my tokens go" view. Opt-in and off by default: it costs a handful of extra
+   * `countTokens` calls (each block counted on its own, on top of the one combined count the
+   * normal path already does), fine for an on-demand inspection but wasted work on every actual
+   * generation turn, which never reads this field.
+   */
+  includeSectionBreakdown?: boolean
+}
+
+export interface PromptSectionBreakdownItem {
+  id: string
+  label: string
+  tokens: number
 }
 
 export interface PromptBuildResult {
@@ -124,6 +138,14 @@ export interface PromptBuildResult {
   activatedEntries: LorebookEntry[]
   droppedForBudget: LorebookEntry[]
   droppedForGroup: LorebookEntry[]
+  /**
+   * Present only when `includeSectionBreakdown` was requested — one entry per non-empty section
+   * that's actually included, ordered the same as the prompt itself. Each block is counted on its
+   * own (no shared prefix/suffix, no inter-section join), so these numbers won't sum to exactly
+   * `tokensUsed` above — that's the real number sent, this is a per-section approximation for
+   * understanding where it went, not a reconciliation of it.
+   */
+  sectionBreakdown?: PromptSectionBreakdownItem[]
   /** Sticky/cooldown state to persist for the next turn — undefined when `worldInfoState` wasn't passed in. */
   worldInfoState?: WorldInfoRuntimeState
   /**
@@ -207,8 +229,16 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
     ? `About ${macroCtx.userName}: ${sub(input.personaDescription)}`
     : ''
 
+  // Confirmed live: an ungrounded weak/free model can read raw example dialogue as something that
+  // already happened and just continue or repeat it verbatim (reproduced with a group-chat
+  // participant taking their first turn — the model's whole reply was the example's opening line,
+  // echoed back). Explicit framing costs a few tokens but removes the ambiguity regardless of
+  // whether the model recognizes SillyTavern's own `<START>` convention (some cards use it, this
+  // doesn't assume either way).
   const exampleBlock =
-    sections.examples && character.mes_example?.trim() ? sub(character.mes_example) : ''
+    sections.examples && character.mes_example?.trim()
+      ? `Example lines showing ${macroCtx.charName}'s voice, style, and typical phrasing — a reference only, not something that already happened in this scene. Do not repeat or continue these lines; write a new reply instead.\n${sub(character.mes_example)}`
+      : ''
 
   const worldBefore = before.map((e) => sub(e.content)).join('\n')
   const worldAfter = after.map((e) => sub(e.content)).join('\n')
@@ -327,6 +357,30 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
   const tokensUsed =
     fixedTokens + postHistoryTokens + genCueTokens + includedTurns.reduce((sum, t) => sum + t.tokens, 0)
 
+  let sectionBreakdown: PromptSectionBreakdownItem[] | undefined
+  if (input.includeSectionBreakdown) {
+    const worldInfoBlock = [worldBefore, worldAfter].filter(Boolean).join('\n')
+    const candidates: { id: string; label: string; text: string }[] = [
+      { id: 'system', label: 'System prompt', text: sections.system ? systemBlock : '' },
+      { id: 'summary', label: 'Long-term memory summary', text: sections.summary ? summaryBlock : '' },
+      { id: 'world', label: 'World / setting description', text: sections.world ? worldBlock : '' },
+      { id: 'worldInfo', label: 'World info (activated lore)', text: worldInfoBlock },
+      { id: 'description', label: 'Character description', text: sections.description ? descriptionBlock : '' },
+      { id: 'participants', label: 'Other participants roster', text: sections.participants ? participantsBlock : '' },
+      { id: 'persona', label: 'Persona description', text: sections.persona ? personaBlock : '' },
+      { id: 'examples', label: 'Example messages', text: exampleBlock },
+      { id: 'authorNote', label: "Author's note", text: authorNoteText },
+      { id: 'postHistory', label: 'Steering (objective / relationship / style)', text: postHistoryBlock },
+      { id: 'history', label: `Chat history (${includedTurns.length} turns included)`, text: historyText },
+      { id: 'generationCue', label: 'Generation cue', text: genCue },
+    ]
+    sectionBreakdown = await Promise.all(
+      candidates
+        .filter((c) => c.text.trim())
+        .map(async (c) => ({ id: c.id, label: c.label, tokens: await countTokens(c.text) })),
+    )
+  }
+
   return {
     prompt,
     tokensUsed,
@@ -336,6 +390,7 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
     activatedEntries,
     droppedForBudget,
     droppedForGroup,
+    sectionBreakdown,
     worldInfoState,
     systemText: fixedText,
     conversationText: tail,

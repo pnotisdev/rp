@@ -17,6 +17,8 @@ import {
   Wrench,
 } from 'lucide-react'
 import { useChatSession } from '@/lib/hooks/useChatSession'
+import { useApiQuery } from '@/lib/hooks/useApiQuery'
+import { charactersApi } from '@/lib/api/client'
 import { IconButton } from '@/components/ui/IconButton'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import { scrollToMessage } from '@/lib/scrollToMessage'
@@ -104,6 +106,7 @@ export function ChatWindow({
     previewPrompt,
     updateAuthorNote,
     updateScene,
+    updateParticipants,
     updateMemorySummary,
     continueMessage,
     canContinue,
@@ -138,6 +141,10 @@ export function ChatWindow({
   const sfxBursts = useSettingsStore((s) => s.sfxBursts)
   const sfxWords = useSettingsStore((s) => s.sfxWords)
   const setActiveChatId = useSettingsStore((s) => s.setActiveChatId)
+  // Only ever read for the Scene panel's "who's in this scene" invite picker — not the roster
+  // itself, which stays `participantCharacters` (already scoped to `chat.participants`).
+  const allCharacters = useApiQuery('characters', () => charactersApi.list(), []) ?? []
+  const otherCharacters = character ? allCharacters.filter((c) => c.id !== character.id) : allCharacters
   const scrollRef = useRef<HTMLDivElement>(null)
   const [showInspector, setShowInspector] = useState(false)
   const [showObjective, setShowObjective] = useState(false)
@@ -285,6 +292,13 @@ export function ChatWindow({
     world && character?.schedule?.length
       ? getCurrentActivity(character.schedule, world.currentDay ?? 0, world.currentPhaseIndex ?? 0)
       : undefined
+  // Deliberately always the primary here, unlike VNStage's own Bond card: this header's avatar
+  // and name above are always the primary too (the chat's fixed identity), so a warmth number that
+  // silently meant someone else with no visible name attached would be confusing, not fixed — VN
+  // mode's version of this earns the switch because it shows multiple faces on screen at once,
+  // making "whose bond" genuinely ambiguous in a way this single-identity header never is.
+  // `RelationshipPanel` (the heart icon) already gives a properly-labeled per-participant tab for
+  // anyone who wants a non-primary's own number specifically.
   const warmth = computeWarmth(chat.affection ?? 0, getRelationshipStats(chat))
   // Computed live rather than trusted from the stored `chat.relationshipStage` field, so display
   // never drifts out of sync if some future code path updates affection/relationshipStats without
@@ -344,9 +358,11 @@ export function ChatWindow({
       key: 'scene',
       icon: Clapperboard,
       label: chat.scene ? `Scene (${chat.scene.turnPolicy.replace('_', ' ')})` : 'Scene',
-      // Only meaningful once there's a roster to frame/hand turns between — a single-character
-      // chat has no one to choose among, same gating the composer's own "reply as" picker uses.
-      hidden: participantCharacters.length === 0,
+      // Reachable even for a chat with nobody else in it yet — it's the only way to invite a
+      // first participant in (there was previously no way to change `Chat.participants` after
+      // the chat was created at all, only at creation in NewChatDialog). Hidden only when there's
+      // truly nobody else in the whole app who could ever be invited in.
+      hidden: otherCharacters.length === 0,
       active: !!chat.scene && (!!chat.scene.location || !!chat.scene.atmosphere || chat.scene.turnPolicy !== 'manual'),
       onClick: () => setShowScene(true),
     },
@@ -640,7 +656,14 @@ export function ChatWindow({
         />
       )}
       {showScene && (
-        <ScenePanel scene={chat.scene} onClose={() => setShowScene(false)} onSave={updateScene} />
+        <ScenePanel
+          scene={chat.scene}
+          participantIds={chat.participants ?? []}
+          otherCharacters={otherCharacters.map((c) => ({ id: c.id, name: c.card.name }))}
+          onClose={() => setShowScene(false)}
+          onSave={updateScene}
+          onSaveParticipants={updateParticipants}
+        />
       )}
       {showSearch && (
         <SearchPanel
@@ -721,6 +744,7 @@ export function ChatWindow({
           onEdit={editMessage}
           onFork={forkChat}
           onTogglePin={togglePinMessage}
+          onSelectSpeaker={turnPolicy === 'manual' ? (id) => setReplyAsCharacterId(id) : undefined}
           topBarExtra={toolbar}
           onBack={onBack}
           parentChatLink={parentChatLink}

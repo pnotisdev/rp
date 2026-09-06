@@ -83,6 +83,22 @@ describe('generateChoices', () => {
     expect(sent.prompt).toContain('No gifts are currently available to give.')
   })
 
+  it('labels each turn with its own speaker name, not one charName for every non-user line', async () => {
+    // A group scene: the reply we are suggesting follow-ups to came from Kestrel, a participant,
+    // while `charName` is still the primary (Sumire). The brainstorm context must show Kestrel as
+    // the one who just spoke, or the suggestions drift toward answering Sumire.
+    let sent: Record<string, unknown> = {}
+    const groupHistory: ChatMessage[] = [
+      { id: '1', role: 'user', name: 'Kai', text: 'You two know each other?' },
+      { id: '2', role: 'char', name: 'Sumire', text: '"Barely."' },
+      { id: '3', role: 'char', name: 'Kestrel', text: '"We met once. It was raining."' },
+    ]
+    await generateChoices(stubClient('[]', (p) => (sent = p)), { history: groupHistory, charName: 'Sumire', userName: 'Kai' })
+    expect(sent.prompt).toContain('Kestrel: "We met once. It was raining."')
+    expect(sent.prompt).toContain('Sumire: "Barely."')
+    expect(sent.prompt).toContain('Kai: You two know each other?')
+  })
+
   it('only sends the last 8 turns of history', async () => {
     let sent: Record<string, unknown> = {}
     const long: ChatMessage[] = Array.from({ length: 20 }, (_, i) => ({

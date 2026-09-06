@@ -23,7 +23,11 @@ function renderContext(history: ChatMessage[], charName: string, userName: strin
   return history
     .slice(-depth)
     .filter((m) => m.text.trim())
-    .map((m) => `${m.role === 'user' ? userName : charName}: ${m.text}`)
+    // Label each line with the turn's actual speaker (`m.name`) rather than a single `charName`
+    // for every non-user line — in a group scene that one name would mislabel every participant's
+    // turn as the primary's, exactly the context a post-reply choice suggestion reads to stay on
+    // topic. Falls back to the role-based name for any stray unnamed entry.
+    .map((m) => `${m.name?.trim() || (m.role === 'user' ? userName : charName)}: ${m.text}`)
     .join('\n')
 }
 

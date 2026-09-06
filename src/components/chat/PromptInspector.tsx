@@ -70,6 +70,32 @@ export function PromptInspector({
               )}
             </div>
 
+            {result.sectionBreakdown && result.sectionBreakdown.length > 0 && (
+              <div className="mb-5 rounded-xl bg-bg-sunken p-4">
+                <h3 className="mb-2 text-xs font-semibold text-text-muted">Where your tokens went</h3>
+                <ul className="space-y-1.5">
+                  {[...result.sectionBreakdown]
+                    .sort((a, b) => b.tokens - a.tokens)
+                    .map((section) => {
+                      const pct = result.tokensUsed > 0 ? Math.round((section.tokens / result.tokensUsed) * 100) : 0
+                      return (
+                        <li key={section.id} className="flex items-center gap-3 text-xs">
+                          <span className="w-44 shrink-0 truncate text-text">{section.label}</span>
+                          <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-bg-elevated">
+                            <span className="block h-full rounded-full bg-accent/60" style={{ width: `${Math.max(pct, 2)}%` }} />
+                          </span>
+                          <span className="w-16 shrink-0 text-right text-text-muted">{section.tokens} tok</span>
+                        </li>
+                      )
+                    })}
+                </ul>
+                <p className="mt-2 text-[11px] text-text-muted">
+                  Each section counted on its own — these won't sum to exactly the total above (formatting between
+                  sections adds a few tokens), close enough to see where it's actually going.
+                </p>
+              </div>
+            )}
+
             <div className="mb-5 rounded-xl bg-bg-sunken p-4">
               <div className="mb-2 flex items-center justify-between">
                 <h3 className="text-xs font-semibold text-text-muted">Long-term memory (summary)</h3>

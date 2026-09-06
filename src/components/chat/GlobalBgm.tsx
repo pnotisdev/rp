@@ -17,11 +17,13 @@ export function GlobalBgm() {
   const bgmVolume = useSettingsStore((s) => s.bgmVolume)
   const scene = useBgmSceneStore((s) => s.scene)
 
-  // Only pay for the lookups once the feature is actually switched on.
+  // Only pay for the lookups once the feature is actually switched on — `enabled` being a dep
+  // alone doesn't skip the fetch itself, since useApiQuery always calls whatever fetcher it's
+  // given; each fetcher below has to early-return on its own when the feature is off.
   const enabled = bgmVolume > 0
-  const chats = useApiQuery('chats', () => chatsApi.list(), [enabled]) ?? []
-  const characters = useApiQuery('characters', () => charactersApi.list(), [enabled]) ?? []
-  const worlds = useApiQuery('worlds', () => worldsApi.list(), [enabled]) ?? []
+  const chats = useApiQuery('chats', () => (enabled ? chatsApi.list() : Promise.resolve([])), [enabled]) ?? []
+  const characters = useApiQuery('characters', () => (enabled ? charactersApi.list() : Promise.resolve([])), [enabled]) ?? []
+  const worlds = useApiQuery('worlds', () => (enabled ? worldsApi.list() : Promise.resolve([])), [enabled]) ?? []
 
   if (!enabled) return <BgmPlayer />
 

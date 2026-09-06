@@ -350,6 +350,61 @@ describe('buildPrompt — regex scripts (prompt target)', () => {
   })
 })
 
+describe('buildPrompt — sectionBreakdown (Prompt Inspector token breakdown)', () => {
+  it('is omitted by default — no extra countTokens work on the normal generation path', async () => {
+    const result = await buildPrompt(
+      baseInput({ character: character({ name: 'Aria', description: 'A calm archivist.' }) }),
+    )
+    expect(result.sectionBreakdown).toBeUndefined()
+  })
+
+  it('reports one entry per non-empty included section, each counted on its own', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        character: character({ name: 'Aria', description: 'A calm archivist.', mes_example: 'EXAMPLE_LINE' }),
+        personaDescription: 'A curious traveler.',
+        history: [{ id: '1', role: 'user', name: 'You', text: 'Hi.' }],
+        includeSectionBreakdown: true,
+      }),
+    )
+    const ids = result.sectionBreakdown!.map((s) => s.id)
+    expect(ids).toContain('description')
+    expect(ids).toContain('persona')
+    expect(ids).toContain('examples')
+    expect(ids).toContain('history')
+    expect(ids).toContain('generationCue')
+    // No section reports a zero/negative count, and every count matches the fixture's own
+    // length-based `countTokens` applied to that exact section's text.
+    for (const section of result.sectionBreakdown!) {
+      expect(section.tokens).toBeGreaterThan(0)
+    }
+  })
+
+  it('omits a disabled section from the breakdown entirely, not just as a zero entry', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        character: character({ name: 'Aria', description: 'A calm archivist.' }),
+        chatSummary: 'SUMMARY_LINE',
+        promptSections: { summary: false },
+        includeSectionBreakdown: true,
+      }),
+    )
+    expect(result.sectionBreakdown!.map((s) => s.id)).not.toContain('summary')
+  })
+})
+
+describe('buildPrompt — example dialogue framing', () => {
+  it('frames example dialogue as a style reference, not something that already happened', async () => {
+    const result = await buildPrompt(
+      baseInput({ character: character({ name: 'Kestrel', mes_example: '{{user}}: Are you scared?\n{{char}}: Scared\'s the wrong word.' }) }),
+    )
+    expect(result.prompt).toContain("Example lines showing Kestrel's voice")
+    expect(result.prompt).toContain('not something that already happened')
+    expect(result.prompt).toContain('Do not repeat or continue these lines')
+    expect(result.prompt).toContain("Scared's the wrong word.")
+  })
+})
+
 describe('buildPrompt — promptSections (section 13 instruct-template-manager part c)', () => {
   it('includes every section by default when promptSections is unset, same as before this option existed', async () => {
     const result = await buildPrompt(
