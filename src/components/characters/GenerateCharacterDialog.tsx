@@ -1,8 +1,15 @@
 import { useRef, useState } from 'react'
+import { Dices, RefreshCw } from 'lucide-react'
 import { useChatBackendClient } from '@/lib/hooks/useChatBackendClient'
 import type { CharacterCardData, Lorebook } from '@/lib/characters/cardSpec'
 import type { Outfit } from '@/lib/vn/outfits'
-import { draftCharacterFromBrief, draftCharacterFromPortrait, type DraftedBonds, type DraftedProfile } from '@/lib/characters/aiAssist'
+import {
+  draftCharacterFromBrief,
+  draftCharacterFromPortrait,
+  generateTraitOptions,
+  type DraftedBonds,
+  type DraftedProfile,
+} from '@/lib/characters/aiAssist'
 import {
   OPTIONAL_STAGES,
   STAGE_LABELS,
@@ -12,6 +19,17 @@ import {
   type StageStatus,
 } from '@/lib/characters/generateFullCharacter'
 import { fileToDataUrl } from '@/lib/characters/importExport'
+import {
+  TRAIT_AXIS_META,
+  composeTraitBrief,
+  randomTraitOption,
+  randomTraitPicks,
+  toTraitOptionPool,
+  type TraitAxisId,
+  type TraitOption,
+  type TraitOptionPool,
+  type TraitPicks,
+} from '@/lib/characters/traitPresets'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import { errorMessage, toastError, toastInfo } from '@/lib/store/useToastStore'
 import { Button } from '@/components/ui/Button'
@@ -52,9 +70,13 @@ export function GenerateCharacterDialog({
 }) {
   const client = useChatBackendClient()
   const styleGuidance = useSettingsStore((s) => s.styleGuidance)
-  const [mode, setMode] = useState<'brief' | 'portrait'>('brief')
+  const [mode, setMode] = useState<'brief' | 'portrait' | 'traits'>('brief')
   const [scope, setScope] = useState<'full' | 'card'>('full')
   const [brief, setBrief] = useState('')
+  const [traitPool, setTraitPool] = useState<TraitOptionPool | null>(null)
+  const [traitPoolLoading, setTraitPoolLoading] = useState(false)
+  const [traitPoolError, setTraitPoolError] = useState('')
+  const [traitPicks, setTraitPicks] = useState<TraitPicks>({})
   const [portraitFile, setPortraitFile] = useState<File | null>(null)
   const [portraitPreview, setPortraitPreview] = useState('')
   const [busy, setBusy] = useState(false)
@@ -62,6 +84,7 @@ export function GenerateCharacterDialog({
   const [rawOutput, setRawOutput] = useState('')
   const [stages, setStages] = useState<StageState | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  const traitAbortRef = useRef<AbortController | null>(null)
 
   const pickPortrait = async (file: File) => {
     setPortraitFile(file)
@@ -73,8 +96,56 @@ export function GenerateCharacterDialog({
     return dataUrl.slice(dataUrl.indexOf(',') + 1)
   }
 
+  // The option pool is never a fixed list — every "From traits" entry (and every "New options" click)
+  // asks the connected model for a fresh batch, so the menu itself has no ceiling. `shuffleTraits` and
+  // `rerollTrait` below just re-pick within whatever pool is currently loaded — free, no AI call.
+  const loadTraitPool = async () => {
+    setTraitPoolLoading(true)
+    setTraitPoolError('')
+    const controller = new AbortController()
+    traitAbortRef.current = controller
+    try {
+      const raw = await generateTraitOptions(client, { worldTone, styleGuidance, signal: controller.signal })
+      const pool = toTraitOptionPool(raw)
+      setTraitPool(pool)
+      const picks = randomTraitPicks(pool)
+      setTraitPicks(picks)
+      setBrief(composeTraitBrief(picks))
+    } catch (e) {
+      if (isAbortError(e) || controller.signal.aborted) return
+      setTraitPoolError(errorMessage(e))
+    } finally {
+      traitAbortRef.current = null
+      setTraitPoolLoading(false)
+    }
+  }
+
+  const pickTrait = (axisId: TraitAxisId, option: TraitOption) => {
+    setTraitPicks((prev) => {
+      const next = { ...prev, [axisId]: prev[axisId]?.id === option.id ? null : option }
+      setBrief(composeTraitBrief(next))
+      return next
+    })
+  }
+
+  const shuffleTraits = () => {
+    if (!traitPool) return
+    const next = randomTraitPicks(traitPool)
+    setTraitPicks(next)
+    setBrief(composeTraitBrief(next))
+  }
+
+  const rerollTrait = (axisId: TraitAxisId) => {
+    if (!traitPool) return
+    setTraitPicks((prev) => {
+      const next = { ...prev, [axisId]: randomTraitOption(traitPool[axisId]) }
+      setBrief(composeTraitBrief(next))
+      return next
+    })
+  }
+
   const generate = async () => {
-    if (mode === 'brief' && !brief.trim()) return
+    if (mode !== 'portrait' && !brief.trim()) return
     if (mode === 'portrait' && !portraitFile) return
     setBusy(true)
     setFailed(false)
@@ -143,7 +214,12 @@ export function GenerateCharacterDialog({
 
   const stop = () => abortRef.current?.abort()
 
-  const canGenerate = mode === 'brief' ? !!brief.trim() : !!portraitFile
+  const switchMode = (next: 'brief' | 'portrait' | 'traits') => {
+    setMode(next)
+    if (next === 'traits' && !traitPool && !traitPoolLoading) loadTraitPool()
+  }
+
+  const canGenerate = mode === 'portrait' ? !!portraitFile : mode === 'traits' ? !!brief.trim() && !traitPoolLoading : !!brief.trim()
 
   return (
     <Modal
@@ -151,7 +227,9 @@ export function GenerateCharacterDialog({
       title="Generate a character with AI"
       description="Describe who you want, or start from a reference portrait; the connected model drafts a full character for you to review and edit."
       size="lg"
+      scrollable
     >
+      <div className="flex-1 overflow-y-auto">
       <div className="mb-3 flex flex-wrap gap-1.5">
         <Chip on={scope === 'full'} onClick={() => setScope('full')} disabled={busy}>
           Full character
@@ -167,14 +245,84 @@ export function GenerateCharacterDialog({
         {styleGuidance.trim() && ' Your writing style from Settings is applied.'}
       </p>
 
-      <div className="mb-3 flex gap-1.5">
-        <Chip on={mode === 'brief'} onClick={() => setMode('brief')} disabled={busy}>
+      <div className="mb-3 flex flex-wrap gap-1.5">
+        <Chip on={mode === 'brief'} onClick={() => switchMode('brief')} disabled={busy}>
           From a brief
         </Chip>
-        <Chip on={mode === 'portrait'} onClick={() => setMode('portrait')} disabled={busy}>
+        <Chip on={mode === 'traits'} onClick={() => switchMode('traits')} disabled={busy}>
+          From traits
+        </Chip>
+        <Chip on={mode === 'portrait'} onClick={() => switchMode('portrait')} disabled={busy}>
           From a portrait
         </Chip>
       </div>
+
+      {mode === 'traits' && (
+        <div className="mb-3 space-y-2.5">
+          <div className="flex items-start justify-between gap-2">
+            <p className="text-[11px] text-text-muted">
+              Pick a trait per row — click again to clear one. Sits between a fixed template and a blank brief:
+              independent pieces the model assembles into a character. Every option below is freshly generated,
+              never a fixed list — ask for a new batch anytime.
+            </p>
+            <div className="flex shrink-0 gap-1.5">
+              <Button variant="ghost" onClick={loadTraitPool} disabled={busy || traitPoolLoading} className="gap-1">
+                <RefreshCw size={14} /> New options
+              </Button>
+              <Button variant="ghost" onClick={shuffleTraits} disabled={busy || traitPoolLoading || !traitPool} className="gap-1">
+                <Dices size={14} /> Shuffle picks
+              </Button>
+            </div>
+          </div>
+
+          {traitPoolLoading && (
+            <p className="rounded-xl bg-bg-sunken p-3 text-xs text-text-muted">Coming up with trait options…</p>
+          )}
+
+          {!traitPoolLoading && traitPoolError && (
+            <div className="rounded-xl bg-bg-sunken p-3 text-xs">
+              <p className="text-danger">{traitPoolError}</p>
+              <Button variant="ghost" onClick={loadTraitPool} className="mt-1.5 gap-1">
+                <RefreshCw size={13} /> Try again
+              </Button>
+            </div>
+          )}
+
+          {!traitPoolLoading &&
+            traitPool &&
+            TRAIT_AXIS_META.map((axis) => (
+              <div key={axis.id}>
+                <div className="mb-1 flex items-center justify-between">
+                  <span className="text-xs font-medium text-text">
+                    {axis.label}
+                    <span className="ml-1.5 font-normal text-text-muted">{axis.hint}</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => rerollTrait(axis.id)}
+                    disabled={busy}
+                    className="text-text-muted transition-colors hover:text-text disabled:opacity-50"
+                    aria-label={`Reroll ${axis.label}`}
+                  >
+                    <Dices size={13} />
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {traitPool[axis.id].map((option) => (
+                    <Chip
+                      key={option.id}
+                      on={traitPicks[axis.id]?.id === option.id}
+                      onClick={() => pickTrait(axis.id, option)}
+                      disabled={busy}
+                    >
+                      {option.label}
+                    </Chip>
+                  ))}
+                </div>
+              </div>
+            ))}
+        </div>
+      )}
 
       {mode === 'portrait' && (
         <div className="mb-3">
@@ -200,7 +348,7 @@ export function GenerateCharacterDialog({
       )}
 
       <TextAreaField
-        label={mode === 'portrait' ? 'Additional guidance (optional)' : 'Brief'}
+        label={mode === 'portrait' ? 'Additional guidance (optional)' : mode === 'traits' ? 'Composed brief (tweak if you like)' : 'Brief'}
         rows={mode === 'portrait' ? 2 : 3}
         value={brief}
         onChange={(e) => setBrief(e.target.value)}
@@ -247,7 +395,8 @@ export function GenerateCharacterDialog({
           </pre>
         </details>
       )}
-      <div className="flex justify-end gap-2">
+      </div>
+      <div className="mt-4 flex shrink-0 justify-end gap-2">
         {busy && scope === 'full' ? (
           <Button variant="ghost" onClick={stop}>
             Stop

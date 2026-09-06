@@ -111,6 +111,7 @@ export function GenerateExpressionSetDialog({
       size="lg"
       scrollable
     >
+      <div className="flex-1 overflow-y-auto">
       <TextAreaField
         label="Base appearance"
         rows={3}
@@ -172,8 +173,9 @@ export function GenerateExpressionSetDialog({
           {results.failed.length > 0 && <p className="mt-1 text-danger">Failed: {results.failed.join('; ')}</p>}
         </div>
       )}
+      </div>
 
-      <div className="mt-5 flex justify-end gap-2">
+      <div className="mt-5 flex shrink-0 justify-end gap-2">
         <Button variant="ghost" onClick={onClose}>
           {results ? 'Close' : 'Cancel'}
         </Button>

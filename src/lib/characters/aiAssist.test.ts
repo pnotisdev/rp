@@ -5,6 +5,7 @@ import {
   draftCharacterFromPortrait,
   draftCharacterOutfits,
   draftCharacterProfile,
+  generateTraitOptions,
   regenerateCardField,
   suggestLoreEntries,
 } from './aiAssist'
@@ -299,6 +300,59 @@ describe('suggestLoreEntries', () => {
   })
 })
 
+describe('generateTraitOptions', () => {
+  const OPTIONS_JSON = JSON.stringify({
+    archetype: ['tsundere', 'gentle giant'],
+    occupation: ['barista', 'veterinary tech'],
+    quirk: ['hums when nervous', 'collects failed drafts'],
+    relationshipStarter: ['childhood friends', 'reluctant roommates'],
+  })
+
+  it('parses a set of options per axis', async () => {
+    const options = await generateTraitOptions(mockClient(OPTIONS_JSON))
+    expect(options.archetype).toEqual(['tsundere', 'gentle giant'])
+    expect(options.relationshipStarter).toEqual(['childhood friends', 'reluctant roommates'])
+  })
+
+  it('coerces a missing or malformed axis to an empty list rather than throwing', async () => {
+    const json = JSON.stringify({ archetype: ['tsundere'], occupation: 'not an array' })
+    const options = await generateTraitOptions(mockClient(json))
+    expect(options.occupation).toEqual([])
+    expect(options.quirk).toEqual([])
+  })
+
+  it('folds worldTone and styleGuidance into the prompt when given', async () => {
+    const client = mockClient(OPTIONS_JSON)
+    await generateTraitOptions(client, { worldTone: 'A gritty cyberpunk megacity.', styleGuidance: 'STYLE_MARKER.' })
+    const { prompt } = (client.generate as ReturnType<typeof vi.fn>).mock.calls[0][0]
+    expect(prompt).toContain('gritty cyberpunk megacity')
+    expect(prompt).toContain('STYLE_MARKER')
+  })
+
+  it('throws when the model returns no usable archetype options', async () => {
+    await expect(generateTraitOptions(mockClient('{"archetype": []}'))).rejects.toThrow(/archetype/)
+  })
+
+  it('recovers positionally when the model drops array brackets and breaks JSON.parse entirely', async () => {
+    // A real captured live-model response: archetype/occupation keep their brackets, quirk and
+    // relationshipStarter don't — malformed enough that jsonRepair's generic passes can't fix
+    // it, but the positional fallback (extractTraitOptionsPositionally) recovers all four.
+    const malformed =
+      '{"archetype":["tsundere rival","guilt-ridden healer"],' +
+      '"occupation":["night-shift ER nurse","forensic sketch artist"],' +
+      '"quirk":"mutters old radio ad jingles","always pockets condiment packets"],' +
+      '"relationshipStarter":"you returned the wallet they left","we got stuck in an elevator"}'
+    const options = await generateTraitOptions(mockClient(malformed))
+    expect(options.archetype).toEqual(['tsundere rival', 'guilt-ridden healer'])
+    expect(options.quirk).toEqual(['mutters old radio ad jingles', 'always pockets condiment packets'])
+    expect(options.relationshipStarter).toEqual(['you returned the wallet they left', 'we got stuck in an elevator'])
+  })
+
+  it('throws when the model does not return a JSON object', async () => {
+    await expect(generateTraitOptions(mockClient('["nope"]'))).rejects.toThrow(/JSON object/)
+  })
+})
+
 describe('timeout handling', () => {
   // Same live-confirmed failure mode `generateWithTimeout` exists for: a provider response that
   // simply never resolves used to leave every one of this file's callers — the field "Regenerate"
@@ -324,6 +378,13 @@ describe('timeout handling', () => {
   it('suggestLoreEntries times out with a labelled message', async () => {
     const pending = suggestLoreEntries(hangingClient(() => {}), CHARACTER, [])
     const assertion = expect(pending).rejects.toThrow(/Suggest lore entries timed out after 45s/)
+    await vi.advanceTimersByTimeAsync(45_000)
+    await assertion
+  })
+
+  it('generateTraitOptions times out with a labelled message', async () => {
+    const pending = generateTraitOptions(hangingClient(() => {}))
+    const assertion = expect(pending).rejects.toThrow(/Generate trait options timed out after 45s/)
     await vi.advanceTimersByTimeAsync(45_000)
     await assertion
   })

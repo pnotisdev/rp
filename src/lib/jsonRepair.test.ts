@@ -33,6 +33,18 @@ describe('parseLenientJson', () => {
     expect(parseLenientJson(raw)).toEqual({ tags: ['a', 'b', 'c'] })
   })
 
+  it('inserts a missing colon between a key and its array value', () => {
+    const raw = '{"archetype": ["tsundere", "gentle giant"], "occupation" ["barista", "vet tech"]}'
+    expect(parseLenientJson(raw)).toEqual({
+      archetype: ['tsundere', 'gentle giant'],
+      occupation: ['barista', 'vet tech'],
+    })
+  })
+
+  it('inserts a missing colon between a key and its object value', () => {
+    expect(parseLenientJson('{"profile" {"name":"Mika"}}')).toEqual({ profile: { name: 'Mika' } })
+  })
+
   it('escapes an unescaped literal quote inside dialogue text', () => {
     const raw = '{"personality":"gruff. "Don\'t push me," he said.","name":"Rex"}'
     const result = parseLenientJson(raw) as Record<string, unknown>

@@ -373,7 +373,7 @@ export function ThemeEditor() {
           checked={visualNovelMode}
           onChange={() => toggleFlag('visualNovelMode')}
           label="Visual Novel mode"
-          description="Full-bleed scene art with a docked dialogue box, in place of the ordinary scrolling chat log"
+          description="Full-bleed scene art with a docked dialogue box, in place of the ordinary scrolling chat log. A presentation choice only — independent of the dating-sim mechanics in Generation settings, on or off either way."
         />
         <Toggle
           checked={visionSceneDetection}

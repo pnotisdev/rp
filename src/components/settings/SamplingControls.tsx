@@ -121,6 +121,25 @@ export function SamplingControls() {
   return (
     <SettingsPage>
       <Section
+        title="Plain chat vs. dating sim"
+        surface="bare"
+        description={
+          <>
+            Not everything below applies to every kind of story. <strong className="text-text">Relationship
+            tracking</strong>, its <strong className="text-text">Difficulty</strong>/<strong className="text-text">
+            Intimacy detail</strong> sub-settings, and <strong className="text-text">Suggest choices</strong> are the
+            dating-sim/VN layer — if you're doing plain roleplay, an adventure, or lore-only chat, it's completely
+            fine to turn all three off. <strong className="text-text">Auto-detect completed tasks</strong> only ever
+            does anything while an Objective is set, in any kind of chat. <strong className="text-text">Visual Novel
+            mode</strong> (Appearance tab) is a presentation choice, not a mechanic — independent of all of this, on
+            or off either way. A world's own template (Freeform RP, Visual Novel, Dating Sim, Slice of Life — set on
+            its Overview tab) already presets sensible per-chat defaults for the dating-sim toggles automatically;
+            what you pick here is just the global fallback for a chat that doesn't override it.
+          </>
+        }
+      />
+
+      <Section
         title="Background AI assists"
         description="Four independent toggles below (relationship tracking, choices, task detection, summarization) each fire their own model call after a reply — useful signal, but a real cost on a local single-GPU server, where they queue with each other and ahead of your next message. These two are a shortcut to set all four at once; each stays individually adjustable in its own section below either way."
       >

@@ -30,11 +30,32 @@ export function parseLenientJson(raw: string): unknown {
 
 function repairPipeline(json: string): string {
   const quotesNormalized = normalizeQuotes(json)
-  const quotesRepaired = repairUnescapedQuotes(quotesNormalized)
+  // Runs before repairUnescapedQuotes on purpose: that pass only recognizes `,:}]"` as valid
+  // characters after a string's closing quote, so a key genuinely followed by a bracket (the
+  // malformed shape this fixes) reads to it as "not really closed" and gets escaped into a
+  // never-ending string instead. Inserting the colon first turns it into an ordinary `"key": [`
+  // that repairUnescapedQuotes already handles correctly.
+  const colonsInserted = insertMissingColons(quotesNormalized)
+  const quotesRepaired = repairUnescapedQuotes(colonsInserted)
   const newlinesEscaped = escapeRawNewlinesInStrings(quotesRepaired)
   const commasInserted = insertMissingCommas(newlinesEscaped)
   const commasStripped = stripTrailingCommas(commasInserted)
   return closeUnbalanced(commasStripped)
+}
+
+/**
+ * A model occasionally drops the colon between a key and its value entirely, e.g.
+ * `"occupation" ["barista", ...]` instead of `"occupation": [...]` — seen from
+ * `generateTraitOptions`'s object-of-arrays shape (none of the other draft prompts ask for
+ * a plain object whose every value is itself an array, so this particular slip hadn't shown
+ * up before). Safe without tracking object/array nesting: a string is never legitimately
+ * followed directly by `[` or `{` — the "missing comma between two array string elements"
+ * case `insertMissingCommas` handles never produces that shape either, since two adjacent
+ * string elements are separated by a quote, not a bracket — so any occurrence here is
+ * unambiguously a missing colon before an array/object value.
+ */
+function insertMissingColons(json: string): string {
+  return json.replace(/("(?:[^"\\]|\\.)*")\s*([[{])/g, '$1: $2')
 }
 
 function extractBraces(text: string): string {

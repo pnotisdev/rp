@@ -1,4 +1,5 @@
 import { normalizeCardJson, type CharacterCardData, type LorebookEntry, type RelationshipStarter } from './cardSpec'
+import { TRAIT_AXIS_META, extractTraitOptionsPositionally, type TraitOptionSet } from './traitPresets'
 import type { ChatBackend } from '@/lib/api/chatBackend'
 import { generateWithTimeout } from '@/lib/api/generateWithTimeout'
 import { parseLenientJson } from '@/lib/jsonRepair'
@@ -273,6 +274,80 @@ export async function draftCharacterFromBrief(
   )
   const card = normalizeCardJson(parseLenientJson(text))
   return { card, rawOutput: text }
+}
+
+/**
+ * The option pool behind "combinatorial" character creation (`GenerateCharacterDialog`'s "From
+ * traits" mode) — asks the connected model for a fresh batch of short trait phrases across the four
+ * fixed axes (`TRAIT_AXIS_META`), rather than shipping a static list that never changes and eventually
+ * repeats. The picker then composes whichever options the user picks into a brief, which goes through
+ * `draftCharacterFromBrief` exactly like a hand-typed one — this call only supplies the menu, not the
+ * card.
+ */
+export async function generateTraitOptions(
+  client: ChatBackend,
+  opts?: { worldTone?: string; styleGuidance?: string; count?: number; signal?: AbortSignal },
+): Promise<TraitOptionSet> {
+  const count = opts?.count ?? 10
+  const prompt = [
+    'You are proposing short trait options for a character-creation picker in a roleplay app. The user will pick one option from each category below, and the picks get combined into a brief for drafting a full character.',
+    opts?.worldTone?.trim() ? `Fit them to this world's own tone and setting:\n${opts.worldTone.trim()}` : '',
+    writerStyleNote(opts?.styleGuidance),
+    `Propose ${count} options for each of these four categories:`,
+    '- archetype: a short personality-type phrase, 2-4 words (e.g. "tsundere", "stoic guardian")',
+    '- occupation: a specific job with a concrete flavor, not just a bare title (e.g. "night-shift ER nurse", not "nurse")',
+    '- quirk: one vivid, specific behavioral detail as a short clause, not a generic trait',
+    '- relationshipStarter: how this character and the player already know each other, as a short clause',
+    'Make every option specific and varied — avoid bland defaults like "mysterious stranger" or "kind and caring" unless given a genuinely fresh angle.',
+    `Output ONLY a minified JSON object shaped exactly {"archetype": [${count} strings], "occupation": [${count} strings], "quirk": [${count} strings], "relationshipStarter": [${count} strings]}. No markdown fences, no commentary.`,
+    'JSON:',
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+
+  const text = await generateWithTimeout(
+    client,
+    {
+      prompt,
+      max_length: 1400,
+      max_context_length: await client.getEffectiveMaxContext(),
+      ...ASSIST_SAMPLER,
+      stop_sequence: ['\n\n\n', '```'],
+      trim_stop: true,
+    },
+    'Generate trait options',
+    opts?.signal,
+  )
+
+  let parsed: unknown = null
+  let parseFailed = false
+  try {
+    parsed = parseLenientJson(text)
+  } catch {
+    parseFailed = true
+  }
+  // A wrong-shaped but successfully-parsed response (e.g. a bare array) means something other
+  // than the bracket-dropping glitch below — not something the positional fallback can help
+  // with either, since it has no key markers to find — so it still fails fast and clearly.
+  if (!parseFailed && (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))) {
+    throw new Error('Model did not return a JSON object of trait options')
+  }
+  const obj = (parsed as Record<string, unknown> | null) ?? {}
+  let result = Object.fromEntries(TRAIT_AXIS_META.map((axis) => [axis.id, strList(obj[axis.id], count)])) as TraitOptionSet
+
+  // A free/weaker model sometimes drops the array brackets for one or more keys entirely,
+  // which breaks JSON.parse for the *whole* object even though the other keys were fine —
+  // recover positionally instead of giving up the whole batch over one malformed key (see
+  // extractTraitOptionsPositionally's own comment for the exact shape). Only reached when
+  // parsing genuinely failed: a well-formed object with one wrong-typed field (e.g. a bare
+  // string instead of an array) still just leaves that one axis an empty list, not silently
+  // reinterpreted as a single-item option list.
+  if (parseFailed) {
+    const positional = extractTraitOptionsPositionally(text)
+    result = Object.fromEntries(TRAIT_AXIS_META.map((axis) => [axis.id, strList(positional[axis.id], count)])) as TraitOptionSet
+  }
+  if (!result.archetype.length) throw new Error('Model did not return any archetype options')
+  return result
 }
 
 /** The practical, non-card life details `CharacterEditor` keeps as their own `Character` fields (not
