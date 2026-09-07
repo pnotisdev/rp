@@ -54,18 +54,21 @@ import {
   startOrShiftIntimacyScene,
 } from '@/lib/dating/intimacyScene'
 import { detectAnyBoundaryCrossing } from '@/lib/dating/boundaryGuard'
-import { detectPersonaClimaxNarration } from '@/lib/dating/agencyGuard'
-import { buildSteerDirective } from '@/lib/dating/steer'
+import { detectPersonaAgencyViolation } from '@/lib/dating/agencyGuard'
+import { buildSteerDirective, hardFailCorrectionDirective } from '@/lib/dating/steer'
 import {
   activityPhase,
   describePresence,
   describeWeather,
   describeWorldMoment,
+  getCalendarInfo,
   getCurrentActivity,
   getEnergyRemaining,
   getWeather,
+  PHASES,
   spendEnergy,
 } from '@/lib/world/calendar'
+import { sceneContinuityNote } from '@/lib/prompt/sceneContinuity'
 import { evaluateTriggers } from '@/lib/world/triggers'
 import {
   ambientEventGuidance,
@@ -125,6 +128,7 @@ import {
   buildSlopAvoidanceNote,
   cleanModelOutput,
   endsCleanly,
+  EXPLICIT_ANTI_PATTERN_ENTRIES,
   isDuplicateOfRecentText,
   isVerbatimEcho,
   trimToLastSentence,
@@ -446,40 +450,27 @@ export function useChatSession(chatId: string | null) {
   const abortRef = useRef<AbortController | null>(null)
   const genKeyRef = useRef<string>('')
   const summarizingRef = useRef(false)
-  // Synchronous generation lock (`generationLock.ts`) guarding against double-dispatch within one
-  // tick — `isGenerating` state alone is one render too slow to catch that. Held by the entry
-  // point, not `runGeneration`, so callers' own setup writes are inside the lock too.
-  // Lazy-built to avoid allocating a lock every render.
+  // Synchronous lock guarding against double-dispatch within one tick — `isGenerating` state alone is one render too slow. Lazy-built to avoid allocating every render.
   const generationLockRef = useRef<GenerationLock | null>(null)
   if (!generationLockRef.current) generationLockRef.current = createGenerationLock()
   const beginGeneration = useCallback(() => generationLockRef.current!.begin(), [])
   const endGeneration = useCallback(() => generationLockRef.current!.end(), [])
-  // Sprite URL -> base64 payload, memoised for the lifetime of the hook so the vision scene-detect
-  // pass (§8) doesn't re-fetch and re-encode the same handful of sprite files on every VN turn.
+  // Sprite URL -> base64 cache for the vision scene-detect pass, memoised for the hook's lifetime.
   const spriteBase64Ref = useRef<Map<string, string>>(new Map())
-  // Who a freshly-sent user message's reply gets generated as — null/primary for every ordinary
-  // chat. Only meaningful when `chat.participants` is non-empty (group chats); manual, not
-  // AI-directed, by design (see ROADMAP.md's group-chat scope notes).
+  // Who a freshly-sent message's reply gets generated as — only meaningful in a group chat.
   const [replyAsCharacterId, setReplyAsCharacterId] = useState<string | null>(null)
   useEffect(() => {
     setReplyAsCharacterId(null)
   }, [chatId])
 
-  // 10f's proactive outreach: opening a chat that has an unread unprompted message clears its
-  // ChatsPanel badge. Reads `chat.hasUnreadOutreach` from the live query rather than chatId alone,
-  // so a tick that sets the flag while this exact chat is already open still gets cleared once the
-  // query re-fetches (the tick itself also checks activeChatId to avoid setting it in that case,
-  // but this is the belt to that belt-and-suspenders).
+  // Opening a chat with an unread unprompted message clears its ChatsPanel badge.
   useEffect(() => {
     if (chat?.id && chat.hasUnreadOutreach) {
       chatsApi.update(chat.id, { hasUnreadOutreach: false }).catch(() => {})
     }
   }, [chat?.id, chat?.hasUnreadOutreach])
 
-  // Background "assist" work kicked off after a reply lands — memory summary, objective checks,
-  // relationship scoring, choice suggestions. Each is its own model call, and on a local
-  // single-GPU KoboldCpp server they queue up (and ahead of the next reply), so the roadmap
-  // wants the wait legible rather than a result that silently pops in seconds later. `key -> label`.
+  // Background "assist" work after a reply lands (relationship scoring, choices, tasks, summary, vision). `key -> label`, shown so the wait stays legible.
   const [assistTasks, setAssistTasks] = useState<Record<string, string>>({})
   useEffect(() => {
     setAssistTasks({})
@@ -502,10 +493,7 @@ export function useChatSession(chatId: string | null) {
     .map((k) => assistTasks[k])
     .filter((label): label is string => !!label)
 
-  // Resolves which character's card is "active" (gets the full system_prompt/description/
-  // personality/scenario treatment) for a given speaker id, plus everyone else in the scene as a
-  // compact roster — reused by both prompt-building and generation so they never disagree about
-  // who's speaking.
+  /** Which character's card is "active" for a given speaker id, plus everyone else as a roster. */
   const resolveSpeaker = useCallback(
     (speakerId: string | null | undefined) => {
       const sceneCharacters = character ? [character, ...participantCharacters] : participantCharacters
@@ -547,14 +535,9 @@ export function useChatSession(chatId: string | null) {
       if (!character || !chat) return null
       const { active: speaker, roster } = resolveSpeaker(opts?.speakerId)
       if (!speaker) return null
-      // Read the chat record fresh rather than trusting the reactive `chat` closure, which can
-      // be one render behind a summary update that just landed (this fn may be called in the
-      // same tick as that write, before useApiQuery's subscription has re-rendered us).
+      // Fresh read — the reactive `chat` closure can be one render behind a summary update that just landed.
       const freshChat = (await chatsApi.get(chat.id)) ?? chat
-      // Every character present in the scene contributes their own lore, not just whoever's
-      // currently speaking — a roster member's card_book stays active in the background.
-      // `sourceKey` is stamped on each so sticky/cooldown state (Chat.worldInfoState) has a
-      // key that's stable turn-to-turn even as the roster / book list is reassembled.
+      // Every character in the scene contributes their own lore, not just whoever's speaking. `sourceKey` keeps sticky/cooldown state stable turn to turn.
       const lorebooks: Lorebook[] = [speaker, ...roster]
         .filter((c) => !!c.card.character_book)
         .map((c) => ({ ...c.card.character_book!, sourceKey: `char:${c.id}` }))
@@ -582,8 +565,7 @@ export function useChatSession(chatId: string | null) {
                 phaseIndex: world.currentPhaseIndex ?? 0,
                 weatherPreferences: speaker.weatherPreferences,
               }),
-              // Only worth a prompt line when this character actually has a schedule authored —
-              // otherwise every character would get a generic "is currently free" non-fact.
+              // Only worth a line when this character actually has a schedule authored.
               speaker.schedule?.length
                 ? describePresence(getCurrentActivity(speaker.schedule, world.currentDay ?? 0, world.currentPhaseIndex ?? 0))
                 : '',
@@ -592,27 +574,18 @@ export function useChatSession(chatId: string | null) {
         freshChat.activeEvent?.title
           ? `Current event: ${freshChat.activeEvent.title}${freshChat.activeEvent.description ? `. ${freshChat.activeEvent.description}` : ''}`
           : '',
-        // Section 4/12's Scene entity — location/atmosphere framing, independent of whether this
-        // chat even has a bound World, so a plain group chat with no World at all can still be
-        // told where it's happening.
+        // Location/atmosphere framing, independent of whether this chat has a bound World.
         freshChat.scene?.location ? `Scene location: ${freshChat.scene.location}` : '',
         freshChat.scene?.atmosphere ? `Scene atmosphere: ${freshChat.scene.atmosphere}` : '',
       ].filter(Boolean)
       const worldDescription = worldDescriptionLines.length > 0 ? worldDescriptionLines.join('\n') : undefined
 
-      // Ordinary chat has no push to ever change the physical setting otherwise — the scene-tag
-      // instruction only asks the model to label wherever the story already is, never to progress
-      // it. Suppressed during a live hangout/date: that event *is* the scene change, and nudging
-      // toward yet another one mid-event would fight the "stay here until it resolves" point of it.
       const { count: staticSceneTurns, currentBackground: staticSceneBackground } = countStaticSceneTurns(messages)
       const speakerPresence = speaker.schedule?.length
         ? getCurrentActivity(speaker.schedule, world?.currentDay ?? 0, world?.currentPhaseIndex ?? 0)
         : undefined
       const scheduleLocation = speakerPresence?.location
-      // A genuine schedule conflict (busy/sleeping/traveling per the character's own authored
-      // routine) reads as a real, noticed cost rather than the schedule silently not existing —
-      // see `world/ambientEvents.ts`'s own doc comment. Suppressed during a live event for the same
-      // reason `sceneNudge` is: the event itself already carries whatever cost starting it had.
+      // A genuine schedule conflict (busy/sleeping/traveling) reads as a noticed cost. Suppressed during a live event, which already carries its own cost.
       const scheduleConflictLine =
         !freshChat.activeEvent && speakerPresence ? scheduleConflictGuidance(speaker.card.name, speakerPresence) : ''
       const sceneNudge = freshChat.activeEvent
@@ -650,21 +623,11 @@ export function useChatSession(chatId: string | null) {
             }),
           })
 
-      // What this specific relationship has earned so far (places to kiss, and — once the user has
-      // explicit content turned on — positions/toys/other intimate beats), offered as a bank of
-      // ideas the model can draw from if a scene genuinely goes there. See `intimacyCatalog.ts`.
+      // What this relationship has earned so far — a bank of intimate ideas the model can draw from if a scene goes there. See `intimacyCatalog.ts`.
       const speakerTrack = getRelationshipTrack(freshChat, speaker.id)
       const speakerStats = getRelationshipStats(speakerTrack)
       const speakerWarmth = computeWarmth(speakerTrack.affection ?? 0, speakerStats)
-      // A `style_guidance` world rule (`world/triggers.ts`) is meant to colour THIS turn's writing
-      // (e.g. "gifts read as loaded right now" while a jealousy flag is hot), not just the next one
-      // — the real, persisting evaluation in `updateAffectionFromReply` only runs after this reply
-      // already exists. This is a second, read-only preview pass against the pre-turn state already
-      // computed above: it never persists `firedIds` or applies any other action kind (that stays
-      // solely the post-turn call's job), so a one-shot rule can't get marked "fired" here — it can
-      // only ever add prompt text before its real evaluation actually happens. Primary-only, same
-      // scoping as the real evaluation ("a world rule describes the player's relationship with the
-      // character whose world it is").
+      // Read-only preview of `world/triggers.ts`'s `style_guidance` rules against pre-turn state, so a rule can colour THIS turn's writing — the real, persisting evaluation runs after in `updateAffectionFromReply`. Never marks a rule fired itself. Primary-only.
       const triggerStyleLines =
         speaker.id === character.id && world?.triggers?.length
           ? evaluateTriggers(
@@ -683,117 +646,86 @@ export function useChatSession(chatId: string | null) {
               .map((a) => a.text)
           : []
       const triggerStyleLine = triggerStyleLines.join(' ')
-      // A toy only ever reaches the model once actually bought (`Chat.toyInventory`) — warmth/
-      // commitment alone just gate *eligibility to buy*, see `intimacyCatalog.ts`.
+      // A toy only reaches the model once actually bought — warmth/commitment just gate eligibility to buy.
       const ownedToyIds = new Set(Object.keys(freshChat.toyInventory ?? {}))
-      // A world's own content rating wins over the global Settings dial — see `resolveIntimacyLevel`.
+      // A world's own content rating wins over the global Settings dial.
       const intimacyLevel = resolveIntimacyLevel(world?.intimacyLevel, globalIntimacyLevel)
       const intimacyOptions = intimacyOptionsGuidance(
         getUnlockedIntimacyOptions(speakerWarmth, speakerTrack.commitmentStatus ?? 'none', world, ownedToyIds),
         intimacyLevel,
       )
 
-      // "Character Mind" scoped slice — a transient mood, an underlying need, and a private
-      // intention, all deliberately separate from the relationship track above. See `prompt/mindGuidance.ts`.
-      // The aftermath of an intimate scene, for as long as the window is open (`aftercare.ts`).
-      // Unlike mood/need/intent below it, this is app-known rather than judge-inferred — the
-      // player initiated the scene through a real action, so there is nothing to guess at.
+      // "Character Mind" — transient mood/need/intent, separate from the relationship track (`prompt/mindGuidance.ts`).
+      // Aftermath window of an intimate scene, app-known rather than judge-inferred (`aftercare.ts`).
       const afterglowSince = afterglowTurnsSince(speakerTrack.afterglow ?? undefined, countCharReplies(messages))
       const afterglowLine =
         afterglowSince !== null && isAfterglowActive(speakerTrack.afterglow ?? undefined, countCharReplies(messages))
           ? afterglowGuidance(speaker.card.name, persona?.name || 'You', afterglowSince, speakerTrack.afterglow?.sourceLabel)
           : ''
-      // Item 4/5's immediate post-climax physical beat — deliberately a SEPARATE line from
-      // `afterglowLine` above, not folded into it: `afterglowGuidance` is content-rating-agnostic
-      // (fires under any `intimacyLevel`) with its own test enforcing it stays non-physical, so the
-      // physical half lives here instead, gated on the live explicit setting and only for the first
-      // couple of replies after the scene actually resolves — see `explicitAftercareGuidance`'s doc
-      // comment for why this isn't just an edit to `afterglowGuidance`.
+      // Immediate post-climax physical beat — separate from `afterglowLine`, which stays content-rating-agnostic and non-physical by its own test. Explicit setting only, first couple of replies after the scene resolves.
       const explicitAftercareLine =
         afterglowSince !== null && afterglowSince <= 1 && intimacyLevel === 'explicit' ? explicitAftercareGuidance(speaker.card.name) : ''
       const moodLine = moodGuidance(speaker.card.name, persona?.name || 'You', speakerTrack.mood)
       const needLine = needGuidance(speaker.card.name, speakerTrack.currentNeed)
       const intentLine = characterIntentGuidance(speaker.card.name, speakerTrack.characterIntent)
-      // The third leg alongside need/intent — see `mindGuidance.ts`'s `fearGuidance` doc comment.
       const fearLine = fearGuidance(speaker.card.name, speakerTrack.currentFear)
-      // Item 5's want-axis undercurrent — see `mindGuidance.ts`'s `desireGuidance` doc comment.
       const desireLine = desireGuidance(speaker.card.name, speakerTrack.currentDesire)
-      // The persistent agency layer — a few turn-spanning intentions the character carries of their
-      // own (`dating/plans.ts`), formed and retired by the same judge call that sets mood/need/intent.
+      // Persistent agency layer — turn-spanning intentions the character carries of their own (`dating/plans.ts`).
       const plansLine = plansGuidance(speaker.card.name, persona?.name || 'You', speakerTrack.plans)
-      // Standing impressions of, and expectations of, {{user}} — the "what does she think of him"
-      // layer `plans`/`mood`/`need` didn't cover (`dating/beliefs.ts`/`dating/expectations.ts`).
+      // Standing impressions of and expectations of {{user}} (`dating/beliefs.ts`/`dating/expectations.ts`).
       const beliefsLine = beliefsGuidance(speaker.card.name, persona?.name || 'You', speakerTrack.beliefsAboutUser)
       const expectationsLine = expectationsGuidance(speaker.card.name, persona?.name || 'You', speakerTrack.expectationsOfUser)
-      // Item 5: a concrete, testable override for a model's own trained romantic defaults winning
-      // over this specific character's authored state. Only fires on an actual tension worth naming
-      // — a resistant mood, or a `distance`-kind plan (the character deliberately holding back) —
-      // never a blanket restatement of "stay in character" that's already implicit every turn.
+      // Overrides a model's trained romantic defaults when they'd conflict with this character's actually-authored state (a resistant mood, or deliberately holding back).
       const priorityLine = authoredStatePriorityNote(
         speaker.card.name,
         speakerTrack.mood,
         (speakerTrack.plans ?? []).some((p) => p.kind === 'distance'),
         !!speaker.boundaries?.length,
       )
-      // Item 1's character-specificity signal — read once, shared by both the intimacy-scene phase
-      // text below and `advanceIntimacyScene`'s own phase-gating in `updateAffectionFromReply`.
       const speakerHoldingBackByPlan = (speakerTrack.plans ?? []).some((p) => p.kind === 'distance')
       const speakerPace = intimacyPaceFor(speakerTrack.mood, speakerHoldingBackByPlan, speaker.boundaries?.length ?? 0)
       const speakerSceneActive = isIntimacySceneActive(speakerTrack.intimacyScene, countCharReplies(messages))
-      // Item 1's intimacy scene state machine — physical continuity plus phase-scaled sensory
-      // guidance, only while a scene is currently active (see `updateAffectionFromReply` for where
-      // its phase actually advances, driven by the same per-turn judge call).
+      // Physical continuity + phase-scaled sensory guidance while a scene is active.
       const intimacySceneLine = speakerSceneActive
         ? intimacySceneGuidance(speaker.card.name, speakerTrack.intimacyScene!, speakerPace)
         : ''
-      // FIXES_TODO.md's "explicit-scene prose quality" item — sequenced physical mechanics, a named
-      // anti-pattern list, and a voice/POV guard, distinct from `intimacySceneLine`'s continuity/
-      // pacing above. Re-checks `intimacyLevel` itself (not just `speakerSceneActive`) as defense in
-      // depth — a scene can only ever have started from an explicit-tier action, but the setting
-      // could have been turned back down since.
+      // Sequenced physical mechanics, anti-pattern list, voice/POV guard. Re-checks `intimacyLevel` itself as defense in depth in case the setting was turned down mid-scene.
       const explicitSceneLine =
         speakerSceneActive && intimacyLevel === 'explicit'
           ? explicitSceneGuidance(speaker.card.name, persona?.name || 'You', speakerTrack.intimacyScene!.phase, speakerPace, speaker.explicitVoiceNote)
           : ''
-      // Item 12's escalation-shape memory — only worth mentioning while a scene is actually live
-      // (the same "something's currently happening" gate every other scene-scoped line above uses);
-      // resolves to nothing the vast majority of the time (needs two *identical* resolved scenes
-      // back to back), so an ordinary chat with no such repeat pays nothing for this.
       const escalationShapeLine = speakerSceneActive
         ? (repeatedEscalationShapeGuidance(speaker.card.name, speakerTrack.intimacySceneShapeLog) ?? '')
         : ''
-      // Item 1's mid-scene consent/comfort-vs-chemistry tension — only meaningful while a scene is
-      // actually live, same gate as the line above.
       const intimacyConsentTensionLine = speakerSceneActive
         ? (intimacyConsentTensionGuidance(speaker.card.name, speakerStats.comfort, speakerStats.chemistry) ?? '')
         : ''
-      // Item 1's deterministic pre-scene buildup — the mirror image of the line above: only while
-      // nothing physical has started yet, so it never overlaps with `intimacySceneLine`.
+      // Pre-scene buildup — the mirror of the line above, only while nothing physical has started yet.
       const intimacyAnticipationLine = !speakerSceneActive
         ? (intimacyAnticipationGuidance(speaker.card.name, persona?.name || 'You', speakerStats.chemistry, speakerStats.comfort) ?? '')
         : ''
-      // Item 2's "missed opportunity" cost — a still-live, decaying cue after a real deflection or
-      // backfire (`dating/rebuff.ts`), distinct from the hard `relationshipWarning` banner.
+      // "Missed opportunity" cost after a real deflection/backfire, distinct from the hard `relationshipWarning` banner.
       const rebuffLine = isRebuffActive(speakerTrack.recentRebuff, countCharReplies(messages))
         ? rebuffGuidance(speaker.card.name, persona?.name || 'You', speakerTrack.recentRebuff!)
         : ''
-      // Item 6's character-initiated gift reciprocity — a still-live, decaying cue after warmth/
-      // circumstance has genuinely earned it (`dating/gifts.ts`).
       const reciprocityLine = isReciprocityCueActive(speakerTrack.reciprocityCue, countCharReplies(messages))
         ? reciprocityGuidance(speaker.card.name, persona?.name || 'You', speakerTrack.reciprocityCue!.reason)
         : ''
-      // Item 3's second, narrower anti-generic-romance guard — stock romance-writing tells,
-      // regardless of whether they've come up before in this specific chat (`buildSlopAvoidanceNote`
-      // below only ever catches this character's own verbatim repeats). Gated to actual romantic/
-      // intimate moments so an ordinary turn pays nothing for it.
+      // Stock romance-writing tells, regardless of whether they've come up before in this chat (unlike `buildSlopAvoidanceNote`, which only catches this character's own repeats).
       const isRomanticOrIntimateMoment =
         speakerSceneActive || isAfterglowActive(speakerTrack.afterglow ?? undefined, countCharReplies(messages)) || speakerStats.chemistry >= 70
       const stockRomancePhrasingLine = stockRomancePhrasingNote(isRomanticOrIntimateMoment)
-      // Item 3's agency/POV guard, lifted out of `explicitSceneGuidance` so it also covers a scene
-      // written entirely in freeform prose that never went through an Unlocks-tab catalog click
-      // (and so never opened an `IntimacyScene` at all) — same broader gate `stockRomancePhrasingLine`
-      // just above already uses. See `mindGuidance.ts`'s `agencyGuardNote` doc comment.
+      // Agency/POV guard, broader than `explicitSceneGuidance`'s own — also covers freeform intimacy that never opened a catalog-driven `IntimacyScene`.
       const agencyGuardLine = agencyGuardNote(isRomanticOrIntimateMoment, speaker.card.name, persona?.name || 'You')
+
+      // Compact, always-computed ledger of concrete scene facts, consolidated into one block instead of scattered across separate lines.
+      const sceneContinuityLine = sceneContinuityNote({
+        location: freshChat.scene?.location ?? scheduleLocation,
+        timePhase: world ? `${getCalendarInfo(world.currentDay ?? 0).weekday} ${PHASES[world.currentPhaseIndex ?? 0]}` : undefined,
+        presentNames: roster.map((c) => c.card.name),
+        currentActivity: speakerSceneActive ? speakerTrack.intimacyScene!.activityLabel : freshChat.activeEvent?.title,
+        openThreads: activeFacts.filter((f) => f.unresolved).map((f) => f.text),
+      })
 
       // Messages already folded into chat.summary are represented there, not sent verbatim.
       const cutoff = freshChat.summaryUpToTimestamp ?? 0
@@ -802,11 +734,7 @@ export function useChatSession(chatId: string | null) {
         ? historyForPrompt.filter((m) => (createdAtById.get(m.id) ?? Infinity) > cutoff)
         : historyForPrompt
 
-      // "Suggest what you'd say next" (`impersonateAsUser`) is writing {{user}}'s line, not {{char}}'s
-      // — so every steer built for {{char}}'s reply (the objective it's working toward, the
-      // relationship nudge, and the character-behaviour half of `styleGuidance` below) is withheld.
-      // Left in for it: the world/persona/history context, and the plain writing-style rules, which
-      // apply to {{user}}'s line just the same.
+      // Impersonating {{user}}'s line withholds every steer built for {{char}}'s reply; world/persona/history context and plain style rules still apply.
       const impersonating = !!opts?.impersonateAsUser
       const pendingTasks = activeObjective?.tasks.filter((t) => t.status === 'pending') ?? []
       const objectiveForPrompt =
@@ -817,18 +745,14 @@ export function useChatSession(chatId: string | null) {
               pendingTasks: pendingTasks.map((t) => t.description),
             }
           : undefined
-      // Only makes sense when the primary is the one actually speaking — it's a nudge about
-      // {{user}}'s relationship with the primary specifically, not something a non-primary
-      // participant's own dialogue should be steered by.
+      // Only meaningful when the primary is actually speaking — it's specific to {{user}}'s relationship with the primary.
       const relationshipDescription =
         !impersonating &&
         effectiveAssistFlag(freshChat.assistOverrides?.autoTrackRelationship, autoTrackRelationship) &&
         speaker.id === character.id
           ? buildRelationshipDescription(freshChat, world, character)
           : undefined
-      // The non-primary half of the line above: every other speaking participant got zero
-      // relationship-flavor guidance until now, which read as either silence or (worse) borrowing
-      // the primary's own romantic warmth. See `chat/participantArchetype.ts`'s own top comment.
+      // The non-primary counterpart to the line above, so another speaking participant doesn't borrow the primary's own romantic warmth.
       const participantGuidance =
         !impersonating && speaker.id !== character.id
           ? participantRelationshipGuidance({
@@ -852,6 +776,7 @@ export function useChatSession(chatId: string | null) {
       // line it will agree with and ignore. Costs zero tokens when the recent turns are clean.
       const slopAvoidance = buildSlopAvoidanceNote(
         recentHistory.filter((m) => m.role === 'char' && m.name === speaker.card.name).map((m) => m.text),
+        { extraPatterns: intimacyLevel === 'explicit' ? EXPLICIT_ANTI_PATTERN_ENTRIES : undefined },
       )
       // How long this speaker's turns should run, in a unit the model can count (sentences), taken
       // from their `replyLength` override or measured from their own example dialogue. The matching
@@ -881,8 +806,7 @@ export function useChatSession(chatId: string | null) {
         ? 'Never use em dashes (the — character) in your writing. Use a comma, period, or parentheses instead.'
         : ''
       const styleGuidance = impersonating
-        ? // Impersonation: only the rules that shape prose, not {{char}}'s behaviour or {{char}}'s
-          // recent phrasing (the slop-avoidance note is scoped to the character's own turns).
+        ? // Impersonation only gets the rules that shape prose, not {{char}}'s behaviour/phrasing.
           [emDashRule, styleGuidanceNote.trim(), opts?.extraStyleGuidance ?? ''].filter(Boolean).join(' ') || undefined
         : [
             emDashRule,
@@ -905,6 +829,7 @@ export function useChatSession(chatId: string | null) {
             priorityLine,
             stockRomancePhrasingLine,
             agencyGuardLine,
+            sceneContinuityLine,
             intimacySceneLine,
             explicitSceneLine,
             escalationShapeLine,
@@ -954,16 +879,12 @@ export function useChatSession(chatId: string | null) {
         authorNote: freshChat.authorNote,
         regexScripts,
         sceneOptions: {
-          // VN scene-tagging stays keyed on the primary for now — per-participant sprites are a
-          // separate, larger lift (VNStage is built entirely around one character's sprite state).
+          // VN scene-tagging stays keyed on the primary — per-participant sprites are a separate, larger lift.
           expressionIds: getUnlockedExpressionIds(character, affection),
           backgroundIds: getUnlockedBackgroundIds(world, affection),
-          // Only ask for a mood tag when this world actually has music to drive with it — no point
-          // spending prompt tokens on a signal the app would then ignore.
+          // Only ask for a mood tag when this world actually has music to drive with it.
           moodIds: world?.music && Object.keys(world.music).length > 0 ? SCENE_MOOD_IDS : undefined,
-          // Wardrobe (`outfits.ts`), on the same "only ask for what the app can actually use"
-          // rule as mood above: a character with no outfit art gets a single-entry list, which
-          // `buildSceneInstruction` treats as no choice and omits from the tag entirely.
+          // A character with no outfit art gets a single-entry list, treated as no choice.
           outfitIds: selectableOutfitIds(character.outfits, character.sprites, affection, new Set(freshChat.sceneFlags ?? [])),
           currentOutfitId: currentOutfitFrom(messages),
         },
@@ -982,11 +903,6 @@ export function useChatSession(chatId: string | null) {
       character,
       chat,
       countTokens,
-      // Was missing before the world-level override existed, so changing the content rating in
-      // Settings left this callback closed over the previous value until some other dependency
-      // happened to change. Self-corrected almost immediately in practice (`messages`/`chat` move
-      // constantly), but it meant the one setting where being a turn late actually matters was the
-      // one not listed.
       globalIntimacyLevel,
       globalPostHistory,
       globalSystemPrompt,
@@ -1052,11 +968,7 @@ export function useChatSession(chatId: string | null) {
     [character, chat, client, keepRecentMessages, messages, persona, sampler.max_context_length, summaryDetail],
   )
 
-  /**
-   * Marks the given indices (into `pending`, the exact array a detector was offered) done on
-   * `objective`. Shared by the standalone task-detection pass below and the merged
-   * relationship+tasks pass in `runGeneration` (section 9(c)'s (a) item) so both write the same way.
-   */
+  /** Marks the given indices (into `pending`) done on `objective`. Shared by the standalone task-detection pass and the merged pass in `runGeneration`. */
   const applyCompletedTasks = useCallback(async (objective: Objective, pending: ObjectiveTask[], completedIndices: number[]) => {
     const completedIds = new Set(completedIndices.map((i) => pending[i].id))
     const now = Date.now()
@@ -1064,11 +976,7 @@ export function useChatSession(chatId: string | null) {
     await objectivesApi.update(objective.id, { tasks: updatedTasks })
   }, [])
 
-  /**
-   * Fire-and-forget: checks whether the reply that just landed accomplished any pending objective
-   * tasks. Standalone path only — when relationship-tracking is also due the same turn, this check
-   * rides along inside `updateAffectionFromReply`'s own call instead (see `runGeneration`).
-   */
+  /** Checks whether the reply that just landed completed any pending objective tasks. Standalone path only — see `runGeneration` for the merged one. */
   const detectAndMarkTasks = useCallback(
     async (chatIdForTasks: string, replyText: string) => {
       const objective = await objectivesApi.getActive(chatIdForTasks)
@@ -1086,21 +994,7 @@ export function useChatSession(chatId: string | null) {
     [client, applyCompletedTasks],
   )
 
-  /**
-   * Scores relationship movement for whichever character actually just spoke (`speaker`), not
-   * always the chat's primary — multi-character relationship tracking's core fix. `speaker`'s own
-   * track (`getRelationshipTrack`/`patchRelationshipTrack` in `stage.ts`) resolves to the primary's
-   * usual top-level `Chat` fields when they *are* the primary (byte-for-byte the same read/write
-   * this function always did), or their own entry in `Chat.participantRelationships` otherwise —
-   * every stat/warmth/stage/risk/gallery-unlock function below already took plain values rather
-   * than reading `Chat` directly, so none of them needed to change, only what feeds them.
-   *
-   * `pendingTasks`, when passed, is folded into the same `assessRelationshipMoment` call as a
-   * fourth thing checked (section 9(c)'s (a) item) — the returned indices are always handed back
-   * to the caller, who applies them via `applyCompletedTasks`, since this function only owns
-   * relationship state, not the objective. Omitted/empty when task-detection isn't due this turn,
-   * matching every other assist here staying independently toggleable.
-   */
+  /** Scores relationship movement for whichever character actually just spoke, reading/writing their own track (`stage.ts`). `pendingTasks`, when passed, rides along in the same judge call and its completed indices are handed back for the caller to apply. */
   const updateAffectionFromReply = useCallback(
     async (
       chatIdForRelationship: string,
@@ -1117,27 +1011,17 @@ export function useChatSession(chatId: string | null) {
       const currentAffection = track.affection ?? 0
       const currentStats = getRelationshipStats(track)
       const existingFlags = new Set((freshChat.sceneFlags ?? []) as SceneFlag[])
-      // The aftercare window closes on the first turn past its length (`aftercare.ts`). The
-      // transcript of the window rides along inside the judge call that was already going to run
-      // this turn, so a verdict costs no extra model round-trip — the same trick objective-task
-      // detection uses. `history` is this turn's own prompt history, so slicing it gives exactly
-      // the turns since the scene without a second fetch.
+      // Aftercare window's transcript rides along in this same judge call — no extra model round-trip.
       const openAfterglow = track.afterglow ?? undefined
       const charRepliesNow = countCharReplies(messages)
       const aftercareDue = isAfterglowComplete(openAfterglow, charRepliesNow)
       const aftercareWindow = aftercareDue ? history.slice(-(AFTERGLOW_TURNS * 2 + 2)) : undefined
-      // Open threads (unresolved facts) go to the judge in a stable index order so it can mark one
-      // closed via `resolvedFactIndices` — same numbered-list / index-return shape as pending tasks.
+      // Stable index order so the judge can mark one closed via `resolvedFactIndices`.
       const openThreads = activeFacts.filter((f) => f.unresolved)
-      // The character's standing plans go to the judge in the same stable numbered-list shape, so
-      // its `planUpdates` can annotate or close one by index (and always add new ones).
       const activePlans = track.plans ?? []
-      // Item 1's intimacy scene state machine — asked for in the same call, only while a scene is
-      // currently active (same ride-along trick `aftercareTurns`/`pendingTasks` already use).
+      // Same ride-along trick as aftercare/pending tasks — only asked for while a scene is active.
       const openScene = track.intimacyScene ?? undefined
       const sceneActive = isIntimacySceneActive(openScene, charRepliesNow)
-      // Beliefs/expectations go to the judge in the same stable numbered-list shape as plans, so
-      // their own updates can revise/resolve one by index (and always add new ones).
       const activeBeliefs = track.beliefsAboutUser ?? []
       const activeExpectations = track.expectationsOfUser ?? []
       const {
@@ -1179,21 +1063,14 @@ export function useChatSession(chatId: string | null) {
         currentIntimacyPhase: sceneActive ? openScene!.phase : undefined,
         activeBeliefs: beliefLinesForJudge(activeBeliefs),
         activeExpectations: expectationLinesForJudge(activeExpectations),
-        // Item 6: everyone else actually in this scene besides whoever's speaking — a group chat's
-        // other participants, present for a jealousy beat to land in front of rather than merely be
-        // discussed. `[]`/undefined for the ordinary single-character chat, the common case.
+        // Everyone else actually in the scene besides whoever's speaking — present for a jealousy beat to land in front of, not just be discussed.
         presentParticipants: [...(character ? [character] : []), ...participantCharacters]
           .filter((c) => c.id !== speaker.id)
           .map((c) => c.card.name),
       })
-      // A due window always closes, even if the model declined to name a verdict — leaving it open
-      // would keep the aftermath guidance running forever. An unusable answer is read as the
-      // middle outcome rather than as "ask again next turn".
+      // A due window always closes even with no verdict — an unusable answer reads as the middle outcome, not "ask again next turn".
       const resolvedAftercare = aftercareDue ? (aftercareVerdict ?? 'awkward') : undefined
-      // "Repeated same interaction → diminishing returns": the player playing the same intent chip
-      // 3+ turns running scales this turn's positive warmth gains toward nothing (a repeated *bad*
-      // move and rising friction pass through). `messages` may not yet carry this turn's user line,
-      // so `intent` is folded in explicitly.
+      // Same intent chip played 3+ turns running scales positive gains toward nothing (a bad move/friction still passes through).
       const userIntents = messages.filter((m) => m.role === 'user').map((m) => m.intent as string | undefined)
       if (userIntents[userIntents.length - 1] !== intent) userIntents.push(intent)
       const scaledDeltas = scaleDeltasForDifficulty(
@@ -1245,8 +1122,7 @@ export function useChatSession(chatId: string | null) {
       const relationshipStage = relationshipStageForWarmth(warmth, milestones)
       const unlockedSet = new Set(track.unlockedGalleryIds ?? [])
       const previouslyUnlockedIds = new Set(unlockedSet)
-      // Endings unlock deterministically off the stage itself, not the AI CG-matching pass below —
-      // excluded from `lockedGallery` so they're never sent to `detectGalleryUnlocks`.
+      // Endings unlock deterministically off the stage, so they're excluded from `lockedGallery` before the AI CG-matching pass below.
       unlockedEndingIds(speaker.gallery, relationshipStage, unlockedSet).forEach((id) => unlockedSet.add(id))
       const lockedGallery = (speaker.gallery ?? []).filter(
         (g) => !g.isEnding && !unlockedSet.has(g.id) && hasRequiredFlags(g.requiredFlags, existingFlags),
@@ -1260,11 +1136,7 @@ export function useChatSession(chatId: string | null) {
         })
         unlockedIds.forEach((id) => unlockedSet.add(id))
       }
-      // Author-defined world rules (`world/triggers.ts`), evaluated against the state this turn
-      // just produced rather than the state it started from — a trigger keyed on "trust >= 70"
-      // should fire on the turn trust actually reaches 70, not one turn later. Only for the
-      // primary's own track: a world rule describes the player's relationship with the character
-      // whose world it is, and firing one per participant would multiply every authored beat.
+      // Evaluated against the state this turn just produced (not the state it started from), so a "trust >= 70" trigger fires the turn it's reached. Primary's own track only.
       const triggerResult = isPrimary
         ? evaluateTriggers(
             world?.triggers,
@@ -1301,10 +1173,7 @@ export function useChatSession(chatId: string | null) {
         }
       }
 
-      // Momentum: this turn's warmth movement folded into the decayed running value. Recomputed
-      // even on an otherwise-flat turn so a burst actually fades (a stale +4 would keep the pacing
-      // clause saying "moving fast" through a quiet stretch); the `noMomentumChange` check below
-      // lets a meaningful decay force a small persist.
+      // Recomputed even on a flat turn so a burst actually decays rather than a stale value sticking around.
       const momentum = nextMomentum(track.momentum, warmthDeltaOf(deltas))
       const noMomentumChange = Math.abs(momentum - (track.momentum ?? 0)) < 0.15
 
@@ -1314,28 +1183,18 @@ export function useChatSession(chatId: string | null) {
       const initiativeBalance = nextInitiativeBalance(track.initiativeBalance, initiativeContribution(!!intent, warmthDeltaOf(deltas)))
       const noInitiativeChange = Math.abs(initiativeBalance - (track.initiativeBalance ?? 0)) < 0.15
 
-      // Persistent agency layer: fold this turn's `planUpdates` into the character's plan list
-      // (`dating/plans.ts` caps it at 3 and ages stale ones out). `messages.length` is the turn
-      // counter, same unit `worldInfoTurn` uses.
+      // Persistent agency layer: fold `planUpdates` into the plan list (`dating/plans.ts` caps at 3, ages out stale ones).
       const nextPlans = applyPlanUpdates(activePlans, planUpdates, messages.length)
       const noPlanChange = !plansChanged(activePlans, nextPlans)
 
-      // Standing impressions of/expectations of {{user}} — same cap-and-age lifecycle as plans,
-      // applied via their own small modules (`dating/beliefs.ts`/`dating/expectations.ts`).
       const nextBeliefs = applyBeliefUpdates(activeBeliefs, beliefUpdates, messages.length)
       const noBeliefChange = !beliefsChanged(activeBeliefs, nextBeliefs)
-      // A violated expectation is memorable enough to earn a durable fact (negative valence) — read
-      // off the *pre*-update list, since `applyExpectationUpdates` has already dropped a resolved
-      // entry from the list it returns by the time this runs.
+      // Read off the pre-update list — `applyExpectationUpdates` has already dropped a resolved entry by the time this runs.
       const violatedTexts = violatedExpectationTexts(activeExpectations, expectationUpdates)
       const nextExpectations = applyExpectationUpdates(activeExpectations, expectationUpdates, messages.length)
       const noExpectationChange = !expectationsChanged(activeExpectations, nextExpectations)
 
-      // Item 1's intimacy scene phase advance — only recomputed while a scene is actually active;
-      // otherwise carried forward unchanged (including a stale one, which every reader already
-      // treats as inactive via `isIntimacySceneActive`, so there's nothing to actively clear here).
-      // Item 1's character-specificity signal, same computation `buildCurrentPrompt` uses for the
-      // guidance text — read here too so the phase-gating itself (not just the wording) respects it.
+      // Only recomputed while a scene is active; a stale one is carried forward unchanged. Same pace computation `buildCurrentPrompt` uses.
       const pace = intimacyPaceFor(mood ?? track.mood, activePlans.some((p) => p.kind === 'distance'), speaker.boundaries?.length ?? 0)
       const nextIntimacyScene = sceneActive ? advanceIntimacyScene(openScene!, intimacyPhase, charRepliesNow, pace) : (openScene ?? null)
       const noSceneChange = JSON.stringify(nextIntimacyScene ?? null) === JSON.stringify(openScene ?? null)
@@ -1348,16 +1207,7 @@ export function useChatSession(chatId: string | null) {
         (!characterIntent || characterIntent === track.characterIntent) &&
         (!currentFear || currentFear === track.currentFear) &&
         (!currentDesire || currentDesire === track.currentDesire)
-      // Coins are NOT granted here — a flat per-turn trickle was tried and deliberately removed
-      // (see the "Quiet, player-facing rewards" comment a few lines down): it was silent (no toast)
-      // and gated only on `isPrimary`, nothing about whether this turn was actually eventful, so it
-      // fired on literally every ordinary reply — exactly the "constant noise" this file already
-      // argues against for stat deltas and scene flags. Coins are instead granted at discrete,
-      // toasted moments elsewhere — `announceMilestone` (a warmth stage actually crossed),
-      // `askForCommitment`'s accept branch (a commitment tier actually accepted),
-      // `setObjectiveStatus` (an objective actually completed), and `endDateEvent`'s existing
-      // affection-scaled date/hangout payout — so money always reads as a noticed, earned event
-      // rather than a number quietly climbing in the background.
+      // Coins are granted only at discrete, toasted moments elsewhere (milestones, commitment accepts, objectives, dates) — never a silent per-turn trickle here.
       if (
         noStatChange &&
         noRiskChange &&
@@ -1368,17 +1218,13 @@ export function useChatSession(chatId: string | null) {
         noSceneChange &&
         noBeliefChange &&
         noExpectationChange &&
-        // A resolved window must always be written, even if its verdict happened to score flat —
-        // otherwise `afterglow` stays set and the aftermath guidance runs forever.
+        // A resolved window must always be written even on a flat verdict, or `afterglow` stays open forever.
         !resolvedAftercare &&
-        // Same for a fired trigger: its flag and its spent id both need persisting even on a turn
-        // that scored no relationship movement at all.
         !triggerResult?.fired.length &&
         newFlags.length === 0 &&
         unlockedSet.size === (track.unlockedGalleryIds ?? []).length
       ) {
-        // Nothing relationship-related moved, but a task can still have completed on a turn that
-        // otherwise scored flat — the caller still needs these indices either way.
+        // A task can still have completed on an otherwise-flat turn — the caller needs these either way.
         return completedTaskIndices
       }
       await chatsApi.update(chatIdForRelationship, {
@@ -1392,10 +1238,7 @@ export function useChatSession(chatId: string | null) {
           breakupCount: risk.breakupCount,
           unlockedGalleryIds: [...unlockedSet],
           mood: mood ?? track.mood,
-          // A `cold` aftermath leaves an unmet need behind (`aftercareNeed`), so the consequence
-          // keeps colouring the character past the window instead of stopping dead with it. The
-          // judge's own read for this turn still wins when it has one — it's the fresher signal,
-          // and it may already have noticed something better than "reassurance".
+          // A `cold` aftermath leaves an unmet need behind; the judge's own fresher read still wins when it has one.
           currentNeed: currentNeed ?? (resolvedAftercare ? aftercareNeed(resolvedAftercare) : undefined) ?? track.currentNeed,
           characterIntent: characterIntent ?? track.characterIntent,
           currentFear: currentFear ?? track.currentFear,
@@ -1405,16 +1248,9 @@ export function useChatSession(chatId: string | null) {
           plans: nextPlans,
           beliefsAboutUser: nextBeliefs,
           expectationsOfUser: nextExpectations,
-          // `null`, not `undefined` — `JSON.stringify` drops undefined-valued keys, so an
-          // undefined here would silently leave the window open. Same trap `relationshipWarning`
-          // one field up already documents.
           afterglow: resolvedAftercare ? null : (track.afterglow ?? null),
           intimacyScene: nextIntimacyScene,
-          // Item 12's escalation-shape memory: a scene that was active and just resolved
-          // (`nextIntimacyScene` reads `null` this exact turn) gets its own final category sequence
-          // snapshotted into the log — `openScene!` is safe here since `sceneActive` already implies
-          // it was set. Any other turn (no scene, still building/peak, or already resolved earlier)
-          // carries the existing log forward unchanged.
+          // A scene that just resolved this turn gets its final category sequence snapshotted into the log; any other turn carries it forward unchanged.
           intimacySceneShapeLog:
             sceneActive && !nextIntimacyScene
               ? appendSceneShapeLog(track.intimacySceneShapeLog, openScene!.categoryHistory ?? [openScene!.category])
@@ -1422,8 +1258,7 @@ export function useChatSession(chatId: string | null) {
         }),
         sceneFlags: [...existingFlags],
       })
-      // A broken expectation is a real, memorable letdown, not a quiet removal — give it the same
-      // durable-fact treatment a hard-landing event already gets, negative valence baked in.
+      // A broken expectation earns a durable fact, negative valence baked in.
       for (const text of violatedTexts) {
         chatFactsApi
           .create({
@@ -1453,11 +1288,7 @@ export function useChatSession(chatId: string | null) {
           else toastSuccess(note, { chime: true })
         }
       }
-      // Append-only history alongside the overwritten running totals above — answers "why is
-      // trust 62 now" instead of only ever showing the current number. Only log when a dimension
-      // or flag genuinely moved; gallery/coin bookkeeping alone isn't relationship movement.
-      // `characterId` is always stamped now (unset on every event from before multi-character
-      // tracking existed, which `RelationshipPanel` reads as "the primary" for backward compat).
+      // Append-only history alongside the running totals — answers "why is trust 62 now". Only logged when a dimension or flag genuinely moved.
       if (!noStatChange || newFlags.length > 0) {
         const changedDeltas = Object.fromEntries(Object.entries(deltas).filter(([, v]) => v !== 0))
         relationshipEventsApi
@@ -1471,8 +1302,6 @@ export function useChatSession(chatId: string | null) {
           })
           .catch(() => {})
       }
-      // Quiet, player-facing rewards — these are milestones worth surfacing, unlike the raw
-      // scene flags (internal bookkeeping) or per-turn stat deltas (would be constant noise).
       await announceMilestone({
         charName: speaker.card.name,
         personaName: persona?.name || 'You',
@@ -1568,18 +1397,13 @@ export function useChatSession(chatId: string | null) {
     [chatId, world],
   )
 
-  /**
-   * Applies an owned item's authored effect immediately and deterministically (10d) — no judge
-   * call, unlike a gift's in-scene reaction, since an item's effect is authored, not reacted to.
-   */
+  /** Applies an owned item's authored effect immediately and deterministically — no judge call, unlike a gift's in-scene reaction. */
   const useItem = useCallback(
     async (itemId: string) => {
       if (!chatId || !character) return
       const def = itemById(itemId, world)
       if (!def) return
-      // Only the 'currency' branch touches `giftCoins`, but the whole read-modify-write still runs
-      // inside the mutex (see the note above `buyGift`) — cheap to serialize, and it means a coin
-      // item used back-to-back with a Shop purchase can't race either.
+      // The whole read-modify-write runs inside the mutex even for non-currency effects, so it can't race a Shop purchase.
       await getCoinMutex(chatId).run(async () => {
         const freshChat = await chatsApi.get(chatId)
         if (!freshChat) return
@@ -1616,30 +1440,10 @@ export function useChatSession(chatId: string | null) {
     [character, chatId, world],
   )
 
-  // `askForCommitment` (just below) needs to call `startDateEvent` for its married/living_together
-  // auto-drafted milestone scene, but `startDateEvent` is declared much further down this same hook
-  // body (it depends on `runGeneration`/`createObjective`, both defined later still) — a direct
-  // reference would be a genuine TypeScript "used before its declaration" error, since the compiler
-  // can't see that the closure referencing it is only ever *called* well after the whole hook body
-  // has finished evaluating for this render. A plain variable reassigned each render wouldn't be
-  // enough on its own: if `askForCommitment`'s *own* memoized closure survives from an earlier
-  // render (its dependency array not having changed) while `startDateEvent`'s identity moved on
-  // (e.g. `chat?.affection` changed), that stale closure would keep calling whatever
-  // `startDateEvent` looked like back when it was created. A ref sidesteps both problems: declared
-  // here (before `askForCommitment`, so no ordering error), its `.current` reassigned to the real
-  // function on every render right after `startDateEvent`'s own declaration — and because a
-  // `useRef` object's identity never changes across renders, even a stale `askForCommitment`
-  // closure reading `.current` at call time always sees the *latest* render's `startDateEvent`.
+  // `askForCommitment` needs `startDateEvent`, which is declared later in this hook body — a ref sidesteps the "used before declaration" ordering issue and any staleness from memoization.
   const startDateEventRef = useRef<(event: DateEventCard) => Promise<void>>(async () => {})
 
-  /**
-   * A single Define-the-Relationship ask (10c) — whichever tier the button offers is already
-   * gated on warmth by the caller (`RelationshipPanel`'s `canAskForCommitment`), so this only ever
-   * needs to judge how the character actually reacts to being asked right now. `characterId`
-   * defaults to the primary — multi-character relationship tracking extends this to any tracked
-   * participant, resolved through the same `getRelationshipTrack`/`patchRelationshipTrack` pair
-   * `updateAffectionFromReply` uses.
-   */
+  /** A single Define-the-Relationship ask — the tier is already warmth-gated by the caller; this just judges how the character reacts to being asked. */
   const askForCommitment = useCallback(
     async (tier: Exclude<CommitmentStatus, 'none'>, characterId?: string) => {
       if (!chatId) return
@@ -1684,9 +1488,7 @@ export function useChatSession(chatId: string | null) {
       nextStats = risk.stats
       const warmth = computeWarmth(affection, nextStats)
       const relationshipStage = relationshipStageForWarmth(warmth, milestones)
-      // Item 2's "missed opportunity" cost: a real deflection/backfire opens (or re-opens) a
-      // still-live, decaying cue that colors the next few turns; an accept always clears it, since
-      // there's nothing left to be gun-shy about once the answer was yes.
+      // A deflection/backfire opens a decaying cue that colors the next few turns; an accept always clears it.
       const nextRebuff: RecentRebuff | null =
         outcome.decision === 'accept'
           ? null
@@ -1734,20 +1536,7 @@ export function useChatSession(chatId: string | null) {
             text: `${persona?.name || 'You'} and ${target.card.name} are officially ${formatCommitmentStatus(tier)}.`,
           })
           .catch(() => {})
-        // A married/living_together accept is big enough to deserve an actual scene, not just a
-        // status label flipping with nothing generated — a wedding day, or a moving-in day. Reuses
-        // the exact same date-event machinery a normal "Suggest event with AI" click already goes
-        // through (`suggestDateEvent` → `startDateEvent`), so this surfaces through the identical
-        // path `DateEventPanel` already reads (`Chat.activeEvent`) rather than inventing a parallel
-        // one. Primary-only: `startDateEvent`/its auto-opening `runGeneration` call are written
-        // against this hook's own `character`/`world`, not an arbitrary tracked participant, so a
-        // non-primary's accepted proposal still lands the status change above but doesn't try to
-        // stage a scene in the wrong character's body/world.
-        //
-        // Deliberately NOT awaited: drafting a card and then starting its live opening scene is two
-        // real model round-trips, and this ask's own promise (what `RelationshipPanel`'s "Asking…"
-        // button waits on) should resolve as soon as the ask itself is settled, not block on a
-        // best-effort scene that can fail or run long without that reading as the ask having failed.
+        // A married/living_together accept earns an actual wedding/moving-in scene, reusing the normal date-event machinery. Primary-only. Not awaited — the ask's own promise shouldn't block on this best-effort scene.
         if ((tier === 'married' || tier === 'living_together') && target.id === character?.id) {
           suggestDateEvent(client, {
             characterName: target.card.name,
@@ -1783,15 +1572,7 @@ export function useChatSession(chatId: string | null) {
     [character, chatId, client, messages, persona?.name, relationshipDifficulty, resolveSpeaker, world],
   )
 
-  /**
-   * A deliberate "first time together" ask — the user's own direct follow-up to the intimacy
-   * catalog ("we should be able to choose... lose virginity"). Byte-for-byte mirrors
-   * `askForCommitment`'s shape (eligibility already gated by the caller's `canInitiateFirstTime`,
-   * same judge-call/deltas/risk/toast structure) with two differences: there's no tier to actually
-   * transition into, just `firstIntimateSceneAt` set once on accept; and deliberately no
-   * auto-sent narrative line afterward — this beat is big enough that the player's own next
-   * message should carry it, same restraint the commitment-ask flow already shows.
-   */
+  /** A deliberate "first time together" ask — mirrors `askForCommitment`'s shape, but sets `firstIntimateSceneAt` instead of a tier, with no auto-sent narrative line afterward. */
   const initiateFirstTime = useCallback(
     async (characterId?: string) => {
       if (!chatId) return
@@ -1832,8 +1613,7 @@ export function useChatSession(chatId: string | null) {
       nextStats = risk.stats
       const warmth = computeWarmth(affection, nextStats)
       const relationshipStage = relationshipStageForWarmth(warmth, milestones)
-      // Item 2's "missed opportunity" cost — same rule as `askForCommitment`: a real deflection/
-      // backfire opens a still-live, decaying cue; an accept clears it.
+      // Same rebuff rule as `askForCommitment`.
       const nextRebuff: RecentRebuff | null =
         outcome.decision === 'accept'
           ? null
@@ -1847,8 +1627,7 @@ export function useChatSession(chatId: string | null) {
         relationshipWarning: risk.relationshipWarning ?? null,
         breakupCount: risk.breakupCount,
         firstIntimateSceneAt: outcome.decision === 'accept' ? (track.firstIntimateSceneAt ?? Date.now()) : track.firstIntimateSceneAt,
-        // Only an accepted first time opens an aftercare window — a deflected or backfired ask has
-        // no aftermath to judge, and scoring one would punish the player twice for the same no.
+        // Only an accepted first time opens an aftercare window — nothing to judge on a deflected/backfired ask.
         afterglow:
           outcome.decision === 'accept'
             ? { startedAtTurn: countCharReplies(messages), sourceLabel: 'their first time together', momentumAtStart: track.momentum ?? 0 }
@@ -1895,13 +1674,7 @@ export function useChatSession(chatId: string | null) {
     [chatId, client, messages, persona?.name, relationshipDifficulty, resolveSpeaker, world],
   )
 
-  /**
-   * The player deliberately ending a committed relationship (10c) — behind a confirmation in the
-   * UI so a joke line can't blow one up by accident. Applies the same one-time scar a strain-driven
-   * breakup does, via the shared `applyRelationshipRisk` plumbing, so a deliberate and an
-   * unresolved-strain breakup leave the same kind of mark rather than two different mechanisms.
-   * `characterId` defaults to the primary, same precedence as `askForCommitment`.
-   */
+  /** Deliberately ending a committed relationship (behind a UI confirmation), applying the same one-time scar a strain-driven breakup does. */
   const endRelationship = useCallback(
     async (characterId?: string) => {
       if (!chatId) return
@@ -1912,13 +1685,7 @@ export function useChatSession(chatId: string | null) {
       const track = getRelationshipTrack(freshChat, target.id)
       if ((track.commitmentStatus ?? 'none') === 'none') return
       const scarredStats = applyBreakupScar(getRelationshipStats(track))
-      // The scar can drop warmth enough to cross back over a milestone boundary (e.g. sweethearts
-      // → close) — every other write path in this file (`updateAffectionFromReply`,
-      // `askForCommitment`, `endDateEvent`'s close-out) recomputes and saves `relationshipStage`
-      // alongside a stats change for exactly this reason; this one didn't, leaving the stored stage
-      // stale at whatever it was before the breakup. Affection itself is untouched by a breakup —
-      // only trust/chemistry/comfort take the scar — so it's `track.affection` unchanged, not a
-      // separately computed value.
+      // The scar can drop warmth enough to cross back over a milestone boundary, so `relationshipStage` is recomputed here too. Affection itself is untouched by a breakup.
       const warmth = computeWarmth(track.affection ?? 0, scarredStats)
       const relationshipStage = relationshipStageForWarmth(warmth, relationshipMilestonesFor(world?.relationshipThresholds))
       await chatsApi.update(chatId, patchRelationshipTrack(freshChat, target.id, {
@@ -1946,12 +1713,7 @@ export function useChatSession(chatId: string | null) {
     return buildCurrentPrompt(historyForPrompt, { speakerId: replyAsCharacterId, includeSectionBreakdown: true })
   }, [buildCurrentPrompt, messages, replyAsCharacterId])
 
-  /**
-   * Save (or clear) this chat's Author's Note. A blank note is stored as `null`, not an empty
-   * object — `JSON.stringify` drops `undefined` keys before the request is sent, so clearing has
-   * to send an explicit `null` for the server's merge to actually overwrite the old value (same
-   * guard as `activeEvent`; see ROADMAP §9 / changelog #28).
-   */
+  /** Saves (or clears, via explicit `null`) this chat's Author's Note. */
   const updateAuthorNote = useCallback(
     async (note: AuthorNote | null) => {
       if (!chatId) return
@@ -1960,13 +1722,7 @@ export function useChatSession(chatId: string | null) {
     [chatId],
   )
 
-  /**
-   * Section 4/12's Scene entity: location/atmosphere framing plus the group-chat turn policy.
-   * `null` clears it entirely (back to manual, no framing — today's exact behavior); a partial
-   * patch merges onto whatever's already set, defaulting to `'manual'` the first time a chat gets
-   * a scene at all. `scene: null`, not `undefined` — the usual `JSON.stringify` drops-`undefined`
-   * reason (see `activeEvent`/`authorNote`).
-   */
+  /** Location/atmosphere framing plus the group-chat turn policy. `null` clears it entirely; a partial patch merges onto whatever's already set. */
   const updateScene = useCallback(
     async (patch: Partial<Scene> | null) => {
       if (!chatId) return
@@ -1980,14 +1736,7 @@ export function useChatSession(chatId: string | null) {
     [chat?.scene, chatId],
   )
 
-  /**
-   * The roster (`Chat.participants`) was previously only ever set once, at chat creation
-   * (`NewChatDialog.tsx`) — there was no way to bring in "a friend who walks in" later, or drop
-   * someone who left the scene, without abandoning the chat and starting a fresh one with the
-   * right roster from the start. Resets `roundRobinIndex` like a turn-policy change already does
-   * (`updateScene` callers, `ScenePanel.tsx`): a changed roster can shift what that index used to
-   * point at, onto someone else entirely.
-   */
+  /** Updates the group-chat roster after chat creation. Resets `roundRobinIndex`, since a changed roster can shift what that index used to point at. */
   const updateParticipants = useCallback(
     async (ids: string[]) => {
       if (!chatId) return
@@ -2040,15 +1789,7 @@ export function useChatSession(chatId: string | null) {
     [messages, suggestChoicesForMessage],
   )
 
-  /**
-   * §8 vision scene detection — a backup for the model's blind `<<scene:>>` self-tag, run only
-   * when Settings → Appearance → "Vision scene detection" is on. Looks at the character's actual
-   * unlocked expression sprites to correct the tagged expression, and at any photo the player
-   * attached this turn to derive a background/mood. Writes the refined `scene` back onto the
-   * just-generated message (active swipe); a no-op when nothing changed or the model declined.
-   * Fire-and-forget like every other post-reply assist — a slow or failed vision pass never
-   * touches the reply that already landed.
-   */
+  /** Vision backup for the model's `<<scene:>>` self-tag: corrects the expression from the character's actual sprites, and derives background/mood from any attached photo. No-op if nothing changed. */
   const refineSceneWithVision = useCallback(
     async (messageId: string, speaker: Character, replyText: string, userImages: string[]) => {
       if (!replyText.trim()) return
@@ -2056,9 +1797,7 @@ export function useChatSession(chatId: string | null) {
       const affection = chat?.affection ?? 0
       const unlockedExpressions = getUnlockedExpressionIds(speaker, affection)
       const unlockedBackgrounds = getUnlockedBackgroundIds(world, affection)
-      // Needed here purely so re-sanitizing the *existing* tag below can't strip an outfit the
-      // reply already established — without it, a vision refine would quietly undress the
-      // character, since `sanitizeSceneTag` drops an outfit it wasn't told is selectable.
+      // Needed so re-sanitizing the existing tag can't strip an outfit the reply already established.
       const selectableOutfits = selectableOutfitIds(speaker.outfits, spriteMap, affection, new Set(chat?.sceneFlags ?? []))
       const currentOutfit = currentOutfitFrom(messages)
 
@@ -2079,9 +1818,7 @@ export function useChatSession(chatId: string | null) {
         ])
         const candidates = spriteExpressionIds.map((id) => ({ id, label: labelById.get(id) ?? id }))
 
-        // A fully-spritted character has 20+ expressions — far too many images to send the vision
-        // model at once. A cheap text pass narrows it to the few that could plausibly fit the line,
-        // then only those sprites are fetched and shown.
+        // Narrow to a few plausible candidates first — too many sprites to send the vision model at once.
         const shortlist = await shortlistExpressions(client, {
           charName: speaker.card.name,
           replyText,
@@ -2094,10 +1831,7 @@ export function useChatSession(chatId: string | null) {
         const sprites = (
           await Promise.all(
             shortlist.map(async (id) => {
-              // Show the vision model the outfit that's actually on screen, falling back to base
-              // art for an expression this outfit doesn't have — it's judging which expression the
-              // line reads as, and comparing against art the player isn't looking at just makes
-              // that call harder.
+              // Show the outfit actually on screen, falling back to base art if this outfit lacks it.
               const url = spriteMap[spriteKey(currentOutfit, id)] ?? spriteMap[id]
               if (!url) return null
               if (!cache.has(url)) {
@@ -2143,15 +1877,7 @@ export function useChatSession(chatId: string | null) {
     [chat?.affection, client, world],
   )
 
-  /**
-   * Text-only sibling to `refineSceneWithVision`: corrects the expression tag using nothing but the
-   * text that was just written (`detectExpressionTextMismatch`, `vn/sceneVision.ts`) — the fallback
-   * for the much more common case where no vision-capable model is loaded, so a stale tag left over
-   * from a few turns ago ("blush") can still be caught even when the model's own reply clearly reads
-   * as something else ("scowled, slammed the door"). Never touches background/outfit/mood, only
-   * expression, and only writes back on an actual change (same idempotent "diff before writing"
-   * guard `refineSceneWithVision` uses).
-   */
+  /** Text-only fallback for `refineSceneWithVision` when no vision model is loaded — corrects a stale expression tag from the reply text alone. Expression only, writes back only on actual change. */
   const refineExpressionFromText = useCallback(
     async (messageId: string, speaker: Character, replyText: string) => {
       if (!replyText.trim()) return
@@ -2195,35 +1921,29 @@ export function useChatSession(chatId: string | null) {
       historyForPrompt: ChatMessage[],
       targetMessageId: string,
       images: string[] = [],
-      opts?: { continuing?: boolean; speakerId?: string | null; intent?: MessageIntent; extraStyleGuidance?: string },
+      opts?: {
+        continuing?: boolean
+        speakerId?: string | null
+        intent?: MessageIntent
+        extraStyleGuidance?: string
+        /** Remaining auto-retries on a hard fail (boundary cross / agency violation) — defaults to 1, decremented on each retry so a second bad attempt is just accepted rather than looping. */
+        hardFailRetriesLeft?: number
+        /** Only meaningful alongside `continuing: true` — the pre-continue snapshot to persist as `continueUndo`, constant across every auto-continue round of this same call. */
+        continueUndo?: { text: string; rawText?: string; scene?: SceneTag }
+      },
     ) => {
-      // Every caller claims `generatingRef` before reaching here and releases it in a `finally`
-      // around its own awaited body — this function only mirrors that into React state for the
-      // UI, and deliberately doesn't claim it itself: several callers write placeholder messages
-      // before calling in, and those writes need to be inside the lock, not in front of it.
+      // Callers claim the generation lock themselves before reaching here (their own placeholder-message writes need to be inside it too) — this only mirrors state into the UI.
       if (!character || !chat) return
       const { active: speaker } = resolveSpeaker(opts?.speakerId)
       if (!speaker) return
-      // Relationship tracking and the live-date rapport read stay scoped to the primary's
-      // relationship — skip them for a turn a non-primary participant spoke, rather than silently
-      // attributing their lines to it. Choice suggestions are *not* in that set: they only read
-      // the recent transcript (now labelled per-speaker) plus the shared gift wallet, so they're
-      // just as useful a prompt after anyone's turn.
+      // Relationship tracking/rapport stay scoped to the primary; choice suggestions apply to anyone.
       const isPrimarySpeaker = speaker.id === character.id
-      // This speaker's reply-length band, turned into a hard `max_length` ceiling for every round
-      // below — so a terse character stays terse even if the model ignores the prose instruction
-      // (`replyLengthInstruction` in `buildCurrentPrompt`). Only ever tightens the user's own
-      // Settings cap, never raises it. `bandCapsBelowUserMax` gates auto-continue: a reply that
-      // stopped because it hit the user's real budget should extend, one that hit this band on
-      // purpose should not.
+      // Hard max_length ceiling from this speaker's reply-length band, so a terse character stays
+      // terse even if the model ignores the prose instruction. Only tightens the user's cap, never raises it.
       const replyBand = resolveReplyLength(speaker.replyLength, speaker.card).band
       const effectiveMaxLength = replyMaxTokens(replyBand, sampler.max_length)
       const bandCapsBelowUserMax = effectiveMaxLength < sampler.max_length
-      // `continuing` starts as whatever the caller asked for (a fresh reply, or a manual
-      // "Continue" click) but becomes true partway through the loop below once an auto-continue
-      // round kicks in — from that point on every remaining round behaves exactly like a manual
-      // continue (same prompt shape, same "replace the last swipe" write), it just wasn't the
-      // user who asked for it.
+      // Becomes true once an auto-continue round kicks in — every remaining round then behaves like a manual continue.
       let continuing = !!opts?.continuing
       const wasOriginallyContinuing = continuing
       let currentHistory = historyForPrompt
@@ -2240,17 +1960,11 @@ export function useChatSession(chatId: string | null) {
       let combined = ''
       let scene: ReturnType<typeof sanitizeSceneTag>
       let wroteAnything = false
-      // Set when the loop breaks on a reply that still ends mid-sentence and has no continuation
-      // coming (a reply-length band cap stopped it short, or it stayed ragged through the last
-      // auto-continue round) — trimmed back to its last complete sentence after the loop.
+      // Set when the loop ends on a reply that's still mid-sentence with no continuation coming — trimmed after the loop.
       let needsSentenceTrim = false
 
       try {
-        // A reply that used its entire token budget without reaching a natural stop almost
-        // always means it was cut off mid-thought, not that the model happened to finish exactly
-        // on the last token — auto-continue transparently rather than leaving a visibly unfinished
-        // message for the user to notice and manually click "Continue" on. Capped so a model that
-        // never emits a stop sequence at all can't turn one reply into an unbounded loop.
+        // Auto-continues a reply that used its whole token budget (likely cut off mid-thought), capped so a model with no stop sequence can't loop forever.
         for (let round = 0; round <= MAX_AUTO_CONTINUE_ROUNDS; round++) {
           let built = await buildCurrentPrompt(currentHistory, {
             continueLastTurn: continuing,
@@ -2260,10 +1974,7 @@ export function useChatSession(chatId: string | null) {
           })
           if (!built) throw new Error('Could not build prompt: missing character or chat.')
 
-          // The budget was already tight for THIS turn, not just future ones — fold the
-          // overflow into the summary now and rebuild, instead of waiting until after the
-          // reply lands. Keeps the roleplay going instead of silently truncating history
-          // right when it matters most.
+          // Budget was already tight this turn — fold overflow into the summary and rebuild now rather than after the reply lands.
           if (autoSummarize && built.excludedMessageCount > 0) {
             await updateMemorySummary({ force: true })
             const rebuilt = await buildCurrentPrompt(currentHistory, {
@@ -2274,28 +1985,13 @@ export function useChatSession(chatId: string | null) {
             if (rebuilt) built = rebuilt
           }
 
-          // The template's own turn-boundary tokens (e.g. ChatML's <|im_end|>) must reach
-          // the sampler or the model has no signal to stop at its own turn — merged with
-          // whatever the user additionally set in Settings, not replacing it. Also merged with a
-          // couple of dynamic, always-safe stops: many imported character cards' `mes_example`
-          // uses SillyTavern's own `<START>` / `{{user}}:` / `{{char}}:` example-dialogue
-          // delimiters (verbatim in the prompt via `exampleBlock`), and a model that's uncertain
-          // about turn boundaries can fall back to imitating that pattern instead of stopping
-          // after its own single turn — seen live, producing a reply that trails off into a
-          // fabricated `<START>`/persona-name-prefixed "next" turn. No legitimate single-turn
-          // reply needs to emit a literal `<START>` or restate the persona's or its own
-          // name-prefix mid-message, so stopping there is safe for every template, not just ones
-          // that already define their own stop sequences.
+          // Template stop sequences + user's own, plus dynamic safe stops: a model can otherwise imitate
+          // a card's own `<START>`/name-prefixed example-dialogue delimiters instead of stopping its turn.
           const personaName = persona?.name || 'You'
           const dynamicStops = ['<START>', `\n${personaName}:`, `\n${speaker.card.name}:`]
           const stopSequence = [...new Set([...template.stopSequences, ...(sampler.stop_sequence ?? []), ...dynamicStops])]
 
-          // The KoboldCpp sampler shape (top_k/min_p/rep_pen/DRY/mirostat/...) has no meaning for a
-          // chat-completion backend — swap in the chat-completion-native params instead
-          // (temperature/top_p/penalties/reasoning_effort/verbosity, from their own separately
-          // tuned settings object). `max_context_length` stays from `sampler` either way: it's what
-          // sized `buildCurrentPrompt`'s context budget above, even though only KoboldCpp's own
-          // request actually reads the field itself.
+          // A chat-completion backend needs its own native sampler params, not KoboldCpp's shape.
           const generationParams =
             chatBackend === 'openai-compatible'
               ? { max_context_length: sampler.max_context_length, ...chatCompletionSamplerToRequest(chatCompletionSampler) }
@@ -2313,11 +2009,7 @@ export function useChatSession(chatId: string | null) {
                 max_length: effectiveMaxLength,
                 stop_sequence: stopSequence,
                 prompt: built.prompt,
-                // Section 8's "additional model backends": KoboldClient ignores this entirely
-                // (it only ever reads `prompt`); OpenAICompatibleClient uses it instead of
-                // wrapping `prompt` as a single user turn, giving a hosted chat-completion
-                // backend a proper system/user split for the one call site worth the effort —
-                // the main generation loop, not every background judge/assist call.
+                // KoboldClient ignores this; OpenAICompatibleClient uses it for a proper system/user split.
                 messages: [
                   { role: 'system', content: built.systemText },
                   { role: 'user', content: built.conversationText },
@@ -2342,7 +2034,7 @@ export function useChatSession(chatId: string | null) {
               abort.signal,
             )
           } catch (streamErr) {
-            // Fall back to non-streaming generate (some builds/proxies block SSE).
+            // Some builds/proxies block SSE — fall back to non-streaming.
             console.warn('Streaming generation failed, falling back to non-streaming:', streamErr)
             newText = await client.generate(
               {
@@ -2361,14 +2053,7 @@ export function useChatSession(chatId: string | null) {
             )
           }
 
-          // Finalize this round's stats client-side rather than reconciling against KoboldCpp's
-          // own `/api/extra/perf` — tried that first, and live-caught a real attribution bug: with
-          // post-reply assists (relationship scoring, choice suggestions) sharing the same server,
-          // `/api/extra/perf` reports the single most recent generation of ANY kind, so by the time
-          // this round's `getPerf()` call resolves it can just as easily describe an unrelated
-          // background assist call as this reply — one live run showed a nonsensical 300s
-          // "time to first token" this way. Every token in `streamedTokenCount` is scoped to
-          // exactly this round's own SSE stream, so it can't be misattributed the same way.
+          // Stats computed client-side from this round's own stream — KoboldCpp's `/api/extra/perf` can misattribute to a concurrent background assist call sharing the same server.
           if (streamedTokenCount > 0 && firstTokenAt !== null) {
             const finalElapsedSec = (performance.now() - firstTokenAt) / 1000
             setGenStats({
@@ -2390,29 +2075,12 @@ export function useChatSession(chatId: string | null) {
             new Set(chat.sceneFlags ?? []),
           )
           const { text: extractedText, scene: parsedScene } = extractSceneTag(combinedRaw)
-          // Deterministic scrub before this reply is stored: it fixes both what's displayed and
-          // what's fed back into every later prompt (a tell left in history is one the model
-          // imitates next turn). Idempotent, so the auto-continue rounds below re-running it over
-          // already-cleaned text is harmless. `combinedRaw` keeps the untouched original for the
-          // Prompt Inspector's raw/processed toggle.
+          // Scrubbed before storing so a tell doesn't get fed back and imitated next turn. `combinedRaw` keeps the raw original for the Prompt Inspector's toggle.
           combined = cleanModelOutput(extractedText, { charName: speaker.card.name, personaName: persona?.name || 'You' })
           scene = sanitizeSceneTag(parsedScene, unlockedExpressions, unlockedBackgrounds, selectableOutfits)
-          // FIXES_TODO.md's "model occasionally echoes recent chat history back as a fresh reply"
-          // bug — broader than the immediate-echo check below, and live-reproduced in shapes that
-          // check doesn't catch: a tail-end-only repeat of an earlier message, a concatenation of
-          // the last two char turns, and once a byte-for-byte copy of the PLAYER's own earlier
-          // line. `isDuplicateOfRecentText` catches all three via a bidirectional substring check
-          // against recent history from EITHER role, not just the character's own prior turn.
+          // Catches the model echoing recent history back as a "fresh" reply (tail-end repeat, concatenated turns, or a copy of the player's own line).
           const recentTextsForDuplicateCheck = historyForPrompt.slice(-6).map((m) => m.text)
-          // FIXES_TODO.md's "model can echo the raw injected relationship-guidance prompt text
-          // verbatim as dialogue" bug — `cleanModelOutput` above already strips the two most
-          // identifiable fixed lines of that block (see its `META_LINE_PATTERNS` entries), but a
-          // partial survivor (the pacing/gift-taste notes, say) wouldn't trip that on its own. This
-          // reconstructs the exact text that was actually injected this turn (same function, same
-          // inputs `buildCurrentPrompt` used, macro-substituted the same way it is in the real
-          // prompt) and checks for substantial overlap the same way as the history check above —
-          // only meaningful for the primary speaker, since that's the only one this block is ever
-          // injected for (see `buildCurrentPrompt`'s own `speaker.id === character.id` gate).
+          // Reconstructs the relationship-guidance text actually injected this turn, to catch a partial leak of it into the reply (primary speaker only).
           const relationshipDescriptionLeakText =
             isPrimarySpeaker
               ? substituteMacros(buildRelationshipDescription(chat, world, character) ?? '', {
@@ -2420,19 +2088,7 @@ export function useChatSession(chatId: string | null) {
                   userName: persona?.name || 'You',
                 })
               : undefined
-          // A reply that's nothing but a recognized `<<scene:>>` tag (or otherwise scrubs down to
-          // nothing), that's just the immediately-preceding message parroted back (bare, or with a
-          // stray speaker label glued on — see `isVerbatimEcho`), or that substantially duplicates
-          // recent history or the injected relationship-guidance text, is a real generation
-          // failure, not a success with an empty/repeated/recited message — without this, it saved
-          // as `failed: false` and rendered as a blank, duplicate-looking, or nonsense bubble with
-          // no "Generation failed" affordance, while still feeding the bad text to the choice/
-          // relationship assists below as the latest reply. `historyForPrompt`'s last entry (not
-          // `currentHistory`, which an auto-continue round has already overwritten with this same
-          // reply's own earlier text) is always whatever genuinely came before this generation
-          // attempt started, whoever said it. `combined` only ever grows round to round (each round
-          // re-derives it from the full accumulated text, never just its own delta), so once a
-          // round produces real, non-echoed text this can't flip back on a later round.
+          // Empty, an echo of the prior message, or a duplicate of recent history/injected guidance all count as a real failure, not a blank/repeated "success".
           const isUsableReply =
             combined.trim().length > 0 &&
             !isVerbatimEcho(combined, historyForPrompt[historyForPrompt.length - 1]?.text) &&
@@ -2457,6 +2113,7 @@ export function useChatSession(chatId: string | null) {
               scene,
               tokenCount: await countTokens(combined),
               failed: !isUsableReply,
+              continueUndo: opts?.continueUndo ?? null,
             })
           } else {
             const freshMsg = await messagesApi.get(targetMessageId)
@@ -2477,18 +2134,14 @@ export function useChatSession(chatId: string | null) {
               scene,
               tokenCount: await countTokens(combined),
               failed: !isUsableReply,
+              // A fresh (non-continue) generation replaces the whole reply, so any earlier continue is moot.
+              continueUndo: null,
             })
           }
-          // Only a round that actually produced a real, non-echoed reply counts — an empty or
-          // echoed round shouldn't mask a genuine failure if this is also the round the loop ends
-          // on (see `isUsableReply` above).
           wroteAnything = wroteAnything || isUsableReply
-          // Also rolls the sticky/cooldown bookkeeping forward for next turn (built once per round;
-          // the final round's state is the one that sticks). Bumps updatedAt regardless.
+          // Rolls world-info sticky/cooldown state forward for next turn.
           await chatsApi.update(chat.id, { worldInfoState: built.worldInfoState ?? {} })
 
-          // Stopping the generation by hand (or the model genuinely finishing early) both mean
-          // "don't keep going" regardless of how close to the token cap it landed.
           const generatedTokens = !abort.signal.aborted && newText.trim() ? await countTokens(newText) : 0
           const hitCap = !abort.signal.aborted && generatedTokens >= effectiveMaxLength - 1
           // A round that stopped well under the cap but leaves the reply mid-sentence was cut by a
@@ -2518,11 +2171,7 @@ export function useChatSession(chatId: string | null) {
               : [...currentHistory.slice(0, -1), { ...currentHistory[currentHistory.length - 1], text: combined }]
         }
 
-        // A reply that broke out of the loop still ending mid-sentence (band cap, or ragged past
-        // the last auto-continue round) gets trimmed back to its last complete sentence
-        // (trimToLastSentence bails itself if that would lose too much of a single long run-on),
-        // then any action beat / line of dialogue a stop sequence cut off mid-mark is closed off.
-        // Only the display text and active swipe change; the untouched `rawText` stays as-is.
+        // A reply still mid-sentence when the loop ends gets trimmed to its last complete sentence and closed off; `rawText` stays untouched.
         if (needsSentenceTrim && !abort.signal.aborted) {
           const tidied = balanceTrailingMarkup(trimToLastSentence(combined))
           if (tidied && tidied !== combined) {
@@ -2535,36 +2184,17 @@ export function useChatSession(chatId: string | null) {
           }
         }
 
-        // Item 4's deterministic "hard rail": a cheap, synchronous, non-AI lexical check against
-        // this character's own authored `boundaries` PLUS — item 7 — anything the player's own
-        // persona description states as a limit (`dating/boundaryGuard.ts`'s `detectAnyBoundaryCrossing`),
-        // the one piece of real enforcement on top of either field's existing prompt-only treatment
-        // everywhere else. Informational only (a toast), never an auto-reroll or a silent rewrite —
-        // a false positive discarding a good reply with no way to verify that live would be worse
-        // than an occasional missed catch. See that file's own doc comment for why this stays conservative.
+        // Deterministic hard rails: lexical checks against authored boundaries/POV/anti-patterns.
+        let hardFailCorrection: string | undefined
         if (!abort.signal.aborted && combined.trim()) {
           const crossed = detectAnyBoundaryCrossing(speaker.boundaries, persona?.description, combined)
           if (crossed) {
             toastInfo(`This reply may have crossed a stated limit: "${crossed}". Worth a regenerate if it reads wrong.`)
           }
-          // FIXES_TODO.md item #8: the sharpest, narrowest shape of "narrated the wrong person's
-          // climax" — see `agencyGuard.ts`'s own doc comment for why this is deliberately much
-          // narrower than the boundary check above (a false positive here is easier to hit than a
-          // stated-boundary miss, so precision matters even more). Never fires for a non-primary
-          // speaker's persona — `persona?.name` is always {{user}}'s own name regardless of who's
-          // replying, exactly what this needs to check against.
-          const povNarration = detectPersonaClimaxNarration(persona?.name || 'You', combined)
-          if (povNarration) {
-            toastInfo(`This reply may have narrated ${persona?.name || 'your'} own reaction for you: "${povNarration}". Worth a regenerate if it reads wrong.`)
+          const agencyViolation = detectPersonaAgencyViolation(persona?.name || 'You', combined)
+          if (agencyViolation) {
+            toastInfo(`This reply may have narrated ${persona?.name || 'your'} own reaction for you: "${agencyViolation}". Worth a regenerate if it reads wrong.`)
           }
-          // Item 11: same cheap, deterministic hard-rail idea, checking `explicitSceneGuidance`'s own
-          // "avoid these stock phrases" instruction actually landed — only meaningful while that
-          // instruction was actually issued this turn (an active, explicit-tier, peak-phase scene;
-          // see `detectExplicitAntiPatternUsed`'s own doc comment for why `building`-phase text is
-          // never worth checking against this specific list). Reads `chat`/`world` directly (not a
-          // fresh fetch) — same as the sibling read a few lines up in this same function, and this
-          // only needs "was a scene active going into this turn", the exact state `buildCurrentPrompt`
-          // itself read when it decided whether to issue the instruction in the first place.
           const flagCheckTrack = getRelationshipTrack(chat, speaker.id)
           const flagCheckIntimacyLevel = resolveIntimacyLevel(world?.intimacyLevel, globalIntimacyLevel)
           const antiPatternUsed =
@@ -2576,69 +2206,52 @@ export function useChatSession(chatId: string | null) {
           if (antiPatternUsed) {
             toastInfo(`This reply used the stock phrase "${antiPatternUsed}" it was told to avoid. Worth a regenerate if it reads wrong.`)
           }
-          // Item 8/11: durable, not just the toasts above — see `boundaryFlag`'s own doc comment
-          // (`types.ts`) for why a message-level marker is the safer alternative to an automatic
-          // reroll. `crossed ?? null`, not left conditionally omitted, so an old flag is actually
-          // cleared when a later attempt reads clean, not left stale from a previous round. Same
-          // reasoning for `povFlag`/`explicitQualityFlag`.
+          // `?? null`, not omitted — clears a stale flag from a previous attempt once this one reads clean.
           messagesApi
             .update(targetMessageId, {
               boundaryFlag: crossed ?? null,
-              povFlag: povNarration ?? null,
+              povFlag: agencyViolation ?? null,
               explicitQualityFlag: antiPatternUsed ?? null,
             })
             .catch(() => {})
+          // A genuine hard fail (boundary/agency, not the lower-stakes anti-pattern wording) earns one
+          // automatic retry with a short correction, rather than leaving a bad reply standing on the
+          // strength of a toast alone. Never more than one — a second bad attempt is just accepted.
+          if ((opts?.hardFailRetriesLeft ?? 1) > 0) {
+            hardFailCorrection = hardFailCorrectionDirective(speaker.card.name, persona?.name || 'You', crossed, agencyViolation)
+          }
         }
 
-        // Post-reply assists. Each is fire-and-forget (never blocks the reply that just landed) but
-        // routed through `runAssist` so the chat can show which ones are still running — on a local
-        // single-GPU server they queue up on the model, and their results otherwise appear with no
-        // warning that they were coming.
+        // A hard fail with a retry left: redo the whole reply fresh, with a concrete correction —
+        // never the rejected attempt's own post-reply assists (the relationship judge fires at most
+        // once per message id, so the retry, not the discarded attempt, must be the one it sees).
+        if (hardFailCorrection) {
+          await runGeneration(historyForPrompt, targetMessageId, images, {
+            ...opts,
+            hardFailRetriesLeft: (opts?.hardFailRetriesLeft ?? 1) - 1,
+            extraStyleGuidance: [opts?.extraStyleGuidance, hardFailCorrection].filter(Boolean).join(' '),
+          })
+          return
+        }
+
+        // Post-reply assists — each fire-and-forget, routed through `runAssist` so the UI can show which are still running.
         const relationshipHistory = wasOriginallyContinuing
           ? [...historyForPrompt.slice(0, -1), { id: targetMessageId, role: 'char' as const, name: speaker.card.name, text: combined }]
           : [...historyForPrompt, { id: targetMessageId, role: 'char' as const, name: speaker.card.name, text: combined }]
-        // A live scene (10b: date or its lower-stakes hangout sibling) suppresses the normal
-        // per-turn drip-feed — its outcome is resolved once, at the end, by endDateEvent's own
-        // assessDateOutcome pass instead.
+        // A live date/hangout suppresses the normal per-turn scoring — resolved once at the end by endDateEvent instead.
         const inLiveDate = isLiveScene(chat.activeEvent)
 
-        // FIXES_TODO.md's "regenerate doesn't undo the damage" item: every judge invocation used to
-        // be unconditional, so regenerating a message (a completely ordinary way to get a better
-        // take on the prose, nothing to do with whether the FIRST attempt was good or bad) reran
-        // the judge and applied a brand-new delta on top of whatever the discarded draft's own judge
-        // call already persisted — never reverted. A player who regenerated 3 times before keeping
-        // one got 3 stacked deltas for a single logical turn. Fixed at the root: the judge fires at
-        // most once, ever, per message id — on whichever attempt is the first to actually land
-        // usable (non-failed) text — see `StoredMessage.relationshipJudged`'s own doc comment.
-        // Fetched fresh rather than trusting `messages` (the hook's own possibly-stale query state):
-        // this same round's `failed` write just above is what `alreadyJudged` needs to see accurately.
+        // The judge fires at most once per message id, on whichever attempt first lands usable text — otherwise a regenerate would stack a fresh delta on top of an already-applied one. Fetched fresh so this round's own `failed` write above is visible.
         const targetMsgForJudgeGate = await messagesApi.get(targetMessageId)
         const shouldRunRelationshipJudge = !targetMsgForJudgeGate?.failed && !targetMsgForJudgeGate?.relationshipJudged
-        // Multi-character relationship tracking: scores whichever character actually just spoke,
-        // not only the primary — `updateAffectionFromReply` resolves the right track either way.
-        // A live date still suppresses this entirely regardless of speaker (dates stay primary-only
-        // and end-of-scene-scored; see `inLiveDate` above).
-        //
-        // Section 9(c)'s last open (a) item: when task-detection is ALSO due this turn, its check
-        // rides along inside this same judge call (`updateAffectionFromReply` → `assessRelationshipMoment`)
-        // instead of firing as a second, separately-queued request — the same "fold it into the one
-        // call already running" idea item 18 used for scene flags and fact extraction.
-        // `tasksHandledByMerge` tells the standalone `autoDetectTasks` block below to skip its own
-        // call when that happened. The merge only applies here (relationship tracking is due, not
-        // suppressed by a live date) — during a live date, or with relationship-tracking off,
-        // task-detection still runs standalone exactly as before.
+        // Scores whichever character actually spoke, not only the primary. Task-detection, when also due, rides along in this same judge call instead of a second request.
         let tasksHandledByMerge = false
         if (effectiveAssistFlag(chat.assistOverrides?.autoTrackRelationship, autoTrackRelationship) && !inLiveDate && shouldRunRelationshipJudge) {
-          // Intent from the just-sent message (opts), or from the latest stored user turn on a
-          // regenerate/swipe where no fresh message was sent.
           const latestIntent = opts?.intent ?? [...messages].reverse().find((m) => m.role === 'user')?.intent
           if (autoDetectTasks) {
             tasksHandledByMerge = true
             runAssist('relationship', 'Updating relationship', async () => {
-              // Fresh fetch, not the closure-captured `activeObjective` — this runs fire-and-forget
-              // after the reply already landed, so a stale read here would risk marking tasks done
-              // against an objective that's since moved on (same reasoning `detectAndMarkTasks` below
-              // already followed).
+              // Fresh fetch — this runs after the reply already landed, so a stale objective read risks marking tasks against one that's since moved on.
               const objective = await objectivesApi.getActive(chat.id)
               const pending = objective?.tasks.filter((t) => t.status === 'pending') ?? []
               const completedIndices = await updateAffectionFromReply(chat.id, relationshipHistory, combined, latestIntent, speaker, pending)
@@ -2652,8 +2265,7 @@ export function useChatSession(chatId: string | null) {
             })
           }
         }
-        // 10b live rapport: during a live date, no stat scoring runs, so instead read how the scene
-        // is trending and show that qualitatively. Cheap, stateless — never touches affection/stats.
+        // During a live date, read how the scene is trending qualitatively instead of scoring stats.
         if (inLiveDate && isPrimarySpeaker) {
           const startedAt = chat.activeEvent?.startedAt ?? 0
           const rapportTail = [
@@ -2671,12 +2283,7 @@ export function useChatSession(chatId: string | null) {
               charPersonality: character.card.personality,
             })
             if (!read) return
-            // 10b's "real stakes": a genuine dealbreaker ends the date for real, right now — not a
-            // quiet score-only consequence the player only sees when they get around to ending it
-            // themselves. `endDateEvent` re-checks `activeEvent` itself, so this is safe even if it
-            // races with the player hitting "End date" at the same moment. Hangouts are deliberately
-            // stakes-free (see `DateEventCard.kind` doc), so a walkOut read is never acted on there —
-            // the rapport judge is still asked for one, it's just ignored.
+            // A genuine dealbreaker ends the date immediately; hangouts are stakes-free so a walkOut read is ignored there.
             if (read.walkOut && chat.activeEvent?.kind === 'date') {
               await endDateEvent({ walkedOut: true })
               return
@@ -2749,21 +2356,13 @@ export function useChatSession(chatId: string | null) {
     ) => {
       if (!chatId || !beginGeneration()) return
       try {
-        // Read fresh rather than trusting the hook's own (possibly one-render-stale) `chat` — both
-        // the gift block below and the scene-policy resolution after it need this, so it's fetched
-        // once here instead of twice.
+        // Read fresh rather than the hook's possibly stale `chat` — needed by both the gift block and the scene-policy resolution below.
         const freshChat = await chatsApi.get(chatId)
         if (!freshChat) return
-        // Resolved once, up front, and reused below for who the gift goes to — multi-character
-        // relationship tracking's gift half: giving a gift moves *this* target's own track, not
-        // always the primary's, using the exact same "reply as" choice the composer already exposes
-        // for a group chat rather than adding a second, separate "give to" picker. Deliberately
-        // independent of the scene's turn policy below: a deliberate "give this to them" action
-        // shouldn't get silently redirected by round-robin or an AI director.
+        // A gift moves the chosen target's own track, not always the primary's — same "reply as" picker the composer already exposes.
         const { active: giftTarget } = resolveSpeaker(replyAsCharacterId)
         let giftId: string | undefined
-        // Item 3's one-shot reaction steer for the character's very next reply turn — combined with
-        // `intimacyDirective` below at the `runGeneration` call site, same one-shot channel.
+        // One-shot reaction steer for the character's next reply turn.
         let giftReactionDirective: string | undefined
         if (opts?.choice?.kind === 'gift' && opts.choice.giftId && giftTarget) {
           const inventory = { ...(freshChat.giftInventory ?? defaultGiftInventory(world)) }
@@ -2777,9 +2376,7 @@ export function useChatSession(chatId: string | null) {
           const gift = giftById(opts.choice.giftId, world)
           const preferenceScore = Math.max(-2, Math.min(3, Number(giftTarget.giftPreferences?.[opts.choice.giftId] ?? 0)))
           const track = getRelationshipTrack(freshChat, giftTarget.id)
-          // Item 3: recency (not just lifetime count) of this exact gift, so a re-gift and an
-          // obvious no-variety pattern read differently from a first-time gift — both in the stat
-          // math below and in `giftReactionDirective`'s prose steer.
+          // Recency (not just lifetime count) of this exact gift, so a re-gift reads differently from a first-time one.
           const priorTimesGivenThisGift = track.giftsGiven?.[opts.choice.giftId] ?? 0
           const sameGiftRun = trailingSameGiftRun(track.giftLog, opts.choice.giftId)
           const isMismatch = preferenceScore <= -0.5
@@ -2792,9 +2389,7 @@ export function useChatSession(chatId: string | null) {
           const warmth = computeWarmth(affection, getRelationshipStats(track))
           const giftsGiven = { ...(track.giftsGiven ?? {}) }
           giftsGiven[opts.choice.giftId] = (giftsGiven[opts.choice.giftId] ?? 0) + 1
-          // Item 6: a gift that genuinely lands (the same `>= 2` bar the durable-fact hook below
-          // already uses) opens a short reciprocity window — see `gifts.ts`'s `ReciprocityCue`.
-          // Milestone-crossing reciprocity is set separately in `announceMilestone`'s callers.
+          // A gift that genuinely lands opens a short reciprocity window (`gifts.ts`'s `ReciprocityCue`).
           const reciprocityCue: ReciprocityCue | undefined =
             preferenceScore >= 2 ? { startedAtTurn: countCharReplies(messages), reason: 'gift_received' } : undefined
           await chatsApi.update(chatId, {
@@ -2820,12 +2415,7 @@ export function useChatSession(chatId: string | null) {
               priorTimesGivenThisGift,
               isMismatch ? undefined : { rarity: gift.rarity, preferenceScore },
             )
-            // Item 3(c): a genuinely meaningful gift (a real authored love, not just "not disliked"),
-            // the first couple of times it's given, earns a durable, emotionally-coloured memory —
-            // hooked into the existing remembered-facts system (reaches the prompt every turn via
-            // `buildFactsLorebook`) rather than a parallel reference-tracking system of its own, so a
-            // character can plausibly call back to it later ("you still have that charm I gave you")
-            // with no new machinery.
+            // A genuinely meaningful gift, the first couple of times, earns a durable remembered fact so the character can call back to it later.
             if (preferenceScore >= 2 && priorTimesGivenThisGift < 2) {
               chatFactsApi
                 .create({
@@ -2838,24 +2428,15 @@ export function useChatSession(chatId: string | null) {
             }
           }
         }
-        // Normalise the player's own markup the same way the model's is on store: `<i>` and `**` both
-        // become `*action*`, so stored text, prompt history, and display all agree. Only the typed
-        // line, never `composeMessageText`'s appended file contents.
+        // Same `<i>`/`**` → `*action*` normalization the model's own output gets, so stored text/history/display all agree.
         const composedText = composeMessageText(normalizeRpMarkup(text), attachments).trim()
         const apiImages = collectImageBase64(attachments)
         if (!composedText && apiImages.length === 0) return
         if (!reducedAudio) playSendBlip()
 
-        // Stored as full data: URLs (renderable as-is); the API only ever sees the base64 payload.
         const storedImages = attachments.filter((a) => a.kind === 'image').map((a) => a.dataUrl)
 
-        // An explicit-tier intimacy action (a position/toy/activity from the Relationship panel,
-        // never a kissing spot) puts the character into their designated intimate outfit — decided
-        // here rather than left to the model, since this is a discrete, deliberate, player-initiated
-        // act, and the outfit it implies is usually `manualOnly` precisely so the model can't pick
-        // it on its own. Stamped onto the player's own message so it takes effect from this moment
-        // (see `currentOutfitFrom`), not only once the reply agrees. One-way by design: the story
-        // tags its own way back out.
+        // An explicit-tier intimacy action puts the character into their designated intimate outfit right away, stamped onto the player's message so it takes effect immediately.
         const usedIntimacyOption = opts?.intimacyOptionId ? intimacyItemById(opts.intimacyOptionId, world) : undefined
         const startsIntimateScene = !!usedIntimacyOption && isExplicitCategory(usedIntimacyOption.category) && !!giftTarget
         const intimateOutfit =
@@ -2882,10 +2463,7 @@ export function useChatSession(chatId: string | null) {
                 sourceLabel: usedIntimacyOption!.label,
                 momentumAtStart: priorTargetTrack.momentum ?? 0,
               },
-              // Item 1's intimacy scene state machine: starts (or re-centers, if one was already
-              // live — the consent-checkpoint/renegotiation case, gated by the exact same catalog
-              // click as any other intimacy action) at `'building'`, tracking what's now physically
-              // happening so later turns can be told rather than having to infer it from scrollback.
+              // Starts (or re-centers) the intimacy scene at `building`, tracking what's now physically happening.
               intimacyScene: startOrShiftIntimacyScene(
                 resolveIntimacyPromptNote(usedIntimacyOption!, giftTarget.card.name),
                 usedIntimacyOption!.category,
@@ -2895,13 +2473,7 @@ export function useChatSession(chatId: string | null) {
             }),
           })
         }
-        // A `kissing_spot` action is a deterministic, player-initiated kiss — the commitment
-        // ladder's physical-reality gate (`stage.ts`'s `commitmentLockReason`/`FIRST_KISS_FLAG`)
-        // should unlock the instant this is clicked, not wait on next turn's AI classifier to
-        // (maybe) notice it in prose. That classifier still separately covers a kiss written out in
-        // freeform roleplay instead of through this button — see `assessRelationshipMoment`'s own
-        // `first_kiss` glossary entry in `relationshipAssist.ts`. `kissing_spot` never satisfies
-        // `isExplicitCategory`, so this never overlaps with the `startsIntimateScene` branch above.
+        // A `kissing_spot` click unlocks the commitment ladder's first-kiss gate immediately, rather than waiting on next turn's AI classifier to notice it in prose.
         if (usedIntimacyOption?.category === 'kissing_spot' && !(freshChat.sceneFlags ?? []).includes(FIRST_KISS_FLAG)) {
           await chatsApi.update(chatId, { sceneFlags: [...(freshChat.sceneFlags ?? []), FIRST_KISS_FLAG] })
         }
@@ -2915,18 +2487,16 @@ export function useChatSession(chatId: string | null) {
           text: composedText,
           giftId,
           intent: opts?.intent,
-          intimacyAction: usedIntimacyOption ? { label: usedIntimacyOption.label, category: usedIntimacyOption.category } : undefined,
+          intimacyAction: usedIntimacyOption
+            ? { label: usedIntimacyOption.label, category: usedIntimacyOption.category, optionId: usedIntimacyOption.id }
+            : undefined,
           scene: intimateOutfit ? { outfit: intimateOutfit } : undefined,
           images: storedImages.length ? storedImages : undefined,
           createdAt: now,
         }
         await messagesApi.create(userMsg)
 
-        // Section 4/12's "proper Scene entity": who actually replies, per the chat's turn policy —
-        // `'manual'` (or no scene at all) keeps today's exact behavior, the same "reply as" choice
-        // gifting uses above. The other three only ever engage once there's an actual roster to
-        // choose among; each falls back to `giftTarget` (manual resolution) on its own terms rather
-        // than ever leaving `speaker` unset.
+        // Who actually replies, per the chat's turn policy — `manual` keeps the "reply as" choice above; the others need a roster to pick from.
         let speaker = giftTarget
         const turnPolicy = freshChat.scene?.turnPolicy ?? 'manual'
         if (turnPolicy !== 'manual' && character && participantCharacters.length > 0) {
@@ -2935,8 +2505,7 @@ export function useChatSession(chatId: string | null) {
             const next = nextRoundRobinSpeaker(roster, freshChat.scene?.roundRobinIndex)
             if (next) {
               speaker = resolveSpeaker(next.id).active
-              // Advanced immediately rather than after the reply lands, so the bookkeeping can't be
-              // reused by a rapid second send while this one is still generating.
+              // Advanced immediately so a rapid second send can't reuse this same index while this one is still generating.
               await chatsApi.update(chatId, { scene: { ...freshChat.scene!, roundRobinIndex: next.nextIndex } })
             }
           } else if (turnPolicy === 'mention') {
@@ -2954,8 +2523,7 @@ export function useChatSession(chatId: string | null) {
           }
         }
 
-        // createdAt is offset by 1ms and sent explicitly so this reply always sorts after the
-        // user's turn even though both are created in the same synchronous burst.
+        // createdAt offset by 1ms so this reply sorts after the user's turn despite both being created synchronously.
         const charMsg: StoredMessage = {
           id: newId(),
           chatId,
@@ -2975,9 +2543,7 @@ export function useChatSession(chatId: string | null) {
           name: m.name,
           text: m.text,
         }))
-        // When the player used a Relationship-panel intimacy action, hand the reply turn an explicit
-        // directive naming what was just initiated — a terse `*I ease {char} onto their back*` alone
-        // reads like a stage direction the model can skip past (the user's own report).
+        // Names what was just initiated explicitly — a terse action alone reads like a stage direction the model can skip past.
         const intimacyDirective =
           usedIntimacyOption && speaker
             ? intimacyActionDirective(usedIntimacyOption, persona?.name || 'You', speaker.card.name)
@@ -2985,8 +2551,7 @@ export function useChatSession(chatId: string | null) {
         await runGeneration(historyForPrompt, charMsg.id, apiImages, {
           speakerId: speaker?.id ?? null,
           intent: opts?.intent,
-          // Item 3's one-shot gift-reaction steer rides alongside the intimacy directive — both are
-          // one-shot corrections for this exact reply turn only, never persisted anywhere.
+          // Both directives are one-shot corrections for this exact reply turn only, never persisted.
           extraStyleGuidance: [intimacyDirective, giftReactionDirective].filter(Boolean).join(' ') || undefined,
         })
       } finally {
@@ -3000,9 +2565,7 @@ export function useChatSession(chatId: string | null) {
     async (messageId: string) => {
       const idx = messages.findIndex((m) => m.id === messageId)
       if (idx === -1) return
-      // Claimed after the lookup, so a regenerate aimed at a message that no longer exists never
-      // takes the lock — and before the blanking write below, which a second rapid click would
-      // otherwise land on top of a run already streaming into that same row.
+      // Claimed after the lookup, and before the blanking write below, so a second rapid click can't land on a run already streaming into this row.
       if (!beginGeneration()) return
       try {
         const priorMessages = messages.slice(0, idx)
@@ -3013,8 +2576,7 @@ export function useChatSession(chatId: string | null) {
           text: m.text,
         }))
         await messagesApi.update(messageId, { text: '', failed: false, boundaryFlag: null, povFlag: null, explicitQualityFlag: null })
-        // Regenerating keeps whoever originally said it, rather than letting a regenerate silently
-        // switch the speaker — that's a distinct, explicit action (editing the message).
+        // Keeps whoever originally spoke — switching speaker is a distinct, explicit edit action.
         await runGeneration(historyForPrompt, messageId, latestImages(priorMessages), { speakerId: messages[idx].speakerId })
       } finally {
         endGeneration()
@@ -3068,10 +2630,7 @@ export function useChatSession(chatId: string | null) {
       const swipes = msg.swipes ?? [msg.text]
       const current = msg.activeSwipe ?? 0
       if (direction === 'right' && current === swipes.length - 1) {
-        // Only this branch generates; stepping between existing swipes is a pure read and stays
-        // usable while a reply is in flight, exactly as before. The lock covers the `swipes`
-        // append too — two fast clicks used to push two empty swipes and generate into only one,
-        // leaving a permanently blank swipe stranded in the message.
+        // Only this branch generates; the lock also covers the `swipes` append so two fast clicks can't both push an empty swipe.
         if (!beginGeneration()) return
         try {
           const idx = messages.findIndex((m) => m.id === messageId)
@@ -3103,9 +2662,7 @@ export function useChatSession(chatId: string | null) {
         text: swipes[nextIndex],
         scene: msg.swipeScenes?.[nextIndex],
         rawText: msg.swipeRawTexts?.[nextIndex],
-        // `boundaryFlag`/`povFlag`/`explicitQualityFlag` aren't tracked per-swipe (unlike `scene`) —
-        // a flag from whichever swipe was previously active describes text that's no longer showing,
-        // so it's cleared here rather than left attached to different content.
+        // Flags aren't tracked per-swipe (unlike `scene`) — cleared here rather than left attached to different content.
         boundaryFlag: null,
         povFlag: null,
         explicitQualityFlag: null,
@@ -3125,7 +2682,12 @@ export function useChatSession(chatId: string | null) {
         name: m.name,
         text: m.text,
       }))
-      await runGeneration(historyForPrompt, last.id, latestImages(messages), { continuing: true, speakerId: last.speakerId })
+      const continueUndo = { text: last.text, rawText: last.rawText, scene: last.scene }
+      await runGeneration(historyForPrompt, last.id, latestImages(messages), {
+        continuing: true,
+        speakerId: last.speakerId,
+        continueUndo,
+      })
     } finally {
       endGeneration()
     }
@@ -3135,6 +2697,59 @@ export function useChatSession(chatId: string | null) {
     messages.length > 0 &&
     messages[messages.length - 1].role === 'char' &&
     !!messages[messages.length - 1].text.trim()
+
+  const canUndoLastContinue =
+    messages.length > 0 && messages[messages.length - 1].role === 'char' && !!messages[messages.length - 1].continueUndo
+
+  /** Reverts the last message back to how it read right before its most recent "Continue" — discards the appended segment entirely rather than regenerating it. */
+  const undoLastContinue = useCallback(async () => {
+    const last = messages[messages.length - 1]
+    if (!last || last.role !== 'char') return
+    const freshMsg = await messagesApi.get(last.id)
+    const undo = freshMsg?.continueUndo
+    if (!undo) return
+    const activeSwipe = freshMsg?.activeSwipe ?? 0
+    const swipes = freshMsg?.swipes?.length ? [...freshMsg.swipes] : [undo.text]
+    swipes[activeSwipe] = undo.text
+    const swipeScenes = freshMsg?.swipeScenes ? [...freshMsg.swipeScenes] : []
+    swipeScenes[activeSwipe] = undo.scene
+    const swipeRawTexts = freshMsg?.swipeRawTexts ? [...freshMsg.swipeRawTexts] : []
+    swipeRawTexts[activeSwipe] = undo.rawText
+    await messagesApi.update(last.id, {
+      text: undo.text,
+      rawText: undo.rawText,
+      scene: undo.scene,
+      swipes,
+      swipeScenes,
+      swipeRawTexts,
+      activeSwipe,
+      tokenCount: await countTokens(undo.text),
+      continueUndo: null,
+    })
+  }, [messages])
+
+  /** Re-runs just the "Continue" step from the same pre-continue point, discarding the current appended segment for a freshly generated one instead. */
+  const regenerateLastContinueSegment = useCallback(async () => {
+    const last = messages[messages.length - 1]
+    if (!last || last.role !== 'char' || !last.continueUndo) return
+    if (!beginGeneration()) return
+    try {
+      const continueUndo = last.continueUndo
+      const historyForPrompt: ChatMessage[] = messages.map((m) => ({
+        id: m.id,
+        role: m.role,
+        name: m.name,
+        text: m.id === last.id ? continueUndo.text : m.text,
+      }))
+      await runGeneration(historyForPrompt, last.id, latestImages(messages), {
+        continuing: true,
+        speakerId: last.speakerId,
+        continueUndo,
+      })
+    } finally {
+      endGeneration()
+    }
+  }, [beginGeneration, endGeneration, messages, runGeneration])
 
   /** Suggests what the persona might say next, in their voice — returned for the caller to drop into the composer, never auto-sent. */
   const impersonate = useCallback(async (): Promise<string> => {
@@ -3152,21 +2767,9 @@ export function useChatSession(chatId: string | null) {
       { ...sampler, prompt: built.prompt, genkey: makeGenKey() },
       'Suggest a reply',
     )
-    // The generation cue already ends with "{{user}}:", so a model that opens with "Kai: " is
-    // echoing the label, not naming itself — the same scrub the character reply path gets. Passing
-    // the persona name as `charName` (the expected speaker of *this* text) strips that leading
-    // label; passing the character name as `personaName` truncates the suggestion if the model runs
-    // on past {{user}}'s line into {{char}}'s reply.
+    // Strips a leading "Kai: "-style label echo the same way the character reply path does.
     const cleaned = cleanModelOutput(text, { charName: persona?.name || 'You', personaName: character.card.name })
-    // FIXES_TODO.md item #4: the char-turn pipeline (`runGeneration`) has had an empty/echo/
-    // duplicate-of-recent-history guard for a while now (`isVerbatimEcho`/`isDuplicateOfRecentText`,
-    // used to build `isUsableReply`) — this call site never had the equivalent, so a suggestion that
-    // came back empty, or that was really the character's own last line played back (a real, live
-    // failure shape for this exact generation shape — impersonation with no real fresh content to
-    // work from), used to land straight in the composer via `Composer.tsx`'s `handleImpersonate`
-    // with nothing to catch it. `historyForPrompt`'s own last few entries (not filtered by role) are
-    // the same "recent history" window the char-turn path checks against, so a suggestion that's
-    // really a repeat of the character's last reply is caught the same way a repeat reply would be.
+    // Same empty/echo/duplicate guard the char-turn pipeline uses for `isUsableReply`.
     const recentTexts = historyForPrompt.slice(-6).map((m) => m.text)
     if (!cleaned.trim() || isVerbatimEcho(cleaned, historyForPrompt[historyForPrompt.length - 1]?.text) || isDuplicateOfRecentText(cleaned, recentTexts)) {
       throw new Error("Couldn't come up with a suggestion that fit — try again.")
@@ -3174,13 +2777,7 @@ export function useChatSession(chatId: string | null) {
     return cleaned
   }, [buildCurrentPrompt, character, chat, client, messages, persona?.name, sampler])
 
-  /**
-   * Writes the player's action line for a Relationship-panel intimacy option, adapted to the scene
-   * as it stands right now instead of the one fixed sentence every time (the user's ask: "a
-   * different message each time, depending on scenario and the messages before"). Returns text for
-   * the composer — reviewed and sent by hand, never auto-sent, same as `impersonate`. On any
-   * failure the caller falls back to the entry's own `composeIntimacyActionText`.
-   */
+  /** Drafts the player's action line for a Relationship-panel intimacy option, adapted to the current scene rather than one fixed sentence. Returned for the composer, never auto-sent. */
   const draftIntimacyAction = useCallback(
     async (optionId: string): Promise<string> => {
       if (!character || !chat) return ''
@@ -3189,16 +2786,7 @@ export function useChatSession(chatId: string | null) {
       const personaName = persona?.name || 'You'
       const charName = character.card.name
       const historyForPrompt: ChatMessage[] = messages.map((m) => ({ id: m.id, role: m.role, name: m.name, text: m.text }))
-      // The user's own live catch: a drafted action can drift entirely off the clicked catalog
-      // entry — seen live, clicking a toy mid-kiss produced fluent, in-character text that was
-      // still just... more kissing, nothing about the toy at all, saved under the toy's own label
-      // with no way for anything downstream to notice the mismatch. The likely cause: the original
-      // wording asked for prose "fitting exactly where the scene already is," which a model with a
-      // strong existing beat already in progress can read as license to keep doing that instead of
-      // actually switching to the new action. Reworded to make unmistakable that this is a
-      // deliberate change FROM whatever was just happening, not a continuation of it — the scene's
-      // mood/position is still something to adapt around, just never a reason to substitute a
-      // different act than the one actually clicked.
+      // Explicitly a deliberate change FROM whatever was happening, not a continuation — a drafted action can otherwise drift back onto the prior beat instead of the one actually clicked.
       const directive = [
         `${personaName} is choosing to do exactly this, right now: ${resolveIntimacyPromptNote(option, charName)}.`,
         `This is a deliberate change FROM whatever was just happening in the scene, not a continuation of it — write ${personaName} actually transitioning into THIS specific action. The current mood, position, and what everyone is or isn't wearing are still there to adapt the transition around, never a reason to keep doing the previous act instead of this one.`,
@@ -3278,14 +2866,9 @@ export function useChatSession(chatId: string | null) {
     async (status: 'completed' | 'abandoned') => {
       if (!activeObjective) return
       await objectivesApi.update(activeObjective.id, { status })
-      // `null`, not `undefined` — JSON.stringify drops undefined-valued keys entirely, so the
-      // server would never see this field in the PATCH body and the stale activeEvent would stick.
+      // `null`, not `undefined` — JSON.stringify would drop an undefined key and leave the stale activeEvent in place.
       if (chatId) await chatsApi.update(chatId, { activeEvent: null })
-      // 10a's "Economy" bullet: completing an objective is the one earning moment available to a
-      // player who mostly just talks through ordinary roleplay instead of deliberately starting
-      // formal dates/hangouts (which already earn their own payout via `endDateEvent`). Only a
-      // deliberate 'completed' grants this — 'abandoned' earns nothing. See
-      // `OBJECTIVE_COMPLETE_COIN_BONUS`'s own doc comment for why this amount.
+      // Completing an objective is an earning moment too, distinct from a date/hangout's own payout. Only 'completed' grants coins.
       if (status === 'completed' && chatId) {
         const coinsGranted = await getCoinMutex(chatId).run(async () => {
           const liveChat = await chatsApi.get(chatId)
@@ -3324,21 +2907,11 @@ export function useChatSession(chatId: string | null) {
     })
   }, [character, chat, client, persona?.name, world])
 
-  /**
-   * Starting a `kind: 'date'` or `'hangout'` card spends one of the world's daily actions (10a's
-   * "Energy/action economy") — gift/milestone cards aren't a "spend a chunk of the day doing
-   * something" activity the way a live scene is, so they're left free. No world assigned to this
-   * character means no clock to spend against, so energy simply doesn't apply (unlimited, same as
-   * before this existed).
-   */
+  /** Starting a date/hangout spends one of the world's daily energy actions; gift/milestone cards stay free. No world means energy doesn't apply. */
   const startDateEvent = useCallback(
     async (event: DateEventCard) => {
       if (!chatId || !event.title.trim() || !event.objectiveTitle.trim()) return
-      // Captured before any energy spend below rolls the world clock forward — once a day's last
-      // action forces a rollover, the *persisted* clock jumps straight to next morning and no
-      // longer represents the moment the activity is actually happening in (see `activityPhase`'s
-      // own doc comment). The opener below grounds its opening line on this snapshot instead of
-      // reading the live (by then already-advanced) world state.
+      // Snapshotted before the energy spend below can roll the world clock to next morning, so the opener still grounds on the moment the activity is actually happening in.
       let openingMomentNote: string | undefined
       if ((event.kind === 'date' || event.kind === 'hangout') && world) {
         const freshWorld = await worldsApi.get(world.id)
@@ -3350,9 +2923,7 @@ export function useChatSession(chatId: string | null) {
         }
         if (character) {
           const moment = activityPhase(day, phaseIndex)
-          // `describeWorldMoment` writes `{{char}}` as a literal macro (correct for `worldDescription`,
-          // which is macro-substituted) — `styleGuidance` isn't, so it's resolved by hand here rather
-          // than leaking a literal `{{char}}` into the actual prompt sent to the model.
+          // `styleGuidance` isn't macro-substituted, so `{{char}}` is resolved by hand here rather than leaking literally into the prompt.
           openingMomentNote = describeWorldMoment({
             worldId: world.id,
             characterId: character.id,
@@ -3369,9 +2940,7 @@ export function useChatSession(chatId: string | null) {
         }
       }
       await createObjective(event.objectiveTitle, event.objectiveDescription ?? event.description ?? '', 'ai')
-      // 10b's "real stakes": draft what the character secretly wants from this scene, from their
-      // own card. Best-effort and never blocks starting the date — a card too thin to draft one
-      // from, or a judge call that fails, just leaves it unset.
+      // Best-effort hidden agenda for what the character secretly wants from this date; never blocks starting it.
       let hiddenAgenda: string | undefined
       if (event.kind === 'date' && character) {
         const warmthLabel = formatRelationshipStage(
@@ -3390,32 +2959,13 @@ export function useChatSession(chatId: string | null) {
             warmthLabel,
           }).catch(() => null)) ?? undefined
       }
-      // Stamped on every event regardless of kind — harmless metadata for gift/milestone cards,
-      // which never read it — but for a `kind: 'date'` card its presence is what marks this as a
-      // live, scored date (10b) rather than the original lightweight event-card flow, and its
-      // value is the cutoff `endDateEvent` uses to gather this date's own transcript.
-      // Clear any rapport read left over from a previous date so the indicator starts blank.
+      // Marks this as a live, scored date/hangout; also the cutoff `endDateEvent` uses to gather its transcript. Clears any leftover rapport read.
       await chatsApi.update(chatId, { activeEvent: { ...event, startedAt: Date.now(), hiddenAgenda }, rapport: null })
 
-      // "Breaking the ice" (10b's top-of-section ask): a live date/hangout is a real streamed
-      // scene, not a checklist the player messages a stranger into — so the character opens it,
-      // the same instant it starts, rather than leaving an empty composer waiting on the player.
-      // Built exactly like a fresh reply (a new empty char message, `runGeneration` over the
-      // existing history) with one difference: `extraStyleGuidance` tells the model this is an
-      // opening, not a response, since the history it's reading may end on the character's OWN
-      // last line from before the scene began — a shape nothing else in the app produces.
+      // The character opens the scene themselves the instant it starts, rather than leaving an empty composer waiting on the player.
       if ((event.kind === 'date' || event.kind === 'hangout') && character) {
         const sceneNoun = event.kind === 'hangout' ? 'hangout' : 'date'
-        // Narrow but real: another generation (a regular reply, a swipe) can still be in flight the
-        // instant this fires, and runGeneration's shared refs (abort controller, gen key,
-        // streaming-text state) genuinely can't run two at once — skip rather than corrupt that
-        // state, but say so, since silently skipping would recreate the exact "empty composer,
-        // waiting on the player" gap this feature exists to close.
-        //
-        // The claim doubles as that check (it fails exactly when something else holds the lock),
-        // which also closes the gap the old `isGenerating` read left: everything above this point
-        // awaits, so by the time the branch was reached the captured state could be several
-        // renders stale — precisely the case a scene opener firing next to a live reply hits.
+        // The lock claim doubles as a liveness check: another generation could still be in flight, and runGeneration's shared refs can't run two at once.
         if (!beginGeneration()) {
           toastInfo(`${event.title} has started — ${character.card.name} will pick it up as soon as the current reply finishes, or send a message yourself.`)
         } else {
@@ -3451,13 +3001,7 @@ export function useChatSession(chatId: string | null) {
   // Kept current every render — see `startDateEventRef`'s own doc comment, above `askForCommitment`.
   startDateEventRef.current = startDateEvent
 
-  /**
-   * Ends an active live scene (`kind: 'date'` or its `'hangout'` sibling) with a single validated
-   * judge pass over the whole scene's transcript (10b's "save-safe end-of-date scoring") rather
-   * than the per-turn drip-feed ordinary chat gets — see `assessDateOutcome`. A scene with no
-   * messages since it started just closes quietly, no judge call and no relationship movement:
-   * starting one and never speaking shouldn't count for or against anything.
-   */
+  /** Ends an active date/hangout with one validated judge pass over its whole transcript. A scene with no messages just closes quietly. */
   const endDateEvent = useCallback(async (opts?: { walkedOut?: boolean }) => {
     if (!chatId || !character) return
     const freshChat = await chatsApi.get(chatId)
@@ -3466,8 +3010,7 @@ export function useChatSession(chatId: string | null) {
     const startedAt = event.startedAt
 
     const closeOutEvent = async () => {
-      // `null`, not `undefined` — see the note on the other clearing call site above. Rapport is
-      // scene-scoped, so it clears with the date it belonged to.
+      // Rapport is scene-scoped, so it clears with the date it belonged to.
       await chatsApi.update(chatId, { activeEvent: null, rapport: null })
       if (activeObjective) await objectivesApi.update(activeObjective.id, { status: 'completed' })
     }
@@ -3539,15 +3082,7 @@ export function useChatSession(chatId: string | null) {
       unlockedIds.forEach((id) => unlockedSet.add(id))
     }
 
-    // 10a's "Economy" bullet, first slice: coins earned from how the date actually went, not
-    // handed out flat — a date that lands earns real money, a flat or hurtful one earns none.
-    // Still chat-scoped (`Chat.giftCoins`) like every other coin flow today, not the shared
-    // per-world wallet the roadmap ultimately wants — that's a bigger migration, left open.
-    //
-    // The payout write runs inside the coin mutex, re-reading the balance *inside* the lock rather
-    // than the `freshChat` snapshot fetched before `assessDateOutcome`'s AI call — by the time a
-    // multi-turn date ends, that snapshot is easily stale enough for a Shop purchase made mid-date
-    // to race it and lose its deduction. See `coinMutex.ts`.
+    // Coins scale with how the date actually went. Balance is re-read inside the coin mutex, not the possibly-stale `freshChat` snapshot, so a mid-date Shop purchase can't race it.
     const coinsEarned = Math.max(0, Math.round(deltas.affection * 2))
     await getCoinMutex(chatId).run(async () => {
       const liveChat = (await chatsApi.get(chatId)) ?? freshChat
@@ -3577,8 +3112,7 @@ export function useChatSession(chatId: string | null) {
       })
       .catch(() => {})
 
-    // A walkout is a real, bad outcome — read it back as one (a red toast), not the same
-    // congratulatory tone as an ordinary date ending.
+    // A walkout is a real, bad outcome — a red toast, not the usual congratulatory tone.
     if (opts?.walkedOut) toastError(outcome.recap)
     else toastSuccess(outcome.recap)
     if (coinsEarned > 0) toastSuccess(`Earned ${coinsEarned} coins from the ${event.kind === 'hangout' ? 'hangout' : 'date'}`)
@@ -3619,8 +3153,7 @@ export function useChatSession(chatId: string | null) {
     if (msg?.activeSwipe !== undefined && swipes[msg.activeSwipe] !== undefined) {
       swipes[msg.activeSwipe] = text
     }
-    // A hand-edit is the player's own words now, not the flagged generation — the old flag no
-    // longer describes what's actually there, so it's cleared rather than left stale.
+    // A hand-edit is the player's own words now — the old flag no longer describes what's there.
     await messagesApi.update(messageId, { text, swipes, boundaryFlag: null, povFlag: null, explicitQualityFlag: null })
   }, [])
 
@@ -3687,6 +3220,9 @@ export function useChatSession(chatId: string | null) {
     updateMemorySummary,
     continueMessage,
     canContinue,
+    canUndoLastContinue,
+    undoLastContinue,
+    regenerateLastContinueSegment,
     impersonate,
     draftIntimacyAction,
     createObjective,

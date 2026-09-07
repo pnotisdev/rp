@@ -1,13 +1,7 @@
-/**
- * Puts an indefinite article in front of a noun phrase, for the one-line action the app writes on
- * the player's behalf when they hand over a gift (`useChatSession`'s `*I give {name} {gift}.*`).
- * Without it that line read "I give Sumire Pressed Flower Bookmark."
- *
- * A display-only heuristic, deliberately biased toward *not* inserting an article: a missing "a"
- * reads as slightly clipped, but a wrong one ("a Chocolates", "a a Cup of Tea") reads as broken.
- * Gift names come from a world's own authored catalog (`WorldCard.gifts`), so the input is
- * arbitrary text rather than a fixed set this could be hand-tuned against.
- */
+// Puts an indefinite article in front of a noun phrase, for the gift-giving action line
+// (`*I give {name} {gift}.*`). A display-only heuristic biased toward *not* inserting an article —
+// a missing "a" reads clipped, a wrong one ("a Chocolates") reads broken. Gift names are arbitrary
+// authored text (`WorldCard.gifts`), not a fixed set this could be hand-tuned against.
 
 /** Words that already determine the noun — prefixing anything would double up. Numbers count too ("Two Tickets", "3 Coins"). */
 const DETERMINERS = new Set([
@@ -33,20 +27,12 @@ const DETERMINERS = new Set([
   'those',
 ])
 
-/**
- * Written vowels are only a proxy for vowel *sounds*, which is what "a"/"an" actually tracks.
- * These are the two directions the proxy gets wrong often enough to be worth naming: a silent `h`
- * ("an hour") and a `u`/`o` that opens on a consonant sound ("a university", "a one-way ticket").
- * Matched on the first word only, since that's the word the article sits against.
- */
+// Written vowels are only a proxy for vowel sounds — these catch the two common mismatches: a
+// silent `h` ("an hour") and a `u`/`o` that opens on a consonant sound ("a university").
 const SILENT_H = /^(hour|honest|honou?r|heir)/i
 const CONSONANT_INITIAL_VOWEL = /^(uni(?![a-z]*[aeiou]?n\b)|use|user|usual|euro|eu|ubiquit|one|once)/i
 
-/**
- * Ends in an `s` that reads as a plural rather than part of the word — "Chocolates" takes no
- * article, "Glass" and "Iris" do. Not a real pluralizer; it only has to be right often enough on
- * short noun phrases to beat always-inserting.
- */
+/** Ends in an `s` that reads as a plural rather than part of the word — "Chocolates" takes no article, "Glass"/"Iris" do. */
 function looksPlural(word: string): boolean {
   if (!/s$/i.test(word)) return false
   return !/(ss|us|is|as|os)$/i.test(word)

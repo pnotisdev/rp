@@ -163,6 +163,40 @@ describe('resolveExpressionSprite — outfits', () => {
   })
 })
 
+describe('resolveExpressionSprite — variants (item 11)', () => {
+  const AVATAR = 'data:avatar'
+  const sprites = { happy: 'data:happy-primary', neutral: 'data:neutral' }
+
+  it('is byte-for-byte unchanged when no variant options are passed', () => {
+    expect(resolveExpressionSprite(sprites, {}, AVATAR, 'happy', 50)).toBe('data:happy-primary')
+  })
+
+  it('can pick a variant other than the primary for a given seed', () => {
+    const variants = { happy: ['data:happy-alt1', 'data:happy-alt2', 'data:happy-alt3'] }
+    const pool = new Set<string>()
+    for (let i = 0; i < 20; i++) {
+      pool.add(resolveExpressionSprite(sprites, {}, AVATAR, 'happy', 50, undefined, { variants, seed: `msg-${i}` })!)
+    }
+    // Every pick is a real member of [primary, ...variants], and more than just the primary shows up.
+    expect([...pool].every((p) => [sprites.happy, ...variants.happy].includes(p))).toBe(true)
+    expect(pool.size).toBeGreaterThan(1)
+  })
+
+  it('picks the same variant every time for the same seed — no flicker across re-renders', () => {
+    const variants = { happy: ['data:happy-alt1', 'data:happy-alt2'] }
+    const first = resolveExpressionSprite(sprites, {}, AVATAR, 'happy', 50, undefined, { variants, seed: 'msg-1' })
+    for (let i = 0; i < 5; i++) {
+      expect(resolveExpressionSprite(sprites, {}, AVATAR, 'happy', 50, undefined, { variants, seed: 'msg-1' })).toBe(first)
+    }
+  })
+
+  it('ignores variants for a key with none, and never picks a variant for a key that was not resolved', () => {
+    const variants = { neutral: ['data:neutral-alt'] }
+    // 'happy' resolves, but has no variants of its own — must stay exactly the primary.
+    expect(resolveExpressionSprite(sprites, {}, AVATAR, 'happy', 50, undefined, { variants, seed: 'msg-1' })).toBe('data:happy-primary')
+  })
+})
+
 describe('expressionCandidatesFor', () => {
   it('pairs each unlocked id with its default label', () => {
     expect(expressionCandidatesFor(['neutral', 'happy'], undefined)).toEqual([

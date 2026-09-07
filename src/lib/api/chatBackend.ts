@@ -1,38 +1,24 @@
 import type { GenerateRequest } from './types'
 
-/**
- * Section 8's "additional model backends" — one interface both the existing `KoboldClient` and a
- * new hosted-provider client implement, the same "one abstraction, many providers" shape
- * `ttsProviders.ts` already uses for text-to-speech. Deliberately narrow: only the methods every
- * real call site (the main chat loop, every background judge/assist call, character-field
- * regeneration) actually calls. KoboldCpp-specific status/diagnostics (`getVersion`, `getPerf`,
- * `getMaxContextLength`, ...) stay directly on `KoboldClient` — they back the Connection settings
- * tab's own KoboldCpp-specific status display, not something a hosted API has an equivalent of.
- */
+// Shared interface implemented by `KoboldClient` and every hosted-provider client, plus the
+// provider metadata (ids, labels, known OpenAI-compatible providers) used to pick between them.
+
 export interface ChatBackend {
   generate(params: GenerateRequest, signal?: AbortSignal): Promise<string>
   generateStream(params: GenerateRequest, onToken: (token: string, full: string) => void, signal?: AbortSignal): Promise<string>
   /** The model's actual max context, cached — or a sane fallback for a backend with no introspection endpoint. */
   getEffectiveMaxContext(fallback?: number): Promise<number>
   tokenCount(text: string): Promise<{ count: number }>
-  /** Best-effort server-side abort — a no-op for a backend with no such endpoint; the caller's own `AbortSignal` already stops the client-side read either way. */
+  /** Best-effort server-side abort — a no-op for a backend with no such endpoint. */
   abort(genkey: string): Promise<void>
-  /** The loaded model's own chat template, for the instruct-template-mismatch nudge — meaningless (and always null) for a backend that isn't running a local GGUF. */
+  /** The loaded model's own chat template — always null for a backend that isn't running a local GGUF. */
   getChatTemplate(): Promise<string | null>
 }
 
-/**
- * A lightweight, no-generation-cost reachability+auth probe — deliberately not part of
- * `ChatBackend` itself (same reasoning as the doc comment above: KoboldCpp's rich status lives
- * directly on `KoboldClient`, not the shared interface). Unlike that richer status, "is this
- * endpoint reachable and is the key accepted" genuinely does have an answer for every backend, just
- * a much thinner one — `OpenAICompatibleClient` and `NovelAIClient` each implement `checkConnection()`
- * with this same return shape so Settings → Connection and the header status dot can treat every
- * non-KoboldCpp backend identically.
- */
+/** Lightweight reachability+auth probe implemented by every non-KoboldCpp backend, for Settings → Connection. */
 export interface ConnectionCheckResult {
   ok: boolean
-  /** A short, specific reason for a failure (bad key, unreachable host, ...) — undefined for a bare/unexplained failure, and for any success. */
+  /** A short, specific reason for a failure — undefined for success or an unexplained failure. */
   detail?: string
 }
 
@@ -44,7 +30,7 @@ export const CHAT_BACKEND_LABELS: Record<ChatBackendId, string> = {
   novelai: 'NovelAI (hosted, subscription)',
 }
 
-/** NovelAI's own two current text models this app supports — see `novelai.ts`'s own header comment for why Erato isn't included yet. */
+/** NovelAI's own two current text models this app supports. */
 export const NOVELAI_MODELS = [
   { id: 'kayra-v1', label: 'Kayra' },
   { id: 'clio-v1', label: 'Clio' },
@@ -62,19 +48,11 @@ export interface KnownChatProvider {
   id: string
   label: string
   baseUrl: string
-  /** Shown as the Model field's placeholder once this provider is picked — a realistic id, not a promise it's the best/cheapest option there. */
+  /** Shown as the Model field's placeholder once this provider is picked. */
   modelExample: string
 }
 
-/**
- * SillyTavern-style provider picker (user's own reference, after live-testing section 8): each
- * entry's `baseUrl` is that vendor's own documented OpenAI-compatible endpoint, so picking one
- * pre-fills Settings → Connection instead of the user needing to know/paste it themselves. Honesty
- * note matching the rest of section 8: only OpenRouter's entry has actually been exercised against
- * a real account this session (see ROADMAP.md #121/#122) — the rest are correct per each vendor's
- * own docs but not independently re-verified here. "Custom" isn't in this list; it's simply
- * whatever the user types that matches none of these.
- */
+/** SillyTavern-style provider picker: picking one pre-fills Settings → Connection's base URL. */
 export const KNOWN_CHAT_PROVIDERS: KnownChatProvider[] = [
   { id: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', modelExample: 'gpt-4o-mini' },
   {

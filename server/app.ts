@@ -18,21 +18,22 @@ import {
   worldStore,
   avatarsDir,
 } from './db.ts'
-import { removeAvatar, resolveAvatar, resolveAvatarMap, resolveWorldMusicMap } from './avatars.ts'
+import { removeAvatar, resolveAvatar, resolveAvatarMap, resolveAvatarMapVariants, resolveWorldMusicMap } from './avatars.ts'
 import { encodeTokens, tokenizerForModel } from './novelaiTokenizer.ts'
 import { originGuard } from './originCheck.ts'
 
+/**
+ * Express app: REST routes for characters, personas, chats/messages, world info books, sampler
+ * presets, themes, instruct templates, worlds, objectives, relationship events, chat facts, full
+ * backup/restore, and the NovelAI tokenize endpoint — plus the request-body normalization helpers
+ * that validate client-authored JSON before it's persisted.
+ */
 export const app = express()
 
-// Cross-site guard (Section 9's audit finding). See `originCheck.ts` for the full reasoning —
-// short version: reject a request whose Origin is another website, allow any loopback origin so a
-// dev server on a non-5173 port still reaches its own data.
+// Rejects a request whose Origin is another website; any loopback origin is allowed. See originCheck.ts.
 app.use(originGuard)
 
-// A character save can carry many sprite images at once now (10d's bulk expression upload) —
-// each already capped at 8MB decoded by decodeImageDataUrl(), but a full ~21-expression set in
-// one request easily clears a 25MB body. Raised generously since this is a local-only, single-user
-// app with no untrusted-request concern, not a public API needing a tight body-size ceiling.
+// Raised generously (a bulk sprite upload easily clears 25MB) — local-only app, no untrusted-request concern.
 app.use(express.json({ limit: '150mb' }))
 app.use('/avatars', express.static(avatarsDir))
 
@@ -52,14 +53,7 @@ function normalizeCustomExpressions(raw: unknown) {
   return entries.length ? entries : undefined
 }
 
-/**
- * A character's wardrobe states (`src/lib/vn/outfits.ts`). Same shape/validation approach as
- * `normalizeCustomExpressions` above, plus the gates. `id` is checked against the same character
- * class the sprite-key validator uses, because it becomes half of a `<outfitId>--<expression>`
- * sprite key and therefore half of a filename — a client that skipped `slugifyOutfitId` must not
- * be able to smuggle a path separator through here. `base` is reserved (it means "the unprefixed
- * sprite keys"), so an outfit claiming it would shadow the character's original art.
- */
+/** A character's wardrobe states (`src/lib/vn/outfits.ts`); `id` is slug-validated since it becomes half of a sprite filename, and `base` is reserved. */
 function normalizeOutfits(raw: unknown) {
   if (!Array.isArray(raw)) return undefined
   const entries = raw
@@ -81,34 +75,17 @@ function normalizeOutfits(raw: unknown) {
   return unique.length ? unique : undefined
 }
 
-/**
- * A world's own content rating (`WorldCard.intimacyLevel`). Validated rather than passed through
- * because it steers what the model is told to write: an unrecognised value must fall back to
- * "inherit the global setting", never be forwarded as an unknown string.
- */
+/** A world's own content rating (`WorldCard.intimacyLevel`); an unrecognized value falls back to "inherit the global setting". */
 function normalizeIntimacyLevel(raw: unknown) {
   return raw === 'default' || raw === 'fade_to_black' || raw === 'suggestive' || raw === 'explicit' ? raw : undefined
 }
 
-/**
- * "Inherit the global setting" has to travel as an explicit `null`, never `undefined`:
- * `JSON.stringify` drops undefined-valued keys entirely, so the field would simply be absent from
- * the request body, the `'intimacyLevel' in req.body` guard below would be false, and clearing a
- * world's rating would silently leave the old one in place. Same trap `Chat.activeEvent` and
- * `Chat.authorNote` already document. Caught live: setting a world to explicit, then choosing
- * "Use the global setting", left it explicit.
- */
+/** `null` means "inherit the global setting" and must map to `undefined` here, since `'intimacyLevel' in req.body` needs the key present to clear it. */
 function normalizeClearableIntimacyLevel(raw: unknown) {
   return raw === null ? undefined : normalizeIntimacyLevel(raw)
 }
 
-/**
- * A world's author-defined triggers (`src/lib/world/triggers.ts`). Validated structurally rather
- * than passed through, because a trigger's actions write real state (scene flags, durable
- * memories) — a malformed rule from a hand-edited or imported world must be dropped here, not
- * discovered mid-turn. Unknown condition/action kinds are dropped rather than kept: `conditionHolds`
- * refuses to fire on one anyway, so storing it would only leave an invisible dead rule behind.
- */
+/** A world's author-defined triggers (`src/lib/world/triggers.ts`); malformed rules and unknown condition/action kinds are dropped rather than stored dead. */
 function normalizeTriggers(raw: unknown) {
   if (!Array.isArray(raw)) return undefined
   const STATS = new Set(['affection', 'warmth', 'trust', 'chemistry', 'comfort', 'respect', 'curiosity', 'tension'])
@@ -163,8 +140,7 @@ function normalizeTriggers(raw: unknown) {
       when: Array.isArray(t.when) ? t.when.map(condition).filter(Boolean) : [],
       then: Array.isArray(t.then) ? t.then.map(action).filter(Boolean) : [],
     }))
-    // A rule with no surviving conditions could never fire, and one with no surviving actions would
-    // fire and do nothing — either way it is a broken rule, not a disabled one, so it is dropped.
+    // A rule with no surviving conditions or actions is broken, not disabled — drop it.
     .filter((t) => !!t.id && t.when.length > 0 && t.then.length > 0)
     .filter((t) => (seen.has(t.id) ? false : (seen.add(t.id), true)))
   return entries.length ? entries : undefined
@@ -183,15 +159,30 @@ function normalizeCustomBackgrounds(raw: unknown) {
   return entries.length ? entries : undefined
 }
 
+const RELATIONSHIP_STAGES = new Set(['near_strangers', 'acquaintances', 'warming_up', 'getting_close', 'close', 'sweethearts'])
+
+/** Item 10's `GalleryEntry.autoTrigger` — a discriminated union, so validation checks `kind` before trusting the field it implies. */
+function normalizeCgTrigger(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object') return undefined
+  const t = raw as Record<string, unknown>
+  if (t.kind === 'intimacyPhase' && (t.phase === 'building' || t.phase === 'peak')) return { kind: 'intimacyPhase', phase: t.phase }
+  if (t.kind === 'catalogAction' && typeof t.optionId === 'string' && t.optionId.trim()) return { kind: 'catalogAction', optionId: t.optionId.trim() }
+  if (t.kind === 'sceneFlag' && typeof t.flag === 'string' && t.flag.trim()) return { kind: 'sceneFlag', flag: t.flag.trim() }
+  if (t.kind === 'relationshipStage' && RELATIONSHIP_STAGES.has(t.stage as string)) return { kind: 'relationshipStage', stage: t.stage }
+  return undefined
+}
+
 function normalizeGalleryEntries(id: string, galleryRaw: unknown) {
   if (!Array.isArray(galleryRaw)) return []
   const mapInput: Record<string, string> = {}
+  const variantsInput: Record<string, unknown> = {}
   const entries = galleryRaw
     .filter((g): g is Record<string, unknown> => !!g && typeof g === 'object')
     .map((g, i) => {
       const gid = typeof g.id === 'string' && g.id.trim() ? g.id.trim() : `cg-${i}`
       const imageUrl = typeof g.imageUrl === 'string' ? g.imageUrl : ''
       if (imageUrl) mapInput[gid] = imageUrl
+      if (Array.isArray(g.variants)) variantsInput[gid] = g.variants
       return {
         id: gid,
         title: typeof g.title === 'string' ? g.title : `CG ${i + 1}`,
@@ -202,15 +193,17 @@ function normalizeGalleryEntries(id: string, galleryRaw: unknown) {
           ? g.requiredFlags.filter((f): f is string => typeof f === 'string' && !!f.trim())
           : undefined,
         isEnding: g.isEnding === true ? true : undefined,
+        autoTrigger: normalizeCgTrigger(g.autoTrigger),
       }
     })
   const resolvedMap = resolveAvatarMap('characters', 'gallery', id, mapInput) ?? {}
-  // No `.filter((g) => !!g.imageUrl)` here (removed) — that used to silently delete a CG entry's
-  // title/unlock hint/threshold/flags the moment it was saved before an image was added, which
-  // `GenerateImageButton`'s own async generation made a real, easy-to-hit trap: save mid-generation
-  // and the whole entry vanished. `GalleryView.tsx` already renders a missing `imageUrl` safely (a
-  // placeholder, not a crash), so there's nothing to protect by dropping the entry server-side too.
-  return entries.map((g) => ({ ...g, imageUrl: resolvedMap[g.id] || g.imageUrl }))
+  const resolvedVariants = resolveAvatarMapVariants('characters', 'gallery', id, variantsInput) ?? {}
+  // Entries with no imageUrl yet are kept, not dropped — GalleryView renders that safely as a placeholder.
+  return entries.map((g) => ({
+    ...g,
+    imageUrl: resolvedMap[g.id] || g.imageUrl,
+    variants: resolvedVariants[g.id]?.length ? resolvedVariants[g.id] : undefined,
+  }))
 }
 
 const GIFT_RARITIES = new Set(['common', 'uncommon', 'rare', 'epic'])
@@ -229,10 +222,10 @@ function normalizeGiftItems(raw: unknown) {
 }
 
 const RELATIONSHIP_DELTA_KEYS = new Set(['affection', 'trust', 'chemistry', 'comfort', 'respect', 'curiosity', 'tension'])
-/** The 4 flags always available regardless of world — mirrors `stage.ts`'s `SCENE_FLAGS` on the client. A world's own `customSceneFlags` extend this set per-world; see `normalizeItemDefs`'s `allowedFlags` param. */
+/** Flags always available regardless of world; a world's `customSceneFlags` extend this set (see `normalizeItemDefs`'s `allowedFlags`). */
 const DEFAULT_SCENE_FLAGS = new Set(['first_date', 'confession', 'jealousy', 'promise'])
 
-/** 10e's scene-flag authoring — drops any entry missing a label (mirrors `normalizeSocialConnections`'s "drop if missing the one field it's meaningless without" shape). Descriptions are allowed empty (the client nudges for one, but doesn't hard-require it) rather than silently discarding an otherwise-valid flag. */
+/** Drops any entry missing a label; empty descriptions are allowed. */
 function normalizeCustomSceneFlags(raw: unknown): { id: string; label: string; description: string }[] {
   if (!Array.isArray(raw)) return []
   return raw
@@ -245,13 +238,7 @@ function normalizeCustomSceneFlags(raw: unknown): { id: string; label: string; d
     .filter((f) => !!f.label)
 }
 
-/**
- * 10d's item catalog — validates the effect union so a malformed save can never persist an item
- * with no usable effect. `allowedFlags` is the built-in 4 plus whichever custom flags this same
- * world save request just defined — a "Set scene flag" effect referencing an id outside that set
- * (a typo, or a flag deleted in the same edit that removed it) falls through to the default
- * relationship-nudge branch below, same as an unrecognized flag always has.
- */
+/** Validates an item's effect union; a "Set scene flag" referencing an id outside `allowedFlags` falls through to the default relationship-nudge branch. */
 function normalizeItemEffect(
   raw: unknown,
   allowedFlags: Set<string>,
@@ -265,9 +252,7 @@ function normalizeItemEffect(
   }
   const dimension = RELATIONSHIP_DELTA_KEYS.has(obj.dimension as string) ? (obj.dimension as string) : 'affection'
   const amount = Number(obj.amount)
-  // Round rather than reject a fractional amount (e.g. a client that didn't clamp to a whole
-  // number before saving) — silently substituting a fixed 1 for any non-integer input, including
-  // a deliberate "+2.5" someone just typed, discarded the author's actual value with no feedback.
+  // Round rather than reject a fractional amount, so it isn't silently replaced with a fixed 1.
   return {
     kind: 'relationship',
     dimension,
@@ -303,7 +288,7 @@ function normalizeStringArray(raw: unknown): string[] | undefined {
   return cleaned.length > 0 ? cleaned : undefined
 }
 
-/** 10e's "who a character knows" — drops any entry missing a name (the one field a connection is meaningless without). */
+/** Drops any entry missing a name — the one field a connection is meaningless without. */
 function normalizeSocialConnections(raw: unknown): { id: string; name: string; relation: string; notes?: string }[] | undefined {
   if (!Array.isArray(raw)) return undefined
   const entries = raw
@@ -318,7 +303,22 @@ function normalizeSocialConnections(raw: unknown): { id: string; name: string; r
   return entries.length > 0 ? entries : undefined
 }
 
-/** `Character.voiceFingerprint` (src/lib/characters/cardSpec.ts) — free-typed speech-pattern fields, same shape discipline as the rest of this file: trim, drop empties, undefined when nothing survives. */
+/** Drops any entry missing `then` — the one field a rule is meaningless without. */
+function normalizeBehavioralRules(raw: unknown): { id: string; kind: 'when_then' | 'never'; when?: string; then: string }[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const entries = raw
+    .filter((r): r is Record<string, unknown> => !!r && typeof r === 'object')
+    .map((r, i) => ({
+      id: typeof r.id === 'string' && r.id.trim() ? r.id.trim() : `rule-${i}`,
+      kind: r.kind === 'never' ? ('never' as const) : ('when_then' as const),
+      when: typeof r.when === 'string' && r.when.trim() ? r.when.trim() : undefined,
+      then: typeof r.then === 'string' ? r.then.trim() : '',
+    }))
+    .filter((r) => !!r.then)
+  return entries.length > 0 ? entries : undefined
+}
+
+/** `Character.voiceFingerprint`: trims free-typed speech-pattern fields, dropping empties. */
 function normalizeVoiceFingerprint(
   raw: unknown,
 ): { verbalTics?: string[]; catchphrases?: string[]; dialectNotes?: string; sentenceRhythm?: string } | undefined {
@@ -336,7 +336,7 @@ function normalizeVoiceFingerprint(
 
 const OUTREACH_FREQUENCIES = new Set(['never', 'rare', 'normal', 'eager'])
 
-/** 10f's authored outreach trait — rejects an unrecognized frequency (e.g. from a hand-edited backup) rather than letting it silently fall through as `undefined` in a threshold lookup, which would make an unrecognized character permanently eligible. */
+/** Rejects an unrecognized frequency rather than letting it fall through as `undefined`, which would make the character permanently eligible. */
 function normalizeOutreach(raw: unknown): { frequency: string } | undefined {
   if (!raw || typeof raw !== 'object') return undefined
   const frequency = (raw as Record<string, unknown>).frequency
@@ -345,7 +345,7 @@ function normalizeOutreach(raw: unknown): { frequency: string } | undefined {
 
 const REPLY_LENGTHS = new Set(['auto', 'brief', 'moderate', 'detailed'])
 
-/** Per-character reply-length override (src/lib/characters/voice.ts). 'auto' and unset both mean "measure the card"; only the three explicit bands are stored. */
+/** 'auto' and unset both mean "measure the card"; only the three explicit bands are stored. */
 function normalizeReplyLength(raw: unknown): string | undefined {
   return typeof raw === 'string' && REPLY_LENGTHS.has(raw) && raw !== 'auto' ? raw : undefined
 }
@@ -377,12 +377,14 @@ app.post('/api/characters', (req, res) => {
   const id = newId()
   const avatarDataUrl = resolveAvatar('characters', id, req.body.avatarDataUrl)
   const sprites = resolveAvatarMap('characters', 'sprites', id, req.body.sprites)
+  const spriteVariants = resolveAvatarMapVariants('characters', 'sprites', id, req.body.spriteVariants)
   const gallery = normalizeGalleryEntries(id, req.body.gallery)
   const created = characterStore.insert({
     id,
     card: req.body.card,
     avatarDataUrl,
     sprites,
+    spriteVariants,
     spriteUnlocks: req.body.spriteUnlocks ?? {},
     outfits: normalizeOutfits(req.body.outfits),
     customExpressions: normalizeCustomExpressions(req.body.customExpressions),
@@ -405,6 +407,7 @@ app.post('/api/characters', (req, res) => {
     goals: normalizeStringArray(req.body.goals),
     boundaries: normalizeStringArray(req.body.boundaries),
     socialConnections: normalizeSocialConnections(req.body.socialConnections),
+    behavioralRules: normalizeBehavioralRules(req.body.behavioralRules),
     occupation: typeof req.body.occupation === 'string' ? req.body.occupation : undefined,
     workplace: typeof req.body.workplace === 'string' ? req.body.workplace : undefined,
     homeLocation: typeof req.body.homeLocation === 'string' ? req.body.homeLocation : undefined,
@@ -425,6 +428,7 @@ app.put('/api/characters/:id', (req, res) => {
   if ('worldId' in req.body) patch.worldId = req.body.worldId || undefined
   if ('avatarDataUrl' in req.body) patch.avatarDataUrl = resolveAvatar('characters', id, req.body.avatarDataUrl)
   if ('sprites' in req.body) patch.sprites = resolveAvatarMap('characters', 'sprites', id, req.body.sprites)
+  if ('spriteVariants' in req.body) patch.spriteVariants = resolveAvatarMapVariants('characters', 'sprites', id, req.body.spriteVariants)
   if ('spriteUnlocks' in req.body) patch.spriteUnlocks = req.body.spriteUnlocks ?? {}
   if ('outfits' in req.body) patch.outfits = normalizeOutfits(req.body.outfits)
   if ('customExpressions' in req.body) patch.customExpressions = normalizeCustomExpressions(req.body.customExpressions)
@@ -446,6 +450,7 @@ app.put('/api/characters/:id', (req, res) => {
   if ('goals' in req.body) patch.goals = normalizeStringArray(req.body.goals)
   if ('boundaries' in req.body) patch.boundaries = normalizeStringArray(req.body.boundaries)
   if ('socialConnections' in req.body) patch.socialConnections = normalizeSocialConnections(req.body.socialConnections)
+  if ('behavioralRules' in req.body) patch.behavioralRules = normalizeBehavioralRules(req.body.behavioralRules)
   if ('occupation' in req.body) patch.occupation = typeof req.body.occupation === 'string' ? req.body.occupation : undefined
   if ('workplace' in req.body) patch.workplace = typeof req.body.workplace === 'string' ? req.body.workplace : undefined
   if ('homeLocation' in req.body) patch.homeLocation = typeof req.body.homeLocation === 'string' ? req.body.homeLocation : undefined
@@ -458,17 +463,11 @@ app.put('/api/characters/:id', (req, res) => {
 
 app.delete('/api/characters/:id', (req, res) => {
   const characterId = req.params.id
-  // The character itself is gone for good here (card, avatar, sprites all get unlinked below), so
-  // there's no useful "trash" state for a chat that can no longer even render — straight to
-  // `purgeChat` rather than the soft-delete `DELETE /api/chats/:id` goes through.
+  // The character is gone for good, so there's no useful "trash" state — purge its chats directly.
   const chats = chatStore.list({ where: 'characterId = ?', params: [characterId] })
   for (const chat of chats) purgeChat(chat.id as string)
-  // A character can also appear as a non-primary group-chat participant — `participants` lives in
-  // the JSON blob, not an indexed column, so this can't be a SQL WHERE; it's a full scan (fine on
-  // a single-user local table). Drop the dangling id from the array rather than deleting the chat.
-  // Multi-character relationship tracking's own tracked state for this character (if any) is
-  // dropped the same way, from `participantRelationships` — otherwise a re-added character of the
-  // same id later (or a restored backup) would inherit a stale relationship it never actually had.
+  // A character can also appear as a group-chat participant (a full scan — `participants` isn't an
+  // indexed column); drop the dangling id and any tracked relationship for it instead of deleting the chat.
   for (const chat of chatStore.list()) {
     const participants = chat.participants as string[] | undefined
     const participantRelationships = chat.participantRelationships as Record<string, unknown> | undefined
@@ -480,8 +479,7 @@ app.delete('/api/characters/:id', (req, res) => {
     }
     if (Object.keys(patch).length > 0) chatStore.update(chat.id as string, patch)
   }
-  // Removes the whole per-character folder in one shot — avatar, sprites, and gallery all live
-  // under it together (see server/avatars.ts), so nothing can be left orphaned.
+  // Removes the whole per-character folder in one shot (avatar, sprites, gallery — see avatars.ts).
   removeAvatar('characters', characterId)
   characterStore.remove(characterId)
   res.status(204).end()
@@ -525,14 +523,9 @@ app.put('/api/personas/:id', (req, res) => {
 
 app.delete('/api/personas/:id', (req, res) => {
   const personaId = req.params.id
-  // Mirrors the character-delete cleanup below: `Chat.personaId` is a dangling reference once the
-  // persona is gone, not indexed, so a full scan is needed. Left unresolved, the client's persona
-  // fetch 404s silently on every load of that chat and it permanently loses its persona binding
-  // (name/description never reach the prompt) with no visible error.
+  // `Chat.personaId` isn't indexed, so a full scan; clear dangling refs to avoid a silent 404 on load.
   for (const chat of chatStore.list()) {
-    // `Chat.personaId` is typed as a required string (no "no persona" case existed until this
-    // cleanup), so clear it to '' rather than null/undefined to stay a valid value of that type —
-    // `persona?.name || 'You'` and friends already treat any falsy id/lookup miss as "no persona".
+    // Cleared to '' (not null/undefined) to stay a valid value of its required-string type.
     if (chat.personaId === personaId) chatStore.update(chat.id as string, { personaId: '' })
   }
   removeAvatar('personas', personaId)
@@ -542,27 +535,16 @@ app.delete('/api/personas/:id', (req, res) => {
 
 // ---- Chats ----
 
-// How long a deleted chat sits recoverable before it's purged for real — see `purgeExpiredTrash`,
-// called once at server startup (index.ts). `deletedAt` lives in the JSON blob (see `Chat.deletedAt`
-// in types.ts), not an indexed column, so both this sweep and the two list routes below filter in
-// JS rather than SQL — completely fine at the scale a single local user's chat list actually reaches.
+// How long a deleted chat sits recoverable before `purgeExpiredTrash` purges it for real (called at server startup).
 const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000 // 30 days
 
-/**
- * The actual, permanent, cascading delete — deletes messages/objectives/relationship
- * events/facts, un-parents any chat forked from this one, then the chat row itself. Used by the
- * purge route and the retention sweep; `DELETE /api/chats/:id` itself no longer calls this
- * directly (see below) — it soft-deletes instead.
- */
+/** Permanent cascading delete: messages/objectives/relationship events/facts, un-parents any fork, then the chat row. */
 function purgeChat(chatId: string): void {
   for (const msg of messageStore.list({ where: 'chatId = ?', params: [chatId] })) messageStore.remove(msg.id as string)
   for (const o of objectiveStore.list({ where: 'chatId = ?', params: [chatId] })) objectiveStore.remove(o.id as string)
   for (const e of relationshipEventStore.list({ where: 'chatId = ?', params: [chatId] })) relationshipEventStore.remove(e.id as string)
   for (const f of chatFactStore.list({ where: 'chatId = ?', params: [chatId] })) chatFactStore.remove(f.id as string)
-  // Any chat forked FROM this one points back via parentChatId — not an indexed column (it lives
-  // in the JSON blob, like `participants` above), so a full scan. Left dangling, the header's
-  // "⑂ original chat" link would navigate to a chat that no longer exists (a 404 fetch) with no
-  // indication why.
+  // Un-parent any chat forked from this one (parentChatId isn't indexed, so a full scan).
   for (const chat of chatStore.list()) {
     if (chat.parentChatId !== chatId) continue
     chatStore.update(chat.id as string, { parentChatId: undefined, forkedFromMessageId: undefined })
@@ -582,8 +564,7 @@ app.get('/api/chats', (_req, res) => {
   res.json(chatStore.list({ orderBy: 'updatedAt DESC' }).filter((c) => !c.deletedAt))
 })
 
-// Registered before `/api/chats/:id` — a literal path loses to a same-prefix `:id` route if it
-// comes after (Express matches "trash" as an id otherwise), same gotcha as `/api/messages/search`.
+// Registered before `/api/chats/:id`, or Express would match "trash" as an :id.
 app.get('/api/chats/trash', (_req, res) => {
   const trashed = chatStore
     .list()
@@ -640,9 +621,7 @@ app.put('/api/chats/:id', (req, res) => {
   res.json(updated)
 })
 
-// Forks a chat at a given message (or at its latest message, if none given): a new chat
-// carrying the same relationship/gift/gallery state and a copy of the transcript up to that
-// point, so a user can try a choice and still have the original to go back to.
+// Forks a chat at a given message (or its latest), copying relationship/gift/gallery state and the transcript up to that point.
 app.post('/api/chats/:id/fork', (req, res) => {
   const sourceChatId = req.params.id
   const source = chatStore.get(sourceChatId)
@@ -660,10 +639,7 @@ app.post('/api/chats/:id/fork', (req, res) => {
 
   const now = Date.now()
   const newChatId = newId()
-  // `worldInfoState` is transient per-turn sticky/cooldown bookkeeping whose values are absolute
-  // turn numbers from the source chat — meaningless in a branch that may start from a much earlier
-  // point, so the fork begins with a clean slate rather than inheriting stale timers. `rapport` is
-  // a live-date scene read; a fork branches out of that scene, so it starts without one too.
+  // worldInfoState (turn-numbered bookkeeping) and rapport (a live-date scene read) don't carry over to a fork.
   const { id: _id, createdAt: _ca, updatedAt: _ua, title, worldInfoState: _wis, rapport: _rap, ...rest } = source
   const forkedChat = chatStore.insert({
     ...rest,
@@ -695,8 +671,7 @@ app.post('/api/chats/:id/fork', (req, res) => {
     relationshipEventStore.insert({ ...eRest, id: newId(), chatId: newChatId })
   }
 
-  // Same cutoff rule as events above — a fact learned after the fork point belongs only to the
-  // original timeline.
+  // Same cutoff rule as events above.
   const sourceFacts = chatFactStore.list({ where: 'chatId = ?', params: [sourceChatId], orderBy: 'createdAt' })
   for (const f of sourceFacts) {
     if (cutoffCreatedAt !== undefined && (f.createdAt as number) > cutoffCreatedAt) continue
@@ -707,10 +682,7 @@ app.post('/api/chats/:id/fork', (req, res) => {
   res.status(201).json(forkedChat)
 })
 
-// Soft delete: the chat drops out of the normal list (see the filter above) but nothing about it
-// is actually touched, so a mistaken delete — a misclick, or an agent testing something and
-// clearing up after itself, is what actually prompted this — is always recoverable via
-// `POST /:id/restore` until it's purged (`DELETE /:id/purge`, or the retention sweep).
+// Soft delete: drops out of the normal list but stays recoverable via `POST /:id/restore` until purged.
 app.delete('/api/chats/:id', (req, res) => {
   const updated = chatStore.update(req.params.id, { deletedAt: Date.now() })
   if (!updated) return notFound(res)
@@ -723,9 +695,7 @@ app.post('/api/chats/:id/restore', (req, res) => {
   res.json(updated)
 })
 
-// The real, permanent delete — everything `DELETE /:id` used to do immediately. Reachable from the
-// trash view once a chat is already there, so this is always a deliberate second step, not the
-// only way to remove a chat at all.
+// The real, permanent delete — reachable from the trash view, a deliberate second step after soft-delete.
 app.delete('/api/chats/:id/purge', (req, res) => {
   const chatId = req.params.id
   if (!chatStore.get(chatId)) return notFound(res)
@@ -735,10 +705,7 @@ app.delete('/api/chats/:id/purge', (req, res) => {
 
 // ---- Messages ----
 
-// A plain substring scan over every chat's messages rather than a SQL LIKE, so this never needs
-// to add the JSON `data` blob column to assertSafeClause's identifier allowlist for what is a
-// read-only, non-performance-critical feature on a single-user local database. Must be registered
-// before the `/:id` route below, or Express would match "search" itself as an :id.
+// Plain substring scan (not SQL LIKE) over every message. Registered before `/:id`, or Express would match "search" as an :id.
 app.get('/api/messages/search', (req, res) => {
   const q = String(req.query.q ?? '').trim().toLowerCase()
   if (!q) return res.json([])
@@ -924,9 +891,6 @@ app.post('/api/worlds', (req, res) => {
     relationshipThresholds: normalizeRelationshipThresholds(req.body.relationshipThresholds),
     intimacyLevel: normalizeIntimacyLevel(req.body.intimacyLevel),
     triggers: normalizeTriggers(req.body.triggers),
-    // Not previously listed here, so a world created with authored intimacy options in the same
-    // request silently lost them (the PUT handler's `{...req.body}` spread meant a follow-up save
-    // restored them, which is why the UI never surfaced it).
     customIntimacyOptions: Array.isArray(req.body.customIntimacyOptions) ? req.body.customIntimacyOptions : undefined,
     createdAt: now,
     updatedAt: now,
@@ -949,10 +913,8 @@ app.put('/api/worlds/:id', (req, res) => {
   if ('triggers' in req.body) patch.triggers = normalizeTriggers(req.body.triggers)
   if ('customBackgrounds' in req.body) patch.customBackgrounds = normalizeCustomBackgrounds(req.body.customBackgrounds)
   if ('items' in req.body) {
-    // Validate against whichever custom flags are actually in effect after this same request —
-    // the just-normalized ones if this save also touched customSceneFlags, otherwise the world's
-    // existing ones — so an item referencing a custom flag saved in the very same request isn't
-    // wrongly rejected as "unrecognized" just because of normalization order.
+    // Validate against whichever custom flags are in effect after this same request, so an item
+    // referencing a flag saved in the same request isn't wrongly rejected.
     const customFlags = (
       'customSceneFlags' in patch ? patch.customSceneFlags : existing.customSceneFlags
     ) as { id: string }[] | undefined
@@ -970,8 +932,6 @@ app.delete('/api/worlds/:id', (req, res) => {
   for (const c of characterStore.list({ where: 'worldId = ?', params: [worldId] })) {
     characterStore.update(c.id as string, { worldId: undefined })
   }
-  // Removes the whole per-world folder in one shot — avatar and backgrounds live under it
-  // together (see server/avatars.ts), so nothing can be left orphaned.
   removeAvatar('worlds', worldId)
   worldStore.remove(worldId)
   res.status(204).end()
@@ -1011,8 +971,7 @@ app.delete('/api/objectives/:id', (req, res) => {
 })
 
 // ---- Relationship events ----
-// Append-only audit log alongside the overwritten running totals on Chat — no PUT/DELETE,
-// entries are immutable once logged.
+// Append-only audit log; no PUT/DELETE, entries are immutable once logged.
 
 app.get('/api/chats/:id/relationship-events', (req, res) => {
   res.json(relationshipEventStore.list({ where: 'chatId = ?', params: [req.params.id], orderBy: 'createdAt DESC' }))
@@ -1024,8 +983,7 @@ app.post('/api/relationship-events', (req, res) => {
 })
 
 // ---- Chat facts ----
-// Durable, individually-retirable facts — unlike relationship events, these DO support PUT
-// (retiring one sets active: false; the row stays for the audit trail, never DELETEd).
+// Durable, individually-retirable facts; retiring one sets active: false (never DELETEd).
 
 app.get('/api/chats/:id/chat-facts', (req, res) => {
   res.json(chatFactStore.list({ where: 'chatId = ?', params: [req.params.id], orderBy: 'createdAt DESC' }))
@@ -1043,11 +1001,8 @@ app.put('/api/chat-facts/:id', (req, res) => {
 })
 
 // ---- Full backup / restore ----
-// One self-contained JSON snapshot of every table plus every avatar/sprite/background file
-// (inlined as base64), so the entire local install can be moved or recovered in one file —
-// unlike character packs (importExport.ts / pack.ts), which mint new ids and are meant for
-// sharing a single character, this preserves original ids and is meant to reproduce this
-// exact install byte-for-byte.
+// One self-contained JSON snapshot of every table plus every avatar/sprite/background file (base64),
+// preserving original ids — unlike character packs (importExport.ts / pack.ts), which mint new ones.
 
 const BACKUP_VERSION = 1
 const BACKUP_STORES = {
@@ -1094,11 +1049,7 @@ app.post('/api/restore', express.json({ limit: '1gb' }), (req, res) => {
     return res.status(400).json({ error: 'Not a recognized backup file.' })
   }
   const data = body.data as Record<string, unknown>
-  // Everything below the DB tables must land as one all-or-nothing unit — restore used to wipe
-  // and reload each table in sequence with no surrounding transaction, so a single bad row deep
-  // in the backup (e.g. one saved under an older schema) left the DB in a mixed old/new state:
-  // tables processed before the failure held new data, tables after it still held the old data,
-  // with no way to recover the pre-restore state since it had already been partially overwritten.
+  // All-or-nothing: without a transaction, a bad row partway through would leave tables in a mixed old/new state.
   db.exec('BEGIN')
   try {
     for (const [key, store] of Object.entries(BACKUP_STORES)) {
@@ -1112,17 +1063,14 @@ app.post('/api/restore', express.json({ limit: '1gb' }), (req, res) => {
     throw e
   }
   if (Array.isArray(body.avatarFiles)) {
-    // Write into a fresh temp directory first and only swap it in once every file has been
-    // written successfully — writing directly into `avatarsDir` after wiping it (the old
-    // approach) permanently lost every avatar/sprite/background if a write failed partway
-    // through, since the original files were already gone by then.
+    // Write into a fresh temp directory and only swap it in once every file succeeds, so a failure
+    // partway through can't leave avatarsDir wiped with nothing restored.
     const tmpDir = `${avatarsDir}.restore-tmp`
     fs.rmSync(tmpDir, { recursive: true, force: true })
     fs.mkdirSync(tmpDir, { recursive: true })
     for (const f of body.avatarFiles as Record<string, unknown>[]) {
       if (typeof f.relPath !== 'string' || typeof f.base64 !== 'string') continue
-      // Backups are trusted local exports, but a maliciously-crafted one could still carry
-      // '..' segments — strip them so restore can never write outside avatarsDir.
+      // Strip '..' segments so restore can never write outside avatarsDir.
       const safeRel = f.relPath
         .replace(/\\/g, '/')
         .split('/')
@@ -1139,14 +1087,7 @@ app.post('/api/restore', express.json({ limit: '1gb' }), (req, res) => {
   res.status(204).end()
 })
 
-/**
- * Section 8's NovelAI backend: NovelAI's `input` field wants the prompt already tokenized (see
- * `novelaiTokenizer.ts`'s own header comment for why this runs here instead of the browser). The
- * browser calls this first, then sends the resulting token ids straight to NovelAI itself with its
- * own API key — this server never sees that key, matching every other backend in this app. Express
- * 5 forwards a rejected async handler's promise to the error middleware below automatically, so an
- * unsupported model or a corrupt `.model` file surfaces as a normal JSON error, not a crash.
- */
+/** NovelAI wants its prompt pre-tokenized (see novelaiTokenizer.ts); the browser sends the resulting ids to NovelAI directly with its own API key. */
 app.post('/api/novelai/tokenize', async (req, res) => {
   const { text, model } = req.body as { text?: unknown; model?: unknown }
   if (typeof text !== 'string' || typeof model !== 'string') {
@@ -1162,9 +1103,7 @@ app.post('/api/novelai/tokenize', async (req, res) => {
   res.json({ ids })
 })
 
-// Catches synchronous throws from any route above (malformed ids, missing required
-// fields hitting a NOT NULL column, etc.) and returns clean JSON instead of Express's
-// default HTML error page with a leaked stack trace. Must be registered last.
+// Catches throws from any route above and returns clean JSON instead of Express's default HTML error page. Must be last.
 app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err)
   res.status(400).json({ error: err instanceof Error ? err.message : 'Request failed' })

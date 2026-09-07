@@ -3,26 +3,10 @@ import { KoboldApiError } from './types'
 import { estimateTokens } from '@/lib/tokenEstimate'
 import type { ChatBackend, ConnectionCheckResult } from './chatBackend'
 
-/**
- * Section 8's "additional model backends" — a single client for any provider that speaks the
- * OpenAI Chat Completions wire format, which covers far more than just OpenAI itself: OpenRouter
- * (one API key, hundreds of models including Claude and Gemini, proxied through this exact same
- * shape), Groq, Together, local servers (llama.cpp's own `--api` mode, LM Studio, Ollama's OpenAI
- * shim, ...) all speak it too. One implementation instead of one bespoke client per provider,
- * matching how `ttsProviders.ts` already abstracts multiple TTS backends behind one call.
- *
- * Deliberately does NOT attempt native Anthropic/Google wire formats (a different request/response
- * shape each) — OpenRouter already re-exposes both through this one shape, which covers the actual
- * need with a fraction of the surface area. A genuine native Claude/Gemini client is a reasonable,
- * separate follow-up if OpenRouter's proxy ever isn't the right fit (e.g. wanting Anthropic's
- * prompt caching or Gemini's own safety settings directly).
- *
- * Honesty about what this hasn't been checked against: every other client in this codebase is
- * verified live, end to end, against the real service it talks to. This one is built strictly to
- * each provider's own documented Chat Completions contract plus mocked-response unit tests — ask
- * whoever adds a real API key to sanity-check the first real call before trusting it for anything
- * that matters.
- */
+// A single client for any provider that speaks the OpenAI Chat Completions wire format —
+// OpenAI, OpenRouter, Groq, Together, local servers (llama.cpp, LM Studio, Ollama's OpenAI shim),
+// and more. Does not attempt native Anthropic/Google wire formats; OpenRouter already re-exposes
+// both through this same shape.
 export class OpenAICompatibleClient implements ChatBackend {
   constructor(
     public baseUrl: string,
@@ -41,13 +25,7 @@ export class OpenAICompatibleClient implements ChatBackend {
     return this.baseUrl.replace(/\/+$/, '') + '/chat/completions'
   }
 
-  /**
-   * `GenerateRequest.messages` when the caller built one (the main chat generation path); every
-   * other call site (background judge/assist calls) only ever builds `prompt`, a flat instruct-
-   * template-formatted string meant for a text-completion API — wrapped as a single user turn here
-   * so those call sites work against this backend completely unchanged, just without a proper
-   * system/user split.
-   */
+  /** Uses `params.messages` when the caller built one, else wraps `params.prompt` as a single user turn. */
   private body(params: GenerateRequest, stream: boolean): Record<string, unknown> {
     const messages = params.messages?.length ? params.messages : [{ role: 'user' as const, content: params.prompt }]
     const body: Record<string, unknown> = {
@@ -55,26 +33,16 @@ export class OpenAICompatibleClient implements ChatBackend {
       messages,
       stream,
     }
-    // Only the fields with a real, name-and-meaning-compatible equivalent in the OpenAI Chat
-    // Completions contract get mapped — everything KoboldCpp-specific with no such equivalent
-    // (top_k, min_p, typical, tfs, rep_pen*, dry_*, mirostat*, sampler_order, banned_tokens,
-    // grammar) is silently dropped rather than sent as a field the API would ignore or reject.
+    // Only fields with a real equivalent in the OpenAI Chat Completions contract are mapped;
+    // KoboldCpp-specific sampler fields with no equivalent are silently dropped.
     if (typeof params.temperature === 'number') body.temperature = params.temperature
     if (typeof params.top_p === 'number') body.top_p = params.top_p
     if (typeof params.presence_penalty === 'number') body.presence_penalty = params.presence_penalty
     if (typeof params.frequency_penalty === 'number') body.frequency_penalty = params.frequency_penalty
-    // OpenAI's own flat field name for its native reasoning models (o1/o3/gpt-5 family) — also
-    // accepted as an alias by OpenRouter's gateway for any reasoning-capable model it proxies, so
-    // one field covers both without branching on which gateway is configured. OpenRouter's own
-    // richer `reasoning: {effort, max_tokens, exclude}` object (more knobs, plus response-side
-    // `reasoning_details` for preserving a model's chain of thought across turns) is deliberately
-    // not implemented — narrower scope, picked over the fuller passthrough when this was built.
     if (params.reasoning_effort) body.reasoning_effort = params.reasoning_effort
     if (params.verbosity) body.verbosity = params.verbosity
-    // `max_tokens` is the long-standing, still-widely-supported field name every gateway
-    // (OpenRouter, Groq, ...) normalizes; a handful of newer OpenAI reasoning models
-    // (o1/o3/gpt-5-family) want `max_completion_tokens` instead and reject this one outright —
-    // a genuine, documented gap in this first pass rather than a silent one.
+    // max_tokens is the widely-supported name; newer o1/o3/gpt-5-family models want
+    // max_completion_tokens instead and reject this one — a known gap, not handled here.
     if (typeof params.max_length === 'number') body.max_tokens = params.max_length
     if (params.stop_sequence?.length) body.stop = params.stop_sequence
     return body
@@ -90,16 +58,7 @@ export class OpenAICompatibleClient implements ChatBackend {
     }
   }
 
-  /**
-   * FIXES_TODO.md item #14's live catch: a provider's own 429 body text can overclaim permanence
-   * (OpenRouter's free-tier message reads like a hard daily wall — "Daily limit reached... credits
-   * don't affect this cap" — confirmed live this session to sometimes clear on its own in under a
-   * minute, not actually a fixed-until-tomorrow cap every time). Deliberately does NOT rewrite or
-   * drop the provider's own message — it still carries real information (which cap, which key) worth
-   * keeping intact — this only ever *appends* a real, provider-stated retry time from the standard
-   * `Retry-After` header when one comes back, or a soft, honest hedge when it doesn't, rather than
-   * silently trusting whatever permanence the provider's own wording happens to imply.
-   */
+  /** Appends a retry hint to a 429's own error message: the real `Retry-After` value if present, else a soft hedge (some providers' 429 text overclaims permanence). */
   private rateLimitHint(res: Response): string {
     const retryAfterSeconds = Number(res.headers.get('retry-after'))
     if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
@@ -130,12 +89,7 @@ export class OpenAICompatibleClient implements ChatBackend {
     return data.choices?.[0]?.message?.content ?? ''
   }
 
-  /**
-   * SSE streaming, same shape as `KoboldClient.generateStream` (split on blank lines, read `data:`
-   * lines) but a different payload per event — `choices[0].delta.content` instead of `{token}` —
-   * and a literal `data: [DONE]` sentinel marking the end, which every OpenAI-compatible gateway
-   * sends and which is not itself JSON.
-   */
+  /** SSE streaming: splits on blank lines, reads `data:` lines, each payload `choices[0].delta.content`, ending on the `data: [DONE]` sentinel. */
   async generateStream(params: GenerateRequest, onToken: (token: string, full: string) => void, signal?: AbortSignal): Promise<string> {
     let res: Response
     try {
@@ -214,16 +168,7 @@ export class OpenAICompatibleClient implements ChatBackend {
     return null
   }
 
-  /**
-   * Settings → Connection's "does this actually work" check — deliberately not a real chat
-   * completion (costs real money/quota on a paid provider for no reason). `GET {baseUrl}/models`
-   * is the one endpoint essentially every OpenAI-compatible provider implements, and for most of
-   * them (OpenAI, Groq, Together, Mistral, DeepSeek, Fireworks, ...) it genuinely validates the key
-   * too — a bad one comes back 401/403. OpenRouter is the one confirmed exception: its own `/models`
-   * is public and returns 200 for anyone, key or no key, so it wouldn't catch a bad key at all —
-   * its own `/key` endpoint (rate-limit/credit info for the calling key, always auth-required) is
-   * used there instead, and its usage/limit numbers double as a genuinely useful success detail.
-   */
+  /** Settings → Connection's reachability+auth check, without a real (billed) chat completion. Uses `GET /models` (validates the key on most providers) except for OpenRouter, whose `/models` is public — `/key` is used there instead. */
   async checkConnection(): Promise<ConnectionCheckResult> {
     const trimmed = this.baseUrl.replace(/\/+$/, '')
     if (!trimmed) return { ok: false, detail: 'No base URL set.' }
@@ -254,8 +199,7 @@ export class OpenAICompatibleClient implements ChatBackend {
           return { ok: true, detail: spent ? `${spent}${cap}` : tier }
         }
       } catch {
-        // Reached and authenticated either way (status already checked above) — a body we can't
-        // parse just means no bonus detail, not a failure.
+        // Already authenticated (status checked above) — an unparseable body just means no bonus detail.
       }
     }
     return { ok: true }

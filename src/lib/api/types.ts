@@ -35,16 +35,7 @@ export interface ChatCompletionMessage {
   content: string
 }
 
-/**
- * The user's own framing after trying section 8 live: "text completion and chat completion
- * presets are different" (SillyTavern keeps two entirely separate preset systems for exactly this
- * reason). This is the chat-completion-native counterpart to `GenerationParams` — real OpenAI Chat
- * Completions concepts (`frequency_penalty`, `reasoning_effort`, `verbosity`) instead of KoboldCpp
- * sampler internals (`top_k`/`min_p`/`rep_pen`/DRY/mirostat/...) that have no equivalent on a
- * hosted API and were previously just silently dropped by `OpenAICompatibleClient`. Stored
- * separately from `sampler` (`useSettingsStore.chatCompletionSampler`) so switching backends never
- * fights over one shared params object.
- */
+/** Chat-completion-native counterpart to `GenerationParams` — real OpenAI Chat Completions fields instead of KoboldCpp sampler internals. Stored separately from `sampler` so switching backends never fights over one shared params object. */
 export interface ChatCompletionSamplerParams {
   temperature: number
   top_p: number
@@ -73,23 +64,9 @@ export interface GenerateRequest extends Partial<GenerationParams> {
   genkey?: string
   /** Base64-encoded images (no data: prefix), for vision-capable models with a loaded mmproj. */
   images?: string[]
-  /**
-   * Section 8's "additional model backends": every call site already builds `prompt` as one flat,
-   * instruct-template-formatted string — the shape KoboldCpp's own text-completion API wants, and
-   * `KoboldClient` ignores this field entirely. A hosted chat-completion backend (OpenAI/Claude/
-   * Gemini/OpenRouter/...) wants a proper `{role, content}[]` array instead; when a caller supplies
-   * one, `OpenAICompatibleClient` sends it as-is. Callers that don't (every background judge/assist
-   * call — relationship scoring, choice suggestion, memory summary, ...) still work against a
-   * hosted backend without any changes on their part: it falls back to wrapping `prompt` as a
-   * single user message, which is correct/complete, just not split into a proper system turn the
-   * way the main chat generation path (which does supply this) is.
-   */
+  /** Proper `{role, content}[]` turns for a hosted chat-completion backend; `KoboldClient` ignores this. Callers that only build `prompt` (most background judge/assist calls) fall back to it being wrapped as a single user message. */
   messages?: ChatCompletionMessage[]
-  /**
-   * `ChatCompletionSamplerParams`'s three fields with no `GenerationParams` equivalent —
-   * `temperature`/`top_p`/`presence_penalty` already exist there and are reused as-is.
-   * `KoboldClient` ignores all three; `OpenAICompatibleClient` maps them directly.
-   */
+  /** `ChatCompletionSamplerParams` fields with no `GenerationParams` equivalent. `KoboldClient` ignores all three; `OpenAICompatibleClient` maps them directly. */
   frequency_penalty?: number
   reasoning_effort?: 'low' | 'medium' | 'high'
   verbosity?: 'low' | 'medium' | 'high'
@@ -112,14 +89,7 @@ export interface KoboldVersionInfo {
   version: string
 }
 
-/**
- * `/api/extra/perf` — reports the MOST RECENT completed generation, not a running/live figure.
- * The original shape here (`last_process`/`last_eval`/`last_seconds`) never actually matched a
- * real KoboldCpp response — caught only now, while wiring up the Generation HUD (section 15),
- * since nothing had called `getPerf()` before. Fields below are what a live 1.118.1 server
- * actually returns; the index signature covers the rest (image/TTS/transcribe counters, uptime,
- * horde fields) that this app has no use for yet.
- */
+/** `/api/extra/perf` — reports the MOST RECENT completed generation, not a running/live figure. Index signature covers the rest (image/TTS/transcribe counters, uptime, horde fields) this app has no use for. */
 export interface PerfInfo {
   last_process_time: number
   last_eval_time: number

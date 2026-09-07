@@ -7,6 +7,7 @@
  */
 
 import { normalizeRpMarkup } from '@/lib/text/messageSegments'
+import { EXPLICIT_ANTI_PATTERNS } from '@/lib/dating/intimacyScene'
 
 /** One recognisable tell of machine-written prose. */
 export interface SlopPattern {
@@ -67,6 +68,13 @@ export const SLOP_PATTERNS: SlopPattern[] = [
   { id: 'what-happens-next', label: '"whatever happens next" scene-closing filler', re: /\bwhat(ever)? (happens|comes|came) next\b/gi },
   { id: 'one-thing-certain', label: '"one thing was certain"', re: /\bone thing (was|is) (certain|for sure|clear)\b/gi },
 ]
+
+/** `intimacyScene.ts`'s peak-phase stock phrases, converted into the same `SlopPattern` shape so a phrase the character has already used feeds the same avoidance note as ordinary slop. Passed as `extraPatterns`, not merged into `SLOP_PATTERNS`, since it's only relevant during an explicit-rated chat. */
+export const EXPLICIT_ANTI_PATTERN_ENTRIES: SlopPattern[] = EXPLICIT_ANTI_PATTERNS.map((phrase) => ({
+  id: `explicit-${phrase.replace(/[^a-z]+/gi, '-')}`,
+  label: phrase,
+  re: new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'),
+}))
 
 /**
  * Text that is never part of a character's actual turn, only the model slipping out of the
@@ -225,6 +233,18 @@ export function cleanModelOutput(text: string, opts: CleanModelOutputOptions = {
   out = out.replace(LEADING_AFFIRMATION_RE, '')
   out = normalizeRpMarkup(out)
 
+  // Curly quotes -> straight, so quote-matching below (and elsewhere in the codebase) works
+  // against a single consistent character.
+  out = out.replace(/[‘’]/g, "'").replace(/[“”]/g, '"')
+
+  // A model sometimes italicizes an entire line of spoken dialogue outright; this app keeps
+  // dialogue plain and reserves italics for actions/thoughts. Only strips when a `*` sits directly
+  // against the quote mark on both sides, with no nested quote/star in between — so a genuine
+  // action beat next to the quote (`"Hey." *She turns.*`) or emphasis on one word inside otherwise
+  // plain dialogue (`"I *really* mean it."`) is left alone.
+  out = out.replace(/\*"([^"*\n]+)"\*/g, '"$1"')
+  out = out.replace(/"\*([^"*\n]+)\*"/g, '"$1"')
+
   const kept = out
     .split('\n')
     .filter((line) => !META_LINE_PATTERNS.some((re) => re.test(line)))
@@ -252,10 +272,10 @@ export function findSlop(text: string): SlopHit[] {
   return findSlopAcross([text])
 }
 
-/** As `findSlop`, but counting across several texts at once (a character's recent turns). */
-export function findSlopAcross(texts: string[]): SlopHit[] {
+/** As `findSlop`, but counting across several texts at once (a character's recent turns). `extraPatterns` (e.g. `EXPLICIT_ANTI_PATTERN_ENTRIES`) are scanned alongside the base corpus for this call only. */
+export function findSlopAcross(texts: string[], extraPatterns: SlopPattern[] = []): SlopHit[] {
   const hits: SlopHit[] = []
-  for (const pattern of SLOP_PATTERNS) {
+  for (const pattern of [...SLOP_PATTERNS, ...extraPatterns]) {
     let count = 0
     for (const text of texts) {
       if (!text) continue
@@ -343,6 +363,8 @@ export interface SlopAvoidanceOptions {
   maxPhrases?: number
   /** Cap on named repeated phrases. */
   maxRepeats?: number
+  /** Additional patterns scanned alongside the base corpus for this call only — e.g. `EXPLICIT_ANTI_PATTERN_ENTRIES` during an explicit-rated chat. */
+  extraPatterns?: SlopPattern[]
 }
 
 /**
@@ -356,7 +378,7 @@ export function buildSlopAvoidanceNote(recentCharTurns: string[], opts: SlopAvoi
   const maxPhrases = opts.maxPhrases ?? 4
   const maxRepeats = opts.maxRepeats ?? 3
 
-  const slop = findSlopAcross(texts).slice(0, maxPhrases)
+  const slop = findSlopAcross(texts, opts.extraPatterns).slice(0, maxPhrases)
   const repeats = findRepeatedPhrases(texts, { limit: maxRepeats })
 
   const lines: string[] = []

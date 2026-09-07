@@ -1,5 +1,11 @@
 import { slugifyId } from '@/lib/text/slugify'
 import { BASE_OUTFIT_ID, spriteKey } from '@/lib/vn/outfits'
+import { pickVariant } from '@/lib/vn/pickVariant'
+
+/**
+ * The default expression set, same-family fallback chains for missing art, and sprite resolution
+ * (exact tag -> fallback -> neutral -> avatar, outfit-aware) used by VN mode's reactive portraits.
+ */
 
 export interface ExpressionOption {
   id: string
@@ -34,20 +40,7 @@ export const DEFAULT_EXPRESSIONS: ExpressionOption[] = [
 
 export const DEFAULT_EXPRESSION_IDS = DEFAULT_EXPRESSIONS.map((e) => e.id)
 
-/**
- * Section 10's "guaranteed expression coverage for dates": the live-date reactive portrait (and
- * VN mode's own sprite) used to hard-swap straight to the generic avatar the moment the model
- * tagged an expression the creator hadn't drawn (or hadn't unlocked yet) — showing a blank avatar
- * for "yearning" when the creator only drew "love" and "blush" throws away real, close-enough art
- * that already exists. Each entry here is a same-family emotion to try, in order, before finally
- * falling back to 'neutral' and then the avatar. Deliberately a hand-authored judgment call (a
- * "closest embedding" approach would need a model call, a much bigger ask for a cosmetic fallback)
- * rather than a claim of psychological accuracy — every character in this app draws from the same
- * `DEFAULT_EXPRESSIONS` set, so one shared mapping is the same "runs the world" trade-off already
- * made for scene tags/backgrounds. Deliberately excludes 'neutral' as a value (it's the universal
- * last resort, checked separately, not a per-expression association) and excludes an expression
- * from its own list (redundant with the direct check that happens before this is ever consulted).
- */
+/** Same-family fallback chain to try, in order, when the tagged expression has no drawn/unlocked sprite — before finally falling back to 'neutral' then the avatar. Hand-authored, not embedding-based. */
 export const EXPRESSION_FALLBACKS: Record<string, string[]> = {
   happy: ['laughing', 'smitten', 'blush'],
   smirk: ['flirty', 'happy'],
@@ -71,47 +64,45 @@ export const EXPRESSION_FALLBACKS: Record<string, string[]> = {
   sleepy: [],
 }
 
-/**
- * The single source of truth for "which sprite actually shows for this tagged expression" —
- * `ChatWindow.tsx`'s reactive portrait and `VNStage.tsx`'s own sprite used to each inline the same
- * `sprites[expression] || avatarDataUrl` hard swap independently; this replaces both. Checks the
- * exact tag first, then its `EXPRESSION_FALLBACKS` chain, then 'neutral', before finally giving up
- * and returning the avatar (or undefined, if even that isn't set). A fallback still has to be both
- * uploaded *and* unlocked at the current affection — a locked/missing fallback is skipped exactly
- * like a locked/missing primary tag already was.
- */
+/** Item 11's "up to N variants per slot" — extra alternates for a sprite key, picked alongside the primary in `sprites`. */
+export interface SpriteVariantOptions {
+  variants: Record<string, string[]> | undefined
+  /** Stable per-showing seed (e.g. the message id) so the pick doesn't flicker across unrelated re-renders — see `pickVariant`. */
+  seed: string
+}
+
+/** The single source of truth for "which sprite shows for this tagged expression" — exact tag -> `EXPRESSION_FALLBACKS` chain -> 'neutral' -> avatar (or undefined). A fallback must be both uploaded and unlocked at the current affection, same as the primary tag. */
 export function resolveExpressionSprite(
   sprites: Record<string, string> | undefined,
   spriteUnlocks: Record<string, number> | undefined,
   avatarDataUrl: string | undefined,
   expression: string,
   affection: number,
-  /**
-   * Which wardrobe state to draw (`outfits.ts`). Omitted or `BASE_OUTFIT_ID` reproduces the exact
-   * pre-outfit behavior, byte for byte — every existing character and both call sites that don't
-   * pass one keep resolving precisely as before.
-   */
+  /** Which wardrobe state to draw (`outfits.ts`). Omitted or `BASE_OUTFIT_ID` reproduces exact pre-outfit behavior. */
   outfitId?: string,
+  /** Omitted reproduces exact pre-variant behavior (always the primary sprite). */
+  variantOptions?: SpriteVariantOptions,
 ): string | undefined {
   const isAvailable = (key: string): boolean => !!sprites?.[key] && affection >= Number(spriteUnlocks?.[key] ?? 0)
+  const resolved = (key: string): string => {
+    const pool = variantOptions?.variants?.[key]
+    return pool?.length ? pickVariant([sprites![key], ...pool], `${variantOptions!.seed}:${key}`) : sprites![key]
+  }
 
   /** The full exact -> same-family -> neutral walk, within one outfit. */
   const withinOutfit = (outfit: string | undefined): string | undefined => {
     const key = (id: string) => spriteKey(outfit, id)
-    if (isAvailable(key(expression))) return sprites![key(expression)]
+    if (isAvailable(key(expression))) return resolved(key(expression))
     for (const fallback of EXPRESSION_FALLBACKS[expression] ?? []) {
-      if (isAvailable(key(fallback))) return sprites![key(fallback)]
+      if (isAvailable(key(fallback))) return resolved(key(fallback))
     }
-    if (expression !== 'neutral' && isAvailable(key('neutral'))) return sprites![key('neutral')]
+    if (expression !== 'neutral' && isAvailable(key('neutral'))) return resolved(key('neutral'))
     return undefined
   }
 
   const inOutfit = withinOutfit(outfitId)
   if (inOutfit) return inOutfit
-  // A partially-drawn outfit degrades to the *base* art rather than straight to the avatar: an
-  // author who only drew `swimsuit--neutral` and `swimsuit--blush` should still get real art for
-  // "angry", not a blank portrait. Wrong clothes for one beat beats no character at all — and the
-  // same-outfit walk above already tried that outfit's own neutral first, which covers most of it.
+  // A partially-drawn outfit degrades to the *base* art rather than straight to the avatar — wrong clothes beats no character.
   if (outfitId && outfitId !== BASE_OUTFIT_ID) {
     const inBase = withinOutfit(BASE_OUTFIT_ID)
     if (inBase) return inBase
@@ -125,16 +116,7 @@ export interface CustomExpression {
   label: string
 }
 
-/**
- * Builds the `{id, label}` list `detectExpressionTextMismatch` (`sceneVision.ts`) compares a
- * tagged expression against — every currently unlocked expression id, paired with its display
- * label (a custom expression's own label wins over a same-id default, same precedence every other
- * id→label lookup in this app uses). Deliberately unfiltered by sprite art, unlike the shortlist
- * `shortlistExpressions`/`detectExpressionFromSprites` build for the vision pass: that pass is
- * choosing between actual portrait images, so an id with nothing drawn is useless to it, while this
- * one is only judging whether a *tag id* fits the prose that was just written — an expression the
- * model may legitimately tag despite having no art yet still belongs in the running.
- */
+/** Every currently unlocked expression id paired with its display label (custom label wins over a same-id default), for `detectExpressionTextMismatch` (`sceneVision.ts`). Unfiltered by sprite art, unlike the vision-pass shortlist. */
 export function expressionCandidatesFor(
   unlockedExpressionIds: string[],
   customExpressions: CustomExpression[] | undefined,
@@ -146,12 +128,7 @@ export function expressionCandidatesFor(
   return unlockedExpressionIds.map((id) => ({ id, label: labelById.get(id) ?? id }))
 }
 
-/**
- * Turns a free-typed label into a safe expression id: lowercase, hyphenated, matching the
- * server's `SAFE_KEY_RE` (`server/avatars.ts`) since this id becomes both a sprite filename and a
- * literal token in the model's prompt. `existingIds` gets a numeric suffix appended on collision
- * (with a default expression id or another custom one) rather than silently overwriting it.
- */
+/** Turns a free-typed label into a safe expression id (lowercase, hyphenated, matching the server's `SAFE_KEY_RE`) since this becomes both a sprite filename and a prompt token. Suffixes on collision with `existingIds`. */
 export function slugifyExpressionId(label: string, existingIds: string[]): string {
   return slugifyId(label, existingIds, 'expression')
 }

@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from 'react'
-import { ChevronsRight, FileText, Paperclip, Send, Square, Wand2, X } from 'lucide-react'
+import { ChevronsRight, FileText, Paperclip, RefreshCw, Send, Square, Undo2, Wand2, X } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { readAttachment, type PendingAttachment } from '@/lib/attachments'
 
@@ -13,6 +13,10 @@ interface ComposerProps {
   onAbort: () => void
   onContinue: () => void
   onImpersonate: () => Promise<string>
+  /** Whether the last message has a "Continue" segment that can be undone/regenerated — hides both controls when false. */
+  canUndoLastContinue?: boolean
+  onUndoLastContinue?: () => void
+  onRegenerateLastContinueSegment?: () => void
   /** Group-scene characters who can reply besides the primary — omitted/empty hides the "reply as" picker entirely. */
   replyAsOptions?: { id: string; name: string }[]
   replyAsId?: string | null
@@ -35,6 +39,9 @@ export function Composer({
   onAbort,
   onContinue,
   onImpersonate,
+  canUndoLastContinue = false,
+  onUndoLastContinue,
+  onRegenerateLastContinueSegment,
   replyAsOptions = [],
   replyAsId,
   onChangeReplyAs,
@@ -211,6 +218,28 @@ export function Composer({
             >
               <ChevronsRight size={16} strokeWidth={1.75} />
             </button>
+            {canUndoLastContinue && (
+              <>
+                <button
+                  onClick={onUndoLastContinue}
+                  disabled={disabled || isGenerating}
+                  title="Undo last continue"
+                  aria-label="Undo last continue"
+                  className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors disabled:opacity-40 ${iconBtnClass}`}
+                >
+                  <Undo2 size={16} strokeWidth={1.75} />
+                </button>
+                <button
+                  onClick={onRegenerateLastContinueSegment}
+                  disabled={disabled || isGenerating}
+                  title="Regenerate last continue segment"
+                  aria-label="Regenerate last continue segment"
+                  className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors disabled:opacity-40 ${iconBtnClass}`}
+                >
+                  <RefreshCw size={16} strokeWidth={1.75} />
+                </button>
+              </>
+            )}
             <button
               onClick={handleImpersonate}
               disabled={disabled || isGenerating || impersonating}

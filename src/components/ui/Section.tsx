@@ -12,27 +12,15 @@ interface SectionProps {
   description?: ReactNode
   /** Right-aligned header accessory — a toggle, a mode switch — sitting level with the title. */
   action?: ReactNode
-  /**
-   * 'elevated' (default) is for a section sitting on the bare page background (Settings tabs).
-   * 'sunken' is for one nested inside an already-elevated surface (a Modal's body) so it still
-   * reads as a distinct block rather than blending into the panel behind it. 'bare' skips the
-   * card surface entirely, for content that supplies its own (a segmented button row, a lone
-   * field + button) rather than a boxed block.
-   */
+  /** 'elevated' (default) sits on the bare page background; 'sunken' nests inside an already-elevated surface; 'bare' skips the card surface entirely. */
   surface?: SectionSurface
   className?: string
-  /** Extra classes for the inner content wrapper — e.g. `divide-y divide-border` for a list of toggles. Ignored when `surface="bare"`, which has no wrapper to apply them to. */
+  /** Extra classes for the inner content wrapper; ignored when `surface="bare"`. */
   contentClassName?: string
   children?: ReactNode
 }
 
-/**
- * The "labeled card" pattern — a heading, an optional one-line description, and a padded content
- * block — used throughout Settings and several modal bodies. Previously copy-pasted per section
- * (`rounded-2xl bg-bg-elevated p-6` in some files, `rounded-xl bg-bg-sunken p-4` in others, with
- * the heading's own margin drifting between mb-1/mb-2/mb-3 depending who wrote it last) rather
- * than sharing one definition — standardized here to one padding/radius per surface tier instead.
- */
+/** The "labeled card" pattern — heading, optional description, padded content block — used throughout Settings and modal bodies. */
 export function Section({
   title,
   description,

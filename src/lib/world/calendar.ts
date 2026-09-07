@@ -1,16 +1,8 @@
 /**
- * A deterministic, shared "living world" clock — the foundation ROADMAP.md section 10a calls
- * for, and the piece almost everything else in that section reads from. Everything here is a
- * pure function of an absolute day number (plus a seed id for weather/mood), so nothing needs
- * its own storage beyond the two integers that actually change — `WorldCard.currentDay` and
- * `currentPhaseIndex` — season, weekday, holiday, weather, and mood-of-day are all recomputed on
- * demand, never persisted, and always reproducible for the same inputs (weather is "browsable a
- * few days ahead" for free, just by calling getWeather with a larger day number).
- *
- * The economy/currency system (ROADMAP.md 10a's "Economy" bullet) is still not built here — see
- * `endDateEvent` in `useChatSession.ts` for the one earning hook that exists today. `advancePhase`
- * is also still exposed as a plain manual step in the World editor for authoring/testing,
- * independent of the energy ledger below (`spendEnergy`), which is the real in-play path now.
+ * A deterministic, shared "living world" clock. Everything here is a pure function of an absolute
+ * day number (plus a seed id for weather/mood) — only `WorldCard.currentDay`/`currentPhaseIndex`
+ * are actually stored; season, weekday, holiday, weather, and mood-of-day are all recomputed on
+ * demand and always reproducible for the same inputs.
  */
 
 export const SEASONS = ['spring', 'summer', 'autumn', 'winter'] as const
@@ -48,8 +40,7 @@ export function getCalendarInfo(day: number): CalendarInfo {
   const seasonIndex = Math.floor(wrapped / DAYS_PER_SEASON)
   const season = SEASONS[seasonIndex]
   const dayOfSeason = (wrapped % DAYS_PER_SEASON) + 1
-  // Every season starts on a Monday, and DAYS_PER_SEASON (28) is divisible by 7, so the weekday
-  // cycle realigns to Monday at the start of every season, not just once a year.
+  // Every season starts on a Monday (28 is divisible by 7), so this realigns each season, not just once a year.
   const weekday = WEEKDAYS[(dayOfSeason - 1) % 7]
   const holiday = HOLIDAYS[season].dayOfSeason === dayOfSeason ? HOLIDAYS[season].name : undefined
   return { day: wrapped, season, dayOfSeason, weekday, holiday }
@@ -126,11 +117,7 @@ export function advancePhase(day: number, phaseIndex: number): { day: number; ph
   return { day, phaseIndex: next }
 }
 
-/**
- * The day's action pool (ROADMAP.md 10a's "Energy/action economy") — 3 actions on a weekday, 4 on
- * a weekend, one bonus action for staying out late. Never stored: like everything else here it's
- * derived, this time from how far `currentPhaseIndex` already is into the day.
- */
+/** The day's action pool — 3 actions on a weekday, 4 on a weekend. Never stored, derived on demand. */
 export function getMaxEnergyForDay(day: number): number {
   const { weekday } = getCalendarInfo(day)
   return weekday === 'saturday' || weekday === 'sunday' ? 4 : 3
@@ -148,14 +135,7 @@ export interface EnergySpendResult {
   slept: boolean
 }
 
-/**
- * Spends one action: steps the phase clock forward, then — if that step used up today's last
- * action — rolls straight on to next morning instead of leaving the world sitting at a phase with
- * nothing left to do. A weekend's bonus 4th action already lands exactly on `advancePhase`'s own
- * night-to-next-morning wraparound, so only a weekday's earlier cutoff (3 actions but 4 phases)
- * ever needs the extra forced step — which is also why a weekday "ends" at night with no action
- * left to spend there, while a weekend lets the player still be awake and spend one at night.
- */
+/** Spends one action: steps the phase forward, then rolls straight to next morning if that step used up today's last action, rather than leaving the world sitting at a phase with nothing left to do. */
 export function spendEnergy(day: number, phaseIndex: number): EnergySpendResult {
   const stepped = advancePhase(day, phaseIndex)
   if (stepped.day !== day) return { ...stepped, slept: true }
@@ -163,22 +143,10 @@ export function spendEnergy(day: number, phaseIndex: number): EnergySpendResult 
   return { ...advancePhase(stepped.day, stepped.phaseIndex), slept: true }
 }
 
-/**
- * Where an action taken *right now* actually happens, as distinct from `spendEnergy`'s own return
- * value — which, once a day's last action forces a rollover, jumps straight to next morning and
- * never represents the phase the action itself took place in at all. Spending your last weekday
- * action from Evening (phase 2) steps to Night (phase 3) with 0 energy left there, so `spendEnergy`
- * rolls straight on to next morning without ever surfacing Night; spending an already-at-Night
- * action (weekend's bonus 4th) steps `advancePhase` straight into next-day-morning with no
- * intermediate value at all — the activity itself happened in the *original* phase, not the one
- * rolled into. Both cases matter for anything that describes "now" for the activity being started
- * (10b's live-scene opener grounds its opening line on this, not on the post-spend world state,
- * which may have already moved on to the next morning by the time that line is generated).
- */
+/** Where an action taken *right now* actually happens, as distinct from `spendEnergy`'s return value, which jumps straight to next morning once a day's last action forces a rollover. */
 export function activityPhase(day: number, phaseIndex: number): { day: number; phaseIndex: number } {
   const stepped = advancePhase(day, phaseIndex)
-  // advancePhase itself already wrapped the day — phaseIndex was the day's last phase, and that's
-  // where the activity happens, not the next-morning value `stepped` jumped straight to.
+  // Day already wrapped — the activity happened in the original phase, not the next-morning value `stepped` jumped to.
   if (stepped.day !== day) return { day, phaseIndex }
   return stepped
 }
@@ -211,12 +179,7 @@ export function describeWorldMoment(opts: {
 
 export type PresenceStatus = 'available' | 'busy' | 'sleeping' | 'traveling'
 
-/**
- * One routine slot in a character's week (ROADMAP.md 10f's "Schedules" bullet) — the prerequisite
- * for proactive outreach: a character can't decide whether they're free to text the player without
- * first having something to be doing at all. Deliberately simple (a flat list of slots, no
- * recurrence rules beyond "every day" vs specific weekdays) rather than a full calendar system.
- */
+/** One routine slot in a character's week — a flat list of slots, no recurrence rules beyond "every day" vs specific weekdays. */
 export interface ScheduleEntry {
   id: string
   /** Which weekdays this applies to — unset/empty means every day. */
@@ -227,11 +190,7 @@ export interface ScheduleEntry {
   location?: string
 }
 
-/**
- * Resolves what a character is doing right now: a day-specific entry beats an "every day" one for
- * the same phase; the first match in authoring order wins among ties. No schedule at all, or no
- * matching slot, defaults to available/free time — an unscheduled character isn't assumed busy.
- */
+/** What a character is doing right now: a day-specific entry beats an "every day" one; no schedule or no matching slot defaults to available. */
 export function getCurrentActivity(
   schedule: ScheduleEntry[] | undefined,
   day: number,

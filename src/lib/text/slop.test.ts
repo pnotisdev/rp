@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildSlopAvoidanceNote,
   cleanModelOutput,
+  EXPLICIT_ANTI_PATTERN_ENTRIES,
   findRepeatedPhrases,
   balanceTrailingMarkup,
   endsCleanly,
@@ -104,6 +105,23 @@ describe('cleanModelOutput — meta/preamble removal', () => {
       "Sumire feels most loved through Quality time."
     expect(cleanModelOutput(partialSurvivor)).toBe('Sumire feels most loved through Quality time.')
   })
+
+  it('straightens curly quotes to plain ASCII ones', () => {
+    expect(cleanModelOutput('“You’re impossible,” she said.')).toBe('"You\'re impossible," she said.')
+  })
+
+  it('strips italics wrapping an entire quoted line, whether the asterisks sit outside or inside the quotes', () => {
+    expect(cleanModelOutput('*"I don\'t know why."*')).toBe('"I don\'t know why."')
+    expect(cleanModelOutput('"*I don\'t know why.*"')).toBe('"I don\'t know why."')
+  })
+
+  it('leaves partial emphasis on a single word inside otherwise-plain dialogue alone', () => {
+    expect(cleanModelOutput('"I *really* mean it."')).toBe('"I *really* mean it."')
+  })
+
+  it('only strips the italicized quote, leaving a genuine action beat next to it untouched', () => {
+    expect(cleanModelOutput('"*Hey.*" *She turns.* "*Bye.*"')).toBe('"Hey." *She turns.* "Bye."')
+  })
 })
 
 describe('findSlop', () => {
@@ -123,6 +141,12 @@ describe('findSlop', () => {
     ])
     expect(hits[0].id).toBe('couldnt-help')
     expect(hits[0].count).toBe(2)
+  })
+
+  it('scans extraPatterns alongside the base corpus, but only when passed', () => {
+    const withExtra = findSlopAcross(['He entered her, slow at first.'], EXPLICIT_ANTI_PATTERN_ENTRIES)
+    expect(withExtra.map((h) => h.label)).toContain('he entered her')
+    expect(findSlopAcross(['He entered her, slow at first.'])).toEqual([])
   })
 })
 
@@ -157,6 +181,17 @@ describe('buildSlopAvoidanceNote', () => {
 
   it('ignores the player-supplied turns (caller passes char turns only)', () => {
     expect(buildSlopAvoidanceNote([])).toBeUndefined()
+  })
+
+  it('names a peak-phase anti-pattern already used, when extraPatterns is passed (explicit-rated chats only)', () => {
+    const note = buildSlopAvoidanceNote(['*She gasped as he entered her, slow at first.*'], {
+      extraPatterns: EXPLICIT_ANTI_PATTERN_ENTRIES,
+    })
+    expect(note).toContain('he entered her')
+  })
+
+  it('never surfaces an explicit anti-pattern without extraPatterns — the caller gates this to explicit-rated chats', () => {
+    expect(buildSlopAvoidanceNote(['*She gasped as he entered her, slow at first.*'])).toBeUndefined()
   })
 })
 

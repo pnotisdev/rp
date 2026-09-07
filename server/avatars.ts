@@ -96,13 +96,7 @@ export function resolveAvatar(kind: AvatarEntityKind, id: string, avatarDataUrl:
   return `/avatars/${kind}/${id}/avatar.${ext}?t=${Date.now()}`
 }
 
-/**
- * Deletes every file in `dir` whose name isn't in `keep` — used right after (re)writing a set of
- * image files, so a stale one left behind by a format change (re-uploading the same slot as a
- * different mime type, e.g. png -> jpg) or a dropped map key (an unlocked-then-removed gallery
- * CG/sprite) doesn't linger on disk forever; nothing here ever deletes a file that's still
- * referenced by the map/avatar just resolved.
- */
+/** Deletes every file in `dir` not in `keep` — clears stale files left by a format change or dropped map key. */
 function pruneUnreferencedFiles(dir: string, keep: Set<string>): void {
   if (!fs.existsSync(dir)) return
   for (const file of fs.readdirSync(dir)) {
@@ -124,22 +118,11 @@ export function removeAvatar(kind: AvatarEntityKind, id: string): void {
   fs.rmSync(entityDir(kind, id), { recursive: true, force: true })
 }
 
-// Keys here are fixed expression/background ids (src/lib/vn/expressions.ts, backgrounds.ts) or a
-// gallery entry's own id, chosen from a dropdown or generated locally — never freeform user text —
-// still validated since they end up in a filename.
-// Length only bounds the filename; what actually prevents traversal is the character class, which
-// admits no `/`, `\`, or `.` and so cannot express `..` or any path segment. Raised from 40 to 90
-// for outfit sprites (`src/lib/vn/outfits.ts`), whose keys are a composite `<outfitId>--<expression>`
-// — two ids that are each independently capped at 40 by `slugifyId`, so 82 is the real worst case.
+// Fixed expression/background/gallery ids, still validated since they end up in a filename. The
+// character class (no `/`, `\`, `.`) is what prevents traversal; length allows for composite outfit-sprite keys.
 const SAFE_KEY_RE = /^[a-z0-9][a-z0-9-]{0,89}$/i
 
-/**
- * Same idea as resolveAvatar, but for a whole tagged set of images at once — one sprite per
- * expression, one CG per gallery entry, one background per scene tag. Each lives under the owning
- * entity's own folder, in a subfolder named for what it is
- * (data/avatars/<kind>/<id>/<subKind>/<key>.<ext>). Each entry is resolved independently; entries
- * with an invalid key or unresolvable value are dropped.
- */
+/** Like `resolveAvatar` but for a tagged set of images (one per expression/gallery entry/background), stored under `<kind>/<id>/<subKind>/<key>.<ext>`. */
 export function resolveAvatarMap(
   kind: AvatarEntityKind,
   subKind: AvatarMapSubKind,
@@ -149,11 +132,49 @@ export function resolveAvatarMap(
   return resolveMediaMap(kind, subKind, id, map, decodeImageDataUrl)
 }
 
-/**
- * Same tagged-set handling as `resolveAvatarMap`, but for audio — the per-mood background-music
- * tracks on `WorldCard.music`. Lives under `data/avatars/worlds/<id>/music/<key>.<ext>` so the
- * existing recursive backup walk and per-world folder delete cover it for free.
- */
+/** Item 11's "up to N variants per slot" — same idea as `resolveAvatarMap`, but each key holds a *list* of images instead of one, stored under `<kind>/<id>/<subKind>-variants/<key>-alt<i>.<ext>` so filenames never collide with the primary map's own `<key>.<ext>`. */
+export function resolveAvatarMapVariants(
+  kind: AvatarEntityKind,
+  subKind: AvatarMapSubKind,
+  id: string,
+  map: unknown,
+): Record<string, string[]> | undefined {
+  if (!UUID_RE.test(id)) throw new Error('Invalid id')
+  if (!map || typeof map !== 'object') return undefined
+  const result: Record<string, string[]> = {}
+  const dir = path.join(entityDir(kind, id), `${subKind}-variants`)
+  const keepFiles = new Set<string>()
+  for (const [key, rawList] of Object.entries(map as Record<string, unknown>)) {
+    if (!SAFE_KEY_RE.test(key) || !Array.isArray(rawList)) continue
+    const urls: string[] = []
+    rawList.forEach((value, i) => {
+      if (typeof value !== 'string' || !value) return
+      if (!value.startsWith('data:')) {
+        urls.push(value) // already a resolved /avatars/... URL from a previous save
+        const file = value.split('/').pop()?.split('?')[0]
+        if (file) keepFiles.add(file)
+        return
+      }
+      let ext: string
+      let buffer: Buffer
+      try {
+        ;({ ext, buffer } = decodeImageDataUrl(value))
+      } catch (e) {
+        throw new Error(`"${key}[${i}]": ${e instanceof Error ? e.message : String(e)}`)
+      }
+      fs.mkdirSync(dir, { recursive: true })
+      const filename = `${key}-alt${i}.${ext}`
+      fs.writeFileSync(path.join(dir, filename), buffer)
+      urls.push(`/avatars/${kind}/${id}/${subKind}-variants/${filename}?t=${Date.now()}`)
+      keepFiles.add(filename)
+    })
+    if (urls.length) result[key] = urls
+  }
+  pruneUnreferencedFiles(dir, keepFiles)
+  return result
+}
+
+/** Same tagged-set handling as `resolveAvatarMap`, but for `WorldCard.music`'s per-mood audio tracks. */
 export function resolveWorldMusicMap(id: string, map: unknown): Record<string, string> | undefined {
   return resolveMediaMap('worlds', 'music', id, map, decodeAudioDataUrl)
 }
@@ -199,11 +220,7 @@ function resolveMediaMap(
     fs.writeFileSync(path.join(dir, `${key}.${ext}`), buffer)
     result[key] = `/avatars/${kind}/${id}/${subKind}/${key}.${ext}?t=${Date.now()}`
   }
-  // This map fully replaces whatever was here before (a dropped key means the caller no longer
-  // wants that entry at all — e.g. a removed gallery CG or custom expression), and a changed
-  // extension leaves the old-format file behind under `dir` isn't referenced by `result` at all,
-  // so anything not in the freshly-resolved set is safe to delete — this whole directory belongs
-  // to just this one entity/subKind.
+  // This map fully replaces whatever was here before, so anything not in the freshly-resolved set is safe to delete.
   pruneUnreferencedFiles(
     dir,
     new Set(Object.values(result).map((url) => url.split('/').pop()!.split('?')[0])),

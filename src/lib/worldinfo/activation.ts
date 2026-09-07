@@ -2,29 +2,19 @@ import type { Lorebook, LorebookEntry } from '@/lib/characters/cardSpec'
 import { estimateTokens } from '@/lib/tokenEstimate'
 import { MAX_REGEX_HAYSTACK_LENGTH } from '@/lib/text/regexSafety'
 
+/**
+ * Keyword/always/manual lorebook-entry activation: scans recent chat text, applies affection/delay
+ * gates, resolves inclusion groups and per-book token budgets, and (when a runtime is passed)
+ * chains recursive scanning and persists sticky/cooldown state across turns. Mirrors SillyTavern's
+ * "always / when relevant (keyword) / manual" activation modes; `manual` here is just an
+ * author-toggled `enabled` flag, with no in-chat per-turn activation control.
+ */
+
 export interface ActivationOptions {
   /** How many recent messages (rendered as plain text) to scan for keyword hits. */
   scanDepth: number
 }
 
-/**
- * Scans recent chat text for lorebook entry keyword matches. `always`-mode entries (constant:
- * true) are always included. `manual` entries fire purely off their own `enabled` toggle — this
- * app has no in-chat "activate for this turn" control, so unlike upstream SillyTavern's
- * manual mode (activated ad hoc via slash command), here it's simply an entry the author flips
- * on/off by hand in the editor rather than one keyword-triggered automatically.
- * Mirrors ST's "always / when relevant (keyword) / manual" activation modes.
- *
- * (Previously took a `manuallyActivatedIds: Set<number>` for a future per-turn "force this entry
- * on" control, additive on top of `enabled` — removed as dead machinery nothing ever populated,
- * per section 9's own note. It also would have been unsafe to wire up as originally shaped:
- * `LorebookEntry.id` is only unique within one book, and this function scans several books at
- * once, so a single flat id set could force on a same-numbered entry in an unrelated book too —
- * the same cross-source id-collision problem section 9's scene-flag-authoring writeup already
- * flagged for a very similar sticky/cooldown idea. A real version of this control needs a stable
- * composite key across sources first, which is its own, separate piece of work, not a quick
- * revival of this branch.)
- */
 export interface WorldInfoActivationResult {
   activated: LorebookEntry[]
   /** Entries that matched but were dropped because their book's token budget was full. */
@@ -56,16 +46,10 @@ function compositeKey(book: Lorebook, bookIndex: number, entry: LorebookEntry, e
   return `${book.sourceKey ?? `b${bookIndex}`}:${entry.id ?? `i${entryIndex}`}`
 }
 
-/** How many extra recursive-scanning passes a book gets before we stop chaining — bounds a pathological entry->entry->entry cycle to a fixed cost instead of looping. */
+/** Caps recursive-scanning passes so an entry->entry->entry cycle can't loop forever. */
 const MAX_RECURSION_DEPTH = 3
 
-/**
- * Scans for matches per-book, then caps each book to its own token_budget
- * (estimated, since this runs synchronously) so a large lorebook can never
- * silently eat the whole context — this is the actual "token saving"
- * mechanism: only relevant, budget-fitting lore gets injected, never
- * everything that merely matches a keyword.
- */
+/** Scans for matches per-book, then caps each book to its own `token_budget` so a large lorebook can never silently eat the whole context. */
 export function activateWorldInfo(
   books: Lorebook[],
   recentText: string,
@@ -77,9 +61,7 @@ export function activateWorldInfo(
   const droppedForBudget: LorebookEntry[] = []
   const droppedForGroup: LorebookEntry[] = []
 
-  // sticky/cooldown: track which composite keys ended up active this turn (and which of those
-  // were a fresh keyword hit rather than a sticky carry-over) so the per-entry state can be
-  // rolled forward once, after every book has been scanned.
+  // Track active/fresh keys per turn for the sticky/cooldown rollup after all books are scanned.
   const activeKeys = new Set<string>()
   const freshMatchKeys = new Set<string>()
   const stickyCandidates: { key: string; entry: LorebookEntry }[] = []
@@ -92,26 +74,21 @@ export function activateWorldInfo(
 
     for (const entry of book.entries) {
       const mode = entry.activationMode ?? (entry.constant ? 'always' : 'keyword')
-      // Manual-mode entries have their own enabled check below, not the generic one — kept
-      // separate so this stays a no-op fallthrough point if a real per-turn override ever lands.
+      // Manual entries use their own enabled check below, not this generic one.
       if (mode !== 'manual' && !entry.enabled) continue
       const requiredAffection = Number((entry.extensions as Record<string, unknown> | undefined)?.affectionMin ?? 0)
       if (Number.isFinite(requiredAffection) && affection < requiredAffection) continue
-      // ST's "delay": hold the entry back until the chat is at least `delay` messages long. Needs the
-      // turn counter, so like sticky/cooldown it only applies when a runtime is threaded through
-      // (always the case in-app; old callers that pass no runtime keep today's behaviour).
+      // ST's `delay`: hold back until the chat reaches `delay` messages; needs a runtime to apply.
       if (runtime && entry.delay !== undefined && runtime.turn < entry.delay) continue
       if (mode === 'always') {
         matched.push(entry)
         continue
       }
       if (mode === 'manual') {
-        // Manual entries are considered "on" purely via their own enabled toggle.
         if (entry.enabled) matched.push(entry)
         continue
       }
-      // Keyword-mode entries also chain via recursive scanning below, so keep the candidate
-      // list around rather than only checking each one once against the original text.
+      // Kept as a candidate list for recursive scanning below, not just a single original-text check.
       keywordEntries.push(entry)
     }
 
@@ -136,11 +113,8 @@ export function activateWorldInfo(
       }
     }
 
-    // Recursive scanning: a just-activated entry's own content can introduce new keywords that
-    // trigger further entries — e.g. a "the Duke" entry mentioning "Ashfall Keep" pulling in the
-    // Ashfall Keep entry, even though the original message never said it. Only keyword-mode
-    // entries chain this way; always/manual entries are already fully resolved above. Depth-capped
-    // so a cycle of entries referencing each other can't loop forever.
+    // Recursive scanning: a just-activated entry's own content can introduce keywords that trigger
+    // further keyword-mode entries (depth-capped against reference cycles).
     if (book.recursive_scanning) {
       let frontier = matched.filter((e) => keywordEntries.includes(e))
       for (let depth = 0; depth < MAX_RECURSION_DEPTH && frontier.length > 0; depth++) {
@@ -160,9 +134,7 @@ export function activateWorldInfo(
       }
     }
 
-    // Inclusion groups: entries sharing a group name are alternatives for the same beat (e.g.
-    // three mutually-exclusive "how the party reacts" entries) — only the highest-priority one
-    // in each group should actually fire, not all of them at once.
+    // Inclusion groups: entries sharing a group are alternatives — only the highest-priority one fires.
     const byGroup = new Map<string, LorebookEntry[]>()
     const ungrouped: LorebookEntry[] = []
     for (const entry of matched) {
@@ -176,11 +148,7 @@ export function activateWorldInfo(
     }
     matched = ungrouped
     for (const group of byGroup.values()) {
-      // ST's weighted inclusion groups: if any member sets `groupWeight`, the winner is a
-      // weighted random draw across the whole group (an unset weight defaults to 1) instead of
-      // the plain deterministic "highest insertion_order wins" rule every group used before this
-      // existed — that rule stays the default so a book with no weights set behaves exactly as
-      // it always has.
+      // ST's weighted groups: if any member sets `groupWeight`, pick via weighted random draw; else the plain highest-insertion_order rule.
       const winner = group.some((e) => e.groupWeight !== undefined)
         ? pickWeighted(group)
         : [...group].sort((a, b) => b.insertion_order - a.insertion_order)[0]
@@ -210,8 +178,7 @@ export function activateWorldInfo(
   if (runtime) {
     nextState = {}
     const { turn, prevState } = runtime
-    // Carry forward any still-pending block from a key that wasn't even scanned this turn (e.g. its
-    // book dropped out of a group chat's roster for a turn) so a cooldown isn't silently cleared.
+    // Carry forward a pending cooldown even for a key not scanned this turn (e.g. its book left the roster).
     for (const [key, rt] of Object.entries(prevState)) {
       if (rt.blockedUntil !== undefined && turn < rt.blockedUntil) nextState[key] = { blockedUntil: rt.blockedUntil }
     }
@@ -222,8 +189,7 @@ export function activateWorldInfo(
       const next: WorldInfoEntryRuntime = {}
       if (isActive) {
         next.activeAt = turn
-        // A fresh keyword hit (re)starts the sticky window; a sticky carry-over keeps the window it
-        // already has rather than extending it forever.
+        // A fresh hit (re)starts the sticky window; a carry-over keeps its existing window.
         if (freshMatchKeys.has(key) && entry.sticky && entry.sticky > 0) {
           next.activeUntil = turn + entry.sticky + 1
         } else if (rt.activeUntil !== undefined && turn < rt.activeUntil) {
@@ -265,12 +231,7 @@ function pickWeighted(group: LorebookEntry[]): LorebookEntry {
   return group[group.length - 1]
 }
 
-/**
- * SillyTavern's own convention: a key wrapped in slashes (`/pattern/flags`) is a regex, not a
- * literal substring. `caseSensitive` only adds an implicit `i` flag when the author didn't
- * already specify one explicitly — an explicit `i` (or the entry being case-sensitive) is
- * always respected as written.
- */
+/** ST's convention: a key wrapped in slashes (`/pattern/flags`) is a regex, not a literal substring. `caseSensitive` only adds an implicit `i` flag when the author didn't already specify one. */
 function parseRegexKey(key: string, caseSensitive: boolean): RegExp | null {
   const match = key.match(/^\/(.+)\/([a-z]*)$/i)
   if (!match) return null
@@ -286,9 +247,7 @@ function matchesKeywords(entry: LorebookEntry, haystackOriginal: string, haystac
   if (entry.keys.length === 0) return false
   const test = (k: string) => {
     const regex = parseRegexKey(k, !!entry.case_sensitive)
-    // Section 9's ReDoS finding: only the regex path can catastrophically backtrack, so only it
-    // gets capped — plain `.includes()` below stays uncapped since substring matching can't blow
-    // up regardless of input length, and truncating it would just silently miss real content.
+    // Only the regex path can catastrophically backtrack, so only it's length-capped; plain `.includes()` is safe uncapped.
     if (regex) return regex.test(haystackOriginal.slice(0, MAX_REGEX_HAYSTACK_LENGTH))
     const needle = entry.case_sensitive ? k : k.toLowerCase()
     const hay = entry.case_sensitive ? haystackOriginal : haystackLower
@@ -309,16 +268,7 @@ export function recentMessagesText(messages: { text: string }[], scanDepth: numb
     .join('\n')
 }
 
-/**
- * A short human label for a lorebook entry, for lists that name entries rather than show them
- * (the Prompt Inspector's "matched but didn't fit" / "lost to a higher-priority entry" lines).
- *
- * The naive `keys[0] ?? comment` this replaces produced an empty string for the very entries
- * these lists exist to explain: an always-active entry needs no keys, and `comment` is optional,
- * so a world of them rendered as 96 empty slots separated by commas. `??` only catches the
- * missing `comment`, never the empty one. Falls through keys -> comment -> a snippet of the
- * content itself -> a last-resort placeholder, so the result is never blank.
- */
+/** A short human label for a lorebook entry (Prompt Inspector's match/drop lists). Falls through keys -> comment -> a content snippet -> a placeholder, so it's never blank. */
 export function describeEntry(entry: Pick<LorebookEntry, 'keys' | 'comment' | 'content'>): string {
   const key = entry.keys.find((k) => k.trim())
   if (key) return key.trim()

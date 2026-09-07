@@ -44,6 +44,11 @@ import { SelectField } from '@/components/ui/Field'
 import { confirmDialog } from '@/lib/store/useConfirmStore'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 
+/**
+ * The "Relationship" modal: bond/warmth summary, per-dimension stats, intimacy unlocks, the gift/
+ * item/toy shop, and chat-level settings + remembered facts + event history. Supports a tab
+ * switcher across every character this chat tracks a relationship for (primary + participants).
+ */
 const ALL_STAT_KEYS =['affection', 'trust', 'chemistry', 'comfort', 'respect', 'curiosity', 'tension'] as const
 
 const DIMENSION_LABELS: Record<(typeof ALL_STAT_KEYS)[number], string> = {
@@ -68,7 +73,7 @@ type PanelTab = 'overview' | 'unlocks' | 'shop' | 'more'
 interface RelationshipPanelProps {
   chat: Chat
   character?: Character
-  /** Extra characters able to speak in this chat (group scenes) — multi-character relationship tracking's own tab switcher, below. Empty for today's ordinary single-character chats. */
+  /** Extra characters able to speak in this chat (group scenes); drives the tab switcher below. */
   participantCharacters?: Character[]
   world?: WorldCard
   onClose: () => void
@@ -79,17 +84,11 @@ interface RelationshipPanelProps {
   /** The "First time together" milestone ask — see `stage.ts`'s `canInitiateFirstTime`. */
   onInitiateFirstTime: (characterId?: string) => Promise<void>
   onEndRelationship: (characterId?: string) => Promise<void>
-  /** The "Customize in World editor" link, when this character has a bound world — jumps straight to its "Dating sim" tab rather than just the world's overview. Absent when there's nowhere to route to (no view-switcher in scope). */
+  /** Jumps to the bound world's "Dating sim" tab; absent when there's nowhere to route to. */
   onNavigateToWorld?: (worldId: string, tab?: string) => void
-  /**
-   * Clicking an unlocked (and, for toys, owned) intimacy action. The connected model adapts the
-   * entry's `actionText` to the current scene (`draftIntimacyAction`) and the caller drops the
-   * result into the composer for review, arming the option id so a deliberate send still switches
-   * the outfit / opens the aftercare window. Resolves once the composer is populated so the panel
-   * knows when to close; the model call can take a few seconds, so the button shows a pending state.
-   */
+  /** Adapts the option's action text to the scene and drops it in the composer for review; resolves once populated. */
   onIntimacyAction: (option: IntimacyUnlockable) => Promise<void>
-  /** How many replies the character has given, the unit the aftercare window is counted in (`dating/aftercare.ts`). */
+  /** How many replies the character has given — the unit the aftercare window is counted in. */
   charReplyCount: number
 }
 
@@ -114,7 +113,7 @@ function formatDeltas(deltas: Partial<Record<string, number>>): string {
     .join(', ')
 }
 
-/** The small "Customize in World editor" link shared by the Unlocks and Shop tabs — a no-op render (not a disabled button) with no bound world, since there's genuinely nowhere to send the player. */
+/** Shared by the Unlocks and Shop tabs; renders nothing when there's no bound world to send the player to. */
 function CustomizeLink({ world, onNavigateToWorld }: { world?: WorldCard; onNavigateToWorld?: (worldId: string, tab?: string) => void }) {
   if (!world || !onNavigateToWorld) return null
   return (
@@ -144,10 +143,7 @@ export function RelationshipPanel({
   onIntimacyAction,
   charReplyCount,
 }: RelationshipPanelProps) {
-  // Multi-character relationship tracking: everyone this chat actually tracks a relationship for —
-  // the primary plus any participant — with a tab switcher below when there's more than one. Falls
-  // back to the primary the moment a picked participant leaves the roster (edited mid-chat) rather
-  // than silently rendering an empty panel.
+  // Everyone this chat tracks a relationship for; falls back to the primary if a picked participant leaves the roster.
   const trackedCharacters = character ? [character, ...participantCharacters] : participantCharacters
   const [viewingId, setViewingId] = useState(character?.id ?? '')
   const viewingCharacter = trackedCharacters.find((c) => c.id === viewingId) ?? character
@@ -171,12 +167,7 @@ export function RelationshipPanel({
   const knownFlags = combinedSceneFlags(world?.customSceneFlags)
   const commitmentStatus = track.commitmentStatus ?? 'none'
   const nextTier = nextCommitmentTier(commitmentStatus)
-  // The commitment ladder used to be gated on warmth alone — a real playthrough reached "married"
-  // without the characters ever having kissed. `physical` folds in the two signals
-  // `commitmentLockReason`/`canActuallyAskForCommitment` (`stage.ts`) gate on top of warmth:
-  // whether they've kissed (the built-in `first_kiss` scene flag — set either by the deterministic
-  // kissing_spot button or the AI classifier noticing one in freeform prose) and whether they've
-  // already shared their "first time together" (`track.firstIntimateSceneAt`).
+  // Gates the commitment ladder on physical milestones too, not warmth alone — see `commitmentLockReason`/`canActuallyAskForCommitment`.
   const physical = { hasKissed: flags.has(FIRST_KISS_FLAG), firstIntimateSceneAt: track.firstIntimateSceneAt }
   const nextTierLockReason = nextTier ? commitmentLockReason(nextTier, warmth, physical, milestones) : undefined
   const eligibleForNextTier = nextTier ? canActuallyAskForCommitment(nextTier, warmth, physical, milestones) : false
@@ -186,25 +177,12 @@ export function RelationshipPanel({
   const [buyingToyId, setBuyingToyId] = useState<string | null>(null)
   const [pendingActionId, setPendingActionId] = useState<string | null>(null)
 
-  // Eligible (warmth/commitment-met) toys regardless of ownership — the panel itself needs to see
-  // an unbought-but-eligible toy too, to render its "Buy" state, unlike the prompt's own call
-  // (`useChatSession.ts`), which passes `ownedToyIds` to filter those out before the model ever
-  // sees them.
+  // Eligible toys regardless of ownership — the panel needs to render an unbought-but-eligible toy's "Buy" state.
   const intimacyUnlocked = getUnlockedIntimacyOptions(warmth, commitmentStatus, world)
-  // FIXES_TODO.md item #6: a not-yet-owned toy's only "Buy" affordance used to live on its own pill
-  // in the Unlocks tab — reasonable given that's where the warmth/commitment eligibility gate
-  // already lives, but it left toys genuinely invisible to a player who only ever checks the Shop
-  // tab (which explicitly has a whole "Item shop" section, a completely reasonable place to expect
-  // "buy toys" too). The FULL catalog (not just `intimacyUnlocked`, which already drops anything
-  // not yet warmth/commitment-eligible) so a locked toy can still be *shown*, with its requirement,
-  // rather than disappearing until the player stumbles onto it in Unlocks — same "discoverable
-  // before it's buyable" treatment `nextLockedInCategory` already gives the Unlocks tab itself.
+  // The full catalog (not just `intimacyUnlocked`), so a locked toy is still shown with its requirement rather than hidden.
   const toyCatalogAll = getIntimacyCatalog(world).filter((i) => i.category === 'toy')
   const unlockedToyIds = new Set(intimacyUnlocked.filter((i) => i.category === 'toy').map((i) => i.id))
-  // The content rating governs this panel too, not just the prompt. Before this, a chat set to
-  // fade-to-black still rendered position/toy/activity as clickable buttons that send an explicit
-  // action line as the player's own message — the dial held on one surface and not the other.
-  // The world's own rating wins over the global setting (`resolveIntimacyLevel`).
+  // The content rating governs this panel too, not just the prompt; the world's rating wins over the global setting.
   const globalIntimacyLevel = useSettingsStore((st) => st.intimacyLevel)
   // How much of the post-intimacy window is left, or null when none is open (`dating/aftercare.ts`).
   const afterglowSince = afterglowTurnsSince(track.afterglow ?? undefined, charReplyCount)
@@ -252,8 +230,7 @@ export function RelationshipPanel({
     ...(hasShop ? [{ id: 'shop' as const, label: 'Shop' }] : []),
     { id: 'more', label: 'More' },
   ]
-  // A shop-less character never gets to see the tab in the first place — nothing to fall out of if
-  // gifts/items are ever added later, since this re-derives from the catalogs on every render.
+  // Falls back off the shop tab if it stops applying (re-derived from the catalogs every render).
   const activeTab: PanelTab = tab === 'shop' && !hasShop ? 'overview' : tab
 
   const handleAsk = async () => {
@@ -294,21 +271,12 @@ export function RelationshipPanel({
   }
 
   const allEvents = useApiQuery('relationship-events', () => relationshipEventsApi.listByChat(chat.id), [chat.id]) ?? []
-  // `characterId` is unset on every event logged before multi-character tracking existed — those
-  // all belonged to the primary, so treat a missing id as a match for whichever character IS the
-  // primary rather than only ever matching an explicit id.
+  // A missing characterId predates multi-character tracking and belonged to the primary.
   const events = allEvents.filter((e) => (e.characterId ?? chat.characterId) === viewingCharacter?.id)
-  // FIXES_TODO.md's "no in-app signal for why a commitment ask keeps deflecting" item — every ask
-  // at the current `nextTier` logs its own event with a `reason` starting "Asked to be {tier}:"
-  // (`askForCommitment` in `useChatSession.ts`), so counting them is exactly the deflect count for
-  // THIS tier: an acceptance would have already advanced `commitmentStatus`, making `nextTier` a
-  // different (higher) rung, so every logged attempt still under this same `nextTier` was
-  // necessarily a deflect. Never resets on its own — once the tier finally lands, `nextTier` moves
-  // up and this naturally recomputes to 0 for the new one.
+  // Counts deflects at the current tier: an acceptance would have already advanced past it, so every logged attempt here was a deflect.
   const nextTierAskAttempts = nextTier ? events.filter((e) => e.reason.startsWith(`Asked to be ${formatCommitmentStatus(nextTier)}:`)).length : 0
   const facts = useApiQuery('chat-facts', () => chatFactsApi.listByChat(chat.id), [chat.id]) ?? []
-  // `typeof f.text === 'string'` guards against a malformed row (e.g. one written during an HMR
-  // half-edit) rendering an object as a React child and white-screening the panel.
+  // Guards against a malformed row rendering an object as a React child and white-screening the panel.
   const activeFacts = facts.filter((f) => f.active && typeof f.text === 'string')
   const [newFactText, setNewFactText] = useState('')
 
@@ -351,9 +319,7 @@ export function RelationshipPanel({
         </div>
       )}
 
-      {/* Pinned above the tabs — the things worth seeing no matter which tab is open: how close
-          things are, what's going on emotionally right now, and (if things are genuinely at risk)
-          the one banner that shouldn't ever be a tab-click away. */}
+      {/* Pinned above the tabs: bond/warmth, current emotional read, and the at-risk banner if any. */}
       <div className="mb-4 rounded-xl bg-bg-sunken p-4">
         <div className="mb-1 flex items-center justify-between text-xs text-text-muted">
           <span>Bond with {viewingCharacter?.card.name ?? 'Character'}</span>
@@ -391,9 +357,7 @@ export function RelationshipPanel({
           </p>
         )}
         {afterglowRemaining !== null && (
-          // Deliberately says what's true without saying what to do: the whole point of the window
-          // is that it scores what the player does with it, and printing "be warm to them" would
-          // turn a read of the character into a checklist.
+          // Says what's true, not what to do — the window scores what the player does with it.
           <p className="mt-2 border-t border-bg-elevated pt-2 text-xs italic text-romance">
             Still in the hours after being intimate — {afterglowRemaining} more{' '}
             {afterglowRemaining === 1 ? 'reply' : 'replies'} before it settles into how it felt.
@@ -433,8 +397,7 @@ export function RelationshipPanel({
       </div>
       </div>
 
-      {/* The only part that actually scrolls — bounded by the Modal's own max-height, so no tab
-          can ever push the panel taller than the viewport regardless of how much it holds. */}
+      {/* The only part that scrolls — bounded by the Modal's max-height regardless of tab content. */}
       <div className="min-h-0 flex-1 overflow-y-auto">
       {activeTab === 'overview' && (
         <div className="space-y-4">
@@ -460,11 +423,7 @@ export function RelationshipPanel({
                     <Button variant="primary" onClick={handleAsk} disabled={asking}>
                       {asking ? 'Asking…' : `Ask to be ${formatCommitmentStatus(nextTier)}`}
                     </Button>
-                    {/* Warmth being eligible doesn't mean the character will say yes — a real
-                        deflect is a genuine judged outcome, not a bug. But after a few of them in a
-                        row, the player has no in-app signal at all for *why*: every tracked
-                        dimension could be maxed except one quietly lagging behind the others (the
-                        live-observed case this responds to), and there was nothing pointing at it. */}
+                    {/* After a few deflects, point at whichever tracked dimension is lagging behind. */}
                     {nextTierAskAttempts >= 3 && (
                       <p className="max-w-[16rem] text-right text-[11px] text-text-muted">
                         Deflected {nextTierAskAttempts}× so far — {viewingCharacter?.card.name ?? 'their'}{' '}
@@ -474,10 +433,7 @@ export function RelationshipPanel({
                   </div>
                 ) : (
                   <div className="text-right text-xs text-text-muted">
-                    {/* Warmth alone can't tell a player what to actually do next — once it's met,
-                        the lock is physical (haven't kissed yet, or haven't shared a first time
-                        together yet) and the hint needs to say so instead of repeating a warmth
-                        number they've already cleared. */}
+                    {/* Once warmth is met, the lock is physical — say so instead of repeating a cleared number. */}
                     {nextTierLockReason === 'kiss'
                       ? `Kiss ${viewingCharacter?.card.name ?? 'them'} first`
                       : nextTierLockReason === 'first_time'
@@ -500,10 +456,7 @@ export function RelationshipPanel({
                     </div>
                     <div className="h-1.5 overflow-hidden rounded-full bg-bg-elevated">
                       <div
-                        // Tension isn't a "more is better" romance dimension the way the other six
-                        // are (see its glossary entry — rising tension "is not automatically a bad
-                        // thing dramatically") — it stays neutral so its bar doesn't read as
-                        // "progress" the way the romance-tinted ones do.
+                        // Tension isn't a "more is better" dimension, so its bar stays neutral rather than romance-tinted.
                         className={`h-full rounded-full transition-[width] duration-500 ${key === 'tension' ? 'bg-text-muted/50' : 'bg-romance/70'}`}
                         style={{ width: `${value}%` }}
                       />
@@ -543,9 +496,7 @@ export function RelationshipPanel({
                     {items.length > 0 ? (
                       <div className="flex flex-wrap gap-1.5">
                         {items.map((i) => {
-                          // A toy with no authored price (a world author left it unset) is treated
-                          // as free/pre-owned, same as every non-toy category — only an actually
-                          // priced, not-yet-bought toy needs the purchase step.
+                          // An unpriced toy is treated as free/pre-owned; only a priced, not-yet-bought toy needs a purchase step.
                           const needsPurchase = i.category === 'toy' && (i.price ?? 0) > 0 && (toyInventory[i.id] ?? 0) <= 0
                           if (!needsPurchase) {
                             return (
@@ -737,8 +688,7 @@ export function RelationshipPanel({
             </SelectField>
           </Section>
 
-          {/* Chat-wide, not per-character — a durable fact ("allergic to cats") isn't owed to
-              whichever tab happens to be selected, so this stays the same across the switcher above. */}
+          {/* Chat-wide, not per-character — stays the same across the character switcher above. */}
           <Section title="What's remembered in this chat" surface="sunken">
             <div className="mb-3 flex flex-wrap gap-2">
               {activeFacts.map((f) => (

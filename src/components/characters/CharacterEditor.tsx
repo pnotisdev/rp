@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { ImagePlus, Plus, Sparkles, X } from 'lucide-react'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { charactersApi, instructTemplatesApi, worldsApi } from '@/lib/api/client'
-import type { Character, GalleryEntry, OutreachFrequency, RelationshipStarter, SocialConnection } from '@/lib/characters/cardSpec'
+import type { BehavioralRule, Character, GalleryEntry, OutreachFrequency, RelationshipStarter, SocialConnection } from '@/lib/characters/cardSpec'
+import type { RelationshipStage } from '@/lib/types'
 import { blankCharacterData } from '@/lib/characters/cardSpec'
 import {
   REPLY_LENGTH_HINTS,
@@ -74,6 +75,7 @@ export function CharacterEditor({
   const [avatarDataUrl, setAvatarDataUrl] = useState(character?.avatarDataUrl)
   const [sprites, setSprites] = useState<Record<string, string>>(character?.sprites ?? {})
   const [spriteUnlocks, setSpriteUnlocks] = useState<Record<string, number>>(character?.spriteUnlocks ?? {})
+  const [spriteVariants, setSpriteVariants] = useState<Record<string, string[]>>(character?.spriteVariants ?? {})
   const [customExpressions, setCustomExpressions] = useState<CustomExpression[]>(character?.customExpressions ?? [])
   const [newExpressionLabel, setNewExpressionLabel] = useState('')
   const [outfits, setOutfits] = useState<Outfit[]>(character?.outfits ?? [])
@@ -111,6 +113,7 @@ export function CharacterEditor({
   const [goals, setGoals] = useState<string[]>(character?.goals ?? [])
   const [boundaries, setBoundaries] = useState<string[]>(character?.boundaries ?? [])
   const [socialConnections, setSocialConnections] = useState<SocialConnection[]>(character?.socialConnections ?? [])
+  const [behavioralRules, setBehavioralRules] = useState<BehavioralRule[]>(character?.behavioralRules ?? [])
   const [dateModeOptOut, setDateModeOptOut] = useState(character?.dateModeOptOut ?? false)
   const [outreachFrequency, setOutreachFrequency] = useState<OutreachFrequency>(character?.outreach?.frequency ?? 'never')
   const [showGenerate, setShowGenerate] = useState(false)
@@ -124,6 +127,7 @@ export function CharacterEditor({
     setForm(character?.card ?? blankCharacterData())
     setAvatarDataUrl(character?.avatarDataUrl)
     setSprites(character?.sprites ?? {})
+    setSpriteVariants(character?.spriteVariants ?? {})
     setSpriteUnlocks(character?.spriteUnlocks ?? {})
     setCustomExpressions(character?.customExpressions ?? [])
     setNewExpressionLabel('')
@@ -158,6 +162,7 @@ export function CharacterEditor({
     setGoals(character?.goals ?? [])
     setBoundaries(character?.boundaries ?? [])
     setSocialConnections(character?.socialConnections ?? [])
+    setBehavioralRules(character?.behavioralRules ?? [])
     setDateModeOptOut(character?.dateModeOptOut ?? false)
     setOutreachFrequency(character?.outreach?.frequency ?? 'never')
   }, [character?.id])
@@ -265,6 +270,11 @@ export function CharacterEditor({
     setSocialConnections((list) => list.map((c) => (c.id === id ? { ...c, ...patch } : c)))
   const removeSocialConnection = (id: string) => setSocialConnections((list) => list.filter((c) => c.id !== id))
 
+  const addBehavioralRule = () => setBehavioralRules((list) => [...list, { id: newId(), kind: 'when_then', then: '' }])
+  const updateBehavioralRule = (id: string, patch: Partial<BehavioralRule>) =>
+    setBehavioralRules((list) => list.map((r) => (r.id === id ? { ...r, ...patch } : r)))
+  const removeBehavioralRule = (id: string) => setBehavioralRules((list) => list.filter((r) => r.id !== id))
+
   const save = async () => {
     setSaving(true)
     const payload = {
@@ -272,6 +282,7 @@ export function CharacterEditor({
       avatarDataUrl,
       sprites,
       spriteUnlocks,
+      spriteVariants,
       outfits,
       customExpressions: customExpressions.length ? customExpressions : null,
       giftPreferences,
@@ -297,6 +308,7 @@ export function CharacterEditor({
       goals: goals.length ? goals : null,
       boundaries: boundaries.length ? boundaries : null,
       socialConnections: socialConnections.length ? socialConnections : null,
+      behavioralRules: behavioralRules.length ? behavioralRules : null,
       dateModeOptOut,
       outreach: outreachFrequency !== 'never' ? { frequency: outreachFrequency } : null,
     }
@@ -383,10 +395,27 @@ export function CharacterEditor({
     const without = <T,>(map: Record<string, T>) => Object.fromEntries(Object.entries(map).filter(([k]) => !doomed.has(k)))
     setSprites((s) => without(s))
     setSpriteUnlocks((s) => without(s))
+    setSpriteVariants((s) => without(s))
   }
 
   const setSpriteUnlock = (expressionId: string, minAffection: number) =>
     setSpriteUnlocks((s) => ({ ...s, [keyFor(expressionId)]: Math.max(0, Math.min(100, minAffection)) }))
+
+  /** Item 11: an extra alternate image for a sprite slot, added onto whatever's already there. */
+  const addSpriteVariant = async (expressionId: string, file: File) => {
+    const dataUrl = await fileToDataUrl(file)
+    setSpriteVariants((s) => ({ ...s, [keyFor(expressionId)]: [...(s[keyFor(expressionId)] ?? []), dataUrl] }))
+  }
+
+  const removeSpriteVariant = (expressionId: string, index: number) =>
+    setSpriteVariants((s) => {
+      const key = keyFor(expressionId)
+      const remaining = (s[key] ?? []).filter((_, i) => i !== index)
+      const next = { ...s }
+      if (remaining.length) next[key] = remaining
+      else delete next[key]
+      return next
+    })
 
   const addCustomExpression = () => {
     const label = newExpressionLabel.trim()
@@ -433,6 +462,21 @@ export function CharacterEditor({
   const removeGalleryEntry = (id: string) => setGallery((g) => g.filter((item) => item.id !== id))
   const pickGalleryImage = async (id: string, file: File) =>
     updateGalleryEntry(id, { imageUrl: await fileToDataUrl(file) })
+
+  /** Item 11: an extra alternate image for this CG, added onto whatever variants it already has. */
+  const addGalleryVariant = async (id: string, file: File) => {
+    const dataUrl = await fileToDataUrl(file)
+    setGallery((g) => g.map((e) => (e.id === id ? { ...e, variants: [...(e.variants ?? []), dataUrl] } : e)))
+  }
+
+  const removeGalleryVariant = (id: string, index: number) =>
+    setGallery((g) =>
+      g.map((e) => {
+        if (e.id !== id) return e
+        const remaining = (e.variants ?? []).filter((_, i) => i !== index)
+        return { ...e, variants: remaining.length ? remaining : undefined }
+      }),
+    )
 
   const addRelationshipStarter = () =>
     setRelationshipStarters((s) => [...s, { id: newId(), label: `Starter ${s.length + 1}`, blurb: '', startingAffection: 0 }])
@@ -737,6 +781,49 @@ export function CharacterEditor({
               )}
             />
           </Section>
+
+          <Section
+            title="Behavioral rules"
+            description={'Structured "when X, she Y" / "never Z" contracts — followed exactly as written, more precise than free-text personality. Good for desire, hesitation, and aftercare.'}
+            surface="bare"
+          >
+            <ListEditor
+              items={behavioralRules}
+              getKey={(r) => r.id}
+              onAdd={addBehavioralRule}
+              onRemove={(r) => removeBehavioralRule(r.id)}
+              addLabel="Add rule"
+              emptyHint="No behavioral rules yet."
+              renderItem={(rule) => (
+                <div className="space-y-1">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-[8rem_1fr]">
+                    <SelectField
+                      label="Kind"
+                      value={rule.kind}
+                      onChange={(e) => updateBehavioralRule(rule.id, { kind: e.target.value as BehavioralRule['kind'] })}
+                    >
+                      <option value="when_then">When / then</option>
+                      <option value="never">Never</option>
+                    </SelectField>
+                    {rule.kind === 'when_then' && (
+                      <TextField
+                        label="When"
+                        value={rule.when ?? ''}
+                        onChange={(e) => updateBehavioralRule(rule.id, { when: e.target.value })}
+                        placeholder="he brings up her sister"
+                      />
+                    )}
+                  </div>
+                  <TextField
+                    label={rule.kind === 'never' ? "What she never does" : 'Then'}
+                    value={rule.then}
+                    onChange={(e) => updateBehavioralRule(rule.id, { then: e.target.value })}
+                    placeholder={rule.kind === 'never' ? 'initiate a kiss first' : 'she deflects with a joke'}
+                  />
+                </div>
+              )}
+            />
+          </Section>
         </div>
       )}
 
@@ -928,6 +1015,36 @@ export function CharacterEditor({
                     aria-label={`Unlock warmth for ${exp.label}`}
                   />
                 </div>
+                {/* Item 11: extra alternates for this slot — hidden entirely until there's a primary sprite to vary. */}
+                {sprites[keyFor(exp.id)] && (
+                  <div className="flex w-full flex-wrap items-center gap-1 px-0.5">
+                    {(spriteVariants[keyFor(exp.id)] ?? []).map((url, i) => (
+                      <div key={i} className="group/variant relative h-7 w-7 shrink-0 overflow-hidden rounded-md ring-1 ring-border">
+                        <img src={url} alt="" className="h-full w-full object-cover" />
+                        <button
+                          type="button"
+                          onClick={() => removeSpriteVariant(exp.id, i)}
+                          aria-label={`Remove variant ${i + 1} of ${exp.label}`}
+                          className="absolute inset-0 hidden items-center justify-center bg-black/60 text-white group-hover/variant:flex"
+                        >
+                          <X size={11} strokeWidth={2.5} />
+                        </button>
+                      </div>
+                    ))}
+                    <label
+                      title={`Add a variant for ${exp.label} — shown alongside the primary art for visual variety`}
+                      className="flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md border border-dashed border-border text-text-muted hover:text-text"
+                    >
+                      <Plus size={12} strokeWidth={2} />
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp"
+                        className="hidden"
+                        onChange={(e) => e.target.files?.[0] && addSpriteVariant(exp.id, e.target.files[0])}
+                      />
+                    </label>
+                  </div>
+                )}
                 <div className="absolute -bottom-1 -right-1 hidden group-hover:block">
                   <GenerateImageButton
                     label={`Generate ${exp.label} with AI`}
@@ -1032,6 +1149,37 @@ export function CharacterEditor({
                       <TextField label="Title" value={entry.title} onChange={(e) => updateGalleryEntry(entry.id, { title: e.target.value })} />
                     </div>
                   </div>
+                  {/* Item 11: extra alternates for this same CG — hidden until there's a primary image to vary. */}
+                  {entry.imageUrl && (
+                    <div className="flex flex-wrap items-center gap-1">
+                      <span className="mr-1 text-[11px] text-text-muted">Variants</span>
+                      {(entry.variants ?? []).map((url, i) => (
+                        <div key={i} className="group/variant relative h-10 w-14 shrink-0 overflow-hidden rounded-md ring-1 ring-border">
+                          <img src={url} alt="" className="h-full w-full object-cover" />
+                          <button
+                            type="button"
+                            onClick={() => removeGalleryVariant(entry.id, i)}
+                            aria-label={`Remove variant ${i + 1} of ${entry.title}`}
+                            className="absolute inset-0 hidden items-center justify-center bg-black/60 text-white group-hover/variant:flex"
+                          >
+                            <X size={12} strokeWidth={2.5} />
+                          </button>
+                        </div>
+                      ))}
+                      <label
+                        title={`Add a variant for "${entry.title}" — picked alongside the primary image for visual variety`}
+                        className="flex h-10 w-14 shrink-0 cursor-pointer items-center justify-center rounded-md border border-dashed border-border text-text-muted hover:text-text"
+                      >
+                        <Plus size={13} strokeWidth={2} />
+                        <input
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp"
+                          className="hidden"
+                          onChange={(e) => e.target.files?.[0] && addGalleryVariant(entry.id, e.target.files[0])}
+                        />
+                      </label>
+                    </div>
+                  )}
                   <div className="grid grid-cols-1 gap-x-3 sm:grid-cols-2">
                     <TextField
                       label="Unlock hint"
@@ -1058,6 +1206,72 @@ export function CharacterEditor({
                     label="Ending"
                     description="Unlocks the moment the relationship reaches Sweethearts, ignoring the fields above — a once-per-relationship epilogue."
                   />
+                  {!entry.isEnding && (
+                    <div className="grid grid-cols-1 gap-x-3 gap-y-2 rounded-lg bg-bg-sunken p-3 sm:grid-cols-2">
+                      <SelectField
+                        label="Auto-show full-bleed when…"
+                        hint="Once unlocked (above), swaps this in for the ordinary sprite/background live on the VN stage — no need to browse the Gallery to see it."
+                        value={entry.autoTrigger?.kind ?? 'none'}
+                        onChange={(e) => {
+                          const kind = e.target.value
+                          if (kind === 'none') return updateGalleryEntry(entry.id, { autoTrigger: undefined })
+                          if (kind === 'intimacyPhase') return updateGalleryEntry(entry.id, { autoTrigger: { kind, phase: 'peak' } })
+                          if (kind === 'catalogAction') return updateGalleryEntry(entry.id, { autoTrigger: { kind, optionId: '' } })
+                          if (kind === 'sceneFlag') return updateGalleryEntry(entry.id, { autoTrigger: { kind, flag: '' } })
+                          return updateGalleryEntry(entry.id, { autoTrigger: { kind: 'relationshipStage', stage: 'sweethearts' } })
+                        }}
+                      >
+                        <option value="none">Never (Gallery only)</option>
+                        <option value="intimacyPhase">An intimacy phase</option>
+                        <option value="catalogAction">A specific catalog action</option>
+                        <option value="sceneFlag">A scene flag</option>
+                        <option value="relationshipStage">Reaching a relationship stage</option>
+                      </SelectField>
+                      {entry.autoTrigger?.kind === 'intimacyPhase' && (
+                        <SelectField
+                          label="Phase"
+                          value={entry.autoTrigger.phase}
+                          onChange={(e) => updateGalleryEntry(entry.id, { autoTrigger: { kind: 'intimacyPhase', phase: e.target.value as 'building' | 'peak' } })}
+                        >
+                          <option value="building">Building</option>
+                          <option value="peak">Peak</option>
+                        </SelectField>
+                      )}
+                      {entry.autoTrigger?.kind === 'catalogAction' && (
+                        <TextField
+                          label="Catalog action id"
+                          value={entry.autoTrigger.optionId}
+                          onChange={(e) => updateGalleryEntry(entry.id, { autoTrigger: { kind: 'catalogAction', optionId: e.target.value.trim() } })}
+                          placeholder="toy-vibrator"
+                          hint="The unlockable's id, e.g. from the Dating sim tab's intimacy catalog."
+                        />
+                      )}
+                      {entry.autoTrigger?.kind === 'sceneFlag' && (
+                        <TextField
+                          label="Scene flag"
+                          value={entry.autoTrigger.flag}
+                          onChange={(e) => updateGalleryEntry(entry.id, { autoTrigger: { kind: 'sceneFlag', flag: e.target.value.trim() } })}
+                          placeholder="first_kiss"
+                        />
+                      )}
+                      {entry.autoTrigger?.kind === 'relationshipStage' && (
+                        <SelectField
+                          label="Stage"
+                          value={entry.autoTrigger.stage}
+                          onChange={(e) =>
+                            updateGalleryEntry(entry.id, { autoTrigger: { kind: 'relationshipStage', stage: e.target.value as RelationshipStage } })
+                          }
+                        >
+                          <option value="near_strangers">Near strangers</option>
+                          <option value="acquaintances">Acquaintances</option>
+                          <option value="warming_up">Warming up</option>
+                          <option value="getting_close">Getting close</option>
+                          <option value="close">Close</option>
+                          <option value="sweethearts">Sweethearts</option>
+                        </SelectField>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             />

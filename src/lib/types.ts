@@ -79,13 +79,7 @@ export interface RelationshipEvent {
   characterId?: string
 }
 
-/**
- * One entry in a character's persistent agency layer (`RelationshipTrack.plans`) — a concrete
- * intention that persists across turns, formed/annotated/resolved by the judge call
- * (`assessRelationshipMoment`) and read back by `mindGuidance.ts`'s `plansGuidance`. Capped at 3
- * active per character (`dating/plans.ts`). Contrast `characterIntent`, which is transient and
- * reset every turn.
- */
+/** One entry in a character's persistent agency layer (`RelationshipTrack.plans`) — formed/annotated/resolved by the judge call. Capped at 3 active (`dating/plans.ts`). Contrast `characterIntent`, which resets every turn. */
 export interface CharacterPlan {
   id: string
   /** The intention in the character's own terms, short: "finish the mural before the showcase". */
@@ -116,16 +110,7 @@ export interface UserExpectation {
   note?: string
 }
 
-/**
- * The relationship-state bundle that used to live only as `Chat`'s own top-level fields. The
- * primary character keeps reading/writing those `Chat` fields directly (unchanged, no migration);
- * any other participant's copy lives in `Chat.participantRelationships`, keyed by character id.
- * See `getRelationshipTrack`/`patchRelationshipTrack` in `stage.ts`.
- *
- * Deliberately NOT per-character: `sceneFlags`, `giftCoins`/`giftInventory` (shared wallet/stock),
- * and `ChatFact`s (chat-wide log) all stay on `Chat` only. A live date/hangout also stays
- * primary-only — `DateEventCard` has no concept of which participant it's with.
- */
+/** Relationship-state bundle. The primary reads/writes `Chat`'s own top-level fields directly; any other participant's copy lives in `Chat.participantRelationships`, keyed by character id. See `getRelationshipTrack`/`patchRelationshipTrack` in `stage.ts`. Not per-character: `sceneFlags`, `giftCoins`/`giftInventory`, and `ChatFact`s stay on `Chat` only. */
 export interface RelationshipTrack {
   affection?: number
   relationshipStats?: Partial<Record<RelationshipDimension, number>>
@@ -174,15 +159,9 @@ export interface RelationshipTrack {
 }
 
 /**
- * Section 4/12's Scene entity — location/atmosphere framing plus a turn policy. Objective-setting
- * stays on the existing `Objective`/`activeObjective` system rather than being duplicated here.
- *
- * - `'manual'` — today's behavior: the Composer's "reply as ▾" picker decides.
- * - `'round_robin'` — cycles through the primary and every participant in order.
- * - `'director'` — a judge call reads the scene and picks who'd respond; falls back to the primary on failure.
- * - `'mention'` — an `@Name` in the player's message routes to them; no mention falls back to the primary.
- *
- * Only meaningful once a chat has participants; the UI stays hidden until then.
+ * Group-chat turn policy — who replies next. `manual`: the Composer's "reply as" picker decides.
+ * `round_robin`: cycles the primary + every participant in order. `director`: a judge call picks
+ * who'd respond. `mention`: an `@Name` routes to them, else falls back to the primary.
  */
 export type ScenePolicy = 'manual' | 'round_robin' | 'director' | 'mention'
 
@@ -316,8 +295,8 @@ export interface StoredMessage extends ChatMessage {
   initiatedBy?: 'character'
   /** 10b's intent chips — how the player meant this line. User messages only; fed to the relationship judge as context. See `src/lib/dating/intent.ts`. */
   intent?: MessageIntent
-  /** Set when this (user) message was sent via a Relationship-panel Unlocks-tab action rather than typed. `label`/`category` are frozen at send time so it stays accurate if the catalog changes later. `category` is a bare string (not `IntimacyCategory`) to avoid a circular import. See `MessageBubble.tsx`'s badge. */
-  intimacyAction?: { label: string; category: string }
+  /** Set when this (user) message was sent via a Relationship-panel Unlocks-tab action rather than typed. `label`/`category` are frozen at send time so it stays accurate if the catalog changes later. `category` is a bare string (not `IntimacyCategory`) to avoid a circular import. See `MessageBubble.tsx`'s badge. `optionId` (the catalog entry's own id) feeds a `'catalogAction'` `CgTrigger` — unset on an older message from before that field existed. */
+  intimacyAction?: { label: string; category: string; optionId?: string }
   /** Item 8: boundary phrase `dating/boundaryGuard.ts` flagged, persisted so it stays visible past the generation-time toast. Not an automatic reroll — see that file. Cleared on edit/regenerate. `null` clears it (see `RelationshipTrack.afterglow`). */
   boundaryFlag?: string | null
   /** FIXES_TODO "regenerate doesn't undo the damage": true once the per-turn judge has scored THIS message, so a regenerate doesn't reapply its delta again. `char` messages only. */
@@ -326,6 +305,8 @@ export interface StoredMessage extends ChatMessage {
   povFlag?: string | null
   /** FIXES_TODO #11: `dating/intimacyScene.ts` flagged this reply for using one of `EXPLICIT_ANTI_PATTERNS`. Own field since it's a prose-quality miss, not a boundary/POV violation. `null` clears it. */
   explicitQualityFlag?: string | null
+  /** Snapshot of this message right before its most recent "Continue" appended a segment — lets the player undo it (restore this) or regenerate just that segment (re-continue from here). Cleared on a fresh generation/swipe/edit; `null` clears it. */
+  continueUndo?: { text: string; rawText?: string; scene?: SceneTag } | null
 }
 
 /** 10b: how a player meant a tagged line. Labels/judge behavior live in `src/lib/dating/intent.ts`. */
@@ -469,12 +450,7 @@ export interface WorldCard {
   customIntimacyOptions?: IntimacyUnlockable[]
   /** When true, `customIntimacyOptions` REPLACES the built-in catalog instead of adding to it — for non-humanoid or otherwise very different settings. Ignored when `customIntimacyOptions` is empty. */
   replaceIntimacyCatalog?: boolean
-  /**
-   * This world's own content rating, overriding the global Settings value. Unset means "inherit
-   * global", distinct from explicitly choosing `'default'` (pins this world to no instruction at
-   * all). See `resolveIntimacyLevel` in `prompt/intimacyGuidance.ts`.
-   * `null` on the wire means "clear back to inherit"; never `null` once read back.
-   */
+  /** This world's own content rating, overriding global Settings. Unset = inherit global, distinct from explicit `'default'`. `null` on the wire clears back to inherit. See `resolveIntimacyLevel`. */
   intimacyLevel?: IntimacyDetailLevel | null
   /** Author-defined "when X, then Y" rules (`world/triggers.ts`). */
   triggers?: Trigger[]

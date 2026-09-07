@@ -11,40 +11,13 @@ function baseUrlForModel(model: string): string {
   return model.includes('kayra') || model.includes('erato') ? TEXT_NOVELAI : API_NOVELAI
 }
 
-/**
- * NovelAI's own hosted text-generation backend (Kayra, Clio) — a subscription service, not
- * something either the user or this session had an account for while building it. Built to the
- * documented/reverse-engineered contract, cross-checked against SillyTavern's own currently-live
- * source (its real backend proxy `src/endpoints/novelai.js` and frontend `public/scripts/nai-
- * settings.js`) rather than guessed at, but never actually run against a real NovelAI account —
- * treat it the same way as the rest of this app's unverified backends: sanity-check the first real
- * call before trusting it.
- *
- * A genuinely important correction made partway through building this: the initial assumption
- * (from a lower-level Python reference client) was that the prompt itself has to be tokenized with
- * NovelAI's own tokenizer and sent as packed, base64-encoded token ids. SillyTavern's actual,
- * currently-shipping frontend proved that wrong — it sends `input` as plain text with
- * `use_string: true` for the main prompt, every time. NovelAI's own tokenizer (bundled server-side
- * — see `server/novelaiTokenizer.ts`) is still genuinely needed here, just for a narrower purpose:
- * `stop_sequences` and `bad_words_ids` are documented as needing token ids, not strings, unlike
- * every other backend in this app where a stop sequence is a literal string.
- *
- * Deliberately unsupported:
- * - **Erato** (NovelAI's newest model) — a different, Llama-3-family tokenizer with no confirmed
- *   source for its tokenizer file (see `server/novelaiTokenizer.ts`). `getEffectiveMaxContext`/
- *   `tokenizeStopSequences` degrade gracefully for it (no stop sequences, estimated token counts)
- *   rather than erroring, but it's untested and not the intended target.
- * - **`bad_words_ids`/`logit_bias_exp`** — NovelAI-specific anti-repetition/anti-asterisk tuning
- *   SillyTavern applies per-model as its own curated preset content, not a documented API
- *   requirement — skipped as polish rather than correctness.
- * - **The exact SSE streaming field name** — every source found describes the request shape in
- *   detail; none pinned down the response event format for `/ai/generate-stream` (SillyTavern's own
- *   backend just pipes the raw stream through without parsing it, so its frontend's exact parsing
- *   code wasn't reached before this needed to ship). `generateStream` guesses the same `data:`
- *   +`{token}` shape every other backend in this app already uses, with a safety net: a stream that
- *   closes having produced zero tokens automatically retries via the non-streaming endpoint instead
- *   of silently returning nothing.
- */
+// NovelAI's hosted text-generation backend (Kayra, Clio). Built to the documented/reverse-
+// engineered contract, never run against a real account — sanity-check the first real call.
+// Sends `input` as plain text (`use_string: true`); NovelAI's tokenizer (server-side, see
+// `server/novelaiTokenizer.ts`) is only needed for `stop_sequences`, which want token ids.
+// Deliberately unsupported: Erato, and `bad_words_ids`/`logit_bias_exp` preset tuning. The SSE
+// streaming event format is an unconfirmed guess; `generateStream` falls back to `generate()`
+// if a stream ever produces zero tokens.
 export class NovelAIClient implements ChatBackend {
   constructor(
     private apiKey: string,
@@ -55,15 +28,7 @@ export class NovelAIClient implements ChatBackend {
     return { 'Content-Type': 'application/json', Authorization: `Bearer ${this.apiKey}` }
   }
 
-  /**
-   * This app's stop sequences are plain strings (`GenerateRequest.stop_sequence`), same shape
-   * every backend uses — NovelAI's `stop_sequences` parameter wants an array of token-id arrays
-   * instead. Routes through the local server's bundled tokenizer (`/api/novelai/tokenize`, see
-   * `server/novelaiTokenizer.ts`) since the actual SentencePiece model can't reasonably ship in the
-   * browser bundle. Best-effort: any failure (server unreachable, an unsupported model like Erato)
-   * just means this call goes out with no stop sequences rather than failing the generation
-   * outright — a worse turn-ending experience, not a broken one.
-   */
+  /** Converts plain-string stop sequences to the token-id arrays NovelAI wants, via the server's bundled tokenizer. Best-effort: any failure just means no stop sequences rather than a failed generation. */
   private async tokenizeStopSequences(stopSequences: string[] | undefined): Promise<number[][] | undefined> {
     if (!stopSequences?.length) return undefined
     try {
@@ -86,13 +51,7 @@ export class NovelAIClient implements ChatBackend {
     }
   }
 
-  /**
-   * Field names and the `Tea_Time-Kayra` defaults (`phrase_rep_pen: 'aggressive'`,
-   * `prefix: 'vanilla'`, `use_cache: false`, `return_full_text: false`) come from NovelAI's own
-   * bundled preset in SillyTavern's repo, not guessed — but this app has no slider driving several
-   * of them (`phrase_rep_pen`, `prefix`, NovelAI's newer `math1_*` sampler), so they're fixed
-   * constants rather than exposed controls for now.
-   */
+  /** Field names and defaults (`phrase_rep_pen`, `prefix`, `use_cache`, `return_full_text`) come from NovelAI's own bundled preset; a few have no slider in this app so they're fixed constants. */
   private async body(params: GenerateRequest): Promise<Record<string, unknown>> {
     return {
       input: params.prompt,
@@ -205,20 +164,14 @@ export class NovelAIClient implements ChatBackend {
       throw e
     }
 
-    // The event-format safety net described in the class doc comment: a "successful" stream that
-    // produced no text at all is a much stronger signal of a wrong field-name guess than of a
-    // genuinely empty reply — degrade to the non-streaming call instead of returning nothing.
+    // A stream that produced no text at all likely means the guessed event format is wrong.
     if (!full && !signal?.aborted) {
       return this.generate(params, signal)
     }
     return full
   }
 
-  /**
-   * NovelAI's real per-subscription-tier context caps (SillyTavern's own `nai-settings.js` lists
-   * 4096 for the entry tier vs. 8192 for higher ones, at least for Kayra) aren't exposed by any
-   * endpoint this client calls — always the caller's own fallback, same as `OpenAICompatibleClient`.
-   */
+  /** Real per-tier context caps aren't exposed by any endpoint here — always the caller's own fallback. */
   async getEffectiveMaxContext(fallback = 4096): Promise<number> {
     return fallback
   }
@@ -249,15 +202,7 @@ export class NovelAIClient implements ChatBackend {
     return null
   }
 
-  /**
-   * Settings → Connection's "does this actually work" check. `GET /user/subscription` is the
-   * endpoint SillyTavern's own current backend (`src/endpoints/novelai.js`) calls for exactly this —
-   * a real generation costs real subscription-tier quota for no reason, this doesn't. 401 there
-   * means a rejected key; any other non-ok is a general error. The response does carry real
-   * subscription details (tier, perks), but its exact shape isn't confirmed anywhere this session
-   * checked (see the class doc comment's own honesty note) — reachability plus a clear auth-or-not
-   * answer is the honest thing to report, not a guessed-at field.
-   */
+  /** Settings → Connection's reachability+auth check, via `GET /user/subscription` (costs no generation quota). */
   async checkConnection(): Promise<ConnectionCheckResult> {
     if (!this.apiKey.trim()) return { ok: false, detail: 'No API key set.' }
     let res: Response

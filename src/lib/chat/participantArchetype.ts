@@ -75,16 +75,7 @@ function warmthRegister(warmth: number): string {
   return 'a fairly early, still-forming acquaintance'
 }
 
-/**
- * A rival who reads identically whether the primary and {{user}} are near strangers or already
- * married isn't a real rivalry *arc* — it's a static tone label. This is the deepening: the rival's
- * own line now genuinely responds to how far the PRIMARY relationship has actually progressed,
- * using the same `COMMITMENT_ORDER` ladder (`dating/stage.ts`) everything else in the app reads off
- * of. Deliberately scoped to `rival` alone — found-family/mentor-mentee/power-imbalanced aren't
- * reframed by the primary's romance status the same way a rivalry over that exact relationship is.
- * Returns `''` for `'none'` (or no status at all): with nothing yet between the primary and
- * {{user}}, the base rival line already covers it and there's nothing more specific to say.
- */
+/** Shapes a `rival` archetype line by the primary's own commitment status with {{user}}; `''` when there's no status yet. */
 export function rivalCommitmentFraming(
   primaryCommitmentStatus: CommitmentStatus | undefined,
   primaryName: string,
@@ -104,14 +95,7 @@ export function rivalCommitmentFraming(
   }
 }
 
-/**
- * A rival's actual, in-scene PRESENCE is supposed to make a live jealousy beat cut harder than the
- * same tension read about secondhand (that secondhand case is exactly what `ambientEvents.ts`'s own
- * `social_reaction` already covers) — today a jealousy `SceneFlag` (`stage.ts`'s `SCENE_FLAGS`) reads
- * identically whether the rival is standing right there or a thousand miles away. Returns `''` when
- * the flag isn't currently active, so this only ever adds weight to a jealousy beat that's genuinely
- * already live, never invents one.
- */
+/** Sharpens a live jealousy `SceneFlag` beat when the rival is physically present in-scene; `''` when the flag isn't active. */
 export function rivalJealousyIntensifier(rivalName: string, jealousyFlagActive: boolean | undefined): string {
   if (!jealousyFlagActive) return ''
   return `This is playing out with ${rivalName} genuinely standing right here, not just mentioned or heard about secondhand — let that presence sharpen the jealousy beat: less patience, sharper edges, higher stakes than the same tension would read at a distance.`
@@ -120,40 +104,20 @@ export function rivalJealousyIntensifier(rivalName: string, jealousyFlagActive: 
 export interface ParticipantGuidanceParams {
   speakerName: string
   personaName: string
-  /** The scene's primary character's name, for the "don't just borrow their romantic warmth" framing — omitted (a plain group chat with no primary) falls back to generic wording. */
+  /** Primary character's name, for the "don't borrow their warmth" framing; omitted falls back to generic wording. */
   primaryName?: string
-  /** This participant's own tracked warmth toward {{user}} (`computeWarmth` over their own `RelationshipTrack`) — independent of the primary's, per `getRelationshipTrack`. */
+  /** This participant's own tracked warmth toward {{user}}, independent of the primary's. */
   warmth: number
   archetype?: ArchetypeMatch
-  /** Who the archetype line should name as the "other" party — the primary's name for a primary-vs-participant pairing, or the persona name for a participant-vs-player one. Defaults to `personaName`. */
+  /** Who the archetype line names as the "other" party. Defaults to `personaName`. */
   archetypeOtherName?: string
-  /**
-   * The PRIMARY's own commitment tier with {{user}} (`Chat`/`RelationshipTrack.commitmentStatus`,
-   * via `dating/stage.ts`'s `COMMITMENT_ORDER`) — only used to deepen a `rival` archetype match (see
-   * `rivalCommitmentFraming`). Omit when unavailable or when the archetype isn't `rival`; nothing
-   * breaks, the rivalry just reads at its base tone with no commitment-aware framing layered on.
-   */
+  /** Primary's commitment tier with {{user}}; only deepens a `rival` match (see `rivalCommitmentFraming`). */
   primaryCommitmentStatus?: CommitmentStatus
-  /**
-   * Whether a jealousy `SceneFlag` (`stage.ts`'s `SCENE_FLAGS`) is currently active in this chat —
-   * only used to deepen a `rival` archetype match (see `rivalJealousyIntensifier`). Omit when
-   * unavailable; the jealousy beat, if any, simply isn't intensified by this participant's presence.
-   */
+  /** Whether a jealousy `SceneFlag` is active; only deepens a `rival` match (see `rivalJealousyIntensifier`). */
   jealousyFlagActive?: boolean
 }
 
-/**
- * The per-participant equivalent of `dating/relationshipDescription.ts`'s `buildRelationshipDescription`
- * — deliberately NOT that function reused as-is: no stage/commitment-ladder/gift-taste framing, since
- * a rival or a mentor sharing a scene isn't on the romance track just because they're present. Fills
- * the confirmed "zero guidance today" gap for every non-primary speaker; layers archetype-specific
- * tone on top when one is authored, and — for a `rival` specifically — layers on how the PRIMARY
- * relationship's own progress and any live jealousy beat should shape that rival's tone (see
- * `rivalCommitmentFraming`/`rivalJealousyIntensifier`). See this module's own top comment for the
- * suggested `useChatSession.ts` call site (a reserved file this pass, so it isn't wired in directly
- * here) — including the two new optional fields above, which need threading through from state that
- * call site already computes.
- */
+/** Builds the model-facing relationship guidance line for a non-primary participant, layering archetype and (for rivals) commitment/jealousy framing on top of a warmth baseline. */
 export function participantRelationshipGuidance(params: ParticipantGuidanceParams): string {
   const other = params.primaryName ?? 'the rest of the group'
   const baseline = `${params.speakerName} has their own independent footing with ${params.personaName || 'you'} here, separate from ${other}'s — right now that reads as ${warmthRegister(params.warmth)}. Don't default to the same romantic warmth ${other} gets; play ${params.speakerName}'s own footing honestly.`

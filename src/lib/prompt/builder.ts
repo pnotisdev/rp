@@ -13,16 +13,12 @@ export type { SystemPromptPreset } from './systemPrompts'
 export { BUILTIN_SYSTEM_PROMPTS } from './systemPrompts'
 
 /**
- * Section 13's instruct-template-manager part (c): `fixedSections` below used to be a hardcoded,
- * always-on list — the only exception was `includeExamples`, wired to nothing, dead since it was
- * added. Naming each independently-computed block here lets a caller (Settings → Generation) turn
- * any of them off entirely, e.g. to drop the persona blurb for a token-tight model, without
- * touching content. Deliberately NOT included: `worldBefore`/`worldAfter` (governed by lorebook
- * activation/budget, not an on/off concept) and the Author's Note (already has its own presence +
- * position control). Reordering these relative to each other isn't exposed either — several are
- * order-coupled to world-info/author-note placement in ways a flat drag-and-drop would silently
- * break; only enable/disable is safe to expose without touching that structure.
+ * Builds the final KoboldCpp prompt string from a character, history, world info, and settings —
+ * assembling fixed sections (system/description/persona/etc.), trimming history to fit the token
+ * budget, and injecting depth-positioned notes and lorebook entries.
  */
+
+/** Prompt sections a caller (Settings → Generation) can toggle on/off. Not included: world-info blocks and the Author's Note, which have their own placement controls. */
 export type PromptSectionId = 'system' | 'summary' | 'world' | 'description' | 'participants' | 'persona' | 'examples'
 
 export const PROMPT_SECTION_LABELS: Record<PromptSectionId, string> = {
@@ -57,69 +53,54 @@ export interface ChatMessage {
 
 export interface PromptBuildInput {
   character: CharacterCardData
-  /** 10e's life-context fields (occupation, home/frequented locations, likes/goals/boundaries, social connections) — a pre-built, plain-text note, since those fields live on `Character`, not the portable `CharacterCardData` this builder otherwise works from. Folded into the identity block alongside description/personality/scenario. */
+  /** Pre-built life-context/voice note from `Character` fields not on the portable `CharacterCardData`. Folded into the identity block. */
   characterProfile?: string
   personaName: string
   personaDescription: string
-  /** Global fallback system prompt (Settings → Generation) — used only when the character has no `system_prompt` of their own. Empty/undefined falls through to `DEFAULT_SYSTEM_PROMPT`. */
+  /** Fallback system prompt used only when the character has none of its own. */
   globalSystemPrompt?: string
-  /** Global steering line appended after any character `post_history_instructions`, in the same late "right before generation" slot. Applies to every chat. */
+  /** Global steering line appended after any character `post_history_instructions`. */
   globalPostHistory?: string
   history: ChatMessage[]
   /** Running long-term memory log for everything older than what's in `history`. */
   chatSummary?: string
-  /** The world the character lives in, if any — name/description/rules, always included (not keyword-triggered like a lorebook). */
+  /** The world the character lives in, if any. Always included, not keyword-triggered like a lorebook. */
   worldDescription?: string
   lorebooks: Lorebook[]
   template: InstructTemplate
   /** Tokens available for the ENTIRE prompt (max_context_length - max_length, minus caller's safety margin). */
   contextBudget: number
   scanDepth: number
-  /** Per-section on/off, e.g. from Settings → Generation — an unset section defaults to on (`DEFAULT_PROMPT_SECTIONS`), so an old caller that never passes this gets today's always-on behavior unchanged. */
+  /** Per-section on/off; an unset section defaults to on (`DEFAULT_PROMPT_SECTIONS`). */
   promptSections?: Partial<Record<PromptSectionId, boolean>>
   countTokens: (text: string) => Promise<number>
-  /** The last entry in `history` is an in-progress char turn to keep writing, not a finished one — no closing suffix, no fresh generation cue appended after it. */
+  /** The last `history` entry is an in-progress char turn to keep writing, not a finished one. */
   continueLastTurn?: boolean
   /** End the prompt on the USER's turn instead of the character's, so the model suggests what {{user}} would say next. */
   impersonateAsUser?: boolean
-  /** Steers the next reply toward an in-progress goal — injected late (right before generation), same placement as post_history_instructions. */
+  /** Steers the next reply toward an in-progress goal; injected late, same placement as post_history_instructions. */
   activeObjective?: { title: string; description?: string; pendingTasks: string[] }
-  /** A short, natural-language relationship-stage nudge (never raw numbers) — same late placement as activeObjective. Pre-built by the caller since it's dating-sim-specific, not a core builder concern. */
+  /** Short natural-language relationship-stage nudge, same late placement as activeObjective. */
   relationshipDescription?: string
-  /** Global writing-style steering (e.g. "avoid em dashes") — same late "right before generation" placement as everything else here, since style instructions are most reliably followed close to the generation point. Pre-composed by the caller from settings, not a core builder concern. */
+  /** Global writing-style steering (e.g. "avoid em dashes"), same late placement. */
   styleGuidance?: string
-  /**
-   * SillyTavern-style Author's Note — a per-chat steering line placed at a chosen point in the
-   * prompt (see `AuthorNote` in `types.ts`). Macro-substituted here like any other text field;
-   * a blank/whitespace `text` is ignored entirely. `at_depth` is injected into the chat history
-   * `depth` turns up from the latest; `before_char`/`after_char` sit in the fixed identity region.
-   */
+  /** SillyTavern-style Author's Note. `at_depth` is injected into history `depth` turns up from the latest; `before_char`/`after_char` sit in the fixed identity region. */
   authorNote?: { text: string; position: 'before_char' | 'after_char' | 'at_depth'; depth: number }
-  /** User-defined find/replace rules applied (prompt target) to each history turn's text before it's rendered into the prompt. */
+  /** User-defined find/replace rules applied to each history turn's text before rendering. */
   regexScripts?: RegexScript[]
-  /** Expression/background ids the model may tag this reply with (Visual Novel mode) — omitted entirely when empty. */
+  /** Expression/background ids the model may tag this reply with (Visual Novel mode). */
   sceneOptions?: { expressionIds: string[]; backgroundIds: string[]; moodIds?: string[]; outfitIds?: string[]; currentOutfitId?: string }
   /** Current relationship score for unlock-gated lore entries. */
   affection?: number
-  /** Per-entry sticky/cooldown state from the previous turn (`Chat.worldInfoState`). Omit to disable sticky/cooldown entirely (old callers). */
+  /** Per-entry sticky/cooldown state from the previous turn. Omit to disable sticky/cooldown. */
   worldInfoState?: WorldInfoRuntimeState
-  /** Monotonic turn counter for sticky/cooldown (the chat's message count). Defaults to `history.length`. */
+  /** Monotonic turn counter for sticky/cooldown. Defaults to `history.length`. */
   worldInfoTurn?: number
-  /**
-   * Other characters present in the scene (group chats) besides `character` — the one actually
-   * generating this turn. Rendered as a compact roster, not a full identity block each; only
-   * `character` gets the full system_prompt/description/personality/scenario treatment.
-   */
+  /** Other characters present in the scene (group chats) besides `character`, rendered as a compact roster rather than a full identity block. */
   participants?: { name: string; description?: string; personality?: string }[]
-  /** Whose turn is being generated — defaults to `character.name`. Only differs in a group chat where a non-primary participant is replying. */
+  /** Whose turn is being generated — defaults to `character.name`. */
   nextSpeakerName?: string
-  /**
-   * Adds `sectionBreakdown` to the result — a per-section token count for the Prompt Inspector's
-   * "where did my tokens go" view. Opt-in and off by default: it costs a handful of extra
-   * `countTokens` calls (each block counted on its own, on top of the one combined count the
-   * normal path already does), fine for an on-demand inspection but wasted work on every actual
-   * generation turn, which never reads this field.
-   */
+  /** Adds `sectionBreakdown` to the result (Prompt Inspector). Opt-in — costs extra `countTokens` calls. */
   includeSectionBreakdown?: boolean
 }
 
@@ -138,23 +119,11 @@ export interface PromptBuildResult {
   activatedEntries: LorebookEntry[]
   droppedForBudget: LorebookEntry[]
   droppedForGroup: LorebookEntry[]
-  /**
-   * Present only when `includeSectionBreakdown` was requested — one entry per non-empty section
-   * that's actually included, ordered the same as the prompt itself. Each block is counted on its
-   * own (no shared prefix/suffix, no inter-section join), so these numbers won't sum to exactly
-   * `tokensUsed` above — that's the real number sent, this is a per-section approximation for
-   * understanding where it went, not a reconciliation of it.
-   */
+  /** Present only when `includeSectionBreakdown` was requested — per-section token counts (approximate, won't sum exactly to `tokensUsed`). */
   sectionBreakdown?: PromptSectionBreakdownItem[]
   /** Sticky/cooldown state to persist for the next turn — undefined when `worldInfoState` wasn't passed in. */
   worldInfoState?: WorldInfoRuntimeState
-  /**
-   * Section 8's "additional model backends": the exact same two pieces that get joined (with a
-   * blank line) into `prompt` above, exposed separately so a caller can hand them to a hosted
-   * chat-completion backend as a proper `{role: 'system', ...}` / `{role: 'user', ...}` pair
-   * instead of one flat text-completion string. `prompt` itself is unchanged either way — nothing
-   * about the existing KoboldCpp path reads these two fields at all.
-   */
+  /** `systemText` and `conversationText` are the same two pieces joined into `prompt`, exposed separately for a hosted chat-completion backend that wants a proper system/user pair instead of one flat string. */
   systemText: string
   conversationText: string
 }
@@ -177,9 +146,7 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
   const macroCtx = { charName: character.name || 'Character', userName: personaName || 'User' }
   const sub = (text: string | undefined) => substituteMacros(text ?? '', macroCtx)
 
-  // A book's own `scan_depth` (from an imported SillyTavern card) can ask to look further back
-  // than our default — honor the deepest request so that book's entries are actually reachable;
-  // never *narrower* than the default, since there's one shared scan window across all books.
+  // Honor the deepest scan_depth requested by any book; never narrower than the default.
   const effectiveScanDepth = lorebooks.reduce((max, b) => Math.max(max, b.scan_depth ?? 0), scanDepth)
   const scanText = recentMessagesText(history, effectiveScanDepth)
   const { activated: activatedEntries, droppedForBudget, droppedForGroup, nextState: worldInfoState } = activateWorldInfo(
@@ -194,9 +161,7 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
   const after = activatedEntries.filter((e) => e.position === 'after_char')
   const worldAtDepth = activatedEntries.filter((e) => e.position === 'at_depth')
 
-  // Impersonation ("suggest what {{user}} would say") needs its own system block — the normal one
-  // opens with "you are {{char}}, write only {{char}}, never {{user}}", which the model follows over
-  // the lone `{{user}}:` generation cue and writes the character's turn regardless.
+  // Impersonation needs its own system block; the normal one tells the model to never write {{user}}.
   const systemBlock = input.impersonateAsUser
     ? sub(IMPERSONATION_SYSTEM_PROMPT)
     : sub(character.system_prompt?.trim() || input.globalSystemPrompt?.trim() || DEFAULT_SYSTEM_PROMPT)
@@ -229,12 +194,7 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
     ? `About ${macroCtx.userName}: ${sub(input.personaDescription)}`
     : ''
 
-  // Confirmed live: an ungrounded weak/free model can read raw example dialogue as something that
-  // already happened and just continue or repeat it verbatim (reproduced with a group-chat
-  // participant taking their first turn — the model's whole reply was the example's opening line,
-  // echoed back). Explicit framing costs a few tokens but removes the ambiguity regardless of
-  // whether the model recognizes SillyTavern's own `<START>` convention (some cards use it, this
-  // doesn't assume either way).
+  // Frame example dialogue explicitly, so a weak model doesn't read it as something already said and echo it back.
   const exampleBlock =
     sections.examples && character.mes_example?.trim()
       ? `Example lines showing ${macroCtx.charName}'s voice, style, and typical phrasing — a reference only, not something that already happened in this scene. Do not repeat or continue these lines; write a new reply instead.\n${sub(character.mes_example)}`
@@ -243,8 +203,7 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
   const worldBefore = before.map((e) => sub(e.content)).join('\n')
   const worldAfter = after.map((e) => sub(e.content)).join('\n')
 
-  // SillyTavern's Author's Note. `before_char`/`after_char` sit in the fixed region below;
-  // `at_depth` is spliced into the trimmed history further down. A blank note is a no-op.
+  // `before_char`/`after_char` sit in the fixed region below; `at_depth` is spliced into history further down.
   const authorNoteText = input.authorNote?.text?.trim() ? sub(input.authorNote.text) : ''
   const authorNotePosition = input.authorNote?.position ?? 'at_depth'
   const authorNoteDepth = Math.max(0, Math.floor(Number(input.authorNote?.depth) || 0))
@@ -262,20 +221,14 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
     exampleBlock,
     authorNoteText && authorNotePosition === 'after_char' ? authorNoteText : '',
   ].filter(Boolean)
-  // Everything above the chat history — system prompt, character description, persona, examples,
-  // world info — is one block, and for a structured format (ChatML, Gemma, Llama 3, Mistral) it
-  // has to be wrapped in that format's system/opening turn markers or the model reads it as loose
-  // text outside any turn and drops out of its trained chat behaviour. `plain-chat` leaves the
-  // affixes empty, so this is a no-op there.
+  // Wrap everything above the chat history in the template's system/opening turn markers (a no-op for `plain-chat`).
   const fixedInner = fixedSections.join('\n\n')
   const fixedText = fixedInner ? `${template.systemPrefix}${fixedInner}${template.systemSuffix}` : ''
   const fixedTokens = await countTokens(fixedText)
   const authorNoteAtDepthTokens =
     authorNoteText && authorNotePosition === 'at_depth' ? await countTokens(authorNoteText) : 0
 
-  // ST's World Info "@ Depth" position — same injection mechanism as the Author's Note's own
-  // `at_depth` above, generalized to (potentially several) lorebook entries each with their own
-  // depth, rather than the one fixed note.
+  // World Info "@ Depth" entries — same at_depth injection mechanism as the Author's Note, but per-entry.
   const worldAtDepthItems = await Promise.all(
     worldAtDepth.map(async (e) => {
       const text = sub(e.content)
@@ -284,12 +237,8 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
   )
   const worldAtDepthTokens = worldAtDepthItems.reduce((sum, i) => sum + i.tokens, 0)
 
-  // Injected right before generation — same "late" placement as ST's post-history-instructions,
-  // which is exactly where steering toward an in-progress objective is most effective. Impersonation
-  // ("suggest what {{user}} would say") suppresses the character-reply steers here — the card's own
-  // post-history note and the scene tag both assume {{char}} is the one about to speak. The computed
-  // steers (objective, relationship nudge, and the character-behaviour half of `styleGuidance`) are
-  // already withheld by `useChatSession` for this mode.
+  // Injected right before generation, same late placement as post-history-instructions. Impersonation
+  // suppresses the character-reply steers, since the card's post-history note and scene tag assume {{char}} is speaking.
   const imp = !!input.impersonateAsUser
   const postHistoryBlock = [
     imp || !character.post_history_instructions?.trim() ? '' : sub(character.post_history_instructions),
@@ -297,7 +246,6 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
     buildObjectiveBlock(input.activeObjective, sub),
     input.relationshipDescription?.trim() ? sub(input.relationshipDescription) : '',
     input.styleGuidance?.trim() ? input.styleGuidance.trim() : '',
-    // The scene tag describes the character's own turn, so it makes no sense when generating the user's line instead.
     imp ? '' : buildSceneInstruction(input.sceneOptions),
     imp ? `[Write only ${macroCtx.userName}'s next message. Stop before ${macroCtx.charName} replies.]` : '',
   ]
@@ -335,12 +283,8 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
   }
   includedTurns.reverse()
 
-  // "At depth" injection: each item (the Author's Note, plus any lorebook entries positioned
-  // this way) drops in as its own line `depth` turns up from the latest — depth 0 is right before
-  // the generation cue, higher values blend it further back into the transcript. Sorted
-  // farthest-back first so each shallower item's "distance from the end" is computed against the
-  // array as it's grown by the deeper insertions already spliced in, the same way a person
-  // layering several depth-anchored notes by hand would reason about their relative positions.
+  // "At depth" injection: each item drops in `depth` turns up from the latest (0 = right before the
+  // generation cue). Sorted farthest-back first so each insertion point accounts for earlier ones.
   const depthInjections = worldAtDepthItems.map((i) => ({ text: `${i.text}\n\n`, tokens: i.tokens, depth: i.depth }))
   if (authorNoteAtDepthTokens > 0) {
     depthInjections.push({ text: `${authorNoteText}\n\n`, tokens: authorNoteAtDepthTokens, depth: authorNoteDepth })
@@ -427,10 +371,7 @@ function renderTurn(
   macroCtx: { charName: string; userName: string },
   regexScripts?: RegexScript[],
 ): string {
-  // A char turn is rendered under its own speaker's name (group chats can have several), not
-  // always the scene's primary character — every message already carries its actual speaker's
-  // name (`useChatSession.ts` stamps it at creation time), so this only changes behavior when
-  // that name differs from the primary's.
+  // A char turn is rendered under its own speaker's name (group chats can have several), not always the primary character.
   const name = msg.role === 'user' ? macroCtx.userName : msg.name?.trim() || macroCtx.charName
   const prefix = turnPrefix(msg.role, name, template)
   const suffix = msg.role === 'user' ? template.userSuffix : template.assistantSuffix

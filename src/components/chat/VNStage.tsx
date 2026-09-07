@@ -15,6 +15,10 @@ import {
   relationshipMilestonesFor,
   relationshipStageForWarmth,
 } from '@/lib/dating/stage'
+import { countCharReplies } from '@/lib/dating/aftercare'
+import { isIntimacySceneActive } from '@/lib/dating/intimacyScene'
+import { triggeredCg } from '@/lib/vn/cgTrigger'
+import { pickVariant } from '@/lib/vn/pickVariant'
 import { MessageLog } from './MessageLog'
 import { SakuraPetals } from './SakuraPetals'
 import { LiveRapport } from './LiveRapport'
@@ -241,12 +245,31 @@ export function VNStage({
   const affection = Math.max(0, Math.min(100, activeTrack.affection ?? 0))
   const warmth = computeWarmth(affection, getRelationshipStats(activeTrack))
   const relationshipStage = relationshipStageForWarmth(warmth, relationshipMilestonesFor(world?.relationshipThresholds))
+  // Item 10: a gallery CG whose author-set trigger condition is met right now, surfaced full-bleed
+  // in place of the ordinary background+sprite composition below.
+  const activeCgSource = cast.find((m) => m.id === activeSpeakerId)
+  const activeIntimacyScene = isIntimacySceneActive(activeTrack.intimacyScene, countCharReplies(messages))
+    ? activeTrack.intimacyScene
+    : undefined
+  const triggeredCgEntry = triggeredCg(activeCgSource?.gallery, {
+    affection,
+    sceneFlags: chat.sceneFlags ?? [],
+    intimacyPhase: activeIntimacyScene?.phase,
+    lastCatalogActionId: lastUserMsg?.intimacyAction?.optionId,
+    relationshipStage,
+  })
+  // Item 11: a stable pick across this CG's own variants, reseeded only when the message that surfaced it changes.
+  const triggeredCgImageUrl = triggeredCgEntry
+    ? pickVariant([triggeredCgEntry.imageUrl, ...(triggeredCgEntry.variants ?? [])].filter(Boolean), lastCharMsg?.id ?? triggeredCgEntry.id)
+    : undefined
   const liveDateActive = isLiveScene(chat.activeEvent)
   const isHangoutEvent = chat.activeEvent?.kind === 'hangout'
   const expression = scene?.expression || 'neutral'
   // Sprite resolution degrades unlocked tag -> same-family expression -> avatar (see resolveExpressionSprite).
   // Outfits are sticky across turns, read from the last message that set one.
   const outfitId = currentOutfitFrom(messages)
+  // Same stable-per-message seed as the CG pick above, so a sprite variant doesn't flicker mid-turn.
+  const spriteVariantSeed = lastCharMsg?.id ?? 'no-message'
   // Everyone in the roster is shown at once (a two/three-shot); the active speaker gets the live
   // expression and full prominence, everyone else rests dimmed at neutral.
   const canPickSpeaker = !!onSelectSpeaker && cast.length > 1
@@ -255,9 +278,10 @@ export function VNStage({
     const isActive = member.id === activeSpeakerId
     // Non-active members gate their sprite/expression unlocks on their own affection, not the active speaker's.
     const memberAffection = isActive ? affection : Math.max(0, Math.min(100, getRelationshipTrack(chat, member.id).affection ?? 0))
+    const variantOptions = { variants: member.spriteVariants, seed: spriteVariantSeed }
     const spriteUrl = isActive
-      ? resolveExpressionSprite(member.sprites, member.spriteUnlocks, member.avatarDataUrl, expression, memberAffection, outfitId)
-      : resolveExpressionSprite(member.sprites, member.spriteUnlocks, member.avatarDataUrl, 'neutral', memberAffection)
+      ? resolveExpressionSprite(member.sprites, member.spriteUnlocks, member.avatarDataUrl, expression, memberAffection, outfitId, variantOptions)
+      : resolveExpressionSprite(member.sprites, member.spriteUnlocks, member.avatarDataUrl, 'neutral', memberAffection, undefined, variantOptions)
     return {
       id: member.id,
       name: member.card.name,
@@ -320,6 +344,10 @@ export function VNStage({
   return (
     <div className="relative flex flex-1 flex-col overflow-hidden">
       <div className="absolute inset-0 transition-[background] duration-500" style={bgStyle} />
+      {triggeredCgEntry && triggeredCgImageUrl && (
+        // Full-bleed CG in place of the ordinary background — sprites are skipped below while one's showing.
+        <img key={triggeredCgEntry.id} src={triggeredCgImageUrl} alt={triggeredCgEntry.title} className="absolute inset-0 h-full w-full object-cover" />
+      )}
       <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/10 to-black/35" />
       {/* Cinematic vignette rather than a flat scrim. */}
       <div
@@ -423,7 +451,7 @@ export function VNStage({
               isGroupScene ? 'pt-8 sm:pt-14 md:pt-20' : 'pt-3 sm:pt-6 md:pt-10'
             }`}
           >
-            {artHint && character && (
+            {!triggeredCgEntry && artHint && character && (
               <div className="absolute inset-x-0 top-[26%] z-20 flex justify-center px-6">
                 <div className="relative max-w-sm rounded-2xl border border-dashed border-white/25 bg-black/45 px-5 py-4 text-center text-[12px] leading-relaxed text-white/80 backdrop-blur-sm">
                   <button
@@ -438,7 +466,8 @@ export function VNStage({
                 </div>
               </div>
             )}
-            {/* h-full is required for each slot's h-[NN%] to resolve against a definite height. */}
+            {/* h-full is required for each slot's h-[NN%] to resolve against a definite height. Skipped while a CG is showing full-bleed — sprites composited over unrelated CG art would look wrong. */}
+            {!triggeredCgEntry && (
             <div className="flex h-full w-full items-end justify-center gap-2 sm:gap-5">
               {castMembers.map((m) => (
                 <VNCharacterSprite
@@ -453,6 +482,7 @@ export function VNStage({
                 />
               ))}
             </div>
+            )}
           </div>
 
           {lastUserMsg && (

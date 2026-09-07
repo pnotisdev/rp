@@ -67,6 +67,11 @@ import { getGiftCatalog } from '@/lib/dating/gifts'
 import { getItemCatalog } from '@/lib/dating/items'
 import { composeIntimacyActionText, type IntimacyUnlockable } from '@/lib/dating/intimacyCatalog'
 
+/**
+ * The main chat screen: header, toolbar, and either the default message-log layout or VNStage's
+ * visual-novel layout, plus every side panel (relationship, objective, scene, inspector, etc.)
+ * they share. Wires `useChatSession`'s state/actions together with settings and display state.
+ */
 export function ChatWindow({
   chatId,
   onBack,
@@ -110,6 +115,9 @@ export function ChatWindow({
     updateMemorySummary,
     continueMessage,
     canContinue,
+    canUndoLastContinue,
+    undoLastContinue,
+    regenerateLastContinueSegment,
     impersonate,
     draftIntimacyAction,
     activeObjective,
@@ -141,8 +149,7 @@ export function ChatWindow({
   const sfxBursts = useSettingsStore((s) => s.sfxBursts)
   const sfxWords = useSettingsStore((s) => s.sfxWords)
   const setActiveChatId = useSettingsStore((s) => s.setActiveChatId)
-  // Only ever read for the Scene panel's "who's in this scene" invite picker — not the roster
-  // itself, which stays `participantCharacters` (already scoped to `chat.participants`).
+  // Only used for the Scene panel's invite picker, not the roster itself (`participantCharacters`).
   const allCharacters = useApiQuery('characters', () => charactersApi.list(), []) ?? []
   const otherCharacters = character ? allCharacters.filter((c) => c.id !== character.id) : allCharacters
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -161,8 +168,7 @@ export function ChatWindow({
   const highlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [draft, setDraft] = useState('')
   const [armedIntent, setArmedIntent] = useState<MessageIntent | null>(null)
-  // Set when a Relationship-panel intimacy action populated the composer — travels with the next
-  // send so the deliberate outfit-switch / aftercare-window side effects still fire, then clears.
+  // Set when a Relationship-panel intimacy action populates the composer; carries the outfit/aftercare side effects into the next send.
   const [armedIntimacyOptionId, setArmedIntimacyOptionId] = useState<string | null>(null)
   const [refreshingChoices, setRefreshingChoices] = useState(false)
   const [exporting, setExporting] = useState(false)
@@ -176,8 +182,7 @@ export function ChatWindow({
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
   }, [messages.length, streamingText])
 
-  // Publish the scene the last character reply landed on, for the app-level music player
-  // (GlobalBgm) — it sits above the view switch so a world's track keeps playing into Settings.
+  // Publishes the last reply's scene for the app-level music player (GlobalBgm).
   const setBgmScene = useBgmSceneStore((s) => s.setScene)
   const lastChar = [...messages].reverse().find((m) => m.role === 'char')
   const lastCharScene = lastChar?.swipeScenes?.[lastChar.activeSwipe ?? 0] ?? lastChar?.scene
@@ -193,11 +198,7 @@ export function ChatWindow({
     if (highlightedId) scrollToMessage(scrollRef.current, highlightedId)
   }, [highlightedId])
 
-  // Section 15's "discoverable keyboard shortcuts" — arrow-key swipe navigation on the latest
-  // reply. Deliberately never fires the "generate a brand-new swipe" branch `swipe('right', ...)`
-  // takes at the last index (see `useChatSession.ts`) — an arrow key is a passive browsing
-  // gesture, and silently kicking off a real generation from it would be a surprising, easy-to-
-  // trigger-by-accident side effect, not a shortcut anyone asked for.
+  // Arrow-key swipe navigation on the latest reply; never triggers a new-swipe generation at the last index.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
@@ -217,8 +218,7 @@ export function ChatWindow({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [messages, swipe])
 
-  // A jump from search or the pinned panel — scroll-to for the VN log lives in VNStage itself
-  // (it needs to open its collapsed backlog drawer first), driven by the same highlightedId.
+  // A jump from search or the pinned panel; VNStage handles its own scroll-to since it must open its backlog drawer first.
   const jumpToMessage = (id: string) => {
     setShowSearch(false)
     setShowPinned(false)
@@ -265,16 +265,10 @@ export function ChatWindow({
     )
   }
 
-  // Chat-level override wins over the global Settings → Appearance default, same precedence style
-  // as the autoTrackRelationship/autoSuggestChoices overrides below it.
+  // Chat-level override wins over the global Settings → Appearance default.
   const visualNovelMode = chat.assistOverrides?.visualNovelMode ?? globalVisualNovelMode
   const pinnedCount = messages.filter((m) => m.pinned).length
-  // 10b's reactive portrait for the default (non-VN) layout — same expression/unlock resolution
-  // VNStage already does for its sprite, so a live scene reads the same character mood regardless
-  // of which layout you're in. `resolveExpressionSprite` guarantees coverage: an unlocked/missing
-  // exact tag falls through to a same-family expression before the plain avatar, rather than
-  // hard-swapping straight to the avatar the moment the exact tag isn't available (section 10's
-  // "guaranteed expression coverage for dates"). `undefined` (no avatar either) means no portrait.
+  // Reactive portrait for the default (non-VN) layout, using the same expression resolution as VNStage's sprite.
   const reactivePortraitExpression = lastCharScene?.expression || 'neutral'
   const reactivePortraitUrl = resolveExpressionSprite(
     character?.sprites,
@@ -282,34 +276,21 @@ export function ChatWindow({
     character?.avatarDataUrl,
     reactivePortraitExpression,
     chat.affection ?? 0,
-    // Same sticky-outfit read VNStage uses, so the two surfaces can never show the character in
-    // different clothes at the same moment.
+    // Same sticky-outfit read as VNStage, so both surfaces always agree on what the character is wearing.
     currentOutfitFrom(messages),
+    { variants: character?.spriteVariants, seed: lastChar?.id ?? 'no-message' },
   )
-  // Presence reads the world's shared clock, so it's only meaningful for a world-bound character
-  // that actually has a schedule authored — most characters have neither, and stay unbadged.
+  // Only meaningful for a world-bound character with an authored schedule; most stay unbadged.
   const presence =
     world && character?.schedule?.length
       ? getCurrentActivity(character.schedule, world.currentDay ?? 0, world.currentPhaseIndex ?? 0)
       : undefined
-  // Deliberately always the primary here, unlike VNStage's own Bond card: this header's avatar
-  // and name above are always the primary too (the chat's fixed identity), so a warmth number that
-  // silently meant someone else with no visible name attached would be confusing, not fixed — VN
-  // mode's version of this earns the switch because it shows multiple faces on screen at once,
-  // making "whose bond" genuinely ambiguous in a way this single-identity header never is.
-  // `RelationshipPanel` (the heart icon) already gives a properly-labeled per-participant tab for
-  // anyone who wants a non-primary's own number specifically.
+  // Always the primary character's warmth, unlike VNStage's Bond card — this header's identity is always the primary's.
   const warmth = computeWarmth(chat.affection ?? 0, getRelationshipStats(chat))
-  // Computed live rather than trusted from the stored `chat.relationshipStage` field, so display
-  // never drifts out of sync if some future code path updates affection/relationshipStats without
-  // separately recomputing the cached stage.
+  // Computed live rather than trusted from the stored `chat.relationshipStage`, so it can't drift out of sync.
   const relationshipStage = relationshipStageForWarmth(warmth, relationshipMilestonesFor(world?.relationshipThresholds))
 
-
-  // Built once, rendered twice: as the ordinary header's toolbar (tone="chrome") in normal mode,
-  // and folded into VNStage's own floating overlay (tone="glass") in VN mode — same actions, same
-  // order, so the two modes never drift apart into different feature sets. Only the `primary`
-  // actions render as icons; the rest collapse into a single "•••" overflow menu (ChatToolbar).
+  // Built once, rendered as the header toolbar (tone="chrome") or folded into VNStage's overlay (tone="glass").
   const toolbarTone = visualNovelMode ? 'glass' : 'chrome'
   const toolbarActions: ChatToolbarAction[] = [
     {
@@ -333,9 +314,7 @@ export function ChatWindow({
       label: chat.activeEvent?.title ? `Event: ${chat.activeEvent.title}` : 'Start a date or event',
       priority: 'primary-desktop',
       active: !!chat.activeEvent,
-      // 10e's content/feature flag: an author-level opt-out, not something that unlocks with more
-      // warmth like every other gate in this app — so the trigger is hidden entirely rather than
-      // just disabled, the same way a character with no active date shows no badge at all.
+      // An author-level opt-out, hidden entirely rather than just disabled.
       hidden: !!character?.dateModeOptOut,
       onClick: () => setShowEvent(true),
     },
@@ -358,10 +337,7 @@ export function ChatWindow({
       key: 'scene',
       icon: Clapperboard,
       label: chat.scene ? `Scene (${chat.scene.turnPolicy.replace('_', ' ')})` : 'Scene',
-      // Reachable even for a chat with nobody else in it yet — it's the only way to invite a
-      // first participant in (there was previously no way to change `Chat.participants` after
-      // the chat was created at all, only at creation in NewChatDialog). Hidden only when there's
-      // truly nobody else in the whole app who could ever be invited in.
+      // Also how a first participant gets invited into an empty chat; hidden only when nobody else exists to invite.
       hidden: otherCharacters.length === 0,
       active: !!chat.scene && (!!chat.scene.location || !!chat.scene.atmosphere || chat.scene.turnPolicy !== 'manual'),
       onClick: () => setShowScene(true),
@@ -409,8 +385,7 @@ export function ChatWindow({
     return last
   })()
 
-  // The Prompt Inspector's raw/processed toggle only ever looks at the latest reply — a message
-  // generated before `rawText` existed just has nothing to show, handled there, not here.
+  // For the Prompt Inspector's raw/processed toggle.
   const lastCharMessage = [...messages].reverse().find((m) => m.role === 'char')
 
   const choiceListNode = (variant: 'default' | 'vn') =>
@@ -433,15 +408,11 @@ export function ChatWindow({
       <QuickReplyBar variant={variant} replies={quickReplies} onPick={(reply) => sendUserMessage(reply.message, [])} />
     )
 
-  // 10b intent chips: offered while relationship tracking is on for this chat (its override, else
-  // the global default) — the same condition that decides whether the judge runs and cares about
-  // intent. Lives inside the composer card (as its `intentSlot`), never as a separate bar.
+  // Intent chips: offered while relationship tracking is on for this chat (its override, else the global default).
   const relationshipTrackingActive = chat?.assistOverrides?.autoTrackRelationship ?? autoTrackRelationship
   const showIntentChips = relationshipTrackingActive && !isGenerating && !!character
   const liveDateActive = isLiveScene(chat?.activeEvent)
-  // During a live scene the tension stat is frozen (scoring is end-of-scene only), so surface the
-  // Reassure/Apologize intents off the live rapport read instead — those repair beats are exactly
-  // what a scene reading "pulling back" or "on edge" calls for.
+  // During a live scene, tension is frozen, so surface Reassure/Apologize off the live rapport read instead.
   const intentStats = (() => {
     const base = getRelationshipStats({ relationshipStats: chat?.relationshipStats })
     const strained = liveDateActive && (chat?.rapport?.trajectory === 'pulling_back' || chat?.rapport?.trajectory === 'on_edge')
@@ -458,10 +429,7 @@ export function ChatWindow({
     setArmedIntimacyOptionId(null)
   }
 
-  // Clicking an intimacy action: the model rewrites the entry's action line for the scene as it
-  // stands, the result goes in the composer for review (never auto-sent), and the option id is
-  // armed so a real send still fires the outfit/aftercare side effects. Falls back to the entry's
-  // own hand-written line if the model call fails or isn't reachable.
+  // Model rewrites the action line into the composer for review (never auto-sent); falls back to the canned line on failure.
   const onIntimacyAction = async (option: IntimacyUnlockable) => {
     let text = ''
     try {
@@ -474,10 +442,7 @@ export function ChatWindow({
     setShowRelationship(false)
   }
 
-  // Section 4/12's Scene entity: once a non-'manual' policy is active, the composer's own "reply
-  // as" picker gives way to a read-only hint — there's nothing to manually choose once the scene
-  // is deciding automatically. Computed here (not inside `useChatSession`) since it's pure display
-  // text derived from state the hook already exposes, not something anything else needs to read.
+  // Once a non-'manual' policy is active, the composer's "reply as" picker gives way to a read-only hint.
   const turnPolicy = chat.scene?.turnPolicy ?? 'manual'
   const turnPolicyHint =
     turnPolicy === 'manual' || participantCharacters.length === 0
@@ -498,8 +463,7 @@ export function ChatWindow({
       value={draft}
       onChangeValue={(v) => {
         setDraft(v)
-        // Clearing the composer discards the armed intimacy action too — a fresh, unrelated message
-        // shouldn't quietly still switch the outfit / open the aftercare window.
+        // Clearing the composer discards the armed intimacy action too.
         if (!v.trim()) setArmedIntimacyOptionId(null)
       }}
       disabled={!character}
@@ -509,6 +473,9 @@ export function ChatWindow({
       onAbort={abortGeneration}
       onContinue={continueMessage}
       onImpersonate={impersonate}
+      canUndoLastContinue={canUndoLastContinue}
+      onUndoLastContinue={undoLastContinue}
+      onRegenerateLastContinueSegment={regenerateLastContinueSegment}
       replyAsOptions={
         character ? [{ id: character.id, name: character.card.name }, ...participantCharacters.map((c) => ({ id: c.id, name: c.card.name }))] : []
       }
@@ -524,14 +491,9 @@ export function ChatWindow({
   )
 
   return (
-    // overflow-hidden matters here, not just cosmetically: TuningPanel docks to this container via
-    // `absolute right-0` + `translate-x-full` when closed — a transform moves an element visually
-    // but its box still counts toward an ancestor's scrollable area, so without this the closed
-    // (off to the right, still `w-96` wide) panel was quietly widening the whole page's scrollWidth,
-    // showing up as a permanent horizontal scrollbar that could scroll the "hidden" panel into view.
-    // Every panel that needs to escape this box on purpose already does — the `<Modal>` shell (and
-    // ReactivePortrait's own nested `relative` wrapper) use `position: fixed`, which an ancestor's
-    // plain `overflow` (no transform of its own) does not clip.
+    // overflow-hidden is load-bearing: TuningPanel's closed (translate-x-full) state still counts
+    // toward scrollWidth without it, causing a permanent horizontal scrollbar. Panels that need to
+    // escape this box use position: fixed instead, which plain overflow doesn't clip.
     <div className="relative flex flex-1 flex-col min-w-0 overflow-hidden">
       {!visualNovelMode && (
         <header className="flex items-center justify-between gap-4 border-b border-border bg-bg-elevated px-5 py-3">
@@ -565,9 +527,7 @@ export function ChatWindow({
               </div>
               <div className="mt-1 flex min-w-0 items-center gap-2 text-[11px] uppercase tracking-wide text-text-muted">
                 {liveDateActive && chat.rapport ? (
-                  // During a live scene the warmth number is frozen (scoring happens once, at the
-                  // end), so it would only mislead — show the qualitative read of how the scene is
-                  // going instead.
+                  // Warmth is frozen during a live scene, so show the qualitative rapport read instead.
                   <LiveRapport read={chat.rapport} label={chat?.activeEvent?.kind === 'hangout' ? 'Live hangout' : 'Live date'} />
                 ) : (
                   <>
@@ -577,8 +537,7 @@ export function ChatWindow({
                         style={{ width: `${warmth}%` }}
                       />
                     </div>
-                    {/* Stage label truncates first on a narrow header; the warmth number never does —
-                        it's the piece that actually changes turn to turn. */}
+                    {/* Stage label truncates first on a narrow header; the warmth number never does. */}
                     <span className="truncate">{formatRelationshipStage(relationshipStage)}</span>
                     <span className="shrink-0 tabular-nums text-text">{warmth}</span>
                   </>
@@ -586,9 +545,7 @@ export function ChatWindow({
               </div>
             </div>
           </div>
-          {/* Just the primary actions plus a "•••" overflow now, so the whole row fits beside the
-              title block even at 375px without the horizontal-scroll hack the ten-icon version
-              needed — and the overflow dropdown can't be clipped by an `overflow-x-auto` ancestor. */}
+          {/* Primary actions plus a "•••" overflow, so the row fits beside the title block at 375px. */}
           <div className="flex shrink-0 items-center gap-1">
             {toolbar}
             <div className="mx-1.5 h-5 w-px bg-border" />
@@ -689,9 +646,7 @@ export function ChatWindow({
           giftInventory={chat.giftInventory ?? {}}
           itemCatalog={getItemCatalog(world)}
           itemInventory={chat.itemInventory ?? {}}
-          // Multi-character relationship tracking: a gift now actually goes to whoever "reply as"
-          // is set to, not always the primary — this copy needs to say so, or "give to Sumire" would
-          // lie about a gift that's about to land on a different character's own track.
+          // A gift goes to whoever "reply as" is set to, not always the primary — copy must say so.
           characterName={(replyAsCharacterId && participantCharacters.find((c) => c.id === replyAsCharacterId)?.card.name) || character.card.name}
           onClose={() => setShowBag(false)}
           onGive={(gift) => {
@@ -779,9 +734,7 @@ export function ChatWindow({
                 onTogglePin={togglePinMessage}
               />
             </div>
-            {/* Live scenes only (10b) — an ordinary chat stays exactly as calm/text-focused as
-                before; this is the visual cue that's missing specifically while a date/hangout
-                is actually happening, not a permanent addition to the default layout. */}
+            {/* Live scenes only — an ordinary chat stays text-focused with no portrait. */}
             {liveDateActive && character && (
               <ReactivePortrait spriteUrl={reactivePortraitUrl} alt={character.card.name} />
             )}

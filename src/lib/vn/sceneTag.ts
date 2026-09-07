@@ -1,39 +1,28 @@
+/**
+ * Parses/emits the `<<scene:...>>` directive the model appends to a reply to drive VN mode's
+ * expression/background/mood/outfit, and strips it from what's shown mid-stream.
+ */
+
 export interface SceneTag {
   expression?: string
   background?: string
   /** Ambient scene mood (src/lib/vn/moods.ts) — selects the background-music track in VN mode. */
   mood?: string
-  /**
-   * Which wardrobe state the character is in (src/lib/vn/outfits.ts). Only ever offered when the
-   * character actually has unlocked outfit art, so an ordinary character's tag is unchanged.
-   * Unset means "no change" rather than "base outfit" — the reader carries the last one forward,
-   * since a model that simply doesn't repeat the field shouldn't undress anyone.
-   */
+  /** Wardrobe state (src/lib/vn/outfits.ts). Unset means "no change", not "base outfit". */
   outfit?: string
 }
 
 const TAG_PREFIX = '<<scene:'
-// Deliberately NOT anchored to end-of-string (a global match instead) — seen live: a model that
-// emits one tag mid-reply, keeps writing dialogue, then emits a second one at the end. Anchoring to
-// `$` only ever found and removed the second tag; the first was left as literal, unstripped text,
-// which `cleanModelOutput`'s later `normalizeRpMarkup` step then mangled trying to treat `<<scene:
-// ...>>` as an HTML tag (its `<tag>` pattern only ever expects ONE leading `<`) — stripping the
-// inside but leaving the outer `<`/`>` behind as garbage (a real reply reduced to literally `"<>"`).
+// Global match, not anchored to end-of-string: a model can emit a tag mid-reply then another at the
+// end, and anchoring to `$` would leave the first as literal unstripped text.
 const TAG_RE = /\n?<<scene:([^>]*)>>/gi
 
-/**
- * Pulls every `<<scene:...>>` directive out of a completed generation, if any — using the LAST one
- * found for the actual expression/background/mood (a model updating the tag partway through a
- * reply presumably means the later one to be its final, intended state) while removing ALL of them
- * from the returned text, not just the one that supplied the metadata.
- */
+/** Pulls every `<<scene:...>>` directive out of a completed generation, using the LAST one for the actual metadata while stripping ALL of them from the returned text. */
 export function extractSceneTag(raw: string): { text: string; scene?: SceneTag } {
   let lastMatch: RegExpMatchArray | undefined
   for (const match of raw.matchAll(TAG_RE)) lastMatch = match
   if (!lastMatch) {
-    // Generation can get cut off (max tokens, or the model just never emits `>>`) before the tag
-    // closes — there's no usable expression/background then, but the raw, unterminated fragment
-    // must never end up saved as if it were part of the character's actual dialogue.
+    // Cut off before the tag closes — the unterminated fragment must never be saved as dialogue.
     return { text: stripSceneTagForDisplay(raw).trimEnd() }
   }
   const scene: SceneTag = {}
@@ -61,13 +50,9 @@ export function stripSceneTagForDisplay(text: string): string {
 export function buildSceneInstruction(options?: {
   expressionIds: string[]
   backgroundIds: string[]
-  /** Passed only when the world actually has music — no point spending prompt tokens on a mood the app will ignore. */
+  /** Passed only when the world actually has music. */
   moodIds?: string[]
-  /**
-   * Passed only when this character has more than one selectable wardrobe state — a character with
-   * only base art gets the exact instruction it always got, with no outfit field and no extra
-   * tokens. See `selectableOutfitIds` in `outfits.ts` for what qualifies.
-   */
+  /** Passed only when the character has more than one selectable wardrobe state — see `selectableOutfitIds` in `outfits.ts`. */
   outfitIds?: string[]
   /** What the character is wearing right now, so the model knows what it would be *changing from*. */
   currentOutfitId?: string

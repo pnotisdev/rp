@@ -2,33 +2,21 @@ export type MessageSegment = { type: 'text' | 'action' | 'quote' | 'sfx'; conten
 
 /** Per-render SFX policy — the global on/off toggle plus any extra vocabulary for this speaker. */
 export interface SfxConfig {
-  /** true = skip SFX detection entirely (the Appearance → "Sound-effect bursts" toggle is off). */
+  /** true = skip SFX detection entirely (the Appearance toggle is off). */
   disabled?: boolean
-  /** Extra onomatopoeia beyond the built-in list — the global custom list plus the speaking
-   *  character's own `sfxWords`, already merged by the caller. Single words; punctuation and
-   *  casing are normalized here, so "Nyaa~" and "nya" both land. */
+  /** Extra onomatopoeia beyond the built-in list — global custom list + the speaking character's own `sfxWords`, already merged by the caller. */
   extraWords?: readonly string[]
 }
 
-// Non-newline so a stray asterisk/quote used mid-sentence (or not yet closed while streaming)
-// doesn't swallow the rest of the message looking for a distant closing mark. `\*{1,3}` on each
-// side so `**bold**` and `***both***` narration read the same as plain `*action*` rather than
-// leaving stray asterisks around an italic run — models drift between `*`, `**`, and `<i>` for the
-// exact same purpose, and a player typing `**word**` expects it to just work.
+// Non-newline so an unterminated asterisk/quote mid-stream doesn't swallow the rest of the message.
+// `\*{1,3}` on each side so `**bold**`/`***both***` narration reads the same as plain `*action*`.
 const SEGMENT_RE = /(\*{1,3}[^*\n]+\*{1,3}|"[^"\n]+")/g
 
 /**
- * Normalise the two ways RP text drifts from this app's one convention (`*action*` / `"speech"`):
- *
- *  - **HTML** — models (RP finetunes especially) format actions with `<i>…</i>` / `<b>…</b>`, and a
- *    confused one emits broken salad (`<b><i><i></b>`). Well-formed pairs become asterisks; block
- *    tags and stray tags are stripped; a bare `<` in prose ("x < y") is left alone.
- *  - **`**` / `***`** — the same drift with markdown weight. The app renders `*x*` and `**x**`
- *    identically (`<em>`), so a `**`/`***` run collapses to a single `*`.
- *
- * Shared by `cleanModelOutput` (scrubs stored text + prompt history), `sendUserMessage` (the
- * player's own typed line), and `splitMessageSegments` (a render-time safety net for old messages
- * and the mid-stream preview). Idempotent.
+ * Normalizes RP text drift toward this app's one convention (`*action*` / `"speech"`): HTML tags
+ * (`<i>`/`<b>`, including broken tag salad) become asterisks or are stripped; `**`/`***` markdown
+ * weight collapses to a single `*` (the app renders them identically). Shared by `cleanModelOutput`,
+ * `sendUserMessage`, and `splitMessageSegments`. Idempotent.
  */
 export function normalizeRpMarkup(text: string): string {
   let out = text
@@ -45,13 +33,7 @@ export function normalizeRpMarkup(text: string): string {
     .replace(/\*{2,}/g, '*') // any lone `**` straggler
 }
 
-/**
- * Curated comic/manga onomatopoeia. Deliberately tight: only words that read purely as a *sound*,
- * never as a shout ("STOP", "NO", "HELP") or an emphasized verb ("SLAMS", "RUNS"), so styling one
- * as a burst can't be wrong. Verb forms with an -s/-ed suffix don't normalize into this set, which
- * is why plain "the door SLAMS shut" is left alone. A character can extend this per-card (a catgirl
- * adding "nya", "mrrp") via `Character.sfxWords`; the user can extend it globally in Settings.
- */
+/** Curated comic/manga onomatopoeia. Deliberately tight: only words that read purely as a sound, never a shout or emphasized verb, so styling one as a burst can't be wrong. */
 export const BUILTIN_SFX_WORDS: readonly string[] = [
   'BOOM', 'KABOOM', 'KABLAM', 'KAPOW', 'BANG', 'BAM', 'POW', 'WHAM', 'WHUMP', 'WHUD',
   'THUD', 'THUMP', 'THOOM', 'THOK', 'CRASH', 'SMASH', 'SLAM', 'CRACK', 'CRACKLE', 'SNAP',
@@ -103,20 +85,16 @@ function isSfxToken(token: string, wordSet: Set<string>): boolean {
   return inSet(parts.join(''))
 }
 
-/**
- * Is this whole trimmed clause an onomatopoeia burst — one to six sound words and nothing else?
- * "BOOM", "knock knock", "tap-tap-tap", "CRASH... BANG" all qualify; "the door slams" does not.
- */
+/** Is this whole trimmed clause an onomatopoeia burst — one to six sound words and nothing else? */
 function isSfxRun(clause: string, wordSet: Set<string>): boolean {
   const tokens = clause.split(/[ \t]+/).filter(Boolean)
   if (tokens.length === 0 || tokens.length > 6) return false
   return tokens.every((t) => isSfxToken(t, wordSet))
 }
 
-// Clause boundaries an SFX burst is allowed to stand between: line breaks, periods/ellipses, and
-// dashes (so "she froze — THUMP — the lid slammed" catches the middle beat). `!`/`?` are left out
-// on purpose — they're both sentence-enders *and* the punctuation a burst itself trails ("BOOM!"),
-// so `isSfxToken` strips them from a token instead and the burst keeps its bang.
+// Clause boundaries an SFX burst can stand between: line breaks, periods/ellipses, dashes. `!`/`?`
+// are left out since they're also the punctuation a burst itself trails ("BOOM!") — `isSfxToken`
+// strips those from a token instead.
 const CLAUSE_SPLIT_RE = /([\n.…—–]+)/
 
 function splitSfx(seg: MessageSegment, wordSet: Set<string>): MessageSegment[] {
@@ -150,22 +128,11 @@ function coalesce(segments: MessageSegment[]): MessageSegment[] {
 }
 
 /**
- * Splits RP message text into plain/action/quote/sfx segments, so both the live chat UI and the
- * standalone HTML transcript export can style `*asterisk-wrapped* narration`, `"quoted"` spoken
- * dialogue, and standalone `BOOM` sound effects consistently from one source of truth instead of
- * re-parsing independently. The asterisks themselves are stripped (they're writing-convention
- * punctuation, not meant to be read); quote marks are kept since they're real printed dialogue
- * punctuation.
- *
- * Walks actual regex matches via `matchAll` rather than `String.split` + re-inspecting each
- * piece's own first/last character — the latter misclassifies an unterminated `*action` (whose
- * leftover text coincidentally starts and ends with `*`) as a real match even though nothing
- * actually matched the delimiter pattern.
- *
- * SFX detection is opt-in per the `sfx` argument (the global toggle), a second pass over the
- * plain/action segments only (never inside `"quotes"`, where a "BOOM!" is something a character
- * *said*): a clause standing on its own between sentence punctuation that is nothing but words
- * from the onomatopoeia list — built-ins plus any `sfx.extraWords` — becomes an `sfx` segment.
+ * Splits RP message text into plain/action/quote/sfx segments — one source of truth for both the
+ * live chat UI and the HTML transcript export. Asterisks are stripped; quote marks are kept.
+ * Walks actual `matchAll` matches rather than `String.split`, so an unterminated `*action` (whose
+ * leftover text coincidentally starts/ends with `*`) isn't misclassified as a real match.
+ * SFX detection is opt-in and only runs over plain/action segments, never inside `"quotes"`.
  */
 export function splitMessageSegments(text: string, sfx?: SfxConfig): MessageSegment[] {
   const normalized = normalizeRpMarkup(text)

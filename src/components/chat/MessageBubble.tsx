@@ -98,8 +98,7 @@ export const MessageBubble = memo(function MessageBubble({
   // Additive, not a replacement for the text (unlike the failed indicator above): the reply itself
   // is still real, just flagged for the player's own judgment call.
   const showBoundaryFlag = !isUser && !!message.boundaryFlag && !isStreaming
-  // Item 8: same durable, player-reviewed pattern as `boundaryFlag` above — see `types.ts`'s
-  // `povFlag` doc comment and `dating/agencyGuard.ts`'s `detectPersonaClimaxNarration`.
+  // Same durable, player-reviewed pattern as `boundaryFlag` above — see `dating/agencyGuard.ts`'s `detectPersonaAgencyViolation`.
   const showPovFlag = !isUser && !!message.povFlag && !isStreaming
   // Item 11: same durable, player-reviewed pattern again — see `types.ts`'s `explicitQualityFlag`
   // doc comment and `dating/intimacyScene.ts`'s `detectExplicitAntiPatternUsed`.

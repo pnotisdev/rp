@@ -1,3 +1,8 @@
+/**
+ * Zustand store for all persisted user settings: connection, identity, theming, layout toggles,
+ * generation/sampler params, memory/relationship/objective behavior, and backend configs (chat,
+ * image, TTS). Persisted to localStorage as `rp-settings`, with a deep `merge` for a few nested keys.
+ */
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { ChatCompletionSamplerParams, GenerationParams } from '@/lib/api/types'
@@ -11,7 +16,7 @@ import type { ThemePreset } from '@/lib/store/themePresets'
 import type { PromptSectionId } from '@/lib/prompt/builder'
 import { DEFAULT_PROMPT_SECTIONS } from '@/lib/prompt/builder'
 
-/** Seeded on first run only — a returning user's own edits/deletions are never overwritten (see the `merge` config below, which does a plain shallow spread for this key like every other scalar/array setting). */
+/** Seeded on first run only; a returning user's own edits/deletions are never overwritten. */
 const DEFAULT_QUICK_REPLIES: QuickReply[] = [
   { id: 'qr-surroundings', label: 'Look around', message: '*takes a moment to look around and take in the surroundings*' },
   { id: 'qr-time-skip', label: 'Let time pass', message: '*lets some time pass*' },
@@ -28,13 +33,7 @@ export interface PromptPreset {
 export type ChatStyle = 'flat' | 'bubbles' | 'document'
 export type AvatarShape = 'circle' | 'square' | 'rounded' | 'rectangle'
 export type ColorMode = 'light' | 'dark'
-/**
- * How explicit intimate/romantic scenes get written once the story has actually led there —
- * separate from `slowBurnPacing` (which governs how *fast* a relationship escalates, not how the
- * prose reads once it has). 'default' sends no instruction at all, identical to every chat before
- * this setting existed, so nobody's existing behavior changes unless they deliberately pick a
- * level — same "opt-in, safe default" rule as every other setting in this app.
- */
+/** How explicit intimate scenes get written once the story leads there; 'default' sends no instruction (old behavior). */
 export type IntimacyDetailLevel = 'default' | 'fade_to_black' | 'suggestive' | 'explicit'
 
 export const DEFAULT_THEME_TOKENS: Record<string, string> = {
@@ -73,8 +72,7 @@ export const DEFAULT_THEME_TOKENS_DARK: Record<string, string> = {
   '--c-romance-text': '12 13 13',
 }
 
-// Kept in sync with the "Balanced" built-in preset (builtinPresets.ts) on every field that preset
-// opinionates, so a fresh install shows "Balanced" selected rather than "Custom".
+// Kept in sync with the "Balanced" built-in preset (builtinPresets.ts) so a fresh install shows it selected.
 export const DEFAULT_SAMPLER: GenerationParams = {
   max_context_length: 8192,
   max_length: 300,
@@ -118,12 +116,10 @@ interface SettingsState {
   themeTokensDark: Record<string, string>
   setColorMode: (m: ColorMode) => void
   setThemeToken: (key: string, value: string, mode: ColorMode) => void
-  /** Apply a colour preset: a complete palette every time (defaults + the preset's overrides),
-   *  so switching presets can't accumulate stray tokens and `resetTheme()` is its clean inverse. */
+  /** Applies a complete palette (defaults + preset overrides) so presets never accumulate stray tokens. */
   applyThemePreset: (light: Record<string, string>, dark: Record<string, string>) => void
   resetTheme: () => void
-  /** User-saved colour palettes, shown in the Presets row alongside the built-ins. Snapshots the
-   *  full light+dark token maps as they are right now (colours only — never chatStyle/layout/CSS). */
+  /** User-saved colour palettes shown in the Presets row; snapshots the current light+dark token maps. */
   customThemePresets: ThemePreset[]
   addCustomThemePreset: (name: string) => void
   removeCustomThemePreset: (id: string) => void
@@ -139,10 +135,10 @@ interface SettingsState {
   reducedAudio: boolean
   /** Style standalone comic sound words ("BOOM!", "knock knock") as manga-style bursts in messages. */
   sfxBursts: boolean
-  /** Extra sound-effect words applied to every character, on top of the built-in list — comma / newline separated. Per-character additions live on `Character.sfxWords`. */
+  /** Extra sound-effect words applied to every character, comma/newline separated. */
   sfxWords: string
   setSfxWords: (v: string) => void
-  /** Background-music volume, 0..1. 0 (default) = off; music never plays and never asks the browser to unlock audio until this is raised. Per-world tracks live on `WorldCard.music`. */
+  /** Background-music volume, 0..1; 0 (default) = off. */
   bgmVolume: number
   setBgmVolume: (v: number) => void
   showTimestamps: boolean
@@ -151,10 +147,7 @@ interface SettingsState {
   tagsAsFolders: boolean
   clickToEdit: boolean
   visualNovelMode: boolean
-  /** §8: with a vision-capable model loaded, run a post-reply pass that looks at the character's
-   *  actual expression sprites (and any photo the player attached) to correct the model's blind
-   *  `<<scene:>>` tag. Off by default — it needs an mmproj and adds a slow image generation per
-   *  VN turn; when off, scene tagging behaves exactly as before. */
+  /** With a vision-capable model loaded, runs a post-reply pass to correct the model's `<<scene:>>` tag. Off by default. */
   visionSceneDetection: boolean
   setChatStyle: (s: ChatStyle) => void
   setAvatarShape: (s: AvatarShape) => void
@@ -182,7 +175,7 @@ interface SettingsState {
   advancedSamplerMode: boolean
   sampler: GenerationParams
   instructTemplateId: string
-  /** Which of `builder.ts`'s fixed prompt sections are included — a missing key defaults to on (`DEFAULT_PROMPT_SECTIONS`). */
+  /** Which of `builder.ts`'s fixed prompt sections are included; a missing key defaults to on. */
   promptSections: Record<PromptSectionId, boolean>
   setAdvancedSamplerMode: (v: boolean) => void
   setSampler: (patch: Partial<GenerationParams>) => void
@@ -198,9 +191,7 @@ interface SettingsState {
   chatsPanelCollapsed: boolean
   setChatsPanelCollapsed: (v: boolean) => void
 
-  /** Character ids whose "VN mode has no art yet" setup hint the user has dismissed — per-character
-   *  so a brand-new character without sprites still gets told, but a deliberately art-less one
-   *  stops nagging. */
+  /** Character ids whose "VN mode has no art yet" setup hint the user has dismissed. */
   vnArtHintDismissed: string[]
   dismissVnArtHint: (characterId: string) => void
 
@@ -219,7 +210,7 @@ interface SettingsState {
   // dating-sim relationship tracking
   autoTrackRelationship: boolean
   setAutoTrackRelationship: (v: boolean) => void
-  /** Global multiplier on how far relationship deltas swing — never what a character says or how a scene opens. */
+  /** Global multiplier on how far relationship deltas swing; never what a character says or how a scene opens. */
   relationshipDifficulty: RelationshipDifficulty
   setRelationshipDifficulty: (d: RelationshipDifficulty) => void
 
@@ -238,7 +229,7 @@ interface SettingsState {
   // system prompt — the instruction block at the top of every generation. Empty = the built-in
   // `DEFAULT_SYSTEM_PROMPT` (builder.ts); a character's own `system_prompt` still overrides both.
   systemPrompt: string
-  /** Global steering appended after any per-character post-history instructions — applies to every chat. */
+  /** Global steering appended after any per-character post-history instructions. */
   postHistoryInstructions: string
   setSystemPrompt: (v: string) => void
   setPostHistoryInstructions: (v: string) => void
@@ -252,16 +243,10 @@ interface SettingsState {
   avoidEmDashes: boolean
   setStyleGuidance: (v: string) => void
   setAvoidEmDashes: (v: boolean) => void
-  /** Steers scene *content*, not just prose — the relationship-difficulty slider above only scales
-   *  numeric deltas and says so in its own copy ("never what a character says or how a scene
-   *  opens"); this is what actually asks the model not to have a character give in to a request
-   *  just to be agreeable. Defaults on: reproduced live against the seeded Sumire on a near-strangers
-   *  chat, an unprompted kiss request got a token "you can't just demand that" followed by
-   *  immediate compliance in the same reply — the character's own card already asks for someone who
-   *  "warms up slowly," the model just wasn't holding that line under a direct, escalating request. */
+  /** Steers scene content (not just prose) so a character doesn't give in to a request just to be agreeable. Defaults on. */
   slowBurnPacing: boolean
   setSlowBurnPacing: (v: boolean) => void
-  /** How explicit intimate scenes get written once earned — see `IntimacyDetailLevel`'s own doc comment. */
+  /** See `IntimacyDetailLevel`. */
   intimacyLevel: IntimacyDetailLevel
   setIntimacyLevel: (v: IntimacyDetailLevel) => void
 
@@ -279,12 +264,7 @@ interface SettingsState {
     ttsVoice: string
   }>) => void
 
-  /**
-   * Section 8's "additional model backends". Defaults to `'koboldcpp'` so every existing user's
-   * setup is untouched unless they opt in from Settings. The other three fields only matter for
-   * `'openai-compatible'` — mirrors the flat `ttsProvider`/`ttsApiKey`/`ttsBaseUrl` shape above
-   * rather than a nested config object, for the same reason: one setter, one persisted shape.
-   */
+  /** Defaults to `'koboldcpp'`; the other three fields only matter for `'openai-compatible'`. */
   chatBackend: ChatBackendId
   chatBackendBaseUrl: string
   chatBackendApiKey: string
@@ -295,20 +275,11 @@ interface SettingsState {
     chatBackendApiKey: string
     chatBackendModel: string
   }>) => void
-  /**
-   * The user's own framing, after live-testing section 8: "text completion and chat completion
-   * presets are different" — kept as its own object rather than folded into `sampler`
-   * (`GenerationParams`, KoboldCpp-only concepts) so switching `chatBackend` back and forth never
-   * clobbers either one's last-tuned values.
-   */
+  /** Kept separate from `sampler` (KoboldCpp-only) so switching `chatBackend` never clobbers either one's tuned values. */
   chatCompletionSampler: ChatCompletionSamplerParams
   setChatCompletionSampler: (patch: Partial<ChatCompletionSamplerParams>) => void
 
-  /**
-   * Section 11's "image/asset generation backends" — same flat-fields-plus-one-setter shape as
-   * the chat backend above. `imageBackendUsername`/`imageBackendPassword` do double duty per
-   * backend: Automatic1111's optional `--api-auth user:pass`, or (username only) NovelAI's API key.
-   */
+  /** `imageBackendUsername`/`imageBackendPassword` double as Automatic1111's `--api-auth user:pass` or (username only) NovelAI's API key. */
   imageBackend: ImageBackendId
   imageBackendBaseUrl: string
   imageBackendUsername: string
@@ -501,11 +472,7 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: 'rp-settings',
-      // zustand's default merge is shallow — a token object already in localStorage (from before
-      // this key existed) would otherwise fully replace the default object instead of layering
-      // over it, permanently hiding any new token/param this app ships later behind `undefined`
-      // for every returning user. Deep-merging just these three keeps a user's customized values
-      // while still backfilling new ones with their default.
+      // Deep-merge just these nested keys so new tokens/params backfill instead of being hidden by an old persisted object.
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<SettingsState>
         return {

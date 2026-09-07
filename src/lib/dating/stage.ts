@@ -12,13 +12,10 @@ import type {
 } from '@/lib/types'
 import type { GalleryEntry } from '@/lib/characters/cardSpec'
 
-/**
- * 10b: which `DateEventCard` kinds are a *live, end-of-scene-scored* scene — per-turn scoring
- * suppressed, a rapport read shown instead, one judge pass when it ends — versus the original
- * lightweight event-card flow (`gift`/`milestone`), which never goes "live" at all. The one place
- * this decision is made, so a scene's live-ness can never drift between the header, the VN HUD, the
- * event panel, and `useChatSession`'s own generation loop.
- */
+// Relationship stage/warmth/commitment ladder logic, risk/breakup evaluation, and the
+// multi-character relationship-track resolution (`getRelationshipTrack`/`patchRelationshipTrack`).
+
+/** Which `DateEventCard` kinds are a live, end-of-scene-scored scene (date/hangout) vs. the lightweight gift/milestone flow. */
 export function isLiveScene(event: Pick<DateEventCard, 'kind' | 'startedAt'> | undefined): boolean {
   return !!event?.startedAt && (event.kind === 'date' || event.kind === 'hangout')
 }
@@ -33,21 +30,13 @@ export const RELATIONSHIP_MILESTONES: { stage: RelationshipStage; at: number }[]
   { stage: 'sweethearts', at: 90 },
 ]
 
-/** Canonical set of built-in branching scene-memory flags the AI classifier can detect — always available, regardless of world. See `combinedSceneFlags` for the full set including a world's own custom ones. */
+/** Built-in branching scene-memory flags the AI classifier can detect. See `combinedSceneFlags` for the full set including a world's own custom ones. */
 export const SCENE_FLAGS: SceneFlag[] = ['first_date', 'confession', 'jealousy', 'promise', 'first_kiss']
 
-/**
- * The built-in flag marking "these two have actually kissed" — the physical-reality signal
- * `canActuallyAskForCommitment` gates the `dating` tier on (see its own doc comment for the full
- * "married with zero kisses" bug this exists to fix). Set two ways, so it fires whichever way a
- * kiss actually happens: deterministically the instant a `kissing_spot`-category intimacy action is
- * sent (`useChatSession.ts`'s `sendUserMessage`), or by the AI classifier noticing one written out
- * in freeform roleplay instead (`relationshipAssist.ts`'s `FLAG_GLOSSARY` entry for this flag).
- * Exported so every site that needs the literal agrees on one spelling rather than retyping it.
- */
+/** Marks "these two have actually kissed" — set either deterministically by a `kissing_spot` action or by the AI classifier noticing one in freeform prose. */
 export const FIRST_KISS_FLAG: SceneFlag = 'first_kiss'
 
-/** The 4 built-in flags plus whatever a world has authored on top, as {id, label} pairs — the one place both the UI (Relationship panel checklist, item "set flag" picker) and the AI classifier (relationshipAssist.ts) should read the full available set from, so they can never drift apart. */
+/** The built-in flags plus a world's own, as {id, label} pairs. */
 export function combinedSceneFlags(customFlags?: CustomSceneFlag[]): { id: string; label: string }[] {
   return [
     ...SCENE_FLAGS.map((f) => ({ id: f, label: f.replace(/_/g, ' ') })),
@@ -55,7 +44,7 @@ export function combinedSceneFlags(customFlags?: CustomSceneFlag[]): { id: strin
   ]
 }
 
-/** 10c's Define-the-Relationship ladder, lowest first. Separate from `RELATIONSHIP_MILESTONES` — warmth only ever gates when a tier can be *asked for*, never grants it automatically. `married` is the top rung (the user's own ask: "unlocking moving together, getting married, and other things") — same ask/accept/backfire flow as every other tier below it, just one rung further. */
+/** Define-the-Relationship ladder, lowest first. Warmth only gates when a tier can be asked for, never grants it automatically. */
 export const COMMITMENT_ORDER: CommitmentStatus[] = ['none', 'dating', 'exclusive', 'living_together', 'married']
 
 const COMMITMENT_LABELS: Record<CommitmentStatus, string> = {
@@ -70,21 +59,14 @@ export function formatCommitmentStatus(status: CommitmentStatus): string {
   return COMMITMENT_LABELS[status]
 }
 
-/** The next tier up from `current`, or undefined once already at the top of the ladder — never 'none', since that's only ever the bottom of the ladder, not something to advance "to". */
+/** The next tier up from `current`, or undefined at the top of the ladder. */
 export function nextCommitmentTier(current: CommitmentStatus): Exclude<CommitmentStatus, 'none'> | undefined {
   const i = COMMITMENT_ORDER.indexOf(current)
   return i >= 0 && i < COMMITMENT_ORDER.length - 1 ? (COMMITMENT_ORDER[i + 1] as Exclude<CommitmentStatus, 'none'>) : undefined
 }
 
-/**
- * Reuses the same warmth milestones already authored for `RelationshipStage` rather than a second
- * set of thresholds — dating needs getting_close's warmth, exclusive needs close's, living together
- * and married both need sweethearts' (the ladder's own top stage, so there's nowhere higher to peg
- * a warmth floor for married specifically). That's fine: `nextCommitmentTier` already refuses to
- * offer married until *currently* living_together, so the real gate marriage needs — you have to
- * have already moved in together first — comes from ladder order, not from a warmth number no
- * stage would ever clear.
- */
+// Reuses the existing warmth milestones rather than a second threshold set; living_together and
+// married both peg to the top stage since ladder order (not warmth) is what actually gates married.
 const COMMITMENT_TIER_STAGE: Record<Exclude<CommitmentStatus, 'none'>, RelationshipStage> = {
   dating: 'getting_close',
   exclusive: 'close',
@@ -112,20 +94,10 @@ export function canAskForCommitment(
 export type CommitmentLockReason = 'warmth' | 'kiss' | 'first_time'
 
 /**
- * A live playthrough reached "married" on warmth alone, the two characters never having so much as
- * kissed — `canAskForCommitment`'s threshold says nothing about physical reality. This is the one
- * place that decides *why* `tier` is locked, composing the existing warmth gate with two new
- * physical-reality checks: `RelationshipPanel`'s locked-hint copy reads this directly (`canAskFor
- * Commitment` alone can't tell "not warm enough yet" apart from "warm enough, but they haven't
- * kissed", and a player can only act on the second kind of hint if it says so).
- * - `dating` additionally needs `physical.hasKissed` — the built-in `first_kiss` scene flag
- *   (`FIRST_KISS_FLAG`) having been set.
- * - `living_together` and `married` additionally need `physical.firstIntimateSceneAt` to be set
- *   (the "first time together" milestone, see `canInitiateFirstTime`) — checked at *both* tiers
- *   independently, as defense in depth, even though ladder order alone already implies it (you
- *   can't ask for `married` without already being `living_together`, which already required it).
- * `exclusive` gets no additional check of its own: by the time it's askable the pair is already
- * `dating`, which already required a kiss, and flags are never removed once set.
+ * Composes the warmth gate with physical-reality checks (so e.g. "married" can't be reached on
+ * warmth alone with the pair never having kissed): `dating` needs `hasKissed`; `living_together`/
+ * `married` need `firstIntimateSceneAt`. `exclusive` needs no extra check of its own since `dating`
+ * already required a kiss.
  */
 export function commitmentLockReason(
   tier: Exclude<CommitmentStatus, 'none'>,
@@ -139,7 +111,7 @@ export function commitmentLockReason(
   return undefined
 }
 
-/** True once `tier` is actually askable right now — warmth *and* the physical-reality gates above. Asking still doesn't mean the character will say yes. */
+/** True once `tier` is actually askable right now — warmth and the physical-reality gates above. */
 export function canActuallyAskForCommitment(
   tier: Exclude<CommitmentStatus, 'none'>,
   warmth: number,
@@ -149,12 +121,7 @@ export function canActuallyAskForCommitment(
   return commitmentLockReason(tier, warmth, physical, milestones) === undefined
 }
 
-/**
- * True once this relationship is ready to be *asked* about a "first time together" milestone (see
- * `RelationshipTrack.firstIntimateSceneAt`) — same "asking doesn't mean yes" spirit as
- * `canAskForCommitment`, just gated on warmth + any real commitment rather than one specific tier,
- * since this isn't itself a rung on the `COMMITMENT_ORDER` ladder.
- */
+/** True once ready to be *asked* about a "first time together" milestone — gated on warmth + any real commitment, not a rung on `COMMITMENT_ORDER`. */
 export function canInitiateFirstTime(warmth: number, commitmentStatus: CommitmentStatus): boolean {
   return warmth >= 75 && commitmentStatus !== 'none'
 }
@@ -169,27 +136,10 @@ export const RELATIONSHIP_DIMENSIONS: RelationshipDimension[] = [
   'tension',
 ]
 
-/**
- * Dimensions (including `affection`) that count toward `warmth` — `curiosity` and `tension` don't.
- * Exported (not just used internally by `computeWarmth` below) so `RelationshipPanel.tsx` can name
- * whichever of these is lagging once a commitment ask keeps deflecting despite warmth itself
- * already clearing the threshold — see `lowestWarmthDimension`.
- */
+/** Dimensions (plus `affection`) that count toward `warmth` — `curiosity`/`tension` don't. */
 export const WARMTH_DIMENSIONS: RelationshipDimension[] = ['trust', 'chemistry', 'comfort', 'respect']
 
-/**
- * FIXES_TODO.md's "no in-app signal for why a commitment ask keeps deflecting" item — live-repro'd
- * at 10 straight deflects on "exclusive" despite affection maxed and trust/chemistry/respect all
- * high: `comfort` specifically was the dimension quietly lagging the whole time, confirmed by
- * watching it recover right before the very next ask landed. `canActuallyAskForCommitment`/
- * `commitmentLockReason` only ever gate on warmth as a single blended number (plus the kiss/
- * first-time physical-reality checks) — nothing surfaces which *specific* tracked dimension is
- * actually dragging that blend down once it's already past the threshold, which is exactly the
- * situation a repeatedly-deflecting player is in. Ties (more than one dimension sharing the lowest
- * value) resolve to the first in `WARMTH_DIMENSIONS`'s own order, arbitrarily but deterministically
- * — there's no principled way to prefer one over another when they're genuinely equal, and a stable
- * pick beats one that flickers between renders.
- */
+/** Whichever warmth dimension is lowest, for naming what's dragging a commitment ask down even though blended warmth already clears the threshold. Ties resolve to the first in `WARMTH_DIMENSIONS` order. */
 export function lowestWarmthDimension(stats: Record<RelationshipDimension, number>): RelationshipDimension {
   return WARMTH_DIMENSIONS.reduce((lowest, dim) => (stats[dim] < stats[lowest] ? dim : lowest))
 }
@@ -259,16 +209,7 @@ type TrackHost = Pick<
   | 'participantRelationships'
 >
 
-/**
- * Multi-character relationship tracking's one resolution point: which bag of fields a given
- * character's relationship state actually lives in. The primary reads their own copy straight off
- * `Chat`'s top-level fields, unchanged since before this existed; anyone else reads their entry in
- * `Chat.participantRelationships`, defaulting to a fresh (all-zero) track the first time they're
- * ever looked at. Every other relationship function (`getRelationshipStats`, `computeWarmth`,
- * `relationshipStageForWarmth`, `applyRelationshipRisk`, ...) already takes plain values rather
- * than reading `Chat` directly, so the object this returns slots straight into them with no changes
- * needed on that side at all.
- */
+/** Which bag of fields a character's relationship state lives in: the primary reads `Chat`'s own top-level fields; anyone else reads their entry in `Chat.participantRelationships`. */
 export function getRelationshipTrack(chat: TrackHost, characterId: string): RelationshipTrack {
   if (characterId === chat.characterId) {
     return {
@@ -302,14 +243,7 @@ export function getRelationshipTrack(chat: TrackHost, characterId: string): Rela
   return chat.participantRelationships?.[characterId] ?? {}
 }
 
-/**
- * The `PUT /api/chats/:id` patch that persists a track update for one character. The server merges
- * a PUT shallowly (see `server/db.ts`'s `update`) — a nested object in the patch *replaces* the
- * stored one rather than merging into it — so the non-primary branch always rewrites the *whole*
- * `participantRelationships` map (every other participant's entry spread in unchanged) rather than
- * sending just the one character's delta, which would otherwise silently erase everyone else's
- * tracked state on the very next write.
- */
+/** The PUT patch that persists a track update for one character. Rewrites the whole `participantRelationships` map for a non-primary (a shallow PUT merge would otherwise erase everyone else's entry). */
 export function patchRelationshipTrack(
   chat: Pick<Chat, 'characterId' | 'participantRelationships'>,
   characterId: string,
@@ -324,12 +258,7 @@ export function patchRelationshipTrack(
   }
 }
 
-/**
- * Warmth is a derived overall-closeness score — affection plus four of the six tracked
- * dimensions (trust, chemistry, comfort, respect), excluding curiosity (interest/spark, not
- * necessarily closeness) and tension (friction — shouldn't read as "warm"). It's never stored;
- * always computed fresh from the dimensions that make it up.
- */
+/** Derived overall-closeness score: affection plus trust/chemistry/comfort/respect, excluding curiosity and tension. Never stored. */
 export function computeWarmth(affection: number, stats: Record<RelationshipDimension, number>): number {
   const values = [affection, ...WARMTH_DIMENSIONS.map((d) => stats[d])]
   const sum = values.reduce((total, v) => total + v, 0)
@@ -343,19 +272,13 @@ export function clampAffection(n: number): number {
 /** Same 0-100 clamp as `clampAffection`, named generically for the other six dimensions. */
 export const clampStat = clampAffection
 
-/** True the moment warmth crosses INTO a higher stage than it was, false on a same-stage or backward move. */
+/** True the moment warmth crosses into a higher stage than it was. */
 export function crossedMilestone(previousStage: RelationshipStage, nextStage: RelationshipStage): boolean {
   const stageOrder = RELATIONSHIP_MILESTONES.map((m) => m.stage)
   return stageOrder.indexOf(nextStage) > stageOrder.indexOf(previousStage)
 }
 
-/**
- * Ids of `isEnding` gallery entries (10c's "Endings gallery") that should unlock now — reaching
- * the top "sweethearts" stage, not `unlockAffection`/story-beat matching like an ordinary CG, so
- * this never runs through `detectGalleryUnlocks`'s AI reply-matching pass. Already-unlocked ids
- * are skipped, which is also what makes this naturally "once per relationship" — nothing re-fires
- * on later turns once an ending has landed in the set.
- */
+/** Ids of `isEnding` gallery entries that should unlock now — reaching the top "sweethearts" stage, not AI reply-matching like an ordinary CG. */
 export function unlockedEndingIds(
   gallery: GalleryEntry[] | undefined,
   relationshipStage: RelationshipStage,
@@ -365,16 +288,16 @@ export function unlockedEndingIds(
   return (gallery ?? []).filter((g) => g.isEnding && !alreadyUnlocked.has(g.id)).map((g) => g.id)
 }
 
-// ---------- 10c: Breakups & reconciliation ----------
+// ---------- Breakups & reconciliation ----------
 
 const RISK_TENSION_THRESHOLD = 80
 const RISK_COMFORT_FLOOR = 15
-/** Real elapsed time, not in-fiction days — always available whether or not this chat's character has a world/calendar at all. */
+/** Real elapsed time, not in-fiction days. */
 const BREAKUP_GRACE_MS = 3 * 24 * 60 * 60 * 1000
-/** A one-time cost applied when a relationship actually breaks — the "lasting scar" this item asks for, short of a literal permanent ceiling (which would need every clamp in the codebase to read a per-chat cap). */
+/** One-time cost applied when a relationship actually breaks. */
 const BREAKUP_SCAR = 15
 
-/** True once a *committed* relationship is under real strain — an unofficial relationship has no status to lose, so it's never "at risk" in this sense. */
+/** True once a committed relationship is under real strain — an unofficial one has no status to lose. */
 export function relationshipAtRisk(
   commitmentStatus: CommitmentStatus,
   stats: Record<RelationshipDimension, number>,
@@ -399,7 +322,7 @@ export function applyBreakupScar(stats: Record<RelationshipDimension, number>): 
 }
 
 export interface RelationshipRiskResult {
-  /** Next warning state — undefined means no warning (either never at risk, resolved, or just broke up). */
+  /** Next warning state — undefined means no warning (never at risk, resolved, or just broke up). */
   warning?: RelationshipWarning
   commitmentStatus: CommitmentStatus
   breakupCount: number
@@ -408,13 +331,7 @@ export interface RelationshipRiskResult {
   clearedJustNow: boolean
 }
 
-/**
- * Pure decision step for whether a committed relationship's current strain should raise a new
- * warning, let a standing one run out into an actual breakup, or clear one that's since resolved —
- * called after every relationship-stat update, not on any separate timer/tick. Applying the actual
- * stat scar and persisting the result is the caller's job (`useChatSession.ts`), same split as
- * `crossedMilestone`/`announceMilestone`.
- */
+/** Pure decision step for whether a committed relationship's current strain should raise a warning, let one run out into a breakup, or clear a resolved one. Called after every stat update, not on a timer. Applying the scar and persisting is the caller's job. */
 export function evaluateRelationshipRisk(opts: {
   commitmentStatus: CommitmentStatus
   stats: Record<RelationshipDimension, number>

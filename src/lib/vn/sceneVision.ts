@@ -1,23 +1,10 @@
 /**
- * Vision-based scene tagging (ROADMAP §8). The model self-tags every VN reply with a trailing
- * `<<scene:expression=…,background=…,mood=…>>` directive picked *blind* from a list of ids — it
- * never sees the sprites it's choosing between, and a small local model forgets the tag, emits an
- * invalid id, or picks a poor match often enough to matter.
- *
- * With a vision-capable model loaded (mmproj), these two passes look at the actual images that are
- * already in play and correct the tag after the fact:
- *
- *  1. `detectExpressionFromSprites` — shows the model the character's own unlocked expression
- *     sprites, labelled, alongside the line just delivered, and asks which face fits. Robust for
- *     custom or oddly-named sprites where the id alone tells the model nothing.
- *  2. `classifyAttachedImageScene` — when the player attached a photo to their message, classifies
- *     what it depicts into an available background id and/or a scene mood, so the VN stage reacts
- *     to what was shared instead of ignoring it.
- *
- * Both are backups, not replacements: they run as non-blocking assists after the reply lands and
- * only override the model's own tag when they produce a valid answer (see `useChatSession.ts`).
- * Same "never trust raw model output" discipline as the `relationshipAssist.ts` judge calls —
- * every returned id is validated against the caller's allowed set before it's used.
+ * Corrects the model's own blind `<<scene:>>` self-tag (`sceneTag.ts`) after the fact, two ways:
+ * vision passes (`detectExpressionFromSprites`, `classifyAttachedImageScene`) that look at actual
+ * sprite/attached images when a vision-capable model is loaded, and a text-only pass
+ * (`detectExpressionTextMismatch`) for when it isn't. All non-blocking best-effort assists —
+ * they only override the tag on a valid, allowed-set-validated answer; otherwise the original
+ * tag (or no change) stands.
  */
 
 import type { ChatBackend } from '@/lib/api/chatBackend'
@@ -57,13 +44,7 @@ export interface SpriteForVision {
   base64: string
 }
 
-/**
- * Picks the expression sprite whose face best matches `replyText`, by actually showing the model
- * the sprites. Returns a validated id from `sprites`, or null when the model declines / the answer
- * doesn't match a real sprite (caller then keeps whatever the reply's own `<<scene:>>` tag said).
- *
- * Needs at least two sprites to be worth running — with one or none there is nothing to choose.
- */
+/** Picks the expression sprite whose face best matches `replyText`, by actually showing the model the sprites. Returns a validated id, or null when the model declines or gives no usable answer. Needs at least two sprites to be worth running. */
 export async function detectExpressionFromSprites(
   client: ChatBackend,
   params: {
@@ -101,10 +82,7 @@ export async function detectExpressionFromSprites(
 
   let text: string
   try {
-    // Every call in this file is a non-blocking backup that only ever overrides the model's own
-    // tag on a valid answer (see the file header) — a hang here used to mean the caller waited
-    // forever for a "best-effort" pass that was supposed to be cheap; `generateWithTimeout` bounds
-    // it to 45s, after which the catch below falls back the same as any other read/parse failure.
+    // Bounded to 45s by generateWithTimeout so this best-effort pass can't hang the caller.
     text = await generateWithTimeout(
       client,
       { ...VISION_PARAMS, max_context_length: await client.getEffectiveMaxContext(), prompt, images: sprites.map((s) => s.base64) },
@@ -122,13 +100,7 @@ export interface ExpressionCandidate {
   label: string
 }
 
-/**
- * A cheap text-only pre-filter for `detectExpressionFromSprites`: given the line and the full list
- * of available expressions (id + human label), names the few most plausible ones so the vision
- * pass only has to look at a handful of sprites instead of twenty. Falls back to the model's own
- * tagged guess (or the first `limit` candidates) whenever the model's answer is unusable, so the
- * caller always gets a non-empty shortlist when candidates exist.
- */
+/** A cheap text-only pre-filter for `detectExpressionFromSprites`: names the few most plausible expressions so the vision pass only looks at a handful of sprites. Falls back to the tagged guess or first `limit` candidates on an unusable answer. */
 export async function shortlistExpressions(
   client: ChatBackend,
   params: {
@@ -181,8 +153,7 @@ export async function shortlistExpressions(
     ? parsed.filter((v): v is string => typeof v === 'string' && allowed.has(v.trim())).map((v) => v.trim())
     : []
   if (picks.length === 0) return fallback()
-  // Guarantee the tagged guess survives even if the model dropped it — the vision pass still gets
-  // to reject it, but it should at least be in the running.
+  // Guarantee the tagged guess is at least in the running, even if the model dropped it.
   const withTag =
     params.taggedExpression && allowed.has(params.taggedExpression) && !picks.includes(params.taggedExpression)
       ? [params.taggedExpression, ...picks]
@@ -195,12 +166,7 @@ export interface SceneClassification {
   mood?: string
 }
 
-/**
- * Classifies a photo the player attached to their message into an available background id and/or a
- * scene mood, so the VN stage can shift to reflect what was shared. Everything is optional in the
- * result — a selfie has a mood but no meaningful "background", a landscape the reverse — and every
- * value is validated against what the caller actually offered.
- */
+/** Classifies a photo the player attached into an available background id and/or scene mood, so the VN stage reflects what was shared. Either field may come back empty; both are validated against what the caller offered. */
 export async function classifyAttachedImageScene(
   client: ChatBackend,
   params: {
@@ -244,7 +210,7 @@ export async function classifyAttachedImageScene(
   return result
 }
 
-/** Same low-temperature classification params as the vision passes above, minus the image-specific length cap — text-only. */
+/** Same low-temperature classification params as the vision passes above, text-only (no image length cap). */
 const GREETING_SCENE_PARAMS = {
   ...VISION_PARAMS,
   max_length: 40,
@@ -252,32 +218,12 @@ const GREETING_SCENE_PARAMS = {
 }
 
 /**
- * Closes the loop the other direction from every pass above: those correct a *tag* using an image
- * (the character's own sprites, or a photo the player attached). This corrects a tag using nothing
- * but the *text that was just written* — for the much more common case where no vision-capable
- * model is loaded at all, which is most of this app's actual local-KoboldCpp usage.
- *
- * The gap this closes: the model's own blind `<<scene:>>` self-tag (`sceneTag.ts`) is written by
- * the same generation that wrote the reply, but nothing stops it from being lazy — repeating
- * whatever expression was tagged last turn out of habit even when the prose it just wrote clearly
- * shows something else ("she smiled" while the tag still says `blush` from three turns ago). Text
- * and tag can drift apart with no correction today unless a vision-capable model happens to be
- * loaded (`detectExpressionFromSprites`, gated on real sprite art and `visionSceneDetection`).
- *
- * Deliberately expression-only, never outfit: an outfit tag is sticky by design (`sceneTag.ts`'s own
- * "an absent tag means unchanged" contract) and `manualOnly`/intimate outfits exist specifically so
- * the model can't move a character into one just because a reply *read* suggestive — auto-correcting
- * outfit from text content would defeat that guarantee outright. Background is left for a later pass
- * for the same reason `detectGreetingScene` only ever handles expression+background together when
- * there's an actual location description to read; a single reply rarely re-describes where a scene
- * is set the way it re-describes an expression.
- *
- * Deliberately biased toward "no change": the prompt asks for a correction only on a *clear,
- * obvious* mismatch, and repeating the current tag is explicitly offered as the right answer when
- * it still fits — a subtle or ambiguous line should never cause churn just because a cheap
- * classifier's judgment differs slightly from the writing model's own. Returns `null` (meaning
- * "keep the current tag") on no signal, an invalid answer, a parse failure, or a thrown/timed-out
- * client error — the same fail-safe-to-no-change contract every pass in this file follows.
+ * Text-only correction for the common case where no vision-capable model is loaded: the model can
+ * be lazy and repeat last turn's expression tag out of habit even when the prose it just wrote
+ * clearly shows something else. Expression-only, never outfit (outfit is sticky by design and must
+ * not auto-change from suggestive-reading text) or background. Strongly biased toward "no change" —
+ * only flags a *clear, obvious* mismatch; returns `null` (keep current tag) on no signal, an
+ * invalid/unparseable answer, or a client error.
  */
 export async function detectExpressionTextMismatch(
   client: ChatBackend,
@@ -290,8 +236,7 @@ export async function detectExpressionTextMismatch(
 ): Promise<string | null> {
   const reply = params.replyText.trim().slice(0, 900)
   const tagged = params.taggedExpression.trim()
-  // Needs the current tag plus at least one real alternative to be worth asking about, same
-  // "nothing to choose" guard `detectExpressionFromSprites` uses for sprites.
+  // Needs the current tag plus at least one real alternative to be worth asking about.
   if (!reply || !tagged || params.candidates.length < 2) return null
 
   const allowed = new Set(params.candidates.map((c) => c.id))
@@ -324,15 +269,7 @@ export async function detectExpressionTextMismatch(
   return picked
 }
 
-/**
- * A brand-new chat's opening line is the character's static `first_mes` — nobody generates it, so
- * unlike every later reply it never gets the trailing `<<scene:>>` tag (`sceneTag.ts`) that lets VN
- * mode pick an expression/background. Without this, VN mode's very first screen is always a bare
- * placeholder gradient, no matter how much real background art a world has, until the model
- * generates an actual reply. One cheap, best-effort, text-only classification — reading nothing but
- * the greeting itself — run once at chat creation (`createChat.ts`) gives it the same tag any later
- * turn would have picked on its own.
- */
+/** A chat's static `first_mes` opening line is never generated, so it never gets a `<<scene:>>` tag (`sceneTag.ts`) the way later replies do. Run once at chat creation (`createChat.ts`), this gives it one anyway via a cheap text-only classification. */
 export async function detectGreetingScene(
   client: ChatBackend,
   params: { text: string; expressionIds: string[]; backgroundIds: string[] },
@@ -377,13 +314,7 @@ export async function detectGreetingScene(
   return Object.keys(scene).length ? scene : null
 }
 
-/**
- * Pulls an expression id out of a model response. Tolerates bare text (`happy`), a quoted string, a
- * JSON object (`{"expression":"happy"}`), and — because a vision model very often answers with the
- * picture number instead of the label — a 1-based index (`{"expression":"2"}`, `Image 2`, `2`)
- * mapped back through `orderedIds`, which is the same order the images were attached in. An id match
- * always wins over an index read, so an expression literally named "2" is still safe.
- */
+/** Pulls an expression id out of a model response — bare text, a quoted string, a JSON object, or (since vision models often answer with the picture number) a 1-based index mapped through `orderedIds`. An id match always wins over an index read. */
 function firstAllowedId(text: string, allowed: Set<string>, orderedIds: string[] = []): string | null {
   if (!text?.trim()) return null
 

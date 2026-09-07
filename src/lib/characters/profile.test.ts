@@ -120,6 +120,37 @@ describe('buildCharacterProfileNote', () => {
     expect(buildCharacterProfileNote(character({ voiceFingerprint: {} }))).toBeUndefined()
   })
 
+  it('folds a "when_then" behavioral rule into a "When X: Y." line', () => {
+    const note = buildCharacterProfileNote(
+      character({ behavioralRules: [{ id: 'r1', kind: 'when_then', when: 'he brings up her sister', then: 'she deflects with a joke' }] }),
+    )
+    expect(note).toContain('Behavioral rules, authored for this character and followed exactly as written:')
+    expect(note).toContain('When he brings up her sister: she deflects with a joke.')
+  })
+
+  it('folds a "never" behavioral rule into a "Never: Y." line, ignoring any `when`', () => {
+    const note = buildCharacterProfileNote(character({ behavioralRules: [{ id: 'r1', kind: 'never', when: 'ignored', then: 'initiate a kiss first' }] }))
+    expect(note).toContain('Never: initiate a kiss first.')
+    expect(note).not.toContain('ignored')
+  })
+
+  it('falls back to "it comes up" when a when_then rule has no when text authored', () => {
+    const note = buildCharacterProfileNote(character({ behavioralRules: [{ id: 'r1', kind: 'when_then', then: 'she goes quiet' }] }))
+    expect(note).toContain('When it comes up: she goes quiet.')
+  })
+
+  it('drops rules with blank `then` text and returns undefined if none remain', () => {
+    const note = buildCharacterProfileNote(character({ behavioralRules: [{ id: 'r1', kind: 'never', then: '   ' }] }))
+    expect(note).toBeUndefined()
+  })
+
+  it('caps behavioral rules to the first 10', () => {
+    const behavioralRules = Array.from({ length: 15 }, (_, i) => ({ id: String(i), kind: 'never' as const, then: `rule ${i}` }))
+    const note = buildCharacterProfileNote(character({ behavioralRules }))
+    expect(note).toContain('rule 9')
+    expect(note).not.toContain('rule 10')
+  })
+
   it('still returns a note when only the voice fingerprint is set, with no life-context fields at all', () => {
     const note = buildCharacterProfileNote(character({ voiceFingerprint: { dialectNotes: 'blunt, one-word answers' } }))
     expect(note).toBe(

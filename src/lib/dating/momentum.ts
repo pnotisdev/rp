@@ -1,25 +1,21 @@
 import type { RelationshipDimension } from '@/lib/types'
 import type { CharacterMood, CharacterNeed } from '@/lib/prompt/mindGuidance'
 
-/**
- * Relationship *momentum* — the derivative of warmth, not its level. The state model
- * (`RelationshipTrack`) is good at "where is this relationship"; it can't say "how fast is it
- * moving right now", which is what actually governs pacing: a warmth-90 couple in a quiet stretch
- * and a warmth-90 couple mid-whirlwind should not be written the same.
- *
- * Stored as one decayed running number on the track (`Chat.momentum` for the primary). Each turn:
- * `momentum = momentum * DECAY + (this turn's warmth movement)`. The decay makes it forget a burst
- * over ~4-5 quiet turns on its own, so nothing has to actively wind it back down.
- */
+// Relationship *momentum*: the derivative of warmth, not its level — a warmth-90 couple in a quiet
+// stretch vs. mid-whirlwind shouldn't read the same. Stored as one decayed running number per turn:
+// `momentum = momentum * DECAY + (this turn's warmth movement)`, so a burst fades on its own over
+// ~4-5 quiet turns. Also covers the initiative-balance axis (who's doing the reaching) and the
+// mood-aware slow-burn pacing note.
+
 export const MOMENTUM_DECAY = 0.65
 
 /** Kept in a sane band — a runaway value would just make every clause say "moving fast" forever. */
 const MOMENTUM_CLAMP = 8
 
-/** The dimensions that feed `computeWarmth` (see `stage.ts`) — momentum tracks movement in the same set, so it lines up with the warmth the rest of the app reasons about. `tension` and `curiosity` deliberately don't count. */
+/** The dimensions that feed `computeWarmth` (`stage.ts`) — `tension`/`curiosity` deliberately don't count. */
 const WARMTH_DELTA_KEYS: (RelationshipDimension | 'affection')[] = ['affection', 'trust', 'chemistry', 'comfort', 'respect']
 
-/** This turn's warmth movement — the mean of the warmth-relevant deltas, matching how `computeWarmth` averages the levels. */
+/** This turn's warmth movement — the mean of the warmth-relevant deltas. */
 export function warmthDeltaOf(deltas: Partial<Record<RelationshipDimension | 'affection', number>>): number {
   const sum = WARMTH_DELTA_KEYS.reduce((total, k) => total + (deltas[k] ?? 0), 0)
   return sum / WARMTH_DELTA_KEYS.length
@@ -41,14 +37,7 @@ export function describeMomentum(momentum: number | undefined): string | undefin
   return undefined
 }
 
-/**
- * The pacing clause folded into `buildRelationshipDescription` — the "how fast, and is that a
- * standing invitation" read the raw warmth/stage lines can't give. Real names, no `{{macros}}`
- * (`styleGuidance` / relationshipDescription strings are macro-substituted by `buildPrompt`, but
- * this file is also reused headlessly by `outreach.ts`, and keeping it name-literal matches
- * `mindGuidance.ts`). Returns `undefined` when there's nothing worth saying (a settled early-stage
- * relationship, no momentum either way).
- */
+/** Pacing clause folded into `buildRelationshipDescription`. Real names, no macros. `undefined` when there's nothing worth saying. */
 export function relationshipPacingNote(charName: string, warmth: number, momentum: number, tension: number): string | undefined {
   if (tension >= 55 && warmth >= 45) {
     return `There's been real friction lately, running right alongside the closeness — both are true at once. Don't smooth it over, and don't let accumulated warmth make ${charName} more romantically receptive than the current strain would allow.`
@@ -71,33 +60,10 @@ export function relationshipPacingNote(charName: string, warmth: number, momentu
   return undefined
 }
 
-/**
- * Asymmetric pacing — momentum above answers "how fast is warmth moving", not "whose doing the
- * moving". Two warmth-90 couples that got there the same way can still differ: one where the player
- * carries every overture and the character barely reciprocates reads very differently from one
- * where the character is visibly the one closing distance. This is that second axis: a decayed
- * running balance of who has actually been initiating lately, same "decayed running sum" shape as
- * `nextMomentum` (and the same decay constant — nothing about *how* it forgets a burst needs to
- * differ from momentum's own tuning), just fed a different per-turn signal.
- *
- * Positive = the player has been the one reaching, without much coming back the other way (the
- * character reads as reserved lately). Negative = the character has been initiating warmth on their
- * own, unprompted by a tagged player overture (the character reads as the one leaning in).
- */
+/** Who's actually been initiating lately, not just how fast warmth is moving. Positive = player carrying it (character reads reserved); negative = character carrying it. Same decayed-running-sum shape as momentum. */
 export const INITIATIVE_CLAMP = 6
 
-/**
- * This turn's contribution to the balance. `hadPlayerIntent` is whether the player tagged their line
- * with one of the romantic/emotional intent chips (`dating/intent.ts`) — a deliberate overture, not
- * just an ordinary line. `warmthDelta` is this same turn's `warmthDeltaOf` reading.
- *
- * - A tagged overture that didn't move warmth: the player reached, the character didn't meet it —
- *   +1 (player carrying it).
- * - A tagged overture that did move warmth: reciprocated, balanced — 0.
- * - No tagged overture, but warmth still moved up: the character initiated on their own — -1
- *   (character carrying it).
- * - No tagged overture and no warmth movement: nothing happened either way — 0.
- */
+/** This turn's contribution to the balance. `hadPlayerIntent` = the player tagged a romantic/emotional intent chip (a deliberate overture). */
 export function initiativeContribution(hadPlayerIntent: boolean, warmthDelta: number): number {
   if (hadPlayerIntent) return warmthDelta <= 0 ? 1 : 0
   return warmthDelta > 0 ? -1 : 0
@@ -109,14 +75,6 @@ export function nextInitiativeBalance(prev: number | undefined, contribution: nu
   return Math.max(-INITIATIVE_CLAMP, Math.min(INITIATIVE_CLAMP, Math.round(raw * 100) / 100))
 }
 
-/**
- * A `styleGuidance`-ready nudge once the imbalance is real and sustained, not a single lopsided
- * turn — mirrors the two example phrasings from the brief almost verbatim. Uses `{{user}}`/`{{char}}`
- * macros deliberately: unlike most of this module (folded into real-name `styleGuidance` strings by
- * callers), this is meant to be read into `buildRelationshipDescription`'s output, which
- * `buildPrompt` macro-substitutes (see that file's own doc comment). Returns `undefined` below the
- * threshold, which is most of the time — a small, ordinary lopsidedness isn't worth a callout.
- */
 /** A one-word-ish player-facing label for `RelationshipPanel`, same spirit as `describeMomentum`. */
 export function describeInitiativeBalance(balance: number | undefined): string | undefined {
   const b = balance ?? 0
@@ -125,6 +83,7 @@ export function describeInitiativeBalance(balance: number | undefined): string |
   return undefined
 }
 
+/** `{{user}}`/`{{char}}` macro version, read into `buildRelationshipDescription`'s macro-substituted output. `undefined` below the threshold — most of the time. */
 export function asymmetricPacingNote(charName: string, balance: number): string | undefined {
   if (balance >= 2) {
     return `${charName} has been more reserved than {{user}} has lately — {{user}}'s the one who keeps reaching first, without much coming back the other way. That's not nothing; it can read as real hesitation worth letting show, not just quiet shyness to smooth over.`
@@ -135,18 +94,10 @@ export function asymmetricPacingNote(charName: string, balance: number): string 
   return undefined
 }
 
-/**
- * Item 2(a): the `slowBurnPacing` toggle (`useChatSession.ts`) used to fold in one fixed instruction
- * for every character regardless of who they actually are right now — a `content`, easygoing
- * character and one who's actively `guarded` or holding back on a `distance`-kind plan got the exact
- * same wording. This reads the character's own current mood/plan/unmet-need (all already tracked,
- * see `prompt/mindGuidance.ts`) and scales the actual severity of the instruction: a character with a
- * live, in-character reason to resist gets told to resist *harder* — a flat no or real deflection,
- * not just a token hesitation that quickly gives way — while an otherwise-settled character keeps the
- * gentler baseline wording the toggle always had.
- */
+// Moods that give a character a live, in-character reason to resist harder than the baseline slow-burn wording.
 const HIGH_RESISTANCE_MOODS: readonly CharacterMood[] = ['guarded', 'anxious', 'hurt', 'embarrassed', 'tense']
 
+/** Slow-burn pacing note, scaled to the character's current mood/plan/unmet-need rather than one fixed instruction for everyone. */
 export function slowBurnPacingNote(
   charName: string,
   mood: CharacterMood | undefined,

@@ -1,27 +1,16 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-// @ts-expect-error — no published types; see the README this package ships (checked directly,
-// not from secondhand docs): `new SentencePieceProcessor()`, `await load(path)`, `encodeIds(text)`.
+// @ts-expect-error — no published types for @agnai/sentencepiece-js.
 import { SentencePieceProcessor } from '@agnai/sentencepiece-js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 /**
- * NovelAI's text-generation `input` field isn't plain text — it's the prompt tokenized with
- * NovelAI's own tokenizer, then base64-packed as raw token-id bytes (see `novelaiTokens.ts`).
- * Clio and Kayra both use "NerdStash", a SentencePiece model NovelAI publishes themselves
- * (huggingface.co/NovelAI/nerdstash-tokenizer-v1 for Clio, -v2 for Kayra) — the exact two `.model`
- * files bundled in `server/tokenizers/`. This runs server-side (mirroring where SillyTavern does
- * the equivalent work) rather than in the browser bundle, both because loading a ~1MB WASM
- * tokenizer + two ~1MB model files into the Vite client bundle for a niche, opt-in backend is
- * wasteful, and because `@agnai/sentencepiece-js` (Emscripten/WASM, but built assuming Node's
- * `fs` for loading `.model` files) is the same npm package SillyTavern itself uses for this.
- *
- * Erato (NovelAI's newest model) deliberately isn't supported here — it uses a different,
- * Llama-3-family tokenizer, a separate code path (`@agnai/web-tokenizers`, JSON-based BPE, not
- * SentencePiece) with no confirmed source for its exact tokenizer file found while building this.
- * `tokenizerForModel` returns `null` for it, and the caller (server/app.ts's `/api/novelai/tokenize`)
- * turns that into a clear 400 rather than silently mis-tokenizing.
+ * Tokenizes text server-side for NovelAI's backend: its `input` field wants the prompt pre-tokenized
+ * and base64-packed (see `novelaiTokens.ts`). Clio and Kayra both use "NerdStash", a SentencePiece
+ * model bundled as `.model` files in `server/tokenizers/`. Runs server-side rather than in the
+ * browser bundle since the WASM tokenizer + model files are large for a niche, opt-in backend.
+ * Erato isn't supported (different tokenizer family) — `tokenizerForModel` returns `null` for it.
  */
 export type NovelAITokenizerId = 'nerdstash_v1' | 'nerdstash_v2'
 

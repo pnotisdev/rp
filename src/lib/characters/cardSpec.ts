@@ -7,6 +7,8 @@ import type { ReplyLength } from '@/lib/characters/voice'
 import type { ScheduleEntry, WeatherPreferences } from '@/lib/world/calendar'
 import { DEFAULT_EXPRESSION_IDS, type CustomExpression } from '@/lib/vn/expressions'
 import type { Outfit } from '@/lib/vn/outfits'
+import type { IntimacyPhase } from '@/lib/dating/intimacyScene'
+import type { RelationshipStage } from '@/lib/types'
 
 export type WorldInfoActivationMode = 'always' | 'keyword' | 'manual'
 
@@ -42,7 +44,18 @@ export interface GalleryEntry {
   requiredFlags?: string[]
   /** A once-per-relationship epilogue, unlocked at the top affection stage rather than via `unlockAffection`. */
   isEnding?: boolean
+  /** Item 10: auto-surfaces this CG full-bleed on the VN stage the moment its condition is met — still gated by `unlockAffection`/`requiredFlags` above, which just say it's *allowed* to appear. Unset means never auto-shown; still browsable once unlocked. Ignored on an `isEnding` entry — those stay a browsable epilogue, not something the mid-scene director swaps in unprompted. */
+  autoTrigger?: CgTrigger
+  /** Item 11: extra alternate art for this same CG — `cgTrigger.ts`'s caller picks one of `[imageUrl, ...variants]` per showing, for visual variety on a beat that recurs (e.g. an `intimacyPhase` trigger that fires again in a later scene). */
+  variants?: string[]
 }
+
+/** One condition `cgTrigger.ts`'s `triggeredCg` checks a `GalleryEntry.autoTrigger` against. */
+export type CgTrigger =
+  | { kind: 'intimacyPhase'; phase: IntimacyPhase }
+  | { kind: 'catalogAction'; optionId: string }
+  | { kind: 'sceneFlag'; flag: string }
+  | { kind: 'relationshipStage'; stage: RelationshipStage }
 
 export interface LorebookEntry {
   id?: number
@@ -123,6 +136,8 @@ export interface Character {
   sprites?: Record<string, string>
   /** Minimum affection required before a sprite (keyed the same way as `sprites`) can be shown. */
   spriteUnlocks?: Record<string, number>
+  /** Item 11: extra alternate art per sprite key, keyed the same way as `sprites` — `resolveExpressionSprite` picks one of `[sprites[key], ...spriteVariants[key]]` per showing, for visual variety on a slot that's used a lot. */
+  spriteVariants?: Record<string, string[]>
   /** Wardrobe states beyond the base look (vn/outfits.ts); the base outfit is implicit. */
   outfits?: Outfit[]
   /** Expression slots beyond the built-in default set (vn/expressions.ts). */
@@ -164,6 +179,8 @@ export interface Character {
   boundaries?: string[]
   /** Who this character knows and how; reaches the prompt as a compact roster line. */
   socialConnections?: SocialConnection[]
+  /** Structured `when X → Y` / `never: Z` behavioral contracts, e.g. for desire, hesitation, aftercare — more precise than free-text personality. */
+  behavioralRules?: BehavioralRule[]
   /** Job title/role, e.g. "barista" or "second-year architecture student". */
   occupation?: string
   /** Where they work/study, distinct from `occupation` (the role). */
@@ -189,6 +206,18 @@ export interface SocialConnection {
   /** How they know each other, e.g. "childhood friend", "older sister", "rival from the debate club". */
   relation: string
   notes?: string
+}
+
+/** One structured behavioral contract. `'when_then'` is conditional ("when X, she Y"); `'never'` is an unconditional negative ("never Y") — `when` is unused for it. */
+export type BehavioralRuleKind = 'when_then' | 'never'
+
+export interface BehavioralRule {
+  id: string
+  kind: BehavioralRuleKind
+  /** The trigger, in the author's own words — only meaningful for `'when_then'`. */
+  when?: string
+  /** What happens (`'when_then'`) or what never does (`'never'`). */
+  then: string
 }
 
 export function blankCharacterData(name = 'New Character'): CharacterCardData {

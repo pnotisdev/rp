@@ -18,8 +18,7 @@ import { parseExpectationUpdates, type ExpectationUpdate } from '@/lib/dating/ex
 // date/hangout outcomes, and the commitment/intimacy-milestone asks. Each exported function
 // assembles a prompt, calls the model with a timeout, and parses+validates the JSON reply.
 
-// max_context_length is omitted — callers fetch the server's actual context via
-// `client.getEffectiveMaxContext()` instead of hardcoding a guess.
+// max_context_length omitted — callers fetch the server's actual context via `client.getEffectiveMaxContext()`.
 const REL_PARAMS = {
   max_length: 220,
   temperature: 0.35,
@@ -188,51 +187,21 @@ export interface RelationshipMoment {
   newFacts: RememberedFact[]
   /** Indices into `params.unresolvedFacts` this exchange clearly closed (an apology landed, a promise was kept). `[]` when none were passed or none closed. */
   resolvedFactIndices: number[]
-  /**
-   * Section 9(c)'s remaining (a) item: indices into the `pendingTasks` array passed in, for tasks
-   * this exchange clearly and unambiguously completed — same conservative contract as
-   * `detectCompletedTasks` in `objectiveAssist.ts`, folded into this call instead of firing as its
-   * own separate request when both relationship-tracking and task-detection are due the same turn.
-   * Always `[]` when `pendingTasks` wasn't passed (nothing was asked, so nothing to report).
-   */
+  /** Indices into `pendingTasks` this exchange clearly completed. `[]` when `pendingTasks` wasn't passed. */
   completedTaskIndices: number[]
-  /**
-   * The post-intimacy window's verdict (`dating/aftercare.ts`), only ever present on the turn the
-   * caller actually asked for one by passing `aftercareTurns`. Undefined otherwise — including
-   * when it was asked for and the model returned nothing usable, which the caller treats as
-   * `'awkward'` rather than as a reason to skip closing the window.
-   */
+  /** Post-intimacy window verdict (`dating/aftercare.ts`), only present when the caller passed `aftercareTurns`. */
   aftercareVerdict?: AftercareVerdict
-  /** The "Character Mind" scoped slice — see `prompt/mindGuidance.ts`'s doc comment. Undefined means no clear shift this turn, not "neutral"; all three are sticky rather than reset every turn nothing moved them. */
+  /** "Character Mind" scoped slice — see `prompt/mindGuidance.ts`. Undefined means no clear shift this turn, not "neutral". */
   mood?: CharacterMood
   currentNeed?: CharacterNeed
   characterIntent?: string
-  /**
-   * Changes to the character's persistent agency layer (`dating/plans.ts`) — form a new plan,
-   * annotate one, or close one out. `[]` on most turns. `note`/`resolve` indices point into the
-   * `activePlans` list passed in. The caller folds these into `RelationshipTrack.plans` via
-   * `applyPlanUpdates`.
-   */
+  /** Changes to the character's persistent agency layer (`dating/plans.ts`). `[]` on most turns. `note`/`resolve` indices point into `activePlans`. */
   planUpdates: PlanUpdate[]
-  /**
-   * Item 1's intimacy-scene phase read (`dating/intimacyScene.ts`) — only ever present on a turn
-   * the caller actually asked for one by passing `currentIntimacyPhase` (a scene is currently
-   * active), same conditional contract `aftercareVerdict` already has. `'resolved'` means the judge
-   * read the scene as having wound down/concluded; `undefined` (with a scene active) is read by the
-   * caller as "no change" and keeps the current phase, mirroring mood/need's own contract.
-   */
+  /** Intimacy-scene phase read (`dating/intimacyScene.ts`), only present when the caller passed `currentIntimacyPhase`. `'resolved'` = wound down; `undefined` (scene active) = no change. */
   intimacyPhase?: IntimacyPhase | 'resolved'
-  /**
-   * Changes to the character's standing impressions of {{user}} (`dating/beliefs.ts`) — form,
-   * revise, or drop one. `[]` on most turns. `revise`/`drop` indices point into the
-   * `activeBeliefs` list passed in.
-   */
+  /** Changes to standing impressions of {{user}} (`dating/beliefs.ts`). `[]` on most turns. `revise`/`drop` indices point into `activeBeliefs`. */
   beliefUpdates: BeliefUpdate[]
-  /**
-   * Changes to the character's standing expectations of {{user}} (`dating/expectations.ts`) —
-   * form, annotate, or resolve one (naming whether it was met or violated). `[]` on most turns.
-   * `note`/`resolve` indices point into the `activeExpectations` list passed in.
-   */
+  /** Changes to standing expectations of {{user}} (`dating/expectations.ts`). `[]` on most turns. `note`/`resolve` indices point into `activeExpectations`. */
   expectationUpdates: ExpectationUpdate[]
   /** See `prompt/mindGuidance.ts`'s `fearGuidance` — sticky like `mood`/`currentNeed`/`characterIntent`; undefined means no change this turn. */
   currentFear?: string
@@ -241,17 +210,11 @@ export interface RelationshipMoment {
 }
 
 /**
- * Small conservative classifier that estimates whether the latest exchange moved relationship
- * tone (across seven independent dimensions, see `RelationshipDeltaKey`), newly established any
- * romance-route flags, AND surfaced any durable fact worth remembering — combined into one call
- * on purpose. This used to be two sequential requests (`assessRelationshipDeltas` +
- * `detectSceneFlags`), then three once fact-extraction was folded in too; on a local single-GPU
- * KoboldCpp server, every background classifier call after a reply is serialized, so this fires
- * on literally every single turn (unlike the conditional gallery-unlock check below) and keeping
- * it to one call is a real responsiveness win, not just tidiness. Most dimensions, all flags, and
- * facts should stay unchanged on most turns — only what this specific exchange clearly touched
- * should move. `pendingTasks`, when passed, folds `objectiveAssist.ts`'s `detectCompletedTasks`
- * in as a fourth thing checked in the same call — section 9(c)'s last open (a) item, same idea.
+ * Conservative classifier estimating whether the latest exchange moved relationship tone (seven
+ * dimensions), established any romance-route flags, and surfaced any durable fact — combined into
+ * one call, since every background classifier call is serialized behind the model on a local
+ * server and this one fires every turn. Most dimensions/flags/facts stay unchanged on most turns.
+ * `pendingTasks`, when passed, folds `objectiveAssist.ts`'s task-completion check in too.
  */
 export async function assessRelationshipMoment(
   client: ChatBackend,
@@ -263,62 +226,35 @@ export async function assessRelationshipMoment(
     current: RelationshipDeltas
     /** Facts already known, so the model doesn't re-extract the same thing every turn. */
     knownFacts?: string[]
-    /** Currently-unresolved facts, in the caller's index order — the judge can mark one closed via `resolvedFactIndices`. Omit when there are none. */
+    /** Currently-unresolved facts, in index order — the judge can mark one closed via `resolvedFactIndices`. */
     unresolvedFacts?: string[]
-    /**
-     * The character's persistent plans (`dating/plans.ts`), pre-formatted one per line (kind + note
-     * baked in by `planLinesForJudge`), in the caller's index order — the judge annotates or closes
-     * one by that index, and can always add new ones. Omit when there are none.
-     */
+    /** Persistent plans (`dating/plans.ts`), pre-formatted one per line, in index order — the judge annotates/closes one by index, and can always add new ones. */
     activePlans?: string[]
-    /** World-authored flags beyond the 4 built-in defaults (see `CustomSceneFlag`) — glossaried and validated exactly like the built-ins. */
+    /** World-authored flags beyond the 4 built-in defaults — glossaried and validated like the built-ins. */
     customFlags?: CustomSceneFlag[]
-    /** 10b: how the player tagged their most recent line (`MessageIntent`) — interpretation context, not a direct stat move. */
+    /** How the player tagged their most recent line — interpretation context, not a direct stat move. */
     intent?: string
-    /** Pending objective task descriptions, in the caller's index order — only passed when task-detection is also due this turn. Omitted/empty means "don't ask", not "nothing completed". */
+    /** Pending objective task descriptions, in index order — only passed when task-detection is also due this turn. */
     pendingTasks?: string[]
-    /**
-     * Transcript of the post-intimacy window, passed only on the turn it closes — the same
-     * ride-along trick `pendingTasks` uses, so judging it costs no extra model call. Omitted means
-     * "don't ask", which is every ordinary turn.
-     */
+    /** Transcript of the post-intimacy window, passed only on the turn it closes — rides along at no extra model cost. */
     aftercareTurns?: ChatMessage[]
-    /** The character's mood/need/intention going into this exchange (before it), so the classifier can judge whether any genuinely shifted rather than guessing blind. See `prompt/mindGuidance.ts`. */
+    /** Mood/need/intention going into this exchange, so the classifier judges whether anything genuinely shifted. See `prompt/mindGuidance.ts`. */
     currentMood?: CharacterMood
     currentNeed?: CharacterNeed
     currentIntent?: string
-    /**
-     * Item 1's intimacy scene state machine (`dating/intimacyScene.ts`) — passed only while a scene
-     * is currently active, the same ride-along trick `aftercareTurns`/`pendingTasks` already use so
-     * this costs no extra model call. Asks the judge to read whether this turn's reply is still
-     * building, has reached its peak, or has wound down/concluded.
-     */
+    /** Intimacy scene state (`dating/intimacyScene.ts`), passed only while a scene is active — asks the judge to read building/peak/resolved. */
     currentIntimacyPhase?: IntimacyPhase
-    /** The character's standing impressions of {{user}} (`dating/beliefs.ts`), pre-formatted one per line, in the caller's index order — the judge revises or drops one by that index, and can always add new ones. Omit when there are none. */
+    /** Standing impressions of {{user}} (`dating/beliefs.ts`), pre-formatted one per line, in index order — the judge revises/drops one by index, and can add new ones. */
     activeBeliefs?: string[]
-    /** The character's standing expectations of {{user}} (`dating/expectations.ts`), pre-formatted one per line (note baked in), in the caller's index order — the judge annotates or resolves one by that index. Omit when there are none. */
+    /** Standing expectations of {{user}} (`dating/expectations.ts`), pre-formatted one per line, in index order — the judge annotates/resolves one by index. */
     activeExpectations?: string[]
-    /** The character's current private fear going into this exchange, if one's been read — see `prompt/mindGuidance.ts`'s `fearGuidance`. */
+    /** Current private fear, if read — see `prompt/mindGuidance.ts`'s `fearGuidance`. */
     currentFear?: string
-    /** The character's current underlying desire going into this exchange, if one's been read — see `prompt/mindGuidance.ts`'s `desireGuidance`. */
+    /** Current underlying desire, if read — see `prompt/mindGuidance.ts`'s `desireGuidance`. */
     currentDesire?: string
-    /**
-     * Item 2(b)'s "earned vs. rushed" read (`dating/aftercare.ts`'s `aftercarePaceContext`), passed
-     * only alongside `aftercareTurns` (same ride-along contract as every other conditional field
-     * here) — extra context for the verdict, never a replacement for the judge's own read of the
-     * actual turns since. Omitted when there's no snapshot to read (a window opened before this
-     * signal existed).
-     */
+    /** "Earned vs. rushed" read (`aftercarePaceContext`), passed only alongside `aftercareTurns` — extra context, never a replacement for the judge's own read. */
     aftercarePaceContext?: AftercarePace
-    /**
-     * Item 6: names of anyone else actually present and speaking in this scene right now (a group
-     * chat's other participants), so the jealousy `SceneFlag` classifier can weigh a rival's live
-     * presence differently from the same tension merely being talked about — see
-     * `chat/participantArchetype.ts`'s `rivalJealousyIntensifier`, which already deepens the *tone*
-     * once the flag is set; this is the missing other half, giving the classifier itself a reason to
-     * set it more readily in the first place. Omit for an ordinary single-character chat, where
-     * there's never anyone else to be present.
-     */
+    /** Names of anyone else present and speaking in this scene, so the jealousy flag classifier can weigh a rival's live presence. Omit for an ordinary single-character chat. */
     presentParticipants?: string[]
   },
 ): Promise<RelationshipMoment> {
@@ -434,9 +370,7 @@ export async function assessRelationshipMoment(
           ),
         ]
       : []
-  // Only trusted when it was actually asked for: a model that volunteers the field unprompted is
-  // guessing about a window that isn't open, and honouring that would apply a real stat swing for
-  // an event that never happened.
+  // Only trusted when actually asked for — a volunteered value is guessing about a window that isn't open.
   const aftercareVerdict = hasAftercare && isAftercareVerdict(obj.aftercareVerdict) ? obj.aftercareVerdict : undefined
   const mood = MOOD_VOCAB.includes(obj.mood as CharacterMood) ? (obj.mood as CharacterMood) : undefined
   const currentNeed = NEED_VOCAB.includes(obj.currentNeed as CharacterNeed) ? (obj.currentNeed as CharacterNeed) : undefined
@@ -446,21 +380,18 @@ export async function assessRelationshipMoment(
     typeof obj.currentFear === 'string' && obj.currentFear.trim() ? obj.currentFear.trim().slice(0, 160) : undefined
   const currentDesire =
     typeof obj.currentDesire === 'string' && obj.currentDesire.trim() ? obj.currentDesire.trim().slice(0, 160) : undefined
-  // `note`/`resolve` updates that point past the plans actually passed in are dropped — a stale
-  // index from a model that miscounted must not silently rewrite or delete the wrong plan.
+  // Stale indices past what was actually passed in are dropped, so a model miscount can't rewrite/delete the wrong plan.
   const planCount = params.activePlans?.length ?? 0
   const planUpdates = parsePlanUpdates(obj.planUpdates).filter(
     (u) => u.action === 'add' || u.index < planCount,
   )
-  // Same stale-index guard as `planUpdates` above, for each of the two new lifecycles.
   const beliefCount = params.activeBeliefs?.length ?? 0
   const beliefUpdates = parseBeliefUpdates(obj.beliefUpdates).filter((u) => u.action === 'add' || u.index < beliefCount)
   const expectationCount = params.activeExpectations?.length ?? 0
   const expectationUpdates = parseExpectationUpdates(obj.expectationUpdates).filter(
     (u) => u.action === 'add' || u.index < expectationCount,
   )
-  // Only trusted when actually asked for, same guard `aftercareVerdict` above already applies — a
-  // model volunteering this unprompted is guessing about a scene that isn't tracked as active.
+  // Same guard as `aftercareVerdict` above.
   const intimacyPhase =
     hasIntimacyScene && (obj.intimacyPhase === 'building' || obj.intimacyPhase === 'peak' || obj.intimacyPhase === 'resolved')
       ? (obj.intimacyPhase as IntimacyPhase | 'resolved')
@@ -485,9 +416,7 @@ export async function assessRelationshipMoment(
   }
 }
 
-/**
- * Checks whether any locked gallery entries seem to have been earned by the latest moment.
- */
+/** Checks whether any locked gallery entries seem to have been earned by the latest moment. */
 export async function detectGalleryUnlocks(
   client: ChatBackend,
   params: {
@@ -532,13 +461,9 @@ export interface DateOutcome {
 }
 
 /**
- * Turns an entire date's transcript into one outcome — deltas, new route flags, a player-facing
- * recap, and any durable facts — instead of the per-turn drip-feed `assessRelationshipMoment`
- * already does for ordinary chat. Deliberately a separate pass (10b's "save-safe end-of-date
- * scoring"): a date in progress suppresses the normal per-turn tracking (see
- * `useChatSession.ts`'s `runGeneration`) so a flat, awkward, or hurtful date doesn't quietly drift
- * the relationship forward turn by turn — only this end-of-scene judgment counts, and it can
- * legitimately score near-zero across the board for a date that went nowhere.
+ * Turns an entire date's transcript into one outcome — deltas, new flags, a player-facing recap,
+ * durable facts — instead of the per-turn drip-feed `assessRelationshipMoment` does for ordinary
+ * chat. A live date suppresses normal per-turn tracking, so only this end-of-scene judgment counts.
  */
 export async function assessDateOutcome(
   client: ChatBackend,
@@ -550,21 +475,20 @@ export async function assessDateOutcome(
     current: RelationshipDeltas
     knownFacts?: string[]
     customFlags?: CustomSceneFlag[]
-    /** 10b: the `MessageIntent`s the player deliberately played across the date, in order. */
+    /** The `MessageIntent`s the player deliberately played across the date, in order. */
     intents?: string[]
-    /** 10b: what the character secretly wanted from this date (`DateEventCard.hiddenAgenda`) — never shown to the player, only used to judge whether it landed. Never set for a hangout. */
+    /** What the character secretly wanted from this date (`DateEventCard.hiddenAgenda`) — never shown to the player. Never set for a hangout. */
     hiddenAgenda?: string
-    /** 10b: set when the date ended because the rapport judge flagged a walkout mid-scene, not the player choosing to end it — the outcome should read and score as an abrupt, negative exit. Hangouts never walk out, so this is only ever set for a date. */
+    /** Set when the date ended via a rapport-judge-flagged walkout, not the player choosing to end it — scored as an abrupt, negative exit. Only ever set for a date. */
     walkedOut?: boolean
-    /** 10b: `'hangout'` is the lower-stakes sibling of `'date'` (see `DateEventCard.kind`) — same judge pass, gentler framing: no verdict-y language, modest deltas, comfort/trust-led growth rather than a graded outcome. Defaults to `'date'`. */
+    /** `'hangout'` is the lower-stakes sibling of `'date'` — same judge pass, gentler framing, modest deltas. Defaults to `'date'`. */
     sceneKind?: 'date' | 'hangout'
   },
 ): Promise<DateOutcome> {
   const isHangout = params.sceneKind === 'hangout'
   const sceneNoun = isHangout ? 'hangout' : 'date'
   const excludedFlags = excludedFlagsFor(params.sceneKind)
-  // Cap at the last 24 turns — plenty for a single scene, and keeps the prompt bounded even
-  // if the player let this run long. Empty messages (still-streaming placeholders) are dropped.
+  // Cap at the last 24 turns to keep the prompt bounded; empty (still-streaming) messages dropped.
   const turns = params.transcript.filter((m) => m.text.trim()).slice(-24)
   const transcriptText = turns.map((m) => `${m.role === 'user' ? params.userName : params.charName}: ${m.text}`).join('\n')
 
@@ -593,10 +517,6 @@ export async function assessDateOutcome(
       ? '"recap" must read as the abrupt, in-world exit it was — a line or two on what made {{char}} leave, not a neutral summary.'
       : `"recap" is a short 1-3 sentence in-world summary of how the ${sceneNoun} felt from {{char}}'s side, written for the player to read afterward, not a mechanical report.`,
     '"newFacts" is for concrete, durable things worth recalling much later. Most scenes add one or none. Each is an object {"text": one short sentence, "importance": 0-1, "valence": -1 to 1 (how it felt to {{char}}), "unresolved": true only for an open thread the scene left hanging}.',
-    // The example's `newFlags` has to stay inside the same set the menu above offers: a hangout
-    // that withholds `first_date` while still *demonstrating* it would be handing the classifier
-    // the flag back in the most suggestive line of the whole prompt. Hangouts get modest deltas
-    // here too, matching the gentler framing they're judged under.
     isHangout
       ? 'Example: {"deltas":{"affection":1,"trust":2,"chemistry":0,"comfort":2,"respect":0,"curiosity":1,"tension":0},"newFlags":["promise"],"recap":"They talked about their old bakery for the first time, and made you swear to try their cinnamon rolls sometime.","newFacts":[{"text":"Used to run a small bakery before moving here","importance":0.6,"valence":0.3,"unresolved":false}]}'
       : 'Example: {"deltas":{"affection":3,"trust":2,"chemistry":2,"comfort":1,"respect":0,"curiosity":1,"tension":0},"newFlags":["first_date"],"recap":"They lit up talking about their old bakery and kept finding reasons to lean in closer.","newFacts":[{"text":"Used to run a small bakery before moving here","importance":0.6,"valence":0.3,"unresolved":false}]}',
@@ -618,8 +538,7 @@ export async function assessDateOutcome(
     const v = Number(deltasObj[key])
     deltas[key] = Number.isInteger(v) ? Math.max(-5, Math.min(5, v)) : 0
   }
-  // Re-checked here, not just omitted from the prompt above: a model that names `first_date`
-  // anyway (it is, after all, a flag it has seen in every date scene) must not be able to set it.
+  // Re-checked here, not just omitted from the prompt — a model naming `first_date` anyway must not be able to set it.
   const allowed = allowedFlagIds(params.customFlags, excludedFlags)
   const newFlags = Array.isArray(obj.newFlags)
     ? obj.newFlags.filter((f): f is SceneFlag => typeof f === 'string' && allowed.has(f))
@@ -639,32 +558,11 @@ export async function suggestDateEvent(
     worldDescription?: string
     availableBackgrounds: string[]
     affection: number
-    /**
-     * Where the two of them officially stand (10c's commitment ladder). Without it this call only
-     * ever saw `affection`, and an established couple kept getting handed casual "hangout" cards
-     * long after "ask to be dating" was accepted — affection alone can't distinguish "very fond of
-     * each other" from "actually together", which is exactly the distinction that decides whether
-     * a suggestion should read as a date or a get-together. Optional so an ordinary
-     * not-yet-official chat keeps the prompt it always had, unchanged.
-     */
+    /** Where the two of them officially stand — without it, an established couple kept getting handed casual "hangout" cards, since affection alone can't distinguish "fond" from "actually together". */
     commitmentStatus?: CommitmentStatus
-    /**
-     * Set only when this card is being drafted for one specific ladder-crossing occasion — a
-     * wedding for `married`, a moving-in day for `living_together` — right after `useChatSession.ts`'s
-     * `askForCommitment` sees that tier accepted, rather than an ordinary "Suggest event with AI"
-     * click. Overrides the generic `commitmentStatus`-aware framing below with a much more specific
-     * ask, and forces the returned card's `kind` to `'date'` regardless of what the model answers,
-     * so this milestone always surfaces as a real, live, played-out scene (`stage.ts`'s `isLiveScene`)
-     * instead of risking a `hangout`/`gift`/`milestone` card that never goes live at all.
-     */
+    /** Set only when drafting for one specific ladder-crossing occasion (a wedding, a moving-in day) right after `askForCommitment` sees that tier accepted. Forces the returned card's `kind` to `'date'` regardless of the model's answer, so the milestone always surfaces as a real live scene. */
     milestoneOccasion?: Extract<CommitmentStatus, 'married' | 'living_together'>
-    /**
-     * Item 4(a): the name of the most recent gift that genuinely landed (`dating/gifts.ts`'s
-     * `recentMeaningfulGiftName`), so a suggested date/hangout can plausibly build on or reference it
-     * (a shared restaurant after a "favorite novel" gift, say) instead of being gift-blind. Optional
-     * and additive — an ordinary call with no gift history on record keeps the exact prompt this
-     * always had.
-     */
+    /** Name of the most recent gift that genuinely landed (`dating/gifts.ts`), so a suggestion can plausibly build on it instead of being gift-blind. */
     recentGiftName?: string
   },
 ): Promise<DateEventCard | null> {
@@ -719,21 +617,13 @@ export async function suggestDateEvent(
     objectiveTitle,
     objectiveDescription: typeof obj.objectiveDescription === 'string' ? obj.objectiveDescription.trim() : '',
     backgroundId,
-    // A milestone occasion never trusts the model's own `kind` choice — this must always be a live
-    // scene (see the param's own doc comment), not left to chance.
+    // A milestone occasion never trusts the model's own `kind` choice — must always be a live scene.
     kind: params.milestoneOccasion ? 'date' : obj.kind === 'gift' || obj.kind === 'milestone' || obj.kind === 'hangout' ? obj.kind : 'date',
     affectionRequirement: params.affection,
   }
 }
 
-/**
- * 10b's "real stakes": drafts what a character secretly wants from a date, from their own card —
- * never shown to the player, only fed back to `assessDateOutcome` at the end. Freeform one-sentence
- * text rather than JSON (nothing to validate beyond length), so a model that ignores the format
- * still produces something usable after trimming. Returns null rather than a generic filler when
- * the card gives the judge nothing to work with or the call fails — a missing agenda is a fine
- * outcome, a made-up one that contradicts the card is not.
- */
+/** Drafts what a character secretly wants from a date, from their own card — never shown to the player, only fed back to `assessDateOutcome`. Returns null (not filler) if the card gives nothing to work with or the call fails. */
 export async function draftHiddenAgenda(
   client: ChatBackend,
   params: {
@@ -753,8 +643,6 @@ export async function draftHiddenAgenda(
     `Where things currently stand between them: ${params.warmthLabel}.`,
     `What does ${params.charName} secretly want, need, or fear from this specific scene, given who they are? One thing, concrete and specific to their character — not a generic "wants to have a good time".`,
     'Return ONLY that one sentence, in third person, nothing else. No quotes, no preamble.',
-    // Every other judge call in this file ends on a bare generation cue (`JSON:` etc.) — without
-    // one here, a local model reliably produced nothing rather than guessing where to start.
     'Sentence:',
   ]
     .filter(Boolean)
@@ -781,13 +669,7 @@ export interface CommitmentAskOutcome {
   deltas: RelationshipDeltas
 }
 
-/**
- * Judges a single Define-the-Relationship ask (10c) — reaching warmth just unlocks asking; it
- * never guarantees a yes. The character can accept, deflect (not right now, but nothing damaged —
- * asking again later stays possible), or the ask can backfire (genuinely bad timing or delivery, a
- * real relationship cost) — decided by the model reading the actual relationship texture, not a
- * coin flip or a hardcoded rule for what counts as "badly timed."
- */
+/** Judges a single Define-the-Relationship ask — reaching warmth only unlocks asking, never guarantees a yes. Accept, deflect (nothing damaged), or backfire (real cost), decided from the actual relationship texture. */
 export async function assessCommitmentAsk(
   client: ChatBackend,
   params: {
@@ -837,14 +719,7 @@ export async function assessCommitmentAsk(
   return { decision, reason, deltas }
 }
 
-/**
- * Judges a single "first time together" ask — the user's own direct follow-up to the intimacy
- * catalog ("we should be able to choose... lose virginity"), a deliberate initiation rather than
- * only ever something the relationship-moment classifier might notice after the fact. Same shape
- * and same three-outcome spirit as `assessCommitmentAsk` (reusing `CommitmentAskOutcome`) —
- * reaching the warmth/commitment floor (`stage.ts`'s `canInitiateFirstTime`) only unlocks *asking*,
- * never guarantees a yes.
- */
+/** Judges a single "first time together" ask — a deliberate initiation, not just something the relationship-moment classifier might notice after the fact. Same three-outcome shape as `assessCommitmentAsk`. */
 export async function assessIntimacyMilestone(
   client: ChatBackend,
   params: {

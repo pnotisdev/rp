@@ -1,30 +1,13 @@
 import type { CharacterPlan } from '@/lib/types'
 
-/**
- * The persistent *agency layer* — a character carries a few concrete intentions between turns, so
- * the model can write "given what she wants, what she's doing, and what just happened, what would
- * she naturally do" instead of only "what should she say back to that". It's the richer sibling of
- * `characterIntent` (mindGuidance.ts): one transient private want, reset every turn, becomes a
- * short list with a lifecycle.
- *
- * The lifecycle is driven entirely by the judge call that already runs every turn
- * (`assessRelationshipMoment`) — it forms plans, annotates them as things happen, and resolves or
- * drops them, returning a `planUpdates` array this module applies. No extra AI call. Read back into
- * the prompt as a `styleGuidance` line by `plansGuidance`.
- *
- * Deliberately small. No status enum, no scheduler, no NPC-to-NPC simulation (that stays deferred —
- * the lightweight stand-in is a `personal` plan pointed at a `socialConnection`). A plan that's done
- * or abandoned is removed, not kept; the durable "she did X" trace lives in the `ChatFact` log.
- */
+// Persistent agency layer: a character carries a few concrete intentions between turns (the richer,
+// multi-entry sibling of `mindGuidance.ts`'s transient `characterIntent`). Lifecycle driven entirely
+// by the per-turn judge call's `planUpdates` — no extra AI call. Read into the prompt via `plansGuidance`.
 
-/** Never more than this many live at once. The model can't juggle a backlog, and the point is a handful of real intentions. Adding past the cap drops the oldest. */
+/** Never more than this many live at once. Adding past the cap drops the oldest. */
 export const MAX_ACTIVE_PLANS = 3
 
-/**
- * A backstop against the judge never closing a plan out: one older than this (in turns) is dropped
- * on the next update pass regardless. Generous — a real "finish the mural before the showcase" plan
- * should survive a long stretch — but finite, so a forgotten plan doesn't haunt every prompt forever.
- */
+/** Backstop against the judge never closing a plan out — one older than this (in turns) is dropped regardless. */
 export const PLAN_STALE_TURNS = 60
 
 export type PlanKind = CharacterPlan['kind']
@@ -63,13 +46,7 @@ export function parsePlanUpdates(raw: unknown): PlanUpdate[] {
 
 const defaultIdGen = () => `plan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 
-/**
- * Applies a turn's `planUpdates` to the current list. A `note`/`resolve` `index` refers to the
- * position the plan had when it was handed to the judge (the order `planLinesForJudge` numbered),
- * so both are resolved against that original order before any `add` shifts things. Returns the next
- * list: stale plans aged out, notes merged, resolved ones removed, new ones appended, then trimmed
- * to `MAX_ACTIVE_PLANS` keeping the most recent.
- */
+/** Applies a turn's `planUpdates` to the current list — `note`/`resolve` indices refer to the original judge-numbered order, resolved before any `add` shifts things. Ages out stale plans, then trims to `MAX_ACTIVE_PLANS`. */
 export function applyPlanUpdates(
   plans: CharacterPlan[] | undefined,
   updates: PlanUpdate[],
@@ -121,11 +98,7 @@ function planLine(plan: CharacterPlan, userName: string): string {
   return `- (${tag}) ${plan.goal}${plan.note ? ` — ${plan.note}` : ''}`
 }
 
-/**
- * The `styleGuidance` line carrying a character's persistent plans into generation. Real names, no
- * `{{macros}}` — `styleGuidance` strings are never macro-substituted (see `mindGuidance.ts`).
- * Returns `''` when there are no active plans, which is the common case.
- */
+/** `styleGuidance` line carrying a character's persistent plans into generation. `''` when there are no active plans. */
 export function plansGuidance(charName: string, userName: string, plans: CharacterPlan[] | undefined): string {
   const active = plans ?? []
   if (active.length === 0) return ''

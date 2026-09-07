@@ -1,15 +1,8 @@
-/**
- * Local models frequently return "almost JSON" rather than strict JSON. In practice the
- * failures cluster into a few recurring shapes:
- *  - wrapped in markdown fences or preceded/followed by commentary
- *  - a trailing comma before a closing } or ]
- *  - literal newlines inside string values where \n was meant
- *  - a missing comma between two properties or two array elements
- *  - (the nastiest one) literal, unescaped "quote marks" typed inside dialogue text,
- *    which desyncs naive string-boundary tracking for everything after it
- * Each repair pass is applied in order of how much it assumes about the others having
- * already run; parseLenientJson tries progressively more aggressive combinations.
- */
+// Local models frequently return "almost JSON": markdown-fenced or with surrounding commentary,
+// trailing commas, literal newlines in strings, missing commas between properties, and unescaped
+// quote marks inside dialogue text that desync naive string-boundary tracking. Each repair pass
+// below assumes the earlier ones already ran; parseLenientJson tries progressively more aggressive
+// combinations.
 export function parseLenientJson(raw: string): unknown {
   const attempts: (() => unknown)[] = [
     () => JSON.parse(raw),
@@ -30,11 +23,7 @@ export function parseLenientJson(raw: string): unknown {
 
 function repairPipeline(json: string): string {
   const quotesNormalized = normalizeQuotes(json)
-  // Runs before repairUnescapedQuotes on purpose: that pass only recognizes `,:}]"` as valid
-  // characters after a string's closing quote, so a key genuinely followed by a bracket (the
-  // malformed shape this fixes) reads to it as "not really closed" and gets escaped into a
-  // never-ending string instead. Inserting the colon first turns it into an ordinary `"key": [`
-  // that repairUnescapedQuotes already handles correctly.
+  // Must run before repairUnescapedQuotes — that pass would otherwise read a key genuinely followed by a bracket as "not really closed" and escape it into a never-ending string.
   const colonsInserted = insertMissingColons(quotesNormalized)
   const quotesRepaired = repairUnescapedQuotes(colonsInserted)
   const newlinesEscaped = escapeRawNewlinesInStrings(quotesRepaired)
@@ -43,17 +32,7 @@ function repairPipeline(json: string): string {
   return closeUnbalanced(commasStripped)
 }
 
-/**
- * A model occasionally drops the colon between a key and its value entirely, e.g.
- * `"occupation" ["barista", ...]` instead of `"occupation": [...]` — seen from
- * `generateTraitOptions`'s object-of-arrays shape (none of the other draft prompts ask for
- * a plain object whose every value is itself an array, so this particular slip hadn't shown
- * up before). Safe without tracking object/array nesting: a string is never legitimately
- * followed directly by `[` or `{` — the "missing comma between two array string elements"
- * case `insertMissingCommas` handles never produces that shape either, since two adjacent
- * string elements are separated by a quote, not a bracket — so any occurrence here is
- * unambiguously a missing colon before an array/object value.
- */
+/** A model occasionally drops the colon entirely, e.g. `"occupation" ["barista"]` instead of `"occupation": [...]`. Safe without nesting-tracking — a string is never legitimately followed directly by `[` or `{`. */
 function insertMissingColons(json: string): string {
   return json.replace(/("(?:[^"\\]|\\.)*")\s*([[{])/g, '$1: $2')
 }
@@ -62,8 +41,7 @@ function extractBraces(text: string): string {
   const start = text.indexOf('{')
   const end = text.lastIndexOf('}')
   if (start === -1) throw new Error('No JSON object found in model output')
-  // Tolerate a response that got cut off before its closing brace — closeUnbalanced()
-  // downstream will attempt to append what's missing.
+  // Tolerate a response cut off before its closing brace — closeUnbalanced() downstream appends what's missing.
   return end === -1 || end <= start ? text.slice(start) : text.slice(start, end + 1)
 }
 
@@ -71,15 +49,7 @@ function normalizeQuotes(json: string): string {
   return json.replace(/[“”]/g, '"').replace(/[‘’]/g, "'")
 }
 
-/**
- * Models very often type literal "quote marks" inside dialogue/string content without
- * escaping them, e.g. `"personality": "gruff. "Don't push me," he said."`. A naive
- * quote-toggle parser treats that second `"` as the string's end, corrupting everything
- * after it. Heuristic: when we hit a `"` while already inside a string, peek past
- * whitespace at the next significant character — if it looks like valid JSON
- * continuation (`,` `:` `}` `]` or end-of-input), treat this as the real closing quote;
- * otherwise it's almost certainly a literal quote inside the text, so escape it.
- */
+/** Models often type literal "quote marks" inside dialogue without escaping them. Heuristic: when a `"` appears mid-string, peek past whitespace — if the next char looks like valid JSON continuation, treat this as the real closing quote; otherwise it's a literal quote, so escape it. */
 function repairUnescapedQuotes(json: string): string {
   let out = ''
   let inString = false
@@ -108,9 +78,7 @@ function repairUnescapedQuotes(json: string): string {
     let j = i + 1
     while (j < json.length && /\s/.test(json[j])) j++
     const next = json[j]
-    // A following `"` also counts as a terminator signal: it's the extremely common
-    // "missing comma before the next key" case (insertMissingCommas fixes the comma
-    // afterward) — far more likely in practice than two literal quotes back to back.
+    // A following `"` also counts as a terminator — the common "missing comma before the next key" case, far more likely than two literal quotes back to back.
     const looksLikeTerminator = next === undefined || ',:}]"'.includes(next)
     if (looksLikeTerminator) {
       inString = false
@@ -159,14 +127,7 @@ function escapeRawNewlinesInStrings(json: string): string {
   return out
 }
 
-/**
- * Local models very commonly forget the comma between two properties or two array
- * elements. By this point string boundaries are trustworthy (repairUnescapedQuotes
- * already ran), so every remaining `"` really is a string delimiter — which means
- * "string end, whitespace, string start" with nothing in between can only be a missing
- * comma; valid JSON never has that shape. Safe to fix unconditionally, whether the gap
- * is a newline (pretty-printed) or just a space (single-line output).
- */
+/** By this point string boundaries are trustworthy, so "string end, whitespace, string start" with nothing between can only be a missing comma. */
 function insertMissingCommas(json: string): string {
   return json.replace(/(["\d\]}])([ \t]*\n\s*|[ \t]+)(")/g, '$1,$2$3')
 }
