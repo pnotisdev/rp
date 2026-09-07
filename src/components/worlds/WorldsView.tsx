@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Globe, ImagePlus, Music, Plus, Star, X } from 'lucide-react'
+import { Globe, ImagePlus, Moon, Music, Plus, Star, X } from 'lucide-react'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { worldsApi } from '@/lib/api/client'
 import type { CustomSceneFlag, GiftItem, GiftRarity, ItemDef, ItemEffect, RelationshipDimension, WorldCard } from '@/lib/types'
@@ -22,7 +22,8 @@ import { EditorShell, type EditorTab } from '@/components/ui/EditorShell'
 import { ViewShell } from '@/components/ui/ViewShell'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { ListEditor } from '@/components/ui/ListEditor'
-import { errorMessage, toastError } from '@/lib/store/useToastStore'
+import { errorMessage, toastError, toastSuccess } from '@/lib/store/useToastStore'
+import { FileButton } from '@/components/ui/FileButton'
 import { confirmDialog } from '@/lib/store/useConfirmStore'
 import { LorebookEditor } from '@/components/worldinfo/LorebookEditor'
 import { GenerateImageButton } from '@/components/ui/GenerateImageButton'
@@ -191,6 +192,7 @@ function WorldEditor({
   const [lorebook, setLorebook] = useState(base.lorebook)
   const [avatarDataUrl, setAvatarDataUrl] = useState(base.avatarDataUrl)
   const [backgrounds, setBackgrounds] = useState<Record<string, string>>(base.backgrounds ?? {})
+  const [backgroundsNight, setBackgroundsNight] = useState<Record<string, string>>(base.backgroundsNight ?? {})
   const [backgroundUnlocks, setBackgroundUnlocks] = useState<Record<string, number>>(base.backgroundUnlocks ?? {})
   const [customBackgrounds, setCustomBackgrounds] = useState<CustomBackground[]>(base.customBackgrounds ?? [])
   /** The opening shot VN mode falls back to whenever a scene has no valid tag of its own. */
@@ -245,6 +247,7 @@ function WorldEditor({
       lorebook,
       avatarDataUrl,
       backgrounds,
+      backgroundsNight,
       backgroundUnlocks,
       customBackgrounds,
       // `null`, not `undefined` — see the `intimacyLevel` comment below on why a cleared nullable
@@ -341,6 +344,48 @@ function WorldEditor({
     const dataUrl = await fileToDataUrl(file)
     setBackgrounds((b) => ({ ...b, [tagId]: dataUrl }))
   }
+  const handleBackgroundNightPick = async (tagId: string, file: File) => {
+    setBackgroundsNight((b) => ({ ...b, [tagId]: '' }))
+    const dataUrl = await fileToDataUrl(file)
+    setBackgroundsNight((b) => ({ ...b, [tagId]: dataUrl }))
+  }
+  const removeBackgroundNight = (tagId: string) =>
+    setBackgroundsNight((b) => {
+      const next = { ...b }
+      delete next[tagId]
+      return next
+    })
+  /**
+   * Bulk background upload: pick every location's day/night art at once, matched to a slot by
+   * filename — `park_day.png`/`park_night.png` -> the `park` location (bare `park.png` is treated
+   * as the day image, for a location with no separate night variant yet). Same pattern as
+   * `CharacterEditor.tsx`'s `handleBulkSpritePick`.
+   */
+  const handleBulkBackgroundPick = async (files: FileList) => {
+    const knownIds = new Set([...DEFAULT_BACKGROUND_IDS, ...customBackgrounds.map((b) => b.id)])
+    const matched: string[] = []
+    const unmatched: string[] = []
+    const dayUpdates: Record<string, string> = {}
+    const nightUpdates: Record<string, string> = {}
+    for (const file of Array.from(files)) {
+      const baseName = file.name.replace(/\.[^.]+$/, '').toLowerCase().trim()
+      const nightMatch = baseName.match(/^(.+)_night$/)
+      const dayMatch = baseName.match(/^(.+)_day$/)
+      const id = nightMatch?.[1] ?? dayMatch?.[1] ?? baseName
+      if (!knownIds.has(id)) {
+        unmatched.push(file.name)
+        continue
+      }
+      const dataUrl = await fileToDataUrl(file)
+      if (nightMatch) nightUpdates[id] = dataUrl
+      else dayUpdates[id] = dataUrl
+      matched.push(file.name)
+    }
+    if (Object.keys(dayUpdates).length > 0) setBackgrounds((b) => ({ ...b, ...dayUpdates }))
+    if (Object.keys(nightUpdates).length > 0) setBackgroundsNight((b) => ({ ...b, ...nightUpdates }))
+    if (matched.length > 0) toastSuccess(`Matched ${matched.length} background image${matched.length === 1 ? '' : 's'}`)
+    if (unmatched.length > 0) toastError(`No matching location for: ${unmatched.join(', ')} — rename to "<id>_day.png"/"<id>_night.png", or add a custom location with that id first.`)
+  }
   const handleMusicPick = async (key: string, file: File) => {
     const dataUrl = await fileToDataUrl(file)
     setMusic((m) => ({ ...m, [key]: dataUrl }))
@@ -362,6 +407,7 @@ function WorldEditor({
       delete next[tagId]
       return next
     })
+    removeBackgroundNight(tagId)
   }
   const setDefaultBackground = (tagId: string) => setDefaultBackgroundId((cur) => (cur === tagId ? undefined : tagId))
   const setBackgroundUnlock = (tagId: string, minAffection: number) =>
@@ -530,12 +576,21 @@ function WorldEditor({
           description="Art per location for Visual Novel mode. The model tags each reply's setting; anything left blank falls back to a placeholder gradient."
           surface="bare"
         >
-          <p className="mb-4 text-xs text-text-muted">
+          <p className="mb-2 text-xs text-text-muted">
             {Object.keys(backgrounds).length}/{allBackgrounds.length} set. The number under each is
             the warmth needed before that background can appear. The <Star size={11} strokeWidth={2} className="mb-0.5 inline text-accent" />{' '}
             marks the opening scene — where a new chat starts before the model (or nothing, if
-            there's no model connected) has tagged one of its own.
+            there's no model connected) has tagged one of its own. The small moon toggle on each
+            tile switches it to a night variant, shown automatically once the world clock (Clock tab)
+            reaches evening or night — leave it unset to always show the day art.
           </p>
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <FileButton onPick={handleBulkBackgroundPick} accept="image/png,image/jpeg,image/webp" multiple>
+              <Plus size={14} strokeWidth={2} />
+              Bulk upload by filename
+            </FileButton>
+            <span className="text-[11px] text-text-muted">e.g. classroom_day.png + classroom_night.png → Classroom</span>
+          </div>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
             {allBackgrounds.map((bg) => (
               <div key={bg.id} className="group relative space-y-1.5">
@@ -599,15 +654,41 @@ function WorldEditor({
                 </div>
                 <div className="flex items-center justify-between gap-2 px-0.5">
                   <span className="truncate text-[11px] text-text-muted">{bg.label}</span>
-                  <input
-                    type="number"
-                    min={0}
-                    max={100}
-                    value={Number(backgroundUnlocks[bg.id] ?? 0)}
-                    onChange={(e) => setBackgroundUnlock(bg.id, Number(e.target.value) || 0)}
-                    className="w-12 rounded-md bg-bg-sunken px-1.5 py-0.5 text-center text-[11px] text-text outline-none"
-                    aria-label={`Unlock warmth for ${bg.label}`}
-                  />
+                  <div className="flex items-center gap-1">
+                    <label
+                      title={backgroundsNight[bg.id] ? `Replace ${bg.label}'s night art` : `Add night art for ${bg.label}`}
+                      className={`relative flex h-6 w-6 cursor-pointer items-center justify-center rounded-md ${
+                        backgroundsNight[bg.id] ? 'bg-accent/20 text-accent' : 'bg-bg-sunken text-text-muted hover:text-text'
+                      }`}
+                    >
+                      <Moon size={12} strokeWidth={2} fill={backgroundsNight[bg.id] ? 'currentColor' : 'none'} />
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp"
+                        className="hidden"
+                        onChange={(e) => e.target.files?.[0] && handleBackgroundNightPick(bg.id, e.target.files[0])}
+                      />
+                    </label>
+                    {backgroundsNight[bg.id] && (
+                      <button
+                        type="button"
+                        onClick={() => removeBackgroundNight(bg.id)}
+                        aria-label={`Remove ${bg.label}'s night art`}
+                        className="flex h-6 w-6 items-center justify-center rounded-md bg-bg-sunken text-text-muted hover:text-danger"
+                      >
+                        <X size={11} strokeWidth={2.5} />
+                      </button>
+                    )}
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={Number(backgroundUnlocks[bg.id] ?? 0)}
+                      onChange={(e) => setBackgroundUnlock(bg.id, Number(e.target.value) || 0)}
+                      className="w-12 rounded-md bg-bg-sunken px-1.5 py-0.5 text-center text-[11px] text-text outline-none"
+                      aria-label={`Unlock warmth for ${bg.label}`}
+                    />
+                  </div>
                 </div>
               </div>
             ))}

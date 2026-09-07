@@ -1,0 +1,63 @@
+{
+  "1": {
+    "class_type": "UNETLoader",
+    "inputs": { "unet_name": "ccDreamIsland_kirazuri_rotate.safetensors", "weight_dtype": "default" },
+    "_meta": { "title": "Anima model" }
+  },
+  "2": {
+    "class_type": "CLIPLoader",
+    "inputs": { "clip_name": "qwen_3_06b_base.safetensors", "type": "cosmos", "device": "default" },
+    "_meta": { "title": "Qwen3-0.6B text encoder" }
+  },
+  "3": {
+    "class_type": "VAELoader",
+    "inputs": { "vae_name": "qwen_image_vae.safetensors" },
+    "_meta": { "title": "Qwen-Image VAE (loads as WanVAE)" }
+  },
+  "10": {
+    "class_type": "LoadImage",
+    "inputs": { "image": "SLOT_IMAGE" },
+    "_meta": { "title": "SLOT: master (day render)" }
+  },
+  "11": {
+    "class_type": "VAEEncode",
+    "inputs": { "pixels": ["10", 0], "vae": ["3", 0] },
+    "_meta": { "title": "Encode master" }
+  },
+  "6": {
+    "class_type": "CLIPTextEncode",
+    "inputs": { "clip": ["2", 0], "text": "SLOT_POSITIVE" },
+    "_meta": { "title": "SLOT: positive (location + night)" }
+  },
+  "7": {
+    "class_type": "CLIPTextEncode",
+    "inputs": { "clip": ["2", 0], "text": "SLOT_NEGATIVE" },
+    "_meta": { "title": "SLOT: negative" }
+  },
+  "4": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": ["1", 0],
+      "positive": ["6", 0],
+      "negative": ["7", 0],
+      "latent_image": ["11", 0],
+      "seed": 0,
+      "steps": 30,
+      "cfg": 6.5,
+      "sampler_name": "dpmpp_2m",
+      "scheduler": "simple",
+      "denoise": 0.85
+    },
+    "_meta": { "title": "Sample (img2img relight)" }
+  },
+  "8": {
+    "class_type": "VAEDecode",
+    "inputs": { "samples": ["4", 0], "vae": ["3", 0] },
+    "_meta": { "title": "Decode" }
+  },
+  "9": {
+    "class_type": "SaveImage",
+    "inputs": { "images": ["8", 0], "filename_prefix": "rp-backgrounds/night" },
+    "_meta": { "title": "Save" }
+  }
+}

@@ -179,6 +179,13 @@ export function resolveWorldMusicMap(id: string, map: unknown): Record<string, s
   return resolveMediaMap('worlds', 'music', id, map, decodeAudioDataUrl)
 }
 
+/** Same tagged-set handling as `resolveAvatarMap('worlds', 'backgrounds', ...)`, but for
+ *  `WorldCard.backgroundsNight`'s optional per-location night variants — stored in a sibling
+ *  `backgrounds-night/` folder so a location's day and night art never share a filename. */
+export function resolveWorldBackgroundsNightMap(id: string, map: unknown): Record<string, string> | undefined {
+  return resolveMediaMap('worlds', 'backgrounds-night', id, map, decodeImageDataUrl)
+}
+
 function decodeAudioDataUrl(dataUrl: string): { ext: string; buffer: Buffer } {
   const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/s)
   if (!match) throw new Error('Malformed audio data URL.')

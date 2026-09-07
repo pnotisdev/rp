@@ -22,19 +22,43 @@ export const SEED_CHARACTER_2_ID = 'a0000000-0000-4000-8000-000000000006'
 // Background image files this seed expects to find (and copy into the world's own avatars
 // folder) under seed/backgrounds/<key>.png at the repo root — see seed.ts.
 export const SEED_BACKGROUND_KEYS = [
-  'bedroom',
-  'living-room',
-  'kitchen',
-  'cafe',
   'classroom',
   'school-hallway',
-  'park',
+  'school-rooftop',
+  'school-gate',
+  'school-courtyard',
+  'library',
+  'club-room',
+  'gymnasium',
+  'school-nurse-office',
+  'cafeteria',
   'city-street',
-  'beach',
-  'forest',
+  'train-station',
+  'convenience-store',
+  'restaurant',
+  'cafe',
+  'karaoke',
+  'movie-theater',
+  'hospital',
   'rooftop',
+  'park',
+  'forest',
+  'beach',
+  'shrine',
+  'onsen',
+  'festival',
+  'fireworks-viewing',
+  'living-room',
+  'bedroom',
+  'kitchen',
+  'shower',
   'office',
 ] as const
+
+// Night-lighting variants for `SEED_BACKGROUND_KEYS`, under seed/backgrounds-night/<key>.png — a
+// subset (no night art exists for the two carried-over pre-existing locations, `cafe`/`rooftop`,
+// which just show their day art at night like any world with a partial set).
+export const SEED_BACKGROUND_NIGHT_KEYS = SEED_BACKGROUND_KEYS.filter((k) => k !== 'cafe' && k !== 'rooftop')
 
 // Sumire's expression sprites + portrait, committed under seed/sprites/sumire/<key>.png at the
 // repo root and copied into her own avatars folder on first run — see seed.ts. Keys are rp
@@ -161,6 +185,9 @@ export const seedWorld: WorldCard = {
   },
   backgrounds: Object.fromEntries(
     SEED_BACKGROUND_KEYS.map((key) => [key, `/avatars/worlds/${SEED_WORLD_ID}/backgrounds/${key}.png`]),
+  ),
+  backgroundsNight: Object.fromEntries(
+    SEED_BACKGROUND_NIGHT_KEYS.map((key) => [key, `/avatars/worlds/${SEED_WORLD_ID}/backgrounds-night/${key}.png`]),
   ),
   // A few locations gated behind affection, purely to demonstrate the feature — the rest are open
   // from the very first scene. Roughly ordered by how "invited in" a location implies you are.

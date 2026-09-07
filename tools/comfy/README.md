@@ -104,3 +104,53 @@ sprite shows there with its thumbnail as it's submitted.
 --matte-python <p>   python with rembg for _matte.py  (default $MATTE_PYTHON → the venv)
 --matte-model <m>    rembg model for the mask         (default birefnet-general)
 ```
+
+---
+
+## Comfy MCP (agent tools)
+
+Claude can drive ComfyUI directly (list installed nodes/models, run/validate a workflow JSON, fetch
+outputs) via the official [`comfy-mcp`](https://docs.comfy.org/agent-tools/mcp) server. Registered
+project-wide in [`.mcp.json`](../../.mcp.json).
+
+**Installed** (global env, `pip install "comfy-cli>=1.14.0" comfy-mcp`):
+- `comfy-cli` 1.20.0 → `comfy set-default "E:\Comfy-Desktop\ComfyUI-Installs\Comfy-UI\ComfyUI"`
+  points it at the existing Desktop install instead of creating a new workspace.
+- `comfy-mcp` 0.10.0 → the MCP server binary, run over stdio by Claude Code.
+
+Both talk to whatever ComfyUI is already running at `127.0.0.1:8188` (the Desktop app manages the
+process; `comfy env` confirms `server.running: true` against that URL — no need for the MCP's own
+`launch_comfyui`/`comfy launch` unless ComfyUI isn't up yet).
+
+Tools exposed: `server_info`, `run_workflow`/`job_status`/`fetch_outputs`, `search_nodes`/`get_node`
+(reads the live install, custom nodes included), `search_models`, `validate_workflow`,
+`search_templates`/`fetch_template`, `launch_comfyui`/`stop_comfyui`.
+
+New Claude Code session picks up `.mcp.json` automatically (approve it once when prompted to trust
+project MCP servers).
+
+---
+
+## Backgrounds (day/night location art)
+
+```bash
+node tools/comfy/make-backgrounds.mjs                    # all locations, review in tools/comfy/out/backgrounds/
+node tools/comfy/make-backgrounds.mjs --only classroom,library
+node tools/comfy/make-backgrounds.mjs --dry-run           # print prompts, generate nothing
+```
+
+Per location: **txt2img** (day, fixed seed) → `<id>_day.png`, then that render is uploaded back into
+ComfyUI and **img2img'd** (same seed, denoise 0.85, cfg 6.5, lighting tokens swapped) → `<id>_night.png`.
+No ControlNet/LLLite — img2img alone held composition (desks, windows, shelving) reliably across the
+day→night swing, which is the largest lighting delta this technique has to handle; smaller swings
+(day→evening/overcast) would tolerate lower denoise.
+
+- `backgrounds/locations.json` — shared prefix/negative/seed/size + per-location tags and day/night
+  lighting suffix. Add a location by appending an entry; keep every window-bearing indoor location's
+  night suffix explicit (`dark window, night sky outside, ...`) — without it the sampler tends to
+  leave daylight glowing through the window untouched.
+- `anima-bg-txt2img.api.json` / `anima-bg-img2img.api.json` — the two workflow templates the script
+  fills in (landscape 1216×832, vs. the portrait sprite workflow above).
+
+`@kantoku` + `score_9, score_8` in the shared prefix noticeably sharpens/flattens the render style
+vs. plain `masterpiece, best quality` alone — worth keeping for backgrounds.

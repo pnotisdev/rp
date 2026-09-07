@@ -125,6 +125,14 @@ export function getMoodOfDay(characterId: string, day: number): string {
   return pickFrom(MOODS, `mood:${characterId}:${info.day}`)
 }
 
+/** Whether a phase index reads as "night" for lighting purposes (evening counts as night too — dusk
+ *  is closer to a night scene than a daylit one). Undefined/out-of-range defaults to day, matching a
+ *  world that's never advanced its clock. */
+export function isNightPhase(phaseIndex: number | undefined): boolean {
+  const phase = PHASES[phaseIndex ?? -1]
+  return phase === 'evening' || phase === 'night'
+}
+
 /** Advances the clock by one phase, rolling over to the next day after night. */
 export function advancePhase(day: number, phaseIndex: number): { day: number; phaseIndex: number } {
   const next = phaseIndex + 1

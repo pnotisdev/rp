@@ -468,6 +468,10 @@ export interface WorldCard {
   avatarDataUrl?: string
   /** Scene art keyed by background id (`src/lib/vn/backgrounds.ts`) — falls back to a placeholder gradient when missing. */
   backgrounds?: Record<string, string>
+  /** Optional night-lighting variant of `backgrounds`, same keys — `VNStage` uses this instead of
+   *  `backgrounds` whenever `calendar.ts`'s `isNightPhase(currentPhaseIndex)` is true and a variant
+   *  exists for the current background id; missing keys just fall back to the day art. */
+  backgroundsNight?: Record<string, string>
   /** Minimum affection required before a tagged background can be selected/displayed. */
   backgroundUnlocks?: Record<string, number>
   /** Author-picked opening shot — `VNStage` falls back to this whenever a scene has no valid

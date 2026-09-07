@@ -16,3 +16,6 @@ presets/
 # ComfyUI sprite-generator scratch + backups
 tools/comfy/out/
 tools/comfy/backups/
+
+# Local Comfy MCP registration — hardcodes this machine's absolute paths (see tools/comfy/README.md)
+.mcp.json

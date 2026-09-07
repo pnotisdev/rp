@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { avatarsDir, characterStore, personaStore, worldInfoBookStore, worldStore } from './db.ts'
 import {
   SEED_BACKGROUND_KEYS,
+  SEED_BACKGROUND_NIGHT_KEYS,
   SEED_CHARACTER_ID,
   SEED_CHARACTER_2_ID,
   SEED_PERSONA_ID,
@@ -21,6 +22,7 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // Committed at the repo root (not under data/, which is gitignored) — these ship with the app.
 const seedAssetsDir = path.resolve(__dirname, '..', 'seed', 'backgrounds')
+const seedNightAssetsDir = path.resolve(__dirname, '..', 'seed', 'backgrounds-night')
 const seedSpritesDir = path.resolve(__dirname, '..', 'seed', 'sprites', 'sumire')
 
 /**
@@ -53,6 +55,17 @@ export function runSeedIfNeeded(): void {
     const src = path.join(seedAssetsDir, `${key}.png`)
     if (!fs.existsSync(src)) continue // Missing art shouldn't block seeding the rest — the world just falls back to a placeholder gradient for that key, same as any world with unfinished art.
     fs.copyFileSync(src, path.join(backgroundsDest, `${key}.png`))
+    copied++
+  }
+
+  // Night-lighting variants, same "missing is fine" tolerance — a key with no night art just shows
+  // its day art at night, same as VNStage's runtime fallback.
+  const backgroundsNightDest = path.join(avatarsDir, 'worlds', SEED_WORLD_ID, 'backgrounds-night')
+  fs.mkdirSync(backgroundsNightDest, { recursive: true })
+  for (const key of SEED_BACKGROUND_NIGHT_KEYS) {
+    const src = path.join(seedNightAssetsDir, `${key}.png`)
+    if (!fs.existsSync(src)) continue
+    fs.copyFileSync(src, path.join(backgroundsNightDest, `${key}.png`))
     copied++
   }
 

@@ -5,19 +5,44 @@ export interface BackgroundOption {
   label: string
 }
 
-/** Default scene locations offered to every world so the LLM has somewhere to place the moment even with no custom art uploaded. */
+/** Default scene locations offered to every world so the LLM has somewhere to place the moment even
+ *  with no custom art uploaded. Each can optionally have a night-lighting variant — see
+ *  `WorldCard.backgroundsNight` and `calendar.ts`'s `isNightPhase`. */
 export const DEFAULT_BACKGROUNDS: BackgroundOption[] = [
-  { id: 'bedroom', label: 'Bedroom' },
-  { id: 'living-room', label: 'Living room' },
-  { id: 'kitchen', label: 'Kitchen' },
-  { id: 'cafe', label: 'Café' },
+  // school
   { id: 'classroom', label: 'Classroom' },
   { id: 'school-hallway', label: 'School hallway' },
-  { id: 'park', label: 'Park' },
+  { id: 'school-rooftop', label: 'School rooftop' },
+  { id: 'school-gate', label: 'School gate' },
+  { id: 'school-courtyard', label: 'School courtyard' },
+  { id: 'library', label: 'Library' },
+  { id: 'club-room', label: 'Club room' },
+  { id: 'gymnasium', label: 'Gymnasium' },
+  { id: 'school-nurse-office', label: 'School nurse office' },
+  { id: 'cafeteria', label: 'Cafeteria' },
+  // town
   { id: 'city-street', label: 'City street' },
-  { id: 'beach', label: 'Beach' },
-  { id: 'forest', label: 'Forest' },
+  { id: 'train-station', label: 'Train station' },
+  { id: 'convenience-store', label: 'Convenience store' },
+  { id: 'restaurant', label: 'Restaurant' },
+  { id: 'cafe', label: 'Café' },
+  { id: 'karaoke', label: 'Karaoke' },
+  { id: 'movie-theater', label: 'Movie theater' },
+  { id: 'hospital', label: 'Hospital' },
   { id: 'rooftop', label: 'Rooftop' },
+  // outdoors
+  { id: 'park', label: 'Park' },
+  { id: 'forest', label: 'Forest' },
+  { id: 'beach', label: 'Beach' },
+  { id: 'shrine', label: 'Shrine' },
+  { id: 'onsen', label: 'Onsen' },
+  { id: 'festival', label: 'Festival' },
+  { id: 'fireworks-viewing', label: 'Fireworks viewing' },
+  // home / work
+  { id: 'living-room', label: 'Living room' },
+  { id: 'bedroom', label: 'Bedroom' },
+  { id: 'kitchen', label: 'Kitchen' },
+  { id: 'shower', label: 'Shower' },
   { id: 'office', label: 'Office' },
 ]
 

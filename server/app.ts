@@ -18,7 +18,7 @@ import {
   worldStore,
   avatarsDir,
 } from './db.ts'
-import { removeAvatar, resolveAvatar, resolveAvatarMap, resolveAvatarMapVariants, resolveWorldMusicMap } from './avatars.ts'
+import { removeAvatar, resolveAvatar, resolveAvatarMap, resolveAvatarMapVariants, resolveWorldBackgroundsNightMap, resolveWorldMusicMap } from './avatars.ts'
 import { encodeTokens, tokenizerForModel } from './novelaiTokenizer.ts'
 import { originGuard } from './originCheck.ts'
 
@@ -895,6 +895,7 @@ app.post('/api/worlds', (req, res) => {
   const id = newId()
   const avatarDataUrl = resolveAvatar('worlds', id, req.body.avatarDataUrl)
   const backgrounds = resolveAvatarMap('worlds', 'backgrounds', id, req.body.backgrounds)
+  const backgroundsNight = resolveWorldBackgroundsNightMap(id, req.body.backgroundsNight)
   const music = resolveWorldMusicMap(id, req.body.music)
   const customSceneFlags = normalizeCustomSceneFlags(req.body.customSceneFlags)
   const allowedFlags = new Set([...DEFAULT_SCENE_FLAGS, ...customSceneFlags.map((f) => f.id)])
@@ -907,6 +908,7 @@ app.post('/api/worlds', (req, res) => {
     lorebook: req.body.lorebook,
     avatarDataUrl,
     backgrounds,
+    backgroundsNight,
     backgroundUnlocks: req.body.backgroundUnlocks ?? {},
     music,
     gifts: normalizeGiftItems(req.body.gifts),
@@ -930,6 +932,7 @@ app.put('/api/worlds/:id', (req, res) => {
   const patch: Record<string, unknown> = { ...req.body, updatedAt: Date.now() }
   if ('avatarDataUrl' in req.body) patch.avatarDataUrl = resolveAvatar('worlds', id, req.body.avatarDataUrl)
   if ('backgrounds' in req.body) patch.backgrounds = resolveAvatarMap('worlds', 'backgrounds', id, req.body.backgrounds)
+  if ('backgroundsNight' in req.body) patch.backgroundsNight = resolveWorldBackgroundsNightMap(id, req.body.backgroundsNight)
   if ('music' in req.body) patch.music = resolveWorldMusicMap(id, req.body.music)
   if ('backgroundUnlocks' in req.body) patch.backgroundUnlocks = req.body.backgroundUnlocks ?? {}
   if ('gifts' in req.body) patch.gifts = normalizeGiftItems(req.body.gifts)

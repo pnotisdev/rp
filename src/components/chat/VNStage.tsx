@@ -52,6 +52,7 @@ import { resolveExpressionSprite } from '@/lib/vn/expressions'
 import { currentOutfitFrom } from '@/lib/vn/outfits'
 import { vnArtHint } from '@/lib/vn/artHint'
 import { getWorldTemplate } from '@/lib/world/worldTemplates'
+import { isNightPhase } from '@/lib/world/calendar'
 
 /**
  * Visual-novel presentation of a chat: full-bleed scene background, each cast member's sprite,
@@ -60,7 +61,10 @@ import { getWorldTemplate } from '@/lib/world/worldTemplates'
  */
 
 // Petals only make sense outdoors.
-const OUTDOOR_BACKGROUNDS = new Set(['park', 'forest', 'rooftop', 'city-street', 'beach'])
+const OUTDOOR_BACKGROUNDS = new Set([
+  'park', 'forest', 'rooftop', 'city-street', 'beach',
+  'school-rooftop', 'school-gate', 'school-courtyard', 'shrine', 'festival', 'fireworks-viewing', 'onsen',
+])
 
 /** Horizontal width per cast slot; height is set separately so sprites of any source resolution normalize to the same on-screen height. */
 function slotWidthClass(castSize: number): string {
@@ -278,12 +282,18 @@ export function VNStage({
   const lastCharMsg = [...messages].reverse().find((m) => m.role === 'char')
   const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user')
   const isStreamingThis = !!lastCharMsg && generatingMessageId === lastCharMsg.id
+  // A failed generation leaves no real character line to show — fall back to the player's own last
+  // line as "current" instead of putting an error banner in Sumire's mouth. Same textbox, same
+  // nameplate slot, just attributed to whoever actually has something to say right now.
+  const showUserAsCurrent = !!lastCharMsg?.failed && !isStreamingThis && !!lastUserMsg
   // A failed generation keeps empty text (see useChatSession.ts); show a message instead of going blank.
   const displayText = isStreamingThis
     ? streamingText
-    : lastCharMsg?.failed
-      ? '⚠ Generation failed — try regenerating (⟲) from the log.'
-      : lastCharMsg?.text || (messages.length === 0 ? 'Say hello to begin the scene…' : '')
+    : showUserAsCurrent
+      ? lastUserMsg!.text
+      : lastCharMsg?.failed
+        ? '⚠ Generation failed — try regenerating (⟲) from the log.'
+        : lastCharMsg?.text || (messages.length === 0 ? 'Say hello to begin the scene…' : '')
 
   const activeSwipe = lastCharMsg?.activeSwipe ?? 0
   const scene = lastCharMsg?.swipeScenes?.[activeSwipe] ?? lastCharMsg?.scene
@@ -387,7 +397,10 @@ export function VNStage({
 
   const slotClass = slotWidthClass(castMembers.length)
   const activeMember = castMembers.find((m) => m.isActive) ?? castMembers[0]
-  const speakerName = lastCharMsg?.name ?? activeMember?.name ?? character?.card.name ?? ''
+  // Nameplate follows whoever's line is actually showing — the player's own persona while
+  // `showUserAsCurrent`, the speaking cast member otherwise. Same slot, same styling either way.
+  const speakerName = showUserAsCurrent ? persona?.name || 'You' : (lastCharMsg?.name ?? activeMember?.name ?? character?.card.name ?? '')
+  const speakerAvatarUrl = showUserAsCurrent ? persona?.avatarDataUrl : activeMember?.avatarUrl
   // Group scenes get a per-speaker identity hue; solo chats keep the usual relationship-pink.
   const plateHue = activeMember?.hue ?? 320
   const plate = isGroupScene
@@ -413,7 +426,11 @@ export function VNStage({
   const bgUnlocked = sceneBackground
     ? affection >= Number(world?.backgroundUnlocks?.[sceneBackground] ?? 0)
     : false
-  const backgroundUrl = sceneBackground && bgUnlocked ? world?.backgrounds?.[sceneBackground] : undefined
+  const nightBackground = sceneBackground ? world?.backgroundsNight?.[sceneBackground] : undefined
+  const backgroundUrl =
+    sceneBackground && bgUnlocked
+      ? (isNightPhase(world?.currentPhaseIndex) && nightBackground) || world?.backgrounds?.[sceneBackground]
+      : undefined
   const bgStyle = backgroundUrl
     ? { backgroundImage: `url(${backgroundUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' }
     : { background: placeholderGradient(sceneBackground) }
@@ -800,25 +817,9 @@ export function VNStage({
           {/* Hidden under Hide-UI too — only the background/sprites/CG stay up, full-scene. */}
           {!hideUI && (
           <>
-          {lastUserMsg && (
-            // mb-5 keeps the bubble clear of the speaker nameplate overlapping the panel below.
-            <div className="relative z-10 mx-4 mb-5 flex flex-col items-end gap-1 sm:mx-6 sm:mb-3">
-              <div className="vn-user-bubble prose-rp themed-shadow max-w-[74%] whitespace-pre-wrap rounded-2xl bg-msg-user px-3.5 py-2 text-sm text-accent-text">
-                {renderMessageText(lastUserMsg.text, regexScripts)}
-              </div>
-              {lastUserMsg.intimacyAction && (
-                <span
-                  className="inline-flex items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-medium text-white/80"
-                  title={`Sent from the Relationship panel's Unlocks tab (${lastUserMsg.intimacyAction.category.replace('_', ' ')}): "${lastUserMsg.intimacyAction.label}"`}
-                >
-                  <Heart size={9} strokeWidth={2.25} className="shrink-0" />
-                  {lastUserMsg.intimacyAction.label}
-                </span>
-              )}
-            </div>
-          )}
-
-          {/* Docked flush to the bottom edge, full width, like a real VN textbox. */}
+          {/* Docked flush to the bottom edge, full width, like a real VN textbox. Both the player's
+              last line and the reply to it live in this one panel — a real VN's textbox shows
+              whoever's talking, not a chat-bubble floating over the art for one side only. */}
           <div
             className="group/vnpanel relative z-10 flex flex-col border-t border-white/15 bg-black/75 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.08),0_-18px_36px_-22px_rgb(0_0_0_/_0.85)] backdrop-blur-md"
             style={{ borderTopColor: plate.edge }}
@@ -828,8 +829,8 @@ export function VNStage({
               className="absolute -top-9 left-3 z-20 flex items-center gap-2.5 rounded-t-xl rounded-br-xl py-2 pl-2 pr-4 backdrop-blur-md sm:left-5"
               style={{ backgroundColor: plate.bg, boxShadow: `inset 0 1px 0 ${plate.edge}, 0 10px 22px -10px rgb(0 0 0 / 0.6)` }}
             >
-              {activeMember?.avatarUrl ? (
-                <img src={activeMember.avatarUrl} alt="" className="h-7 w-7 rounded-full object-cover ring-1 ring-white/25" />
+              {speakerAvatarUrl ? (
+                <img src={speakerAvatarUrl} alt="" className="h-7 w-7 rounded-full object-cover ring-1 ring-white/25" />
               ) : (
                 <span
                   className="flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-display text-white shadow-inner ring-1 ring-white/15"
@@ -842,6 +843,17 @@ export function VNStage({
                 {speakerName}
               </span>
             </div>
+            {showUserAsCurrent && lastUserMsg!.intimacyAction && (
+              <div className="px-4 pt-4 sm:px-6">
+                <span
+                  className="mx-auto flex w-fit max-w-3xl items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-medium text-white/70"
+                  title={`Sent from the Relationship panel's Unlocks tab (${lastUserMsg!.intimacyAction.category.replace('_', ' ')}): "${lastUserMsg!.intimacyAction.label}"`}
+                >
+                  <Heart size={9} strokeWidth={2.25} className="shrink-0" />
+                  {lastUserMsg!.intimacyAction.label}
+                </span>
+              </div>
+            )}
             {/* Utility controls recede to near-invisible at rest, appear on hover/focus. */}
             <div className="flex items-center justify-end gap-1 px-3 pt-3 opacity-30 transition-opacity duration-200 focus-within:opacity-100 group-hover/vnpanel:opacity-100 sm:px-5">
               {canSwipe && (
@@ -887,7 +899,7 @@ export function VNStage({
                   </span>
                 </>
               )}
-              {lastCharMsg && !isStreamingThis && (
+              {lastCharMsg && !isStreamingThis && !showUserAsCurrent && (
                 <>
                   {canSwipe && <span className="mx-1 h-4 w-px bg-white/15" />}
                   <button
@@ -927,11 +939,11 @@ export function VNStage({
                 </>
               )}
             </div>
-            {/* Fixed height, not just capped — a one-line reply and a ten-line one occupy the same
-                footprint, so the panel never jumps between turns. Scrolls in place instead. More
-                headroom on a phone (~40vh, where the sprite above can afford to give up the room)
-                than on a wider viewport (22-26vh, where it's needed for the cast). */}
-            <div ref={dialogueBoxRef} className="h-[40vh] overflow-y-auto px-4 pb-3 pt-1.5 sm:h-[22vh] sm:px-6 md:h-[26vh]">
+            {/* Grows with the reply up to a cap, then scrolls in place — a fixed height regardless of
+                content left a short reply (or an error message) floating in a mostly-empty box, the
+                opposite of "see more of the character/background." A floor keeps a one-line reply
+                from looking clipped-thin. Same phone-gets-more-headroom split as before. */}
+            <div ref={dialogueBoxRef} className="max-h-[40vh] min-h-[64px] overflow-y-auto px-4 pb-3 pt-1.5 sm:max-h-[22vh] sm:min-h-[52px] sm:px-6 md:max-h-[26vh]">
               <p
                 // Capped, centered line-width — full viewport width reads as a teleprompter on an
                 // ultra-wide monitor, not a VN textbox.
@@ -951,6 +963,13 @@ export function VNStage({
                   />
                 )}
               </p>
+              {showUserAsCurrent && (
+                // The failure itself, as a small caption rather than the main line — the player's
+                // actual words stay the primary content; this just explains the silence.
+                <p className="mx-auto mt-2 max-w-3xl text-[12px] text-danger/90">
+                  ⚠ {activeMember?.name ?? character?.card.name ?? "Their"}'s reply failed — try regenerating (⟲) from the log.
+                </p>
+              )}
             </div>
             {/* AI-suggested choices: docked pills here (same treatment as the dialogue box above),
                 or nothing at all when `vnChoiceStyle` is 'centered' — that style renders as a

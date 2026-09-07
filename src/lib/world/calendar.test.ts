@@ -14,6 +14,7 @@ import {
   getMaxEnergyForDay,
   getMoodOfDay,
   getWeather,
+  isNightPhase,
   PHASES,
   spendEnergy,
   WEATHER_KINDS,
@@ -108,6 +109,22 @@ describe('advancePhase', () => {
 
   it('rolls over to the next day at morning after night', () => {
     expect(advancePhase(5, PHASES.length - 1)).toEqual({ day: 6, phaseIndex: 0 })
+  })
+})
+
+describe('isNightPhase', () => {
+  it('reads morning and afternoon as day', () => {
+    expect(isNightPhase(PHASES.indexOf('morning'))).toBe(false)
+    expect(isNightPhase(PHASES.indexOf('afternoon'))).toBe(false)
+  })
+
+  it('reads evening and night as night', () => {
+    expect(isNightPhase(PHASES.indexOf('evening'))).toBe(true)
+    expect(isNightPhase(PHASES.indexOf('night'))).toBe(true)
+  })
+
+  it('defaults to day when unset', () => {
+    expect(isNightPhase(undefined)).toBe(false)
   })
 })
 
