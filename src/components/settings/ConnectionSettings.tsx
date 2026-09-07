@@ -75,65 +75,9 @@ export function ConnectionSettings() {
 
   return (
     <SettingsPage>
-      <Section title="KoboldCpp connection" surface="bare">
-        <TextField
-          label="Server URL"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={() => setBaseUrl(draft)}
-          placeholder="http://localhost:5001"
-        />
-        <div className="mt-6 rounded-xl bg-bg-elevated p-5 text-xs">
-          <div className="flex items-center gap-1.5">
-            <span className={`h-2 w-2 rounded-full ${STATUS_DOT[status]}`} />
-            <span className="text-text">{STATUS_LABEL[status]}</span>
-          </div>
-          {model && <div className="mt-1 text-text-muted">Model: {model}</div>}
-          {version && <div className="text-text-muted">KoboldCpp {version}</div>}
-          {maxContext !== null && (
-            <div className="text-text-muted">
-              Max context: {maxContext.toLocaleString()} tokens — used automatically for judge/assist
-              calls (relationship scoring, choices, objectives, lore suggestions) instead of a fixed
-              guess.
-            </div>
-          )}
-          {status === 'offline' && (
-            <p className="mt-2 text-text-muted">
-              Make sure KoboldCpp is running and reachable at this URL. If it's on another machine,
-              launch it with <code>--host 0.0.0.0</code> or your usual CORS/tunnel setup.
-            </p>
-          )}
-        </div>
-
-        {templateMismatch && (
-          <div className="mt-4 rounded-xl bg-warning/10 p-4 text-xs ring-1 ring-warning/30">
-            <p className="text-text">
-              This model's chat template looks like <strong>{templateMismatch.name}</strong>, but the
-              active instruct template is{' '}
-              <strong>
-                {BUILTIN_INSTRUCT_TEMPLATES.find((t) => t.id === instructTemplateId)?.name ?? instructTemplateId}
-              </strong>
-              . A mismatch is the usual cause of a model that rambles, ignores its character, leaks
-              instructions, or never stops.
-            </p>
-            <div className="mt-2.5">
-              <Button
-                variant="primary"
-                onClick={() => {
-                  setInstructTemplateId(templateMismatch.id)
-                  toastSuccess(`Instruct template set to ${templateMismatch.name}`)
-                }}
-              >
-                Switch to {templateMismatch.name}
-              </Button>
-            </div>
-          </div>
-        )}
-      </Section>
-
       <Section
         title="Chat generation backend"
-        description="Everything above is KoboldCpp's own connection — used whenever the backend below is left on 'KoboldCpp (local)'. Switching this to an OpenAI-compatible provider redirects generation (the main chat, and every background judge/assist call) there instead."
+        description="Which provider generates replies — the main chat and every background judge/assist call. Leave it on 'KoboldCpp (local)' for a local model and set its URL below; switch it to a hosted provider (OpenRouter has a free tier) to run everything through their API instead."
         surface="bare"
       >
         <SelectField
@@ -197,7 +141,7 @@ export function ConnectionSettings() {
               through any other server. Context-size and tokenizer figures elsewhere in the app fall
               back to an estimate for this backend, since hosted providers don't expose either. Temperature,
               top P, penalties, and reasoning effort for this backend live in Settings → Generation,
-              separate from the KoboldCpp sampler above.
+              separate from the KoboldCpp sampler below.
             </p>
           </>
         )}
@@ -232,10 +176,70 @@ export function ConnectionSettings() {
             <HostedConnectionStatus status={hostedStatus.status} detail={hostedStatus.detail} recheck={hostedStatus.recheck} />
             <p className="mt-2 text-xs text-text-muted">
               Keys are stored only in this browser and sent directly to NovelAI — never through any
-              other server. The KoboldCpp sampler above supplies temperature/top P/penalties for
+              other server. The KoboldCpp sampler below supplies temperature/top P/penalties for
               this backend too, since NovelAI's own sampler shape is close enough to reuse directly.
             </p>
           </>
+        )}
+      </Section>
+
+      <Section
+        title="KoboldCpp connection"
+        description="Used whenever the backend above is 'KoboldCpp (local)'. Also supplies the sampler and instruct-template settings the hosted backends reuse."
+        surface="bare"
+      >
+        <TextField
+          label="Server URL"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => setBaseUrl(draft)}
+          placeholder="http://localhost:5001"
+        />
+        <div className="mt-6 rounded-xl bg-bg-elevated p-5 text-xs">
+          <div className="flex items-center gap-1.5">
+            <span className={`h-2 w-2 rounded-full ${STATUS_DOT[status]}`} />
+            <span className="text-text">{STATUS_LABEL[status]}</span>
+          </div>
+          {model && <div className="mt-1 text-text-muted">Model: {model}</div>}
+          {version && <div className="text-text-muted">KoboldCpp {version}</div>}
+          {maxContext !== null && (
+            <div className="text-text-muted">
+              Max context: {maxContext.toLocaleString()} tokens — used automatically for judge/assist
+              calls (relationship scoring, choices, objectives, lore suggestions) instead of a fixed
+              guess.
+            </div>
+          )}
+          {status === 'offline' && (
+            <p className="mt-2 text-text-muted">
+              Make sure KoboldCpp is running and reachable at this URL. If it's on another machine,
+              launch it with <code>--host 0.0.0.0</code> or your usual CORS/tunnel setup.
+            </p>
+          )}
+        </div>
+
+        {templateMismatch && (
+          <div className="mt-4 rounded-xl bg-warning/10 p-4 text-xs ring-1 ring-warning/30">
+            <p className="text-text">
+              This model's chat template looks like <strong>{templateMismatch.name}</strong>, but the
+              active instruct template is{' '}
+              <strong>
+                {BUILTIN_INSTRUCT_TEMPLATES.find((t) => t.id === instructTemplateId)?.name ?? instructTemplateId}
+              </strong>
+              . A mismatch is the usual cause of a model that rambles, ignores its character, leaks
+              instructions, or never stops.
+            </p>
+            <div className="mt-2.5">
+              <Button
+                variant="primary"
+                onClick={() => {
+                  setInstructTemplateId(templateMismatch.id)
+                  toastSuccess(`Instruct template set to ${templateMismatch.name}`)
+                }}
+              >
+                Switch to {templateMismatch.name}
+              </Button>
+            </div>
+          </div>
         )}
       </Section>
     </SettingsPage>

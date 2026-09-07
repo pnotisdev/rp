@@ -5,6 +5,7 @@ import {
   CalendarHeart,
   Clapperboard,
   Download,
+  Drama,
   GitFork,
   Heart,
   MessageCircle,
@@ -18,7 +19,7 @@ import {
 } from 'lucide-react'
 import { useChatSession } from '@/lib/hooks/useChatSession'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
-import { charactersApi } from '@/lib/api/client'
+import { charactersApi, chatsApi } from '@/lib/api/client'
 import { IconButton } from '@/components/ui/IconButton'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import { scrollToMessage } from '@/lib/scrollToMessage'
@@ -267,6 +268,16 @@ export function ChatWindow({
 
   // Chat-level override wins over the global Settings → Appearance default.
   const visualNovelMode = chat.assistOverrides?.visualNovelMode ?? globalVisualNovelMode
+  // In-chat VN toggle: writes a per-chat override, but clears it back to "inherit" when the new
+  // value would just match the global default — so a deliberate global setting isn't shadowed by a
+  // redundant override. Same precedence contract as RelationshipPanel's own override selects.
+  const toggleVnForChat = () => {
+    const next = { ...(chat.assistOverrides ?? {}) }
+    const target = !visualNovelMode
+    if (target === globalVisualNovelMode) delete next.visualNovelMode
+    else next.visualNovelMode = target
+    chatsApi.update(chat.id, { assistOverrides: next }).catch((e) => toastError(errorMessage(e)))
+  }
   const pinnedCount = messages.filter((m) => m.pinned).length
   // Reactive portrait for the default (non-VN) layout, using the same expression resolution as VNStage's sprite.
   const reactivePortraitExpression = lastCharScene?.expression || 'neutral'
@@ -307,6 +318,14 @@ export function ChatWindow({
       priority: 'primary',
       active: showTuning,
       onClick: () => setShowTuning((v) => !v),
+    },
+    {
+      key: 'vn-mode',
+      icon: Drama,
+      label: visualNovelMode ? 'Visual Novel mode: on (switch to chat view)' : 'Visual Novel mode: off (switch to scene view)',
+      priority: 'primary-desktop',
+      active: visualNovelMode,
+      onClick: toggleVnForChat,
     },
     {
       key: 'event',
