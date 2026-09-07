@@ -52,7 +52,7 @@ Relationship starters let you author how the two of you already know each other,
 
 ### Visual novel mode
 
-A full-bleed scene: background, sprite, dialogue box, backlog. Each character has 21 expression slots plus any custom ones you add. The model tags its reply and the app resolves the tag, falling through same-family expressions so a missing "yearning" lands on "love" rather than a blank avatar.
+A full-bleed scene: background, sprite, dialogue box, backlog. Each character has 25 expression slots plus any custom ones you add. The model tags its reply and the app resolves the tag, falling through same-family expressions so a missing "yearning" lands on "love" rather than a blank avatar.
 
 **Outfits** add a second axis to the sprite grid, so what you see can change mid-scene. Each one can be gated behind warmth or a story flag, marked as something the model may never pick on its own, or designated as the one an intimate scene switches to. A partly-drawn outfit falls back to base art, so you can add two poses without breaking the other nineteen expressions.
 
@@ -134,7 +134,7 @@ Command palette on Ctrl/Cmd-K, a shortcuts sheet on `?`, a theme editor, a layou
 <tr>
 <td width="50%">
 <img src="screenshots/rp-character-sprites.png" alt="Character expression sprites grid">
-<p align="center"><em>21 expression slots, per outfit.</em></p>
+<p align="center"><em>25 expression slots, per outfit.</em></p>
 </td>
 <td width="50%">
 <img src="screenshots/rp-world-creation-screen.png" alt="World editor">

@@ -40,7 +40,9 @@ export function WelcomeView({
   onStarted: (chatId: string) => void
   onNavigate: (view: ViewId) => void
 }) {
-  const characters = useApiQuery('characters', () => charactersApi.list(), []) ?? []
+  const charactersResult = useApiQuery('characters', () => charactersApi.list(), [])
+  const characters = charactersResult ?? []
+  const charactersLoading = charactersResult === undefined
   const baseUrl = useSettingsStore((s) => s.baseUrl)
   const setBaseUrl = useSettingsStore((s) => s.setBaseUrl)
   const { status, model, maxContext } = useConnectionStatus(baseUrl)
@@ -97,7 +99,8 @@ export function WelcomeView({
         <MessageCircle size={30} strokeWidth={1.25} className="mb-4 text-accent" />
         <h1 className="font-display text-2xl text-text">Welcome to RP Suite</h1>
         <p className="mt-1.5 text-sm text-text-muted">
-          A local-first roleplay client for KoboldCpp. Two steps and you're talking.
+          A local-first roleplay client. Bring your own model — running locally, or a hosted API key.
+          Two steps and you're talking.
         </p>
 
         {/* 1. Connection */}
@@ -123,10 +126,11 @@ export function WelcomeView({
           {status !== 'online' && (
             <div className="space-y-3 text-xs text-text-muted">
               <p>
-                Start KoboldCpp with a model loaded, then check again. Running it on another machine? Launch it with{' '}
-                <code className="rounded-md bg-bg-sunken px-1 py-0.5 font-mono text-[11px]">--host 0.0.0.0</code> and put that machine's
-                address
-                below.
+                Point this at a local model server — KoboldCpp, LM Studio, Ollama, or any
+                OpenAI-compatible endpoint — then check again. Running it on another machine? Launch
+                with{' '}
+                <code className="rounded-md bg-bg-sunken px-1 py-0.5 font-mono text-[11px]">--host 0.0.0.0</code>{' '}
+                (or your usual tunnel) and put that address below.
               </p>
               <div className="flex gap-2">
                 <input
@@ -153,6 +157,13 @@ export function WelcomeView({
                 You can set this up later — it only matters when a character actually needs to reply. Change it any time in
                 Settings → Connection.
               </p>
+              <p>
+                Prefer a hosted provider? OpenRouter has a free tier, and OpenAI / NovelAI work too.{' '}
+                <button className="text-accent transition-colors hover:underline" onClick={() => onNavigate('settings')}>
+                  Set one up in Settings → Connection
+                </button>
+                .
+              </p>
             </div>
           )}
         </div>
@@ -161,7 +172,11 @@ export function WelcomeView({
         <div className="mt-4 rounded-2xl border border-border bg-bg-elevated p-5">
           <div className="mb-3 text-sm font-medium text-text">Start your first chat</div>
 
-          {featured ? (
+          {charactersLoading ? (
+            // Don't flash the "you have no characters" branch before the list has loaded — a fresh
+            // install ships with a seeded character, and that flicker reads as "the seed is missing".
+            <div className="h-14 animate-pulse rounded-xl bg-bg-sunken" />
+          ) : featured ? (
             <>
               <div className="flex items-center gap-3">
                 {featured.avatarDataUrl ? (
