@@ -73,7 +73,9 @@ function buildVoiceFingerprintReminder(fingerprint: VoiceFingerprint | undefined
   if (!fingerprint) return undefined
   const catchphrase = fingerprint.catchphrases?.[0]?.trim()
   const tic = fingerprint.verbalTics?.[0]?.trim()
-  const register = (fingerprint.dialectNotes?.trim() || fingerprint.sentenceRhythm?.trim())?.replace(/\.+$/, '')
+  // The full voice block immediately above already carries the register. Repeat it only when it
+  // is the sole available signal; otherwise the catchphrase/tic reminder is enough.
+  const register = !catchphrase && !tic ? (fingerprint.dialectNotes?.trim() || fingerprint.sentenceRhythm?.trim())?.replace(/\.+$/, '') : undefined
   const bits: string[] = []
   if (catchphrase) bits.push(`reach for "${catchphrase}" again when it fits`)
   if (tic) bits.push(`keep the "${tic}" tic alive`)

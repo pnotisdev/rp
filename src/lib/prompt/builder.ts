@@ -251,6 +251,9 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
     input.relationshipDescription?.trim() ? sub(input.relationshipDescription) : '',
     input.styleGuidance?.trim() ? input.styleGuidance.trim() : '',
     imp ? '' : buildSceneInstruction(input.sceneOptions),
+    imp
+      ? ''
+      : `Conversation fidelity: keep statements with their speaker. Resolve references from the exchange; never attribute ${macroCtx.charName}'s words or beliefs to ${macroCtx.userName}. Answer ${macroCtx.userName}'s latest message directly.`,
     imp ? `[Write only ${macroCtx.userName}'s next message. Stop before ${macroCtx.charName} replies.]` : '',
   ]
     .filter(Boolean)

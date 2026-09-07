@@ -56,6 +56,7 @@ import {
 import { detectAnyBoundaryCrossing } from '@/lib/dating/boundaryGuard'
 import { detectPersonaAgencyViolation } from '@/lib/dating/agencyGuard'
 import { buildSteerDirective, hardFailCorrectionDirective } from '@/lib/dating/steer'
+import { earlyEscalationGuidance } from '@/lib/prompt/intimacyGuidance'
 import {
   activityPhase,
   daysUntilAnnualDate,
@@ -690,6 +691,8 @@ export function useChatSession(chatId: string | null) {
       )
       const speakerHoldingBackByPlan = (speakerTrack.plans ?? []).some((p) => p.kind === 'distance')
       const speakerPace = intimacyPaceFor(speakerTrack.mood, speakerHoldingBackByPlan, speaker.boundaries?.length ?? 0)
+      const latestUserText = [...historyForPrompt].reverse().find((m) => m.role === 'user')?.text
+      const earlyEscalationLine = earlyEscalationGuidance(speakerWarmth, latestUserText, speaker.card.name)
       const speakerSceneActive = isIntimacySceneActive(speakerTrack.intimacyScene, countCharReplies(messages))
       // Physical continuity + phase-scaled sensory guidance while a scene is active.
       const intimacySceneLine = speakerSceneActive
@@ -722,7 +725,7 @@ export function useChatSession(chatId: string | null) {
         speakerSceneActive || isAfterglowActive(speakerTrack.afterglow ?? undefined, countCharReplies(messages)) || speakerStats.chemistry >= 70
       const stockRomancePhrasingLine = stockRomancePhrasingNote(isRomanticOrIntimateMoment)
       // Agency/POV guard, broader than `explicitSceneGuidance`'s own — also covers freeform intimacy that never opened a catalog-driven `IntimacyScene`.
-      const agencyGuardLine = agencyGuardNote(isRomanticOrIntimateMoment, speaker.card.name, persona?.name || 'You')
+      const agencyGuardLine = explicitSceneLine ? '' : agencyGuardNote(isRomanticOrIntimateMoment, speaker.card.name, persona?.name || 'You')
 
       // Compact, always-computed ledger of concrete scene facts, consolidated into one block instead of scattered across separate lines.
       const sceneContinuityLine = sceneContinuityNote({
@@ -788,16 +791,10 @@ export function useChatSession(chatId: string | null) {
       // from their `replyLength` override or measured from their own example dialogue. The matching
       // hard token cap lives in `runGeneration` so brevity survives a model that ignores the line.
       const replyLengthInstruction = resolveReplyLength(speaker.replyLength, speaker.card).instruction
-      // The user's own direct feedback from a live playthrough: the character (and the suggested
-      // choices around them) only ever reacted, never proposed anything themselves, so a session
-      // could sit at "waiting for {{user}} to make every move" indefinitely. Deliberately generic
-      // and always-on (not gated behind relationship tracking) — having opinions about what to do
-      // next is basic characterization, not a dating-sim-only concern. The character's own likes/
-      // frequented locations already reach the model every turn via `buildCharacterProfileNote`;
-      // this just tells the model it's allowed to volunteer from that material instead of only
-      // answering when asked.
       const activityInitiativeGuidance =
-        "Your character doesn't only answer what's put in front of them. Every so often, especially once things feel comfortable, let them bring up an idea of their own: something to do together, a place to go, a topic they're curious about, drawing on their own interests and routine rather than only reacting to what's proposed to them."
+        speakerWarmth >= 20 && countCharReplies(messages) >= 3
+          ? `Do not only react: let ${speaker.card.name} sometimes suggest something that fits their own interests or routine.`
+          : ''
       // "Repeated same interaction → diminishing returns": if the player has leaned on the same
       // intent chip several turns running, tell the character to notice rather than keep being moved.
       // `messages` here is a turn behind (this turn's user line is created but not yet re-queried),
@@ -817,7 +814,7 @@ export function useChatSession(chatId: string | null) {
         : [
             emDashRule,
             effectiveAssistFlag(freshChat.assistOverrides?.slowBurnPacing, slowBurnPacing)
-              ? slowBurnPacingNote(speaker.card.name, speakerTrack.mood, speakerHoldingBackByPlan, speakerTrack.currentNeed)
+              ? slowBurnPacingNote(speaker.card.name, speakerTrack.mood, speakerHoldingBackByPlan)
               : '',
             intimacyGuidance(intimacyLevel),
             intimacyOptions,
@@ -846,6 +843,7 @@ export function useChatSession(chatId: string | null) {
             repeatNudge ?? '',
             sceneNudge,
             scheduleConflictLine,
+            earlyEscalationLine,
             triggerStyleLine,
             ambientLine,
             participantGuidance ?? '',

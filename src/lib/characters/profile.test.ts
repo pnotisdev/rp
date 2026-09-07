@@ -85,6 +85,20 @@ describe('buildCharacterProfileNote', () => {
     expect(reminderLine).not.toContain('you know')
   })
 
+  it('does not repeat a detailed register in the reminder when a tic or catchphrase already anchors it', () => {
+    const note = buildCharacterProfileNote(
+      character({
+        voiceFingerprint: {
+          verbalTics: ['well'],
+          dialectNotes: 'formal under pressure',
+        },
+      }),
+    )!
+    const reminderLine = note.split('\n').find((line) => line.startsWith('Voice check'))!
+    expect(note).toContain('formal under pressure')
+    expect(reminderLine).not.toContain('formal under pressure')
+  })
+
   it('folds the register into the reminder when there is no catchphrase or tic to restate', () => {
     const note = buildCharacterProfileNote(character({ voiceFingerprint: { dialectNotes: 'clipped, never contracts a verb' } }))
     expect(note).toContain('Voice check, every single reply')

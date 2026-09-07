@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { intimacyGuidance, resolveIntimacyLevel } from './intimacyGuidance'
+import { earlyEscalationGuidance, intimacyGuidance, resolveIntimacyLevel } from './intimacyGuidance'
 
 describe('intimacyGuidance', () => {
   it("returns an empty string for 'default' — no behavior change for anyone who hasn't touched the setting", () => {
@@ -52,5 +52,19 @@ describe('resolveIntimacyLevel', () => {
   it("treats a world's explicit 'default' as a pin, not as inherit", () => {
     // Distinct from `undefined`: this world sends no instruction even as the global changes.
     expect(resolveIntimacyLevel('default', 'explicit')).toBe('default')
+  })
+})
+
+describe('earlyEscalationGuidance', () => {
+  it('flags a freeform kiss before the first warmth-gated contact unlock', () => {
+    const guidance = earlyEscalationGuidance(0, '*I lean in and kiss her on the lips.*', 'Sumire')
+    expect(guidance).toContain('very low')
+    expect(guidance).toContain('Sumire')
+    expect(guidance).toContain('not assumed welcome or earned')
+  })
+
+  it('costs no prompt text for ordinary chat or once warmth reaches the first contact unlock', () => {
+    expect(earlyEscalationGuidance(0, 'What kind of books do you like?', 'Sumire')).toBe('')
+    expect(earlyEscalationGuidance(15, '*I kiss her on the lips.*', 'Sumire')).toBe('')
   })
 })

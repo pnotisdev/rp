@@ -28,3 +28,21 @@ export function intimacyGuidance(level: IntimacyDetailLevel): string {
       return ''
   }
 }
+
+/**
+ * Freeform player prose is not limited to catalog actions, so the catalog's warmth gates alone
+ * cannot prevent an unearned kiss from reading as automatically welcome. This stays lexical and
+ * deliberately narrow: it adds no prompt text unless a low-warmth player turn actually attempts
+ * physical escalation.
+ */
+const EARLY_PHYSICAL_ESCALATION = /\b(?:kiss(?:es|ed|ing)?|make(?:\s|-)?out|touch(?:es|ed|ing)?|caress(?:es|ed|ing)?|grope(?:s|d|ing)?|undress(?:es|ed|ing)?|strip(?:s|ped|ping)?|hold(?:s|ing)?\s+(?:her|him|them|you)|pull(?:s|ed|ing)?\s+(?:her|him|them|you)\s+close)\b/i
+
+/** A late, state-based cue for freeform physical escalation before even light kissing is unlocked. */
+export function earlyEscalationGuidance(
+  warmth: number,
+  latestUserText: string | undefined,
+  charName: string,
+): string {
+  if (warmth >= 15 || !latestUserText || !EARLY_PHYSICAL_ESCALATION.test(latestUserText)) return ''
+  return `Warmth is still very low. This physical escalation is not assumed welcome or earned; let ${charName} pull back, deflect, set distance, or keep things lighter if that is the honest read. Never accept it just to be agreeable.`
+}

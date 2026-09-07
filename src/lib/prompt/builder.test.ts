@@ -143,6 +143,25 @@ describe('buildPrompt — styleGuidance', () => {
   })
 })
 
+describe('buildPrompt — conversation fidelity', () => {
+  it('places a speaker-attribution guardrail after history and before the reply cue', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        character: character({ name: 'Sumire' }),
+        personaName: 'Kai',
+        history: [
+          { id: '1', role: 'char', name: 'Sumire', text: 'Toradora is practically mainstream.' },
+          { id: '2', role: 'user', name: 'Kai', text: 'What type of books do you like?' },
+        ],
+      }),
+    )
+    const guardrail = "never attribute Sumire's words or beliefs to Kai"
+    expect(result.prompt).toContain(guardrail)
+    expect(result.prompt.indexOf('Kai: What type of books do you like?')).toBeLessThan(result.prompt.indexOf(guardrail))
+    expect(result.prompt.indexOf(guardrail)).toBeLessThan(result.prompt.lastIndexOf('Sumire:'))
+  })
+})
+
 describe('buildPrompt — impersonateAsUser', () => {
   const history: ChatMessage[] = [
     { id: '1', role: 'user', name: 'You', text: 'How was your day?' },

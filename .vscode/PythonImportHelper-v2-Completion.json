@@ -1,0 +1,169 @@
+[
+    {
+        "label": "sys,",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "sys.",
+        "description": "sys.",
+        "detail": "sys.",
+        "documentation": {}
+    },
+    {
+        "label": "numpy",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "numpy",
+        "description": "numpy",
+        "detail": "numpy",
+        "documentation": {}
+    },
+    {
+        "label": "Image",
+        "importPath": "PIL",
+        "description": "PIL",
+        "isExtraImport": true,
+        "detail": "PIL",
+        "documentation": {}
+    },
+    {
+        "label": "ImageFilter",
+        "importPath": "PIL",
+        "description": "PIL",
+        "isExtraImport": true,
+        "detail": "PIL",
+        "documentation": {}
+    },
+    {
+        "label": "remove",
+        "importPath": "rembg",
+        "description": "rembg",
+        "isExtraImport": true,
+        "detail": "rembg",
+        "documentation": {}
+    },
+    {
+        "label": "new_session",
+        "importPath": "rembg",
+        "description": "rembg",
+        "isExtraImport": true,
+        "detail": "rembg",
+        "documentation": {}
+    },
+    {
+        "label": "(F",
+        "kind": 5,
+        "importPath": "tools.comfy._matte",
+        "description": "tools.comfy._matte",
+        "peekOfCode": "(F = (C - (1-a)*bg) / a). The backdrop colour is sampled from the image's own border, so this\nworks whether the sprite was rendered on grey, green, white, anything.\n\"\"\"\nimport sys, io\nimport numpy as np\nfrom PIL import Image, ImageFilter\nfrom rembg import remove, new_session\ninp, outp = sys.argv[1], sys.argv[2]\nmodel = sys.argv[3] if len(sys.argv) > 3 else \"birefnet-general\"\nraw = open(inp, \"rb\").read()",
+        "detail": "tools.comfy._matte",
+        "documentation": {}
+    },
+    {
+        "label": "model",
+        "kind": 5,
+        "importPath": "tools.comfy._matte",
+        "description": "tools.comfy._matte",
+        "peekOfCode": "model = sys.argv[3] if len(sys.argv) > 3 else \"birefnet-general\"\nraw = open(inp, \"rb\").read()\nsrc = np.asarray(Image.open(inp).convert(\"RGB\"))\nring = np.concatenate([\n    src[:6].reshape(-1, 3), src[-6:].reshape(-1, 3),\n    src[:, :6].reshape(-1, 3), src[:, -6:].reshape(-1, 3),\n])\nbg = np.median(ring, axis=0).astype(np.float32)\nrgba = Image.open(io.BytesIO(remove(raw, session=new_session(model), post_process_mask=True))).convert(\"RGBA\")\na = np.asarray(rgba.split()[3]).astype(np.float32) / 255.0",
+        "detail": "tools.comfy._matte",
+        "documentation": {}
+    },
+    {
+        "label": "raw",
+        "kind": 5,
+        "importPath": "tools.comfy._matte",
+        "description": "tools.comfy._matte",
+        "peekOfCode": "raw = open(inp, \"rb\").read()\nsrc = np.asarray(Image.open(inp).convert(\"RGB\"))\nring = np.concatenate([\n    src[:6].reshape(-1, 3), src[-6:].reshape(-1, 3),\n    src[:, :6].reshape(-1, 3), src[:, -6:].reshape(-1, 3),\n])\nbg = np.median(ring, axis=0).astype(np.float32)\nrgba = Image.open(io.BytesIO(remove(raw, session=new_session(model), post_process_mask=True))).convert(\"RGBA\")\na = np.asarray(rgba.split()[3]).astype(np.float32) / 255.0\nrgb = np.asarray(rgba.convert(\"RGB\")).astype(np.float32)",
+        "detail": "tools.comfy._matte",
+        "documentation": {}
+    },
+    {
+        "label": "src",
+        "kind": 5,
+        "importPath": "tools.comfy._matte",
+        "description": "tools.comfy._matte",
+        "peekOfCode": "src = np.asarray(Image.open(inp).convert(\"RGB\"))\nring = np.concatenate([\n    src[:6].reshape(-1, 3), src[-6:].reshape(-1, 3),\n    src[:, :6].reshape(-1, 3), src[:, -6:].reshape(-1, 3),\n])\nbg = np.median(ring, axis=0).astype(np.float32)\nrgba = Image.open(io.BytesIO(remove(raw, session=new_session(model), post_process_mask=True))).convert(\"RGBA\")\na = np.asarray(rgba.split()[3]).astype(np.float32) / 255.0\nrgb = np.asarray(rgba.convert(\"RGB\")).astype(np.float32)\n# erode ~1px (MinFilter 3) then nudge partial edges toward 0 so the outermost blended ring drops out",
+        "detail": "tools.comfy._matte",
+        "documentation": {}
+    },
+    {
+        "label": "ring",
+        "kind": 5,
+        "importPath": "tools.comfy._matte",
+        "description": "tools.comfy._matte",
+        "peekOfCode": "ring = np.concatenate([\n    src[:6].reshape(-1, 3), src[-6:].reshape(-1, 3),\n    src[:, :6].reshape(-1, 3), src[:, -6:].reshape(-1, 3),\n])\nbg = np.median(ring, axis=0).astype(np.float32)\nrgba = Image.open(io.BytesIO(remove(raw, session=new_session(model), post_process_mask=True))).convert(\"RGBA\")\na = np.asarray(rgba.split()[3]).astype(np.float32) / 255.0\nrgb = np.asarray(rgba.convert(\"RGB\")).astype(np.float32)\n# erode ~1px (MinFilter 3) then nudge partial edges toward 0 so the outermost blended ring drops out\nam = Image.fromarray((a * 255).astype(np.uint8)).filter(ImageFilter.MinFilter(3))",
+        "detail": "tools.comfy._matte",
+        "documentation": {}
+    },
+    {
+        "label": "bg",
+        "kind": 5,
+        "importPath": "tools.comfy._matte",
+        "description": "tools.comfy._matte",
+        "peekOfCode": "bg = np.median(ring, axis=0).astype(np.float32)\nrgba = Image.open(io.BytesIO(remove(raw, session=new_session(model), post_process_mask=True))).convert(\"RGBA\")\na = np.asarray(rgba.split()[3]).astype(np.float32) / 255.0\nrgb = np.asarray(rgba.convert(\"RGB\")).astype(np.float32)\n# erode ~1px (MinFilter 3) then nudge partial edges toward 0 so the outermost blended ring drops out\nam = Image.fromarray((a * 255).astype(np.uint8)).filter(ImageFilter.MinFilter(3))\na = np.clip(np.asarray(am).astype(np.float32) / 255.0 - 5.0 / 255.0, 0.0, 1.0)\na3 = a[..., None]\nwith np.errstate(divide=\"ignore\", invalid=\"ignore\"):\n    fg = np.where(a3 > 0.004, (rgb - (1.0 - a3) * bg) / np.maximum(a3, 1e-4), rgb)",
+        "detail": "tools.comfy._matte",
+        "documentation": {}
+    },
+    {
+        "label": "rgba",
+        "kind": 5,
+        "importPath": "tools.comfy._matte",
+        "description": "tools.comfy._matte",
+        "peekOfCode": "rgba = Image.open(io.BytesIO(remove(raw, session=new_session(model), post_process_mask=True))).convert(\"RGBA\")\na = np.asarray(rgba.split()[3]).astype(np.float32) / 255.0\nrgb = np.asarray(rgba.convert(\"RGB\")).astype(np.float32)\n# erode ~1px (MinFilter 3) then nudge partial edges toward 0 so the outermost blended ring drops out\nam = Image.fromarray((a * 255).astype(np.uint8)).filter(ImageFilter.MinFilter(3))\na = np.clip(np.asarray(am).astype(np.float32) / 255.0 - 5.0 / 255.0, 0.0, 1.0)\na3 = a[..., None]\nwith np.errstate(divide=\"ignore\", invalid=\"ignore\"):\n    fg = np.where(a3 > 0.004, (rgb - (1.0 - a3) * bg) / np.maximum(a3, 1e-4), rgb)\nout = np.dstack([np.clip(fg, 0, 255), a * 255]).astype(np.uint8)",
+        "detail": "tools.comfy._matte",
+        "documentation": {}
+    },
+    {
+        "label": "a",
+        "kind": 5,
+        "importPath": "tools.comfy._matte",
+        "description": "tools.comfy._matte",
+        "peekOfCode": "a = np.asarray(rgba.split()[3]).astype(np.float32) / 255.0\nrgb = np.asarray(rgba.convert(\"RGB\")).astype(np.float32)\n# erode ~1px (MinFilter 3) then nudge partial edges toward 0 so the outermost blended ring drops out\nam = Image.fromarray((a * 255).astype(np.uint8)).filter(ImageFilter.MinFilter(3))\na = np.clip(np.asarray(am).astype(np.float32) / 255.0 - 5.0 / 255.0, 0.0, 1.0)\na3 = a[..., None]\nwith np.errstate(divide=\"ignore\", invalid=\"ignore\"):\n    fg = np.where(a3 > 0.004, (rgb - (1.0 - a3) * bg) / np.maximum(a3, 1e-4), rgb)\nout = np.dstack([np.clip(fg, 0, 255), a * 255]).astype(np.uint8)\nImage.fromarray(out, \"RGBA\").save(outp)",
+        "detail": "tools.comfy._matte",
+        "documentation": {}
+    },
+    {
+        "label": "rgb",
+        "kind": 5,
+        "importPath": "tools.comfy._matte",
+        "description": "tools.comfy._matte",
+        "peekOfCode": "rgb = np.asarray(rgba.convert(\"RGB\")).astype(np.float32)\n# erode ~1px (MinFilter 3) then nudge partial edges toward 0 so the outermost blended ring drops out\nam = Image.fromarray((a * 255).astype(np.uint8)).filter(ImageFilter.MinFilter(3))\na = np.clip(np.asarray(am).astype(np.float32) / 255.0 - 5.0 / 255.0, 0.0, 1.0)\na3 = a[..., None]\nwith np.errstate(divide=\"ignore\", invalid=\"ignore\"):\n    fg = np.where(a3 > 0.004, (rgb - (1.0 - a3) * bg) / np.maximum(a3, 1e-4), rgb)\nout = np.dstack([np.clip(fg, 0, 255), a * 255]).astype(np.uint8)\nImage.fromarray(out, \"RGBA\").save(outp)",
+        "detail": "tools.comfy._matte",
+        "documentation": {}
+    },
+    {
+        "label": "am",
+        "kind": 5,
+        "importPath": "tools.comfy._matte",
+        "description": "tools.comfy._matte",
+        "peekOfCode": "am = Image.fromarray((a * 255).astype(np.uint8)).filter(ImageFilter.MinFilter(3))\na = np.clip(np.asarray(am).astype(np.float32) / 255.0 - 5.0 / 255.0, 0.0, 1.0)\na3 = a[..., None]\nwith np.errstate(divide=\"ignore\", invalid=\"ignore\"):\n    fg = np.where(a3 > 0.004, (rgb - (1.0 - a3) * bg) / np.maximum(a3, 1e-4), rgb)\nout = np.dstack([np.clip(fg, 0, 255), a * 255]).astype(np.uint8)\nImage.fromarray(out, \"RGBA\").save(outp)",
+        "detail": "tools.comfy._matte",
+        "documentation": {}
+    },
+    {
+        "label": "a",
+        "kind": 5,
+        "importPath": "tools.comfy._matte",
+        "description": "tools.comfy._matte",
+        "peekOfCode": "a = np.clip(np.asarray(am).astype(np.float32) / 255.0 - 5.0 / 255.0, 0.0, 1.0)\na3 = a[..., None]\nwith np.errstate(divide=\"ignore\", invalid=\"ignore\"):\n    fg = np.where(a3 > 0.004, (rgb - (1.0 - a3) * bg) / np.maximum(a3, 1e-4), rgb)\nout = np.dstack([np.clip(fg, 0, 255), a * 255]).astype(np.uint8)\nImage.fromarray(out, \"RGBA\").save(outp)",
+        "detail": "tools.comfy._matte",
+        "documentation": {}
+    },
+    {
+        "label": "a3",
+        "kind": 5,
+        "importPath": "tools.comfy._matte",
+        "description": "tools.comfy._matte",
+        "peekOfCode": "a3 = a[..., None]\nwith np.errstate(divide=\"ignore\", invalid=\"ignore\"):\n    fg = np.where(a3 > 0.004, (rgb - (1.0 - a3) * bg) / np.maximum(a3, 1e-4), rgb)\nout = np.dstack([np.clip(fg, 0, 255), a * 255]).astype(np.uint8)\nImage.fromarray(out, \"RGBA\").save(outp)",
+        "detail": "tools.comfy._matte",
+        "documentation": {}
+    },
+    {
+        "label": "out",
+        "kind": 5,
+        "importPath": "tools.comfy._matte",
+        "description": "tools.comfy._matte",
+        "peekOfCode": "out = np.dstack([np.clip(fg, 0, 255), a * 255]).astype(np.uint8)\nImage.fromarray(out, \"RGBA\").save(outp)",
+        "detail": "tools.comfy._matte",
+        "documentation": {}
+    }
+]
