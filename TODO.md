@@ -219,9 +219,11 @@ play."
       and "Roleplay" (relationship tracking, choices, objectives, memory, quick replies, slow-burn,
       intimacy). The "Plain chat vs dating sim" wall of text becomes the short intro to "Roleplay."
       `src/components/settings/SettingsView.tsx`, `SamplingControls.tsx`.
-- [x] **Sticky settings tab strip** — shipped. The heading + tab strip stick to the top of the
-      scroll container (edge-bleeding opaque background) so switching tabs from deep in a long tab
-      no longer means scrolling up. `src/components/settings/SettingsView.tsx`.
+- [x] **Sticky settings tab strip** — shipped (reworked after a first pass looked bad: the scroll
+      container's top padding was offsetting the stick point, leaving a gap that scrolled content
+      bled through). Now the "Settings" heading scrolls away and only the tab strip pins — opaque
+      `bg-bg` + a `pb` shelf, container `pt` moved onto the heading. Verified desktop + mobile.
+      `src/components/settings/SettingsView.tsx`.
 - [x] **Flip the Connection tab** — shipped. "Chat generation backend" (the provider picker + any
       hosted config) is now first; "KoboldCpp connection" follows, with copy updated to match the
       new order. Both still always visible. `src/components/settings/ConnectionSettings.tsx`.

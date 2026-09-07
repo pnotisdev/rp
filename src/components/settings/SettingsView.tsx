@@ -21,12 +21,15 @@ export function SettingsView() {
   ]
 
   return (
-    <div className="mx-auto w-full max-w-2xl flex-1 overflow-y-auto p-4 sm:p-8">
-      {/* Sticky so switching tabs never means scrolling back up from deep in a long tab. The
-          negative margin + matching padding lets the opaque background bleed to the scroll
-          container's edges so scrolled content doesn't peek past the strip's sides. */}
-      <div className="sticky top-0 z-10 -mx-4 mb-6 bg-bg px-4 pt-4 sm:-mx-8 sm:mb-10 sm:px-8 sm:pt-8">
-        <h2 className="mb-5 font-display text-lg text-text">Settings</h2>
+    // No top padding on the scroll container itself — `sticky top-0` sticks relative to the
+    // container's padding edge, so any `pt` here would leave a gap above the pinned strip that
+    // scrolled content shows through. The top gap lives on the (non-sticky) heading instead.
+    <div className="mx-auto w-full max-w-2xl flex-1 overflow-y-auto px-4 pb-10 sm:px-8">
+      <h2 className="pb-4 pt-4 font-display text-lg text-text sm:pt-8">Settings</h2>
+      {/* Only the tab strip sticks — the heading scrolls away. `bg-bg` + the `pb` shelf keep it
+          opaque top-to-bottom so switching tabs from deep in a long tab (Generation is ~16
+          sections) never means scrolling back up. */}
+      <div className="sticky top-0 z-20 bg-bg pb-3 pt-1.5 sm:pb-4 sm:pt-2">
         {/* Mobile: a native select instead of a strip that scrolls tabs off-screen (Voice and Data
             were previously unreachable without this). Desktop keeps the visible strip. */}
         <select
@@ -54,12 +57,14 @@ export function SettingsView() {
           ))}
         </div>
       </div>
-      {tab === 'connection' && <ConnectionSettings />}
-      {tab === 'appearance' && <ThemeEditor />}
-      {tab === 'generation' && <SamplingControls />}
-      {tab === 'voice' && <VoiceSettings />}
-      {tab === 'images' && <ImageGenSettings />}
-      {tab === 'data' && <DataSettings />}
+      <div className="pt-6">
+        {tab === 'connection' && <ConnectionSettings />}
+        {tab === 'appearance' && <ThemeEditor />}
+        {tab === 'generation' && <SamplingControls />}
+        {tab === 'voice' && <VoiceSettings />}
+        {tab === 'images' && <ImageGenSettings />}
+        {tab === 'data' && <DataSettings />}
+      </div>
     </div>
   )
 }
