@@ -33,6 +33,12 @@ export type TriggerAction =
   | { kind: 'social_reaction'; topic: string }
   /** A free-text steer folded into the live per-turn `styleGuidance` channel. Pair with `repeatable: true` for a steer that stays live only while its condition holds. */
   | { kind: 'style_guidance'; text: string }
+  /** Starts a real, live, scored scene the character opens themselves — Stardew's heart events /
+   *  Persona's confidant beats, but built from `TriggerCondition`s that already cover a warmth
+   *  stage or scene-flag combination and more. Built as a `kind: 'hangout'`, `free: true`
+   *  `DateEventCard` and handed to the existing `startDateEvent` pipeline (`useChatSession.ts`) —
+   *  see that function's own handling of `free` for why it doesn't spend a day's energy. */
+  | { kind: 'start_scene'; title: string; description: string; objectiveTitle: string; objectiveDescription?: string }
 
 export interface Trigger {
   id: string
@@ -161,6 +167,8 @@ export function describeAction(action: TriggerAction): string {
       return `a named connection reacts to "${action.topic}"`
     case 'style_guidance':
       return `steer: "${action.text}"`
+    case 'start_scene':
+      return `starts a scene: "${action.title}"`
     default:
       return 'unknown action'
   }

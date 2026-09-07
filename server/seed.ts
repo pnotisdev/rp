@@ -5,12 +5,16 @@ import { avatarsDir, characterStore, personaStore, worldInfoBookStore, worldStor
 import {
   SEED_BACKGROUND_KEYS,
   SEED_CHARACTER_ID,
+  SEED_CHARACTER_2_ID,
   SEED_PERSONA_ID,
   SEED_SPRITE_KEYS,
   SEED_WORLD_ID,
+  SEED_WORLD_2_ID,
   seedCharacter,
+  seedCharacter2,
   seedPersona,
   seedWorld,
+  seedWorld2,
   seedWorldInfoBook,
 } from './seedContent.ts'
 
@@ -26,12 +30,18 @@ const seedSpritesDir = path.resolve(__dirname, '..', 'seed', 'sprites', 'sumire'
  * harmless no-op once it's already been applied once.
  */
 export function runSeedIfNeeded(): void {
-  // The starter persona was added after the original seed shipped — back-fill it for installs that
-  // already ran the seed before it existed, guarded by its own id so it's still a one-time no-op.
+  // The starter persona, and later the second (Freeform) seed world/character, were both added
+  // after the original seed shipped — back-fill each for installs that already ran the seed before
+  // they existed, guarded by their own ids so this stays a one-time no-op per piece.
   if (worldStore.get(SEED_WORLD_ID)) {
     if (!personaStore.get(SEED_PERSONA_ID)) {
       personaStore.insert(seedPersona as unknown as Record<string, unknown>)
       console.log('[rp-server] back-filled the starter persona')
+    }
+    if (!worldStore.get(SEED_WORLD_2_ID)) {
+      worldStore.insert(seedWorld2 as unknown as Record<string, unknown>)
+      characterStore.insert(seedCharacter2 as unknown as Record<string, unknown>)
+      console.log('[rp-server] back-filled the second seed world/character (Freeform)')
     }
     return
   }
@@ -69,9 +79,12 @@ export function runSeedIfNeeded(): void {
   worldInfoBookStore.insert(seedWorldInfoBook as unknown as Record<string, unknown>)
   characterStore.insert(seedCharacter as unknown as Record<string, unknown>)
   personaStore.insert(seedPersona as unknown as Record<string, unknown>)
+  // The second seed: a Freeform-template world + text-only NPC, no art assets to copy for either.
+  worldStore.insert(seedWorld2 as unknown as Record<string, unknown>)
+  characterStore.insert(seedCharacter2 as unknown as Record<string, unknown>)
 
   console.log(
-    `[rp-server] seeded starter content: 1 world, 1 World Info book, 1 character, 1 persona ` +
+    `[rp-server] seeded starter content: 2 worlds, 1 World Info book, 2 characters, 1 persona ` +
       `(${copied}/${SEED_BACKGROUND_KEYS.length} backgrounds, ${spritesCopied}/${SEED_SPRITE_KEYS.length} sprites copied)`,
   )
 }

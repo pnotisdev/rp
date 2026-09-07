@@ -17,6 +17,7 @@ import { buildCharacterPack, downloadCharacterPack, importCharacterPack, parseCh
 import { DEFAULT_EXPRESSIONS, slugifyExpressionId, type CustomExpression } from '@/lib/vn/expressions'
 import { BASE_OUTFIT_ID, expressionIdsForOutfit, outfitCoverage, slugifyOutfitId, spriteKey, type Outfit } from '@/lib/vn/outfits'
 import { combinedSceneFlags } from '@/lib/dating/stage'
+import { getCalendarInfo } from '@/lib/world/calendar'
 import { newId } from '@/lib/id'
 import { NumberField, SelectField, TextAreaField, TextField } from '@/components/ui/Field'
 import { Button } from '@/components/ui/Button'
@@ -108,6 +109,7 @@ export function CharacterEditor({
   const [occupation, setOccupation] = useState(character?.occupation ?? '')
   const [workplace, setWorkplace] = useState(character?.workplace ?? '')
   const [homeLocation, setHomeLocation] = useState(character?.homeLocation ?? '')
+  const [birthday, setBirthday] = useState<number | undefined>(character?.birthday)
   const [frequentedLocations, setFrequentedLocations] = useState<string[]>(character?.frequentedLocations ?? [])
   const [likes, setLikes] = useState<string[]>(character?.likes ?? [])
   const [goals, setGoals] = useState<string[]>(character?.goals ?? [])
@@ -157,6 +159,7 @@ export function CharacterEditor({
     setOccupation(character?.occupation ?? '')
     setWorkplace(character?.workplace ?? '')
     setHomeLocation(character?.homeLocation ?? '')
+    setBirthday(character?.birthday)
     setFrequentedLocations(character?.frequentedLocations ?? [])
     setLikes(character?.likes ?? [])
     setGoals(character?.goals ?? [])
@@ -259,7 +262,7 @@ export function CharacterEditor({
     const settings = useSettingsStore.getState()
     settings.setSampler(maximumImmersionSamplerParams())
     if (!settings.slowBurnPacing) settings.setSlowBurnPacing(true)
-    if (!settings.visualNovelMode) settings.toggleFlag('visualNovelMode')
+    if (!settings.visualNovelMode) settings.setVisualNovelMode(true)
     toastSuccess(
       'Applied Maximum Immersion: this character\'s system prompt is now "Immersive, no meta", and the global sampler/slow-burn pacing/VN mode settings are updated. Bind this character to a "Dating Sim" world for the full mechanic set.',
     )
@@ -303,6 +306,7 @@ export function CharacterEditor({
       occupation: occupation.trim() || null,
       workplace: workplace.trim() || null,
       homeLocation: homeLocation.trim() || null,
+      birthday: birthday ?? null,
       frequentedLocations: frequentedLocations.length ? frequentedLocations : null,
       likes: likes.length ? likes : null,
       goals: goals.length ? goals : null,
@@ -719,6 +723,22 @@ export function CharacterEditor({
               <TextField label="Occupation" value={occupation} onChange={(e) => setOccupation(e.target.value)} placeholder="second-year architecture student" />
               <TextField label="Workplace / school" value={workplace} onChange={(e) => setWorkplace(e.target.value)} placeholder="Sakura Hill University" />
               <TextField label="Home" value={homeLocation} onChange={(e) => setHomeLocation(e.target.value)} placeholder="a small apartment near the station" />
+              <NumberField
+                label="Birthday (day of year)"
+                min={0}
+                max={111}
+                value={birthday ?? ''}
+                onChange={(e) => setBirthday(e.target.value === '' ? undefined : Math.max(0, Math.min(111, Math.round(Number(e.target.value)))))}
+                placeholder="0–111"
+                hint={
+                  birthday !== undefined
+                    ? (() => {
+                        const info = getCalendarInfo(birthday)
+                        return `→ ${info.season.charAt(0).toUpperCase() + info.season.slice(1)}, day ${info.dayOfSeason}/28`
+                      })()
+                    : 'An 8x gift bonus on the day, plus a nudge that it’s coming up — day 0 is the first day of Spring, wrapping every 112 days.'
+                }
+              />
               <TextField
                 label="Frequented locations"
                 value={frequentedLocations.join(', ')}

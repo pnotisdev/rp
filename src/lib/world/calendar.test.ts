@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  ALL_HOLIDAYS,
   DAYS_PER_YEAR,
   activityPhase,
   advancePhase,
+  daysUntilAnnualDate,
   describePresence,
   describeWeather,
   describeWorldMoment,
@@ -291,5 +293,33 @@ describe('describePresence', () => {
     expect(describePresence({ status: 'traveling', activity: 'Heading to market' })).toBe(
       '{{char}} is currently traveling — Heading to market.',
     )
+  })
+})
+
+describe('daysUntilAnnualDate', () => {
+  it('is 0 when today already is the target day-of-year', () => {
+    expect(daysUntilAnnualDate(15, 15)).toBe(0)
+  })
+
+  it('counts forward within the same year', () => {
+    expect(daysUntilAnnualDate(10, 15)).toBe(5)
+  })
+
+  it('wraps forward across the year boundary rather than going negative', () => {
+    // Target already passed this year (day 5) — counts forward to day 5 of *next* year instead.
+    expect(daysUntilAnnualDate(110, 5)).toBe(DAYS_PER_YEAR - 110 + 5)
+  })
+
+  it('normalizes an absolute day far beyond one year the same as its wrapped equivalent', () => {
+    expect(daysUntilAnnualDate(DAYS_PER_YEAR * 3 + 10, 15)).toBe(5)
+  })
+})
+
+describe('ALL_HOLIDAYS', () => {
+  it('lists exactly one holiday per season, each landing on its own actual holiday per getCalendarInfo', () => {
+    expect(ALL_HOLIDAYS).toHaveLength(4)
+    for (const holiday of ALL_HOLIDAYS) {
+      expect(getCalendarInfo(holiday.dayOfYear).holiday).toBe(holiday.name)
+    }
   })
 })

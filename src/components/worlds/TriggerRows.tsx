@@ -194,14 +194,15 @@ export function TriggerActionRows({
   return (
     <div className="mt-2 space-y-1.5">
       {actions.map((a, i) => (
-        <div key={i} className="flex flex-wrap items-center gap-1.5 text-[11px]">
-          <span className="w-9 shrink-0 text-text-muted">{i === 0 ? 'Then' : 'and'}</span>
+        <div key={i} className={`flex flex-wrap gap-1.5 text-[11px] ${a.kind === 'start_scene' ? 'items-start' : 'items-center'}`}>
+          <span className="w-9 shrink-0 pt-1 text-text-muted">{i === 0 ? 'Then' : 'and'}</span>
           <select
             value={a.kind}
             onChange={(e) => {
               const kind = e.target.value as TriggerAction['kind']
               if (kind === 'set_flag') set(i, { kind, flag: knownFlags[0]?.id ?? 'first_date' })
               else if (kind === 'social_reaction') set(i, { kind, topic: '' })
+              else if (kind === 'start_scene') set(i, { kind, title: '', description: '', objectiveTitle: '' })
               else set(i, { kind, text: '' })
             }}
             aria-label="Action type"
@@ -211,6 +212,7 @@ export function TriggerActionRows({
             <option value="set_flag">set flag</option>
             <option value="notify">notify me</option>
             <option value="social_reaction">a named connection reacts</option>
+            <option value="start_scene">starts a scene</option>
           </select>
 
           {a.kind === 'set_flag' ? (
@@ -234,6 +236,40 @@ export function TriggerActionRows({
               aria-label="Topic a connection reacts to"
               className="min-w-0 flex-1 rounded-md bg-bg px-2 py-1 text-text outline-none"
             />
+          ) : a.kind === 'start_scene' ? (
+            <div className="flex min-w-0 flex-1 flex-col gap-1">
+              <input
+                value={a.title}
+                onChange={(e) => set(i, { ...a, title: e.target.value })}
+                placeholder="Scene title — e.g. She asks you to walk her home"
+                aria-label="Scene title"
+                className="w-full rounded-md bg-bg px-2 py-1 text-text outline-none"
+              />
+              <input
+                value={a.description}
+                onChange={(e) => set(i, { ...a, description: e.target.value })}
+                placeholder="A line or two setting up the moment"
+                aria-label="Scene description"
+                className="w-full rounded-md bg-bg px-2 py-1 text-text outline-none"
+              />
+              <input
+                value={a.objectiveTitle}
+                onChange={(e) => set(i, { ...a, objectiveTitle: e.target.value })}
+                placeholder="Objective shown to the player — e.g. Walk her home"
+                aria-label="Scene objective"
+                className="w-full rounded-md bg-bg px-2 py-1 text-text outline-none"
+              />
+              <input
+                value={a.objectiveDescription ?? ''}
+                onChange={(e) => set(i, { ...a, objectiveDescription: e.target.value || undefined })}
+                placeholder="Objective detail (optional)"
+                aria-label="Scene objective detail"
+                className="w-full rounded-md bg-bg px-2 py-1 text-text outline-none"
+              />
+              <p className="text-text-muted">
+                Fires as a free, no-energy-cost live scene — no hidden agenda or walkout risk, same as any other hangout.
+              </p>
+            </div>
           ) : (
             <input
               value={a.text}

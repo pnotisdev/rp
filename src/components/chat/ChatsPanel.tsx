@@ -5,6 +5,7 @@ import { charactersApi, chatsApi, worldsApi } from '@/lib/api/client'
 import { useChatBackendClient } from '@/lib/hooks/useChatBackendClient'
 import { createChat } from '@/lib/chat/createChat'
 import { getCurrentActivity, presenceLabel } from '@/lib/world/calendar'
+import { getWorldTemplate } from '@/lib/world/worldTemplates'
 import type { Character } from '@/lib/characters/cardSpec'
 import type { Chat } from '@/lib/types'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
@@ -109,7 +110,7 @@ export function ChatsPanel({
     setBusyId(chat.id)
     try {
       const world = worlds.find((w) => w.id === character.worldId)
-      const fresh = await createChat({ character, world, personaId: chat.personaId, client })
+      const fresh = await createChat({ character, world, personaId: chat.personaId, mode: chat.mode, client })
       onSelect(fresh.id)
     } catch (e) {
       toastError(errorMessage(e))
@@ -290,6 +291,7 @@ export function ChatsPanel({
                   )}
                   <div className="truncate text-xs text-text-muted">
                     {isBusy ? 'Working…' : new Date(chat.updatedAt).toLocaleString()}
+                    {chat.mode && ` · ${getWorldTemplate(chat.mode).label}`}
                   </div>
                 </div>
               </button>

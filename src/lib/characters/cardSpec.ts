@@ -171,6 +171,10 @@ export interface Character {
   weatherPreferences?: WeatherPreferences
   /** Daily/weekly routine (world/calendar.ts); only meaningful for a world-bound character. */
   schedule?: ScheduleEntry[]
+  /** Day-of-year (0–111, world/calendar.ts) this character was born — an 8x gift multiplier on the
+   *  day (`dating/gifts.ts`), plus an ambient "it's coming up" nudge in the week before
+   *  (`world/ambientEvents.ts`). Only meaningful for a world-bound character. */
+  birthday?: number
   /** General interests/hobbies, distinct from `giftLikes` (gift-shopping taste specifically). */
   likes?: string[]
   /** What this character wants or is working toward. */

@@ -250,6 +250,46 @@ describe('describeCondition / describeAction', () => {
     expect(describeAction({ kind: 'style_guidance', text: 'gifts read as suspicious right now' })).toContain(
       'gifts read as suspicious right now',
     )
+    expect(
+      describeAction({ kind: 'start_scene', title: 'She asks you to walk her home', description: '', objectiveTitle: 'Walk her home' }),
+    ).toContain('She asks you to walk her home')
+  })
+})
+
+describe('start_scene action', () => {
+  it('flows through evaluateTriggers actions like any other action kind, carrying the full authored premise', () => {
+    const t = [
+      trigger({
+        id: 'heart-1',
+        then: [
+          {
+            kind: 'start_scene',
+            title: 'A quiet moment',
+            description: 'She lingers after class.',
+            objectiveTitle: 'Stay a while',
+            objectiveDescription: 'See what she wants to say.',
+          },
+        ],
+      }),
+    ]
+    const out = evaluateTriggers(t, ctx())
+    expect(out.actions).toEqual([
+      {
+        kind: 'start_scene',
+        title: 'A quiet moment',
+        description: 'She lingers after class.',
+        objectiveTitle: 'Stay a while',
+        objectiveDescription: 'See what she wants to say.',
+      },
+    ])
+  })
+
+  it('is a one-shot action by default, same as every other trigger — it does not refire once already fired', () => {
+    const t = [trigger({ id: 'heart-1', then: [{ kind: 'start_scene', title: 'A quiet moment', description: '', objectiveTitle: 'Stay a while' }] })]
+    const first = evaluateTriggers(t, ctx())
+    expect(first.fired).toHaveLength(1)
+    const second = evaluateTriggers(t, ctx(), first.firedIds)
+    expect(second.fired).toHaveLength(0)
   })
 })
 

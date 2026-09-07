@@ -37,6 +37,51 @@ export function giftRepetitionMultiplier(sameGiftRun: number): number {
   return 0.1
 }
 
+/** Stardew's "one gift a day", generalized to a turn window rather than the world clock's actual
+ *  day — the clock only advances when the player deliberately spends a day-planner action or a
+ *  date/event, not with real elapsed turns, so a literal day-bound cap would rarely ever engage,
+ *  and wouldn't apply at all to a chat with no bound world. A turn window achieves the same "don't
+ *  gift-spam" goal for every chat, using data (`GiftLogEntry.turn`) already tracked. */
+export const GIFT_CADENCE_WINDOW_TURNS = 6
+
+/** How many gifts (any kind, not just a repeat of the one being given) landed within the last
+ *  `GIFT_CADENCE_WINDOW_TURNS` turns — read before this gift's own log entry is appended, same
+ *  convention `trailingSameGiftRun` already follows. */
+export function recentGiftCount(log: GiftLogEntry[] | undefined, currentTurn: number): number {
+  return (log ?? []).filter((e) => currentTurn - e.turn <= GIFT_CADENCE_WINDOW_TURNS).length
+}
+
+/** Diminishing returns the more gifts have landed recently, regardless of which ones — full weight
+ *  for the first in the window, roughly halved for a second, heavily discounted beyond that. Never
+ *  applied to an already-negative delta, same rule `giftRepetitionMultiplier` follows. */
+export function giftCadenceMultiplier(recentCount: number): number {
+  if (recentCount <= 0) return 1
+  if (recentCount === 1) return 0.5
+  return 0.2
+}
+
+/** Stardew's single biggest gift multiplier: a positive gift given on the character's actual
+ *  birthday (`Character.birthday`, `world/calendar.ts`) is a special occasion regardless of
+ *  whether this exact gift was just given yesterday — so it bypasses `giftRepetitionMultiplier`
+ *  entirely rather than stacking with it. */
+export const BIRTHDAY_GIFT_MULTIPLIER = 8
+
+/** Replaces the normal repetition-based scaling with a flat `BIRTHDAY_GIFT_MULTIPLIER` on the
+ *  character's actual birthday. Never amplifies an already-negative (mismatch) `baseDelta` —
+ *  a birthday doesn't make a bad gift good, it just isn't punished extra either
+ *  (`giftMismatchPenalty` still applies on top of this, same as any other day). */
+export function giftBirthdayMultiplier(baseDelta: number, isBirthdayToday: boolean, sameGiftRun: number): number {
+  if (baseDelta <= 0) return baseDelta
+  return isBirthdayToday ? baseDelta * BIRTHDAY_GIFT_MULTIPLIER : baseDelta * giftRepetitionMultiplier(sameGiftRun)
+}
+
+/** One-shot reaction steer for a gift given on the character's actual birthday — replaces (not
+ *  appends to) `giftReactionGuidance`'s taste-based read, since the occasion itself supersedes it:
+ *  a birthday gift is a big deal regardless of whether it happens to be exactly their taste. */
+export function birthdayGiftGuidance(charName: string, giftName: string): string {
+  return `Today is ${charName}'s actual birthday, which makes ${giftName} land as a much bigger deal than an ordinary gift — genuine warmth, real delight that it's today of all days, and it's fair for ${charName} to actually thank the giver for remembering. This holds regardless of whether ${giftName} would otherwise have been exactly their taste.`
+}
+
 /** Extra cost when a gift the character has an authored dislike for is given again after already missing once. `0` the first time (the base negative score already covers that miss). */
 export function giftMismatchPenalty(preferenceScore: number, priorTimesGivenThisGift: number): number {
   if (preferenceScore >= -0.5) return 0
@@ -46,6 +91,18 @@ export function giftMismatchPenalty(preferenceScore: number, priorTimesGivenThis
 export interface GiftTaste {
   rarity: GiftRarity
   preferenceScore: number
+}
+
+/** A short, player-facing read of a gift's discovered preference score, for the Shop tab's
+ *  progressive taste reveal — only the two tiers this file already treats as meaningful elsewhere
+ *  (`isThoughtfulNotExpensive`'s `>= 2` "beloved" cutoff, `isMismatch`'s `<= -0.5` cutoff
+ *  elsewhere in `useChatSession.ts`); `''` for anything in-between, meaning "no badge — nothing
+ *  learned worth showing yet". The caller gates this on the gift having actually been given at
+ *  least once (`RelationshipTrack.giftsGiven`) — this function itself doesn't know "discovered". */
+export function giftTasteLabel(charName: string, preferenceScore: number): string {
+  if (preferenceScore >= 2) return `${charName} loves this`
+  if (preferenceScore <= -0.5) return `Not really ${charName}'s taste`
+  return ''
 }
 
 /** A cheap/mid gift that scores as a genuine favorite. */
@@ -66,6 +123,8 @@ export function giftReactionGuidance(
   sameGiftRun: number,
   isMismatch: boolean,
   priorTimesGivenThisGift: number,
+  /** Gifts of any kind within the recent turn window (`recentGiftCount`) — the soft cadence cap's own narrative counterpart. */
+  recentGiftCount: number,
   taste?: GiftTaste,
 ): string | undefined {
   if (isMismatch && priorTimesGivenThisGift > 0) {
@@ -76,6 +135,9 @@ export function giftReactionGuidance(
   }
   if (sameGiftRun === 1) {
     return `${userName} just gave ${charName} another ${giftName}, the same gift as last time. Still sweet, but ${charName} can notice the repeat rather than reacting exactly as freshly as the first time.`
+  }
+  if (recentGiftCount >= 2) {
+    return `${userName} has been giving ${charName} gifts in quick succession lately. However this one lands on its own merits, it can also register as a little much in such a short span — each gift doesn't quite get to be its own moment when they're stacked this close together.`
   }
   if (taste && isThoughtfulNotExpensive(taste)) {
     return `The ${giftName} isn't a lavish or expensive gift, but it happens to be exactly ${charName}'s taste. Let that land as genuinely touching precisely because of how well-chosen and personal it is — the thought and the fit are what's moving here, not the price tag.`

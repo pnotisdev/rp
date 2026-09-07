@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import {
   ArrowLeft,
   Backpack,
+  CalendarDays,
   CalendarHeart,
   Clapperboard,
   Download,
@@ -14,8 +15,10 @@ import {
   Search,
   SlidersHorizontal,
   Star,
+  Sunrise,
   Target,
   Wrench,
+  X,
 } from 'lucide-react'
 import { useChatSession } from '@/lib/hooks/useChatSession'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
@@ -28,6 +31,7 @@ import { parseSfxWordList } from '@/lib/text/messageSegments'
 import { useBgmSceneStore } from '@/lib/store/useBgmSceneStore'
 import { errorMessage, toastError } from '@/lib/store/useToastStore'
 import { getCurrentActivity, getEnergyRemaining, presenceLabel } from '@/lib/world/calendar'
+import { getWorldTemplate } from '@/lib/world/worldTemplates'
 import {
   computeWarmth,
   formatRelationshipStage,
@@ -50,6 +54,8 @@ import { ConnectionBadge } from './ConnectionBadge'
 import { PromptInspector } from './PromptInspector'
 import { ObjectivePanel } from './ObjectivePanel'
 import { DateEventPanel } from './DateEventPanel'
+import { DayPlannerPanel } from './DayPlannerPanel'
+import { CalendarPanel } from './CalendarPanel'
 import { RelationshipPanel } from './RelationshipPanel'
 import { AuthorNotePanel } from './AuthorNotePanel'
 import { AssistActivityBar } from './AssistActivityBar'
@@ -63,6 +69,7 @@ import { ScenePanel } from './ScenePanel'
 import { nextRoundRobinSpeaker, rosterFrom } from '@/lib/chat/scene'
 import { resolveExpressionSprite } from '@/lib/vn/expressions'
 import { currentOutfitFrom } from '@/lib/vn/outfits'
+import { isVnReady } from '@/lib/vn/artHint'
 import { countCharReplies } from '@/lib/dating/aftercare'
 import { getGiftCatalog } from '@/lib/dating/gifts'
 import { getItemCatalog } from '@/lib/dating/items'
@@ -131,6 +138,7 @@ export function ChatWindow({
     suggestDateEventIdea,
     startDateEvent,
     endDateEvent,
+    runDayPlannerActivity,
     regenerateChoices,
     buyGift,
     buyItem,
@@ -150,6 +158,8 @@ export function ChatWindow({
   const sfxBursts = useSettingsStore((s) => s.sfxBursts)
   const sfxWords = useSettingsStore((s) => s.sfxWords)
   const setActiveChatId = useSettingsStore((s) => s.setActiveChatId)
+  const firstReplyTipDismissed = useSettingsStore((s) => s.firstReplyTipDismissed)
+  const dismissFirstReplyTip = useSettingsStore((s) => s.dismissFirstReplyTip)
   // Only used for the Scene panel's invite picker, not the roster itself (`participantCharacters`).
   const allCharacters = useApiQuery('characters', () => charactersApi.list(), []) ?? []
   const otherCharacters = character ? allCharacters.filter((c) => c.id !== character.id) : allCharacters
@@ -157,6 +167,8 @@ export function ChatWindow({
   const [showInspector, setShowInspector] = useState(false)
   const [showObjective, setShowObjective] = useState(false)
   const [showEvent, setShowEvent] = useState(false)
+  const [showDayPlanner, setShowDayPlanner] = useState(false)
+  const [showCalendar, setShowCalendar] = useState(false)
   const [showRelationship, setShowRelationship] = useState(false)
   const [showAuthorNote, setShowAuthorNote] = useState(false)
   const [showScene, setShowScene] = useState(false)
@@ -173,11 +185,25 @@ export function ChatWindow({
   const [armedIntimacyOptionId, setArmedIntimacyOptionId] = useState<string | null>(null)
   const [refreshingChoices, setRefreshingChoices] = useState(false)
   const [exporting, setExporting] = useState(false)
+  // VN quick menu's Auto toggle — off by default, never persisted, and reset below on every chat
+  // switch, so it can never silently keep running somewhere the user forgot about. See
+  // `handleAutoAdvanceFire`'s own doc comment for the rest of the safety rails.
+  const [autoAdvance, setAutoAdvance] = useState(false)
+  const autoAdvanceCountRef = useRef(0)
+  const autoAdvanceStartRef = useRef<number | null>(null)
 
   useEffect(() => {
     setArmedIntent(null)
     setArmedIntimacyOptionId(null)
+    setAutoAdvance(false)
   }, [chatId])
+
+  useEffect(() => {
+    if (autoAdvance) {
+      autoAdvanceCountRef.current = 0
+      autoAdvanceStartRef.current = Date.now()
+    }
+  }, [autoAdvance])
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
@@ -190,6 +216,14 @@ export function ChatWindow({
   useEffect(() => {
     setBgmScene(lastCharScene)
   }, [lastCharScene?.mood, lastCharScene?.background, setBgmScene])
+
+  // A failed reply never re-arms `handleAutoAdvanceFire` on its own — `dialogueComplete` in
+  // `VNStage` requires `!failed`, so its schedule effect just never fires again for this message.
+  // That's already safe (no retry storm), but the toggle would otherwise sit there still showing
+  // "on" and pulsing while actually dormant — this turns it off outright so the UI doesn't lie.
+  useEffect(() => {
+    if (autoAdvance && lastChar?.failed) setAutoAdvance(false)
+  }, [autoAdvance, lastChar?.failed])
 
   useEffect(() => {
     setDraft('')
@@ -266,18 +300,27 @@ export function ChatWindow({
     )
   }
 
-  // Chat-level override wins over the global Settings → Appearance default.
+  // Chat-level override wins over the global Settings → Appearance default. Either can be `'auto'`
+  // — resolved to a real boolean via `isVnReady` (character has sprites, world has scene art) so
+  // 'auto' never shows a blank void, and everything past this point reads the resolved boolean.
   const visualNovelMode = chat.assistOverrides?.visualNovelMode ?? globalVisualNovelMode
-  // In-chat VN toggle: writes a per-chat override, but clears it back to "inherit" when the new
-  // value would just match the global default — so a deliberate global setting isn't shadowed by a
-  // redundant override. Same precedence contract as RelationshipPanel's own override selects.
+  const resolvedVisualNovelMode = visualNovelMode === 'auto' ? isVnReady(character, world) : visualNovelMode
+  // In-chat VN toggle: writes an explicit per-chat override (never 'auto' — that's only reachable
+  // from Settings/RelationshipPanel), clearing back to "inherit" when the new value would just
+  // match the global default. Same precedence contract as RelationshipPanel's own override selects.
   const toggleVnForChat = () => {
     const next = { ...(chat.assistOverrides ?? {}) }
-    const target = !visualNovelMode
+    const target = !resolvedVisualNovelMode
     if (target === globalVisualNovelMode) delete next.visualNovelMode
     else next.visualNovelMode = target
     chatsApi.update(chat.id, { assistOverrides: next }).catch((e) => toastError(errorMessage(e)))
   }
+  // Post-first-reply tip: a one-time nudge toward the two changes that most alter the experience,
+  // once there's an actual completed reply to react to and at least one of them still applies.
+  // Dismissing it is permanent (`firstReplyTipDismissed`) — this is a first-run orientation, not a
+  // recurring reminder.
+  const showFirstReplyTip =
+    !firstReplyTipDismissed && !isGenerating && !!lastChar?.text && !lastChar.failed && (!resolvedVisualNovelMode || !character?.worldId)
   const pinnedCount = messages.filter((m) => m.pinned).length
   // Reactive portrait for the default (non-VN) layout, using the same expression resolution as VNStage's sprite.
   const reactivePortraitExpression = lastCharScene?.expression || 'neutral'
@@ -302,7 +345,7 @@ export function ChatWindow({
   const relationshipStage = relationshipStageForWarmth(warmth, relationshipMilestonesFor(world?.relationshipThresholds))
 
   // Built once, rendered as the header toolbar (tone="chrome") or folded into VNStage's overlay (tone="glass").
-  const toolbarTone = visualNovelMode ? 'glass' : 'chrome'
+  const toolbarTone = resolvedVisualNovelMode ? 'glass' : 'chrome'
   const toolbarActions: ChatToolbarAction[] = [
     {
       key: 'relationship',
@@ -322,9 +365,9 @@ export function ChatWindow({
     {
       key: 'vn-mode',
       icon: Drama,
-      label: visualNovelMode ? 'Visual Novel mode: on (switch to chat view)' : 'Visual Novel mode: off (switch to scene view)',
+      label: resolvedVisualNovelMode ? 'Visual Novel mode: on (switch to chat view)' : 'Visual Novel mode: off (switch to scene view)',
       priority: 'primary-desktop',
-      active: visualNovelMode,
+      active: resolvedVisualNovelMode,
       onClick: toggleVnForChat,
     },
     {
@@ -333,9 +376,22 @@ export function ChatWindow({
       label: chat.activeEvent?.title ? `Event: ${chat.activeEvent.title}` : 'Start a date or event',
       priority: 'primary-desktop',
       active: !!chat.activeEvent,
-      // An author-level opt-out, hidden entirely rather than just disabled.
-      hidden: !!character?.dateModeOptOut,
+      // An author-level opt-out, or this chat's own mode saying "no romance mechanics" — either
+      // way hidden entirely rather than just disabled. Never hides a genuinely active event,
+      // though, even if the mode override would otherwise say no — nothing to strand the user with.
+      hidden: !!character?.dateModeOptOut || (chat.assistOverrides?.showDateEventButton === false && !chat.activeEvent),
       onClick: () => setShowEvent(true),
+    },
+    {
+      key: 'day-planner',
+      icon: Sunrise,
+      label: 'Plan your day',
+      priority: 'primary-desktop',
+      // Same "romance-flavored surface" bucket the event button already opts out of — this just
+      // leads into the same scored-hangout machinery through a different door — plus no bound
+      // world at all, since there's no clock/energy to plan around without one.
+      hidden: !world || !!character?.dateModeOptOut || chat.assistOverrides?.showDateEventButton === false,
+      onClick: () => setShowDayPlanner(true),
     },
     {
       key: 'objective',
@@ -344,6 +400,16 @@ export function ChatWindow({
       priority: 'primary-desktop',
       active: !!activeObjective,
       onClick: () => setShowObjective(true),
+    },
+    {
+      key: 'calendar',
+      icon: CalendarDays,
+      label: 'Key dates',
+      // An occasional-reference view, not a per-turn action — stays in the overflow menu rather
+      // than competing for primary space with the day planner/event buttons. No bound world means
+      // no clock at all to plan a birthday or anniversary against.
+      hidden: !world,
+      onClick: () => setShowCalendar(true),
     },
     {
       key: 'author-note',
@@ -427,10 +493,43 @@ export function ChatWindow({
       <QuickReplyBar variant={variant} replies={quickReplies} onPick={(reply) => sendUserMessage(reply.message, [])} />
     )
 
-  // Intent chips: offered while relationship tracking is on for this chat (its override, else the global default).
+  // Intent chips: offered while relationship tracking is on for this chat (its override, else the
+  // global default) — unless the mode itself has its own opinion (`showIntentChips`), which wins
+  // either way (e.g. a Freeform chat where the player later turned relationship tracking back on
+  // for some other reason still doesn't want "Flirt/Tease" chips; that vocabulary is genre, not tracking).
   const relationshipTrackingActive = chat?.assistOverrides?.autoTrackRelationship ?? autoTrackRelationship
-  const showIntentChips = relationshipTrackingActive && !isGenerating && !!character
+  const showIntentChips = (chat?.assistOverrides?.showIntentChips ?? relationshipTrackingActive) && !isGenerating && !!character
   const liveDateActive = isLiveScene(chat?.activeEvent)
+
+  const AUTO_ADVANCE_MAX_TURNS = 5
+  const AUTO_ADVANCE_MAX_MS = 10 * 60 * 1000
+  /**
+   * Real VN autoplay: called once per completed reply while Auto is on (`VNStage` owns the "when",
+   * timed to that reply's length). Never auto-picks an AI-suggested choice — a real decision point
+   * always waits for the player, same as autoplay pausing at a branch in any other VN. Stops itself
+   * on a live date/event, a failed generation, or a capped number of turns/wall-clock time, so
+   * leaving it on by accident can't run away unattended.
+   */
+  const handleAutoAdvanceFire = () => {
+    if (!autoAdvance || isGenerating) return
+    if (activeChoices) return
+    if (liveDateActive || lastCharMessage?.failed) {
+      setAutoAdvance(false)
+      return
+    }
+    const elapsed = autoAdvanceStartRef.current ? Date.now() - autoAdvanceStartRef.current : 0
+    if (autoAdvanceCountRef.current >= AUTO_ADVANCE_MAX_TURNS || elapsed >= AUTO_ADVANCE_MAX_MS) {
+      setAutoAdvance(false)
+      return
+    }
+    const preferred = quickReplies.find((q) => q.id === 'qr-time-skip') ?? quickReplies[0]
+    if (!preferred) {
+      setAutoAdvance(false)
+      return
+    }
+    autoAdvanceCountRef.current += 1
+    sendUserMessage(preferred.message, [])
+  }
   // During a live scene, tension is frozen, so surface Reassure/Apologize off the live rapport read instead.
   const intentStats = (() => {
     const base = getRelationshipStats({ relationshipStats: chat?.relationshipStats })
@@ -514,7 +613,38 @@ export function ChatWindow({
     // toward scrollWidth without it, causing a permanent horizontal scrollbar. Panels that need to
     // escape this box use position: fixed instead, which plain overflow doesn't clip.
     <div className="relative flex flex-1 flex-col min-w-0 overflow-hidden">
-      {!visualNovelMode && (
+      {showFirstReplyTip && (
+        // `fixed` (not `absolute`) so it floats consistently above whichever layout is active
+        // (VNStage is full-bleed and doesn't otherwise have a slot for this) — same reasoning the
+        // comment above gives for TuningPanel. One-time orientation nudge, not a recurring one.
+        <div className="fixed inset-x-4 bottom-6 z-40 mx-auto max-w-sm rounded-2xl border border-border bg-bg-elevated p-4 shadow-lg sm:inset-x-auto sm:right-6">
+          <button
+            onClick={dismissFirstReplyTip}
+            aria-label="Dismiss tip"
+            className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full text-text-muted transition-colors hover:bg-bg-sunken hover:text-text"
+          >
+            <X size={13} strokeWidth={2} />
+          </button>
+          <p className="pr-5 text-sm text-text">Two changes that most alter the experience:</p>
+          <ul className="mt-2 space-y-1.5 text-xs text-text-muted">
+            {!resolvedVisualNovelMode && (
+              <li>
+                <button onClick={toggleVnForChat} className="font-medium text-accent hover:underline">
+                  Turn on Visual Novel mode
+                </button>{' '}
+                — full-bleed scene art and a dialogue box, instead of the plain chat log.
+              </li>
+            )}
+            {!character?.worldId && (
+              <li>
+                <span className="font-medium text-text">Bind a world</span> — in the character
+                editor's Identity tab, for scene backgrounds and a shared clock.
+              </li>
+            )}
+          </ul>
+        </div>
+      )}
+      {!resolvedVisualNovelMode && (
         <header className="flex items-center justify-between gap-4 border-b border-border bg-bg-elevated px-5 py-3">
           <div className="flex min-w-0 items-center gap-3">
             {onBack && (
@@ -530,6 +660,12 @@ export function ChatWindow({
               </div>
               <div className="flex items-center gap-2 text-xs text-text-muted">
                 <span>as {persona?.name ?? 'You'}</span>
+                {chat.mode && (
+                  <span className="flex items-center gap-2 truncate">
+                    <span className="text-border">·</span>
+                    {getWorldTemplate(chat.mode).label}
+                  </span>
+                )}
                 {presence && (
                   <span
                     className="flex items-center gap-1.5 truncate"
@@ -604,6 +740,28 @@ export function ChatWindow({
             setShowEvent(false)
           }}
           onEnd={endDateEvent}
+        />
+      )}
+      {showDayPlanner && character && world && (
+        <DayPlannerPanel
+          character={character}
+          world={world}
+          activeEvent={chat.activeEvent}
+          onOpenActiveEvent={() => {
+            setShowDayPlanner(false)
+            setShowEvent(true)
+          }}
+          onPick={runDayPlannerActivity}
+          onClose={() => setShowDayPlanner(false)}
+        />
+      )}
+      {showCalendar && character && world && (
+        <CalendarPanel
+          world={world}
+          character={character}
+          participantCharacters={participantCharacters}
+          chat={chat}
+          onClose={() => setShowCalendar(false)}
         />
       )}
       {showRelationship && (
@@ -699,7 +857,7 @@ export function ChatWindow({
         }
       />
 
-      {visualNovelMode ? (
+      {resolvedVisualNovelMode ? (
         <VNStage
           character={character}
           persona={persona}
@@ -722,7 +880,22 @@ export function ChatWindow({
           topBarExtra={toolbar}
           onBack={onBack}
           parentChatLink={parentChatLink}
-          choiceListSlot={choiceListNode('vn') || quickReplyNode('vn')}
+          choiceListSlot={quickReplyNode('vn')}
+          activeChoiceData={
+            activeChoices
+              ? {
+                  choices: activeChoices.choiceCards!,
+                  onPick: (choice) => {
+                    sendUserMessage(choice.text, [], { choice })
+                  },
+                  onRefresh: () => {
+                    setRefreshingChoices(true)
+                    regenerateChoices(activeChoices.id).finally(() => setRefreshingChoices(false))
+                  },
+                  refreshing: refreshingChoices,
+                }
+              : undefined
+          }
           assistSlot={
             <>
               {showGenerationHud && <GenerationHud stats={genStats} variant="vn" />}
@@ -730,6 +903,9 @@ export function ChatWindow({
             </>
           }
           composerSlot={composerNode('vn')}
+          autoAdvance={autoAdvance}
+          onToggleAutoAdvance={() => setAutoAdvance((v) => !v)}
+          onAutoAdvanceFire={handleAutoAdvanceFire}
         />
       ) : (
         <>

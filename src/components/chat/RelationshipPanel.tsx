@@ -4,7 +4,7 @@ import type { Character, GalleryEntry } from '@/lib/characters/cardSpec'
 import type { Chat, WorldCard } from '@/lib/types'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { chatFactsApi, chatsApi, relationshipEventsApi } from '@/lib/api/client'
-import { getGiftCatalog } from '@/lib/dating/gifts'
+import { getGiftCatalog, giftTasteLabel } from '@/lib/dating/gifts'
 import { getItemCatalog } from '@/lib/dating/items'
 import {
   canActuallyAskForCommitment,
@@ -36,6 +36,8 @@ import { AFTERGLOW_TURNS, afterglowTurnsSince } from '@/lib/dating/aftercare'
 import { describeInitiativeBalance, describeMomentum } from '@/lib/dating/momentum'
 import { isRebuffActive } from '@/lib/dating/rebuff'
 import { isIntimacySceneActive } from '@/lib/dating/intimacyScene'
+import { WORLD_TEMPLATES, normalizeWorldTemplateId, type WorldTemplateId } from '@/lib/world/worldTemplates'
+import { daysUntilAnnualDate } from '@/lib/world/calendar'
 import type { CommitmentStatus } from '@/lib/types'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
@@ -259,15 +261,36 @@ export function RelationshipPanel({
     }
   }
 
-  const overrideValue = (key: 'autoTrackRelationship' | 'autoSuggestChoices' | 'visualNovelMode'): 'default' | 'on' | 'off' => {
+  const overrideValue = (key: 'autoTrackRelationship' | 'autoSuggestChoices'): 'default' | 'on' | 'off' => {
     const v = chat.assistOverrides?.[key]
     return v === undefined ? 'default' : v ? 'on' : 'off'
   }
-  const setOverride = async (key: 'autoTrackRelationship' | 'autoSuggestChoices' | 'visualNovelMode', value: 'default' | 'on' | 'off') => {
+  const setOverride = async (key: 'autoTrackRelationship' | 'autoSuggestChoices', value: 'default' | 'on' | 'off') => {
     const next = { ...(chat.assistOverrides ?? {}) }
     if (value === 'default') delete next[key]
     else next[key] = value === 'on'
     await chatsApi.update(chat.id, { assistOverrides: next })
+  }
+  // Its own pair, distinct from the two above — `visualNovelMode` is a tri-state (`'auto'` resolves
+  // live in `ChatWindow` via `isVnReady`), not a plain boolean.
+  const vnModeOverrideValue = (): 'default' | 'on' | 'off' | 'auto' => {
+    const v = chat.assistOverrides?.visualNovelMode
+    if (v === undefined) return 'default'
+    if (v === 'auto') return 'auto'
+    return v ? 'on' : 'off'
+  }
+  const setVnModeOverride = async (value: 'default' | 'on' | 'off' | 'auto') => {
+    const next = { ...(chat.assistOverrides ?? {}) }
+    if (value === 'default') delete next.visualNovelMode
+    else if (value === 'auto') next.visualNovelMode = 'auto'
+    else next.visualNovelMode = value === 'on'
+    await chatsApi.update(chat.id, { assistOverrides: next })
+  }
+  // Purely a display label (`NewChatDialog`'s Play style picker) — changing it later doesn't
+  // retroactively touch `assistOverrides`, same as switching a world's own template doesn't touch
+  // an already-created chat's overrides.
+  const setChatMode = async (value: WorldTemplateId) => {
+    await chatsApi.update(chat.id, { mode: value })
   }
 
   const allEvents = useApiQuery('relationship-events', () => relationshipEventsApi.listByChat(chat.id), [chat.id]) ?? []
@@ -577,14 +600,26 @@ export function RelationshipPanel({
 
       {activeTab === 'shop' && hasShop && (
         <div className="space-y-4">
+          {viewingCharacter?.birthday !== undefined &&
+            world &&
+            daysUntilAnnualDate(world.currentDay ?? 0, viewingCharacter.birthday) === 0 && (
+              <div className="rounded-xl bg-romance/10 px-3 py-2.5 text-sm text-romance">
+                🎂 It's {viewingCharacter.card.name}'s birthday today — a gift means a lot more than usual.
+              </div>
+            )}
           <Section title="Gift inventory" description={`Coins: ${chat.giftCoins ?? 0}`} surface="sunken">
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {giftCatalog.map((gift) => {
                 const qty = inventory[gift.id] ?? 0
+                // Progressive taste reveal: only once this exact gift has actually been given at
+                // least once — the shop never spoils an authored preference up front.
+                const discovered = (track.giftsGiven?.[gift.id] ?? 0) > 0
+                const tasteLabel = discovered ? giftTasteLabel(viewingCharacter?.card.name ?? '', viewingCharacter?.giftPreferences?.[gift.id] ?? 0) : ''
                 return (
                   <div key={gift.id} className="rounded-lg bg-bg-elevated p-3">
                     <div className="text-sm text-text">{gift.name}</div>
                     <div className="text-xs text-text-muted">{gift.rarity} • {gift.price} coins • owned {qty}</div>
+                    {tasteLabel && <div className="mt-0.5 text-xs text-romance">{tasteLabel}</div>}
                     <Button className="mt-2" onClick={() => onBuyGift(gift.id)} disabled={(chat.giftCoins ?? 0) < gift.price}>
                       Buy
                     </Button>
@@ -657,6 +692,18 @@ export function RelationshipPanel({
         <div className="space-y-4">
           <Section title="Chat settings" surface="sunken" contentClassName="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <SelectField
+              label="Play style"
+              hint="Just a label, shown in the header and chat list — it doesn't touch the toggles below."
+              value={normalizeWorldTemplateId(chat.mode)}
+              onChange={(e) => setChatMode(e.target.value as WorldTemplateId)}
+            >
+              {WORLD_TEMPLATES.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.label}
+                </option>
+              ))}
+            </SelectField>
+            <SelectField
               label="Track relationship for this chat"
               hint="Overrides the global Settings → Generation default, just for this chat."
               value={overrideValue('autoTrackRelationship')}
@@ -678,12 +725,13 @@ export function RelationshipPanel({
             </SelectField>
             <SelectField
               label="Visual Novel mode for this chat"
-              hint="Overrides the global Settings → Appearance default, just for this chat."
-              value={overrideValue('visualNovelMode')}
-              onChange={(e) => setOverride('visualNovelMode', e.target.value as 'default' | 'on' | 'off')}
+              hint="Overrides the global Settings → Appearance default, just for this chat. 'Auto' turns it on only once this character has sprites and the world has scene art."
+              value={vnModeOverrideValue()}
+              onChange={(e) => setVnModeOverride(e.target.value as 'default' | 'on' | 'off' | 'auto')}
             >
               <option value="default">Use global default</option>
               <option value="on">On</option>
+              <option value="auto">Auto</option>
               <option value="off">Off</option>
             </SelectField>
           </Section>

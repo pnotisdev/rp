@@ -112,6 +112,10 @@ function normalizeTriggers(raw: unknown) {
       const day = num(o.day, 0, 100000)
       return day === null ? null : { kind: 'day_at_least', day }
     }
+    if (o.kind === 'trigger_fired') {
+      const triggerId = str(o.triggerId, 80)
+      return triggerId ? { kind: 'trigger_fired', triggerId } : null
+    }
     return null
   }
 
@@ -122,9 +126,21 @@ function normalizeTriggers(raw: unknown) {
       const flag = str(o.flag, 60)
       return flag ? { kind: 'set_flag', flag } : null
     }
-    if (o.kind === 'remember' || o.kind === 'notify') {
+    if (o.kind === 'remember' || o.kind === 'notify' || o.kind === 'style_guidance') {
       const text = str(o.text, 300)
       return text ? { kind: o.kind, text } : null
+    }
+    if (o.kind === 'social_reaction') {
+      const topic = str(o.topic, 200)
+      return topic ? { kind: 'social_reaction', topic } : null
+    }
+    if (o.kind === 'start_scene') {
+      const title = str(o.title, 120)
+      const objectiveTitle = str(o.objectiveTitle, 120)
+      if (!title || !objectiveTitle) return null
+      const description = str(o.description, 500) ?? ''
+      const objectiveDescription = str(o.objectiveDescription, 500)
+      return { kind: 'start_scene', title, description, objectiveTitle, ...(objectiveDescription ? { objectiveDescription } : {}) }
     }
     return null
   }
@@ -343,6 +359,12 @@ function normalizeOutreach(raw: unknown): { frequency: string } | undefined {
   return typeof frequency === 'string' && OUTREACH_FREQUENCIES.has(frequency) ? { frequency } : undefined
 }
 
+/** `Character.birthday` — a day-of-year (world/calendar.ts's 112-day year), clamped/rounded rather
+ *  than rejected outright so a stray out-of-range value from the client still lands somewhere sane. */
+function normalizeDayOfYear(raw: unknown): number | undefined {
+  return typeof raw === 'number' && Number.isFinite(raw) ? Math.max(0, Math.min(111, Math.round(raw))) : undefined
+}
+
 const REPLY_LENGTHS = new Set(['auto', 'brief', 'moderate', 'detailed'])
 
 /** 'auto' and unset both mean "measure the card"; only the three explicit bands are stored. */
@@ -411,6 +433,7 @@ app.post('/api/characters', (req, res) => {
     occupation: typeof req.body.occupation === 'string' ? req.body.occupation : undefined,
     workplace: typeof req.body.workplace === 'string' ? req.body.workplace : undefined,
     homeLocation: typeof req.body.homeLocation === 'string' ? req.body.homeLocation : undefined,
+    birthday: normalizeDayOfYear(req.body.birthday),
     frequentedLocations: normalizeStringArray(req.body.frequentedLocations),
     dateModeOptOut: req.body.dateModeOptOut === true,
     outreach: normalizeOutreach(req.body.outreach),
@@ -454,6 +477,7 @@ app.put('/api/characters/:id', (req, res) => {
   if ('occupation' in req.body) patch.occupation = typeof req.body.occupation === 'string' ? req.body.occupation : undefined
   if ('workplace' in req.body) patch.workplace = typeof req.body.workplace === 'string' ? req.body.workplace : undefined
   if ('homeLocation' in req.body) patch.homeLocation = typeof req.body.homeLocation === 'string' ? req.body.homeLocation : undefined
+  if ('birthday' in req.body) patch.birthday = normalizeDayOfYear(req.body.birthday)
   if ('frequentedLocations' in req.body) patch.frequentedLocations = normalizeStringArray(req.body.frequentedLocations)
   if ('dateModeOptOut' in req.body) patch.dateModeOptOut = req.body.dateModeOptOut === true
   if ('outreach' in req.body) patch.outreach = normalizeOutreach(req.body.outreach)
@@ -602,6 +626,7 @@ app.post('/api/chats', (req, res) => {
     activeEvent: req.body.activeEvent,
     summary: req.body.summary || undefined,
     assistOverrides: req.body.assistOverrides ?? undefined,
+    mode: req.body.mode ?? undefined,
     createdAt: now,
     updatedAt: now,
   })

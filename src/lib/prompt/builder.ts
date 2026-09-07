@@ -59,6 +59,10 @@ export interface PromptBuildInput {
   personaDescription: string
   /** Fallback system prompt used only when the character has none of its own. */
   globalSystemPrompt?: string
+  /** A mode-bundled system-prompt preset (`Chat.assistOverrides.systemPromptId`, resolved by the
+   *  caller) — wins over `globalSystemPrompt` but still loses to the character's own, same
+   *  precedence spot every other per-chat override sits in relative to a character-level setting. */
+  chatSystemPrompt?: string
   /** Global steering line appended after any character `post_history_instructions`. */
   globalPostHistory?: string
   history: ChatMessage[]
@@ -164,7 +168,7 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
   // Impersonation needs its own system block; the normal one tells the model to never write {{user}}.
   const systemBlock = input.impersonateAsUser
     ? sub(IMPERSONATION_SYSTEM_PROMPT)
-    : sub(character.system_prompt?.trim() || input.globalSystemPrompt?.trim() || DEFAULT_SYSTEM_PROMPT)
+    : sub(character.system_prompt?.trim() || input.chatSystemPrompt?.trim() || input.globalSystemPrompt?.trim() || DEFAULT_SYSTEM_PROMPT)
 
   const descriptionParts = [
     character.description?.trim() ? sub(character.description) : '',

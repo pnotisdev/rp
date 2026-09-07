@@ -185,6 +185,7 @@ type TrackHost = Pick<
   | 'relationshipStats'
   | 'relationshipStage'
   | 'commitmentStatus'
+  | 'commitmentStartedDay'
   | 'relationshipWarning'
   | 'breakupCount'
   | 'unlockedGalleryIds'
@@ -217,6 +218,7 @@ export function getRelationshipTrack(chat: TrackHost, characterId: string): Rela
       relationshipStats: chat.relationshipStats,
       relationshipStage: chat.relationshipStage,
       commitmentStatus: chat.commitmentStatus,
+      commitmentStartedDay: chat.commitmentStartedDay,
       relationshipWarning: chat.relationshipWarning,
       breakupCount: chat.breakupCount,
       unlockedGalleryIds: chat.unlockedGalleryIds,

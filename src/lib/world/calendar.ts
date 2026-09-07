@@ -46,6 +46,21 @@ export function getCalendarInfo(day: number): CalendarInfo {
   return { day: wrapped, season, dayOfSeason, weekday, holiday }
 }
 
+/** Every named holiday's fixed day-of-year (0–111), derived from `HOLIDAYS` — exported so a
+ *  calendar view can list them without recomputing the season/day math itself. */
+export const ALL_HOLIDAYS: { name: string; dayOfYear: number }[] = SEASONS.map((season, i) => ({
+  name: HOLIDAYS[season].name,
+  dayOfYear: i * DAYS_PER_SEASON + (HOLIDAYS[season].dayOfSeason - 1),
+}))
+
+/** Days from `day` until the next occurrence of `targetDayOfYear` (a day-of-year, 0–111) — `0`
+ *  means today, wrapping forward through the year otherwise. Shared by birthdays, commitment
+ *  anniversaries, and holidays alike — each is just "a day-of-year to count down to." */
+export function daysUntilAnnualDate(day: number, targetDayOfYear: number): number {
+  const todayOfYear = getCalendarInfo(day).day
+  return (targetDayOfYear - todayOfYear + DAYS_PER_YEAR) % DAYS_PER_YEAR
+}
+
 export const WEATHER_KINDS = ['clear', 'rain', 'storm', 'overcast', 'snow', 'wind', 'fog'] as const
 export type WeatherKind = (typeof WEATHER_KINDS)[number]
 

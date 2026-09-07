@@ -474,6 +474,24 @@ describe('buildPrompt — promptSections (section 13 instruct-template-manager p
     expect(withCharOverride.prompt).not.toContain('GLOBAL_SYS_LINE')
   })
 
+  it("uses the chat's own mode-bundled system prompt over the global one, but still loses to the character's", async () => {
+    const withChatOverride = await buildPrompt(
+      baseInput({ globalSystemPrompt: 'GLOBAL_SYS_LINE', chatSystemPrompt: 'CHAT_SYS_LINE' }),
+    )
+    expect(withChatOverride.prompt).toContain('CHAT_SYS_LINE')
+    expect(withChatOverride.prompt).not.toContain('GLOBAL_SYS_LINE')
+
+    const withCharWinning = await buildPrompt(
+      baseInput({
+        character: character({ name: 'Aria', system_prompt: 'CHAR_SYS_LINE' }),
+        globalSystemPrompt: 'GLOBAL_SYS_LINE',
+        chatSystemPrompt: 'CHAT_SYS_LINE',
+      }),
+    )
+    expect(withCharWinning.prompt).toContain('CHAR_SYS_LINE')
+    expect(withCharWinning.prompt).not.toContain('CHAT_SYS_LINE')
+  })
+
   it('appends the global post-history steering after any character post_history_instructions', async () => {
     const result = await buildPrompt(
       baseInput({

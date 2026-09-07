@@ -116,6 +116,10 @@ export interface RelationshipTrack {
   relationshipStats?: Partial<Record<RelationshipDimension, number>>
   relationshipStage?: RelationshipStage
   commitmentStatus?: CommitmentStatus
+  /** Day-of-year (world/calendar.ts) `commitmentStatus` first moved off `'none'` — the
+   *  relationship's anniversary. Stamped once, never overwritten by a later tier change (marriage
+   *  doesn't reset it), so it stays "the day we got together," not "the day we last leveled up." */
+  commitmentStartedDay?: number
   /** `null` clears it; `undefined` is dropped by `JSON.stringify` and won't overwrite a stored value. */
   relationshipWarning?: RelationshipWarning | null
   breakupCount?: number
@@ -264,6 +268,11 @@ export interface DateEventCard {
   startedAt?: number
   /** 10b's hidden stakes — drafted once from the character's card when a `date` starts (never for `hangout`), never shown to the player. Fed to `assessDateOutcome` at the end. Best-effort: may stay unset if a card's too thin or the draft call fails. */
   hiddenAgenda?: string
+  /** True for a world-triggered scene (`world/triggers.ts`'s `start_scene` action) — the player
+   *  didn't choose to spend a day's energy on it, so `startDateEvent` skips the energy check/spend
+   *  entirely for a `free` card rather than risk it silently failing to fire, or costing an action
+   *  the player never spent. */
+  free?: boolean
 }
 
 export interface StoredMessage extends ChatMessage {
@@ -345,6 +354,9 @@ export interface Chat {
   relationshipStage?: RelationshipStage
   /** 10c's Define-the-Relationship ladder — unset/'none' until asked for and accepted. */
   commitmentStatus?: CommitmentStatus
+  /** Day-of-year `commitmentStatus` first moved off `'none'` — see `RelationshipTrack`'s own doc
+   *  comment (the two mirror each other, same as every other per-relationship field here). */
+  commitmentStartedDay?: number
   /** Set while a committed relationship is under strain and hasn't yet broken or recovered. */
   relationshipWarning?: RelationshipWarning
   /** Break-up count — the "lasting scar" is this counter plus a one-time stat hit, not a hard ceiling. */
@@ -397,12 +409,32 @@ export interface Chat {
   parentChatId?: string
   /** The message (in the parent chat) this fork branched off from. */
   forkedFromMessageId?: string
+  /** Display-only "play style" label picked in `NewChatDialog` (defaults to the bound world's own
+   *  template, editable independently) — decouples "how I play this chat" from "did I bind a
+   *  world," per `WORLD_TEMPLATES`. Purely a label: it seeds `assistOverrides` once at creation
+   *  (`assistOverridesForTemplate`) but is never live-recomputed from it afterward. */
+  mode?: WorldTemplateId
   /** Per-chat overrides for the global relationship-tracking/choice-suggestion toggles (Settings → Generation); unset falls back to the global default. Seeded once from the bound world's template at chat creation, not live-recomputed later. */
   assistOverrides?: {
     autoTrackRelationship?: boolean
     autoSuggestChoices?: boolean
-    /** Same fallback; seeded from the bound world's template (Visual Novel forces it on), editable afterward from `RelationshipPanel`. */
-    visualNovelMode?: boolean
+    /** Same fallback; seeded from the bound world's template (Visual Novel seeds `'auto'`), editable
+     *  afterward from `RelationshipPanel`. `'auto'` resolves live in `ChatWindow` — VN mode only
+     *  once the character has sprites and the world has scene art (`isVnReady`), never a blank void. */
+    visualNovelMode?: boolean | 'auto'
+    /** Same fallback as the two above, over Settings → Generation's global "Slow-burn pacing". */
+    slowBurnPacing?: boolean
+    /** A `SystemPromptPreset.id` (`src/lib/prompt/systemPrompts.ts`) — wins over the global system
+     *  prompt but still loses to the character's own `system_prompt`, resolved in `useChatSession`'s
+     *  `buildPrompt` call. Unset means "inherit the global default", same as every override above. */
+    systemPromptId?: string
+    /** Whether intent chips (Flirt/Tease/Open up/…) offer themselves above the composer. Unset
+     *  falls back to whether relationship tracking is active for this chat — the same condition
+     *  `ChatWindow` already gated them on before this existed. */
+    showIntentChips?: boolean
+    /** Whether the "Start a date or event" toolbar button shows at all. Unset means shown — only
+     *  Freeform/Slice-of-Life (whose own blurbs say "no romance mechanics") seed this off. */
+    showDateEventButton?: boolean
   }
   /** 10f's proactive outreach bookkeeping — written every world-tick evaluation regardless of outcome, to avoid re-rolling on every app reopen. */
   lastOutreachCheckedAt?: number
@@ -438,6 +470,10 @@ export interface WorldCard {
   backgrounds?: Record<string, string>
   /** Minimum affection required before a tagged background can be selected/displayed. */
   backgroundUnlocks?: Record<string, number>
+  /** Author-picked opening shot — `VNStage` falls back to this whenever a scene has no valid
+   *  background tag of its own (no model connected, the model omitted `<<scene:>>`, or it picked
+   *  a still-locked one), so VN mode never opens on a bare placeholder gradient. */
+  defaultBackgroundId?: string
   /** World-authored scene locations beyond the 12 built-ins — see `CustomBackground`. */
   customBackgrounds?: CustomBackground[]
   /** Background-music URLs keyed by scene mood id (`src/lib/vn/moods.ts`), plus a `default` key. VN mode only. */

@@ -19,6 +19,7 @@ import { Button } from '@/components/ui/Button'
 import { TextField } from '@/components/ui/Field'
 import { Section } from '@/components/ui/Section'
 import { SettingsPage } from '@/components/ui/SettingsPage'
+import { SettingsEyebrow } from '@/components/ui/SettingsEyebrow'
 import { RegexScriptsSection } from './RegexScriptsSection'
 import { InstructTemplateSection } from './InstructTemplateSection'
 import { PromptSectionsSection } from './PromptSectionsSection'
@@ -120,6 +121,7 @@ export function SamplingControls() {
 
   return (
     <SettingsPage>
+      <SettingsEyebrow>Basics</SettingsEyebrow>
       <Section
         title="Plain chat vs. dating sim"
         surface="bare"
@@ -311,6 +313,7 @@ export function SamplingControls() {
 
       <QuickRepliesSection />
 
+      <SettingsEyebrow>Authoring</SettingsEyebrow>
       <SystemPromptSection />
 
       <WritingStyleSection />
@@ -323,6 +326,7 @@ export function SamplingControls() {
           real instruct template exactly like KoboldCpp does. */}
       {chatBackend !== 'openai-compatible' && <InstructTemplateSection />}
 
+      <SettingsEyebrow>Power user</SettingsEyebrow>
       {chatBackend === 'openai-compatible' ? (
         <ChatCompletionSamplerSection />
       ) : (

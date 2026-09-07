@@ -472,6 +472,7 @@ describe('getRelationshipTrack / patchRelationshipTrack', () => {
       relationshipStats: { trust: 60 },
       relationshipStage: 'warming_up',
       commitmentStatus: 'dating',
+      commitmentStartedDay: 15,
       relationshipWarning: { startedAt: 5, reason: 'tension' },
       breakupCount: 1,
       unlockedGalleryIds: ['cg-1'],

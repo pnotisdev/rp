@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { vnArtHint } from './artHint'
+import { isVnReady, vnArtHint } from './artHint'
 import type { Character } from '@/lib/characters/cardSpec'
 import type { WorldCard } from '@/lib/types'
 
@@ -45,5 +45,21 @@ describe('vnArtHint', () => {
 
   it('falls back to a generic name when the card name is blank', () => {
     expect(vnArtHint(char({ card: { ...char().card, name: '  ' } }), undefined, [])).toMatch(/for this character/i)
+  })
+})
+
+describe('isVnReady', () => {
+  it('is false with no character at all, unlike vnArtHint (which has nothing to hint about there)', () => {
+    expect(isVnReady(undefined, undefined)).toBe(false)
+  })
+
+  it('is false until both sprites and world backgrounds exist', () => {
+    expect(isVnReady(char({ sprites: {} }), undefined)).toBe(false)
+    expect(isVnReady(char({ sprites: { neutral: 'x' } }), undefined)).toBe(false)
+    expect(isVnReady(char({ sprites: { neutral: 'x' } }), world({ backgrounds: {} }))).toBe(false)
+  })
+
+  it('is true once the character has sprites and the world has scene backgrounds', () => {
+    expect(isVnReady(char({ sprites: { neutral: 'x' } }), world({ backgrounds: { park: 'x' } }))).toBe(true)
   })
 })

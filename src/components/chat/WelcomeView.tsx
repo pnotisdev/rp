@@ -4,10 +4,26 @@ import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { charactersApi, chatsApi } from '@/lib/api/client'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import { useConnectionStatus } from '@/lib/hooks/useConnectionStatus'
+import { useHostedBackendStatus } from '@/lib/hooks/useHostedBackendStatus'
+import { KNOWN_CHAT_PROVIDERS, NOVELAI_MODELS } from '@/lib/api/chatBackend'
 import type { ViewId } from '@/components/layout/Sidebar'
 import { Button } from '@/components/ui/Button'
+import { Chip } from '@/components/ui/Chip'
+import { HostedConnectionStatus } from '@/components/settings/HostedConnectionStatus'
 import { NewChatDialog } from './NewChatDialog'
 import { TrashPanel } from './TrashPanel'
+
+const INPUT_CLASS =
+  'flex-1 rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40'
+
+/** Every hosted option the welcome screen's compact picker offers — the full OpenAI-compatible
+ *  roster plus NovelAI folded in as one more choice, so there's a single "Provider" dropdown
+ *  instead of a separate backend-kind selector (Settings → Connection's fuller, two-step version). */
+const HOSTED_PROVIDER_OPTIONS: { id: string; label: string; kind: 'openai-compatible' | 'novelai'; baseUrl?: string; modelExample?: string }[] = [
+  ...KNOWN_CHAT_PROVIDERS.map((p) => ({ id: p.id, label: p.label, kind: 'openai-compatible' as const, baseUrl: p.baseUrl, modelExample: p.modelExample })),
+  { id: 'novelai', label: 'NovelAI (hosted, subscription)', kind: 'novelai' as const },
+]
+const DEFAULT_HOSTED_PROVIDER = KNOWN_CHAT_PROVIDERS.find((p) => p.id === 'openrouter')!
 
 // The seeded starter character (server/seedContent.ts) — featured on the welcome screen when it
 // still exists, so a fresh install is one click from a running conversation.
@@ -45,7 +61,26 @@ export function WelcomeView({
   const charactersLoading = charactersResult === undefined
   const baseUrl = useSettingsStore((s) => s.baseUrl)
   const setBaseUrl = useSettingsStore((s) => s.setBaseUrl)
-  const { status, model, maxContext } = useConnectionStatus(baseUrl)
+  const { status: koboldStatus, model, maxContext } = useConnectionStatus(baseUrl)
+
+  const chatBackend = useSettingsStore((s) => s.chatBackend)
+  const chatBackendBaseUrl = useSettingsStore((s) => s.chatBackendBaseUrl)
+  const chatBackendApiKey = useSettingsStore((s) => s.chatBackendApiKey)
+  const chatBackendModel = useSettingsStore((s) => s.chatBackendModel)
+  const setChatBackendConfig = useSettingsStore((s) => s.setChatBackendConfig)
+  // Which of the two connection paths is showing — directly the same setting Settings → Connection
+  // reads, so switching here and there can never disagree.
+  const isHosted = chatBackend !== 'koboldcpp'
+  const matchedProvider = KNOWN_CHAT_PROVIDERS.find((p) => p.baseUrl === chatBackendBaseUrl)
+  const selectedProviderId = chatBackend === 'novelai' ? 'novelai' : (matchedProvider?.id ?? DEFAULT_HOSTED_PROVIDER.id)
+  const hostedStatus = useHostedBackendStatus(
+    isHosted,
+    chatBackend === 'novelai' ? 'novelai' : 'openai-compatible',
+    chatBackendBaseUrl,
+    chatBackendApiKey,
+    chatBackendModel,
+  )
+  const activeStatus = isHosted ? hostedStatus.status : koboldStatus
 
   const [urlDraft, setUrlDraft] = useState(baseUrl)
   const [probing, setProbing] = useState(false)
@@ -63,9 +98,10 @@ export function WelcomeView({
 
   useEffect(() => setUrlDraft(baseUrl), [baseUrl])
 
-  // Once, when we're offline on the current URL, quietly try the usual KoboldCpp defaults.
+  // Once, when we're offline on the current URL, quietly try the usual KoboldCpp defaults — pointless
+  // (and a wasted local request) while the hosted path is the one actually selected.
   useEffect(() => {
-    if (status !== 'offline' || probedFor.current === baseUrl) return
+    if (isHosted || koboldStatus !== 'offline' || probedFor.current === baseUrl) return
     probedFor.current = baseUrl
     setProbing(true)
     setProbeHit(null)
@@ -85,12 +121,38 @@ export function WelcomeView({
     return () => {
       cancelled = true
     }
-  }, [status, baseUrl])
+  }, [isHosted, koboldStatus, baseUrl])
 
   const applyUrl = (url: string) => {
     probedFor.current = null
     setProbeHit(null)
     setBaseUrl(normalizeUrl(url))
+  }
+
+  // Switching path never touches the *other* path's already-entered settings — flipping back and
+  // forth is always non-destructive. Picking 'hosted' for the first time (still 'koboldcpp')
+  // defaults to OpenRouter's free tier rather than landing on an unconfigured, connectionless state.
+  const selectPath = (path: 'local' | 'hosted') => {
+    if (path === 'local') {
+      setChatBackendConfig({ chatBackend: 'koboldcpp' })
+      return
+    }
+    if (chatBackend === 'koboldcpp') {
+      setChatBackendConfig({ chatBackend: 'openai-compatible', chatBackendBaseUrl: chatBackendBaseUrl || DEFAULT_HOSTED_PROVIDER.baseUrl })
+    }
+  }
+
+  const selectHostedProvider = (id: string) => {
+    const chosen = HOSTED_PROVIDER_OPTIONS.find((p) => p.id === id)
+    if (!chosen) return
+    if (chosen.kind === 'novelai') {
+      setChatBackendConfig({
+        chatBackend: 'novelai',
+        chatBackendModel: NOVELAI_MODELS.some((m) => m.id === chatBackendModel) ? chatBackendModel : NOVELAI_MODELS[0].id,
+      })
+    } else {
+      setChatBackendConfig({ chatBackend: 'openai-compatible', chatBackendBaseUrl: chosen.baseUrl })
+    }
   }
 
   return (
@@ -108,22 +170,31 @@ export function WelcomeView({
           <div className="mb-3 flex items-center gap-2">
             <span
               className={`h-2 w-2 rounded-full ${
-                status === 'online' ? 'bg-success' : status === 'checking' ? 'bg-warning' : 'bg-danger'
+                activeStatus === 'online' ? 'bg-success' : activeStatus === 'checking' ? 'bg-warning' : 'bg-danger'
               }`}
             />
             <span className="text-sm font-medium text-text">
-              {status === 'online' ? 'Model connected' : status === 'checking' ? 'Looking for your model…' : 'No model connected'}
+              {activeStatus === 'online' ? 'Model connected' : activeStatus === 'checking' ? 'Checking connection…' : 'No model connected'}
             </span>
           </div>
 
-          {status === 'online' && (
+          <div className="mb-4 flex gap-2">
+            <Chip on={!isHosted} onClick={() => selectPath('local')}>
+              Local model
+            </Chip>
+            <Chip on={isHosted} onClick={() => selectPath('hosted')}>
+              Hosted API key
+            </Chip>
+          </div>
+
+          {!isHosted && koboldStatus === 'online' && (
             <p className="text-xs text-text-muted">
               {model ?? 'A model'} is loaded{maxContext ? ` — ${maxContext.toLocaleString()} token context` : ''}. You're
               ready to chat.
             </p>
           )}
 
-          {status !== 'online' && (
+          {!isHosted && koboldStatus !== 'online' && (
             <div className="space-y-3 text-xs text-text-muted">
               <p>
                 Point this at a local model server — KoboldCpp, LM Studio, Ollama, or any
@@ -138,7 +209,7 @@ export function WelcomeView({
                   onChange={(e) => setUrlDraft(e.target.value)}
                   onBlur={() => urlDraft !== baseUrl && applyUrl(urlDraft)}
                   placeholder="http://localhost:5001"
-                  className="flex-1 rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40"
+                  className={INPUT_CLASS}
                 />
                 <Button onClick={() => applyUrl(urlDraft)}>Check</Button>
               </div>
@@ -153,14 +224,67 @@ export function WelcomeView({
                   </Button>
                 </div>
               )}
+              <p>You can set this up later — it only matters when a character actually needs to reply.</p>
+            </div>
+          )}
+
+          {isHosted && (
+            <div className="space-y-3 text-xs text-text-muted">
               <p>
-                You can set this up later — it only matters when a character actually needs to reply. Change it any time in
-                Settings → Connection.
+                OpenRouter has a free tier — nothing to pay to try this. Your key is stored only in this
+                browser and sent directly to the provider below, never through any other server.
               </p>
+              <div>
+                <label className="mb-1 block text-text-muted">Provider</label>
+                <select
+                  value={selectedProviderId}
+                  onChange={(e) => selectHostedProvider(e.target.value)}
+                  className={`${INPUT_CLASS} w-full cursor-pointer`}
+                >
+                  {HOSTED_PROVIDER_OPTIONS.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-text-muted">API key</label>
+                <input
+                  type="password"
+                  value={chatBackendApiKey}
+                  onChange={(e) => setChatBackendConfig({ chatBackendApiKey: e.target.value })}
+                  className={`${INPUT_CLASS} w-full`}
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-text-muted">Model</label>
+                {chatBackend === 'novelai' ? (
+                  <select
+                    value={NOVELAI_MODELS.some((m) => m.id === chatBackendModel) ? chatBackendModel : NOVELAI_MODELS[0].id}
+                    onChange={(e) => setChatBackendConfig({ chatBackendModel: e.target.value })}
+                    className={`${INPUT_CLASS} w-full cursor-pointer`}
+                  >
+                    {NOVELAI_MODELS.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    value={chatBackendModel}
+                    onChange={(e) => setChatBackendConfig({ chatBackendModel: e.target.value })}
+                    placeholder={matchedProvider ? `e.g. ${matchedProvider.modelExample}` : 'e.g. gpt-4o-mini'}
+                    className={`${INPUT_CLASS} w-full`}
+                  />
+                )}
+              </div>
+              <HostedConnectionStatus status={hostedStatus.status} detail={hostedStatus.detail} recheck={hostedStatus.recheck} />
               <p>
-                Prefer a hosted provider? OpenRouter has a free tier, and OpenAI / NovelAI work too.{' '}
+                Need more control (custom base URL, per-provider notes)?{' '}
                 <button className="text-accent transition-colors hover:underline" onClick={() => onNavigate('settings')}>
-                  Set one up in Settings → Connection
+                  Open Settings → Connection
                 </button>
                 .
               </p>

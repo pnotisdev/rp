@@ -1,9 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { charactersApi, personasApi, worldsApi } from '@/lib/api/client'
 import { useChatBackendClient } from '@/lib/hooks/useChatBackendClient'
 import { availableGreetings, createChat } from '@/lib/chat/createChat'
+import { WORLD_TEMPLATES, getWorldTemplate, normalizeWorldTemplateId, type WorldTemplateId } from '@/lib/world/worldTemplates'
 import { Button } from '@/components/ui/Button'
+import { Chip } from '@/components/ui/Chip'
 import { Modal } from '@/components/ui/Modal'
 
 export function NewChatDialog({
@@ -27,7 +29,22 @@ export function NewChatDialog({
   const [greetingIndex, setGreetingIndex] = useState(0)
   const [starterId, setStarterId] = useState<string>('')
   const [participantIds, setParticipantIds] = useState<string[]>([])
+  // Defaults to the bound world's own template (falling back to 'dating_sim'); picking a chip
+  // by hand latches `modeTouched` so a later character switch doesn't clobber a deliberate choice.
+  const [mode, setMode] = useState<WorldTemplateId>('dating_sim')
+  const [modeTouched, setModeTouched] = useState(false)
   const [busy, setBusy] = useState(false)
+
+  // `initialCharacterId` arrives before `characters`/`worlds` have loaded (same reason WorldsView's
+  // deep-link effect exists) — pick up the bound world's template as soon as they resolve.
+  useEffect(() => {
+    if (modeTouched || !initialCharacterId) return
+    const initialCharacter = characters.find((c) => c.id === initialCharacterId)
+    if (!initialCharacter) return
+    const initialWorld = worlds.find((w) => w.id === initialCharacter.worldId)
+    setMode(normalizeWorldTemplateId(initialWorld?.template))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [characters.length, worlds.length, initialCharacterId])
 
   // A first-ever chat has no personas to pick from — offer a one-line "who you are" inline instead
   // of sending the model a bare hardcoded "You" (see ROADMAP §13 / the persona-get-route bug, #41).
@@ -74,6 +91,7 @@ export function NewChatDialog({
       startingAffection: starter?.startingAffection ?? 0,
       summary: starter?.blurb || undefined,
       greetingIndex: greetingOptions.length > 0 ? greetingIndex : -1,
+      mode,
       client,
     })
     onCreated(chat.id)
@@ -86,10 +104,16 @@ export function NewChatDialog({
         <select
           value={characterId}
           onChange={(e) => {
-            setCharacterId(e.target.value)
+            const newCharacterId = e.target.value
+            setCharacterId(newCharacterId)
             setGreetingIndex(0)
             setStarterId('')
-            setParticipantIds((prev) => prev.filter((id) => id !== e.target.value))
+            setParticipantIds((prev) => prev.filter((id) => id !== newCharacterId))
+            if (!modeTouched) {
+              const newCharacter = characters.find((c) => c.id === newCharacterId)
+              const newWorld = worlds.find((w) => w.id === newCharacter?.worldId)
+              setMode(normalizeWorldTemplateId(newWorld?.template))
+            }
           }}
           className="mb-3 w-full rounded-xl bg-bg-sunken px-3 py-2.5 text-base text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40 sm:py-2 sm:text-sm"
         >
@@ -129,6 +153,25 @@ export function NewChatDialog({
             </p>
           </div>
         )}
+
+        <div className="mb-4">
+          <label className="mb-1 block text-xs text-text-muted">Play style</label>
+          <div className="flex flex-wrap gap-2">
+            {WORLD_TEMPLATES.map((t) => (
+              <Chip
+                key={t.id}
+                on={mode === t.id}
+                onClick={() => {
+                  setMode(t.id)
+                  setModeTouched(true)
+                }}
+              >
+                {t.label}
+              </Chip>
+            ))}
+          </div>
+          <p className="mt-1.5 text-xs text-text-muted">{getWorldTemplate(mode).blurb}</p>
+        </div>
 
         {noPersonas ? (
           <div className="mb-4">

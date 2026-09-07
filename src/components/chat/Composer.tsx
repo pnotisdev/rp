@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from 'react'
-import { ChevronsRight, FileText, Paperclip, RefreshCw, Send, Square, Undo2, Wand2, X } from 'lucide-react'
+import { ChevronDown, ChevronsRight, FileText, Paperclip, RefreshCw, Send, Square, Undo2, Wand2, X } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { readAttachment, type PendingAttachment } from '@/lib/attachments'
 
@@ -52,6 +52,10 @@ export function Composer({
   const [attachments, setAttachments] = useState<PendingAttachment[]>([])
   const [composerError, setComposerError] = useState<string | null>(null)
   const [impersonating, setImpersonating] = useState(false)
+  // VN mode only, mobile only (see the `sm:hidden` / `hidden sm:block` split below) — intent chips
+  // compete with the sprite/dialogue box for the little vertical room a phone has, so they start
+  // collapsed there. Desktop VN keeps them always visible, no toggle chrome at all.
+  const [showIntentMobile, setShowIntentMobile] = useState(false)
   const textRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const vn = variant === 'vn'
@@ -118,10 +122,26 @@ export function Composer({
         }
       >
         {composerError && <p className="mb-2 px-1.5 text-xs text-danger">{composerError}</p>}
-        {intentSlot && (
-          <div className={`mb-2.5 px-1.5 pb-2.5 ${vn ? 'border-b border-white/10' : 'border-b border-border/50'}`}>
-            {intentSlot}
-          </div>
+        {intentSlot && !vn && (
+          <div className="mb-2.5 border-b border-border/50 px-1.5 pb-2.5">{intentSlot}</div>
+        )}
+        {intentSlot && vn && (
+          <>
+            {/* Desktop VN: always visible, same as before. */}
+            <div className="mb-2.5 hidden border-b border-white/10 px-1.5 pb-2.5 sm:block">{intentSlot}</div>
+            {/* Mobile VN: collapsed by default — the sprite/dialogue box need the vertical room more. */}
+            <div className="mb-2.5 border-b border-white/10 pb-2.5 sm:hidden">
+              <button
+                type="button"
+                onClick={() => setShowIntentMobile((v) => !v)}
+                className="flex items-center gap-1 px-1.5 text-xs text-white/60 transition-colors hover:text-white"
+              >
+                <ChevronDown size={12} strokeWidth={2} className={`transition-transform ${showIntentMobile ? 'rotate-180' : ''}`} />
+                Intent
+              </button>
+              {showIntentMobile && <div className="mt-2 px-1.5">{intentSlot}</div>}
+            </div>
+          </>
         )}
         {attachments.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-2 px-1">

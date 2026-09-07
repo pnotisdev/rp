@@ -89,6 +89,7 @@ export function ThemeEditor() {
   const fontScale = useSettingsStore((s) => s.fontScale)
   const blurPx = useSettingsStore((s) => s.blurPx)
   const shadowStrength = useSettingsStore((s) => s.shadowStrength)
+  const vnTextSpeedMs = useSettingsStore((s) => s.vnTextSpeedMs)
   const setLayout = useSettingsStore((s) => s.setLayout)
 
   const reducedMotion = useSettingsStore((s) => s.reducedMotion)
@@ -104,6 +105,9 @@ export function ThemeEditor() {
   const tagsAsFolders = useSettingsStore((s) => s.tagsAsFolders)
   const clickToEdit = useSettingsStore((s) => s.clickToEdit)
   const visualNovelMode = useSettingsStore((s) => s.visualNovelMode)
+  const setVisualNovelMode = useSettingsStore((s) => s.setVisualNovelMode)
+  const vnChoiceStyle = useSettingsStore((s) => s.vnChoiceStyle)
+  const setVnChoiceStyle = useSettingsStore((s) => s.setVnChoiceStyle)
   const visionSceneDetection = useSettingsStore((s) => s.visionSceneDetection)
   const toggleFlag = useSettingsStore((s) => s.toggleFlag)
 
@@ -349,6 +353,16 @@ export function ThemeEditor() {
           onChange={(v) => setLayout({ shadowStrength: v })}
           formatValue={(v) => `${Math.round(v * 100)}%`}
         />
+        <Slider
+          label="VN text speed"
+          description="How fast a reply types out in Visual Novel mode's dialogue box. Click the scene to skip ahead — always instant with Reduced motion on, regardless of this."
+          min={0}
+          max={48}
+          step={2}
+          value={vnTextSpeedMs}
+          onChange={(v) => setLayout({ vnTextSpeedMs: v })}
+          formatValue={(v) => (v === 0 ? 'Instant' : `${v} ms/char`)}
+        />
       </Section>
 
       <Section title="Behavior" contentClassName="divide-y divide-border">
@@ -369,12 +383,46 @@ export function ThemeEditor() {
         />
         <Toggle checked={tagsAsFolders} onChange={() => toggleFlag('tagsAsFolders')} label="Tags as folders" />
         <Toggle checked={clickToEdit} onChange={() => toggleFlag('clickToEdit')} label="Click message to edit" />
-        <Toggle
-          checked={visualNovelMode}
-          onChange={() => toggleFlag('visualNovelMode')}
-          label="Visual Novel mode"
-          description="Full-bleed scene art with a docked dialogue box, in place of the ordinary scrolling chat log. A presentation choice only — independent of the dating-sim mechanics in Generation settings, on or off either way."
-        />
+        <div className="flex items-center justify-between gap-4 py-2">
+          <span className="flex flex-col">
+            <span className="text-sm text-text">Visual Novel mode</span>
+            <span className="text-xs text-text-muted">
+              Full-bleed scene art with a docked dialogue box, in place of the ordinary scrolling chat
+              log. A presentation choice only — independent of the dating-sim mechanics in Generation
+              settings, on or off either way. "Auto" turns it on only once a character has expression
+              sprites and the world has scene backgrounds, so it's never a blank void.
+            </span>
+          </span>
+          <SegmentedControl
+            size="sm"
+            options={[
+              { value: 'off', label: 'Off' },
+              { value: 'auto', label: 'Auto' },
+              { value: 'on', label: 'On' },
+            ]}
+            value={visualNovelMode === 'auto' ? 'auto' : visualNovelMode ? 'on' : 'off'}
+            onChange={(v) => setVisualNovelMode(v === 'auto' ? 'auto' : v === 'on')}
+          />
+        </div>
+        <div className="flex items-center justify-between gap-4 py-2">
+          <span className="flex flex-col">
+            <span className="text-sm text-text">VN choice style</span>
+            <span className="text-xs text-text-muted">
+              "Docked" keeps AI-suggested choices as pills in the dialogue box. "Centered" surfaces
+              them as a full-screen, scene-dimmed choice screen instead — a real decision moment.
+              Quick replies (Look around, Let time pass, …) always stay docked either way.
+            </span>
+          </span>
+          <SegmentedControl
+            size="sm"
+            options={[
+              { value: 'docked', label: 'Docked' },
+              { value: 'centered', label: 'Centered' },
+            ]}
+            value={vnChoiceStyle}
+            onChange={setVnChoiceStyle}
+          />
+        </div>
         <Toggle
           checked={visionSceneDetection}
           onChange={() => toggleFlag('visionSceneDetection')}

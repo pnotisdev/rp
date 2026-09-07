@@ -34,3 +34,16 @@ export function vnArtHint(
   }
   return null
 }
+
+/** Same "is there enough art for VN mode to look intentional" check `vnArtHint` makes, as a plain
+ *  boolean — backs `visualNovelMode: 'auto'` (`ChatWindow.tsx`): VN mode only turns itself on once
+ *  this is true, so it's never a blank gradient plus a floating sprite. */
+export function isVnReady(
+  character: Pick<Character, 'id' | 'card' | 'sprites'> | undefined,
+  world: Pick<WorldCard, 'name' | 'backgrounds'> | undefined,
+): boolean {
+  // `vnArtHint` itself returns null for "no character yet" too (nothing to hint about) — 'auto'
+  // mode needs the stricter reading: no character selected is never VN-ready.
+  if (!character) return false
+  return vnArtHint(character, world, []) === null
+}

@@ -1,11 +1,31 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { ArrowLeft, ChevronLeft, ChevronRight, GitFork, Heart, History, RotateCcw, Star, X } from 'lucide-react'
+import {
+  ArrowLeft,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsRight,
+  EyeOff,
+  GitFork,
+  Heart,
+  History,
+  Loader2,
+  Play,
+  RotateCcw,
+  Star,
+  Volume1,
+  Volume2,
+  X,
+} from 'lucide-react'
 import type { Character } from '@/lib/characters/cardSpec'
-import type { Chat, Persona, StoredMessage, WorldCard } from '@/lib/types'
+import type { ChoiceOption, Chat, Persona, StoredMessage, WorldCard } from '@/lib/types'
+import { ChoiceList } from './ChoiceList'
+import { VNCenteredChoices } from './VNCenteredChoices'
 import { placeholderGradient } from '@/lib/vn/placeholder'
 import { scrollToMessage } from '@/lib/scrollToMessage'
 import { renderMessageText } from '@/lib/text/messageText'
 import { useSpriteCrossfade } from '@/lib/hooks/useSpriteCrossfade'
+import { useTypewriterReveal } from '@/lib/hooks/useTypewriterReveal'
 import {
   computeWarmth,
   formatRelationshipStage,
@@ -23,11 +43,15 @@ import { MessageLog } from './MessageLog'
 import { SakuraPetals } from './SakuraPetals'
 import { LiveRapport } from './LiveRapport'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
+import { errorMessage, toastError, toastSuccess } from '@/lib/store/useToastStore'
+import { synthesizeSpeech } from '@/lib/voice/ttsProviders'
+import { toSpeakableText } from '@/lib/voice/speakableText'
 import { parseSfxWordList } from '@/lib/text/messageSegments'
 import { sfxConfigFor } from '@/lib/text/sfx'
 import { resolveExpressionSprite } from '@/lib/vn/expressions'
 import { currentOutfitFrom } from '@/lib/vn/outfits'
 import { vnArtHint } from '@/lib/vn/artHint'
+import { getWorldTemplate } from '@/lib/world/worldTemplates'
 
 /**
  * Visual-novel presentation of a chat: full-bleed scene background, each cast member's sprite,
@@ -68,6 +92,7 @@ function VNCharacterSprite({
   dim,
   slotClass,
   onClick,
+  phase,
 }: {
   spriteUrl: string | undefined
   name: string
@@ -79,6 +104,8 @@ function VNCharacterSprite({
   slotClass: string
   /** Doubles as the "reply as" picker; omitted when turn policy isn't manual. */
   onClick?: () => void
+  /** Sprite staging: a brief slide+fade the moment this member joins or leaves the roster. Unset once settled. */
+  phase?: 'entering' | 'exiting'
 }) {
   const { displaySrc, visible, fadeMs } = useSpriteCrossfade(spriteUrl)
 
@@ -121,7 +148,7 @@ function VNCharacterSprite({
             : showingPlaceholder
               ? 'z-0 h-[82%] scale-[0.96] opacity-75 [filter:brightness(0.78)_saturate(0.8)]'
               : 'z-0 h-[80%] scale-[0.95] [filter:brightness(0.5)_saturate(0.72)]'
-      }`}
+      } ${phase === 'entering' ? 'vn-sprite-enter-anim' : phase === 'exiting' ? 'vn-sprite-exit-anim pointer-events-none' : ''}`}
     >
       {isActive && dim && (
         // Floor-light under the speaker, only shown when there's someone else to contrast against.
@@ -170,12 +197,29 @@ interface VNStageProps {
   onBack?: () => void
   /** "Original chat" jump-back link, shown only for forked chats. */
   parentChatLink?: ReactNode
-  /** Next-move suggestion chips (variant="vn"), omitted when none. */
+  /** Quick-reply pills (variant="vn"), shown when there's no active AI-suggested choice — always
+   *  docked regardless of `vnChoiceStyle`, since a casual quick reply isn't a real decision point. */
   choiceListSlot?: ReactNode
+  /** AI-suggested choices — VNStage renders these itself (docked pills or a centered choice screen,
+   *  per Settings → Appearance's `vnChoiceStyle`) rather than taking a pre-rendered node, since which
+   *  one it picks is its own presentation call. Omitted when there's nothing to choose from. */
+  activeChoiceData?: {
+    choices: ChoiceOption[]
+    onPick: (choice: ChoiceOption) => void
+    onRefresh: () => void
+    refreshing: boolean
+  }
   /** "Background assists running" strip, omitted when nothing is running. */
   assistSlot?: ReactNode
   /** Message composer (variant="vn"), docked at the bottom of the glass panel. */
   composerSlot: ReactNode
+  /** Off by default; the quick menu's Auto toggle. Once a reply finishes typing, waits a beat scaled
+   *  to its length and calls `onAutoAdvanceFire` — real VN autoplay, so `ChatWindow` owns the actual
+   *  "what to send" + safety-cap decision (never picks an AI-suggested choice, stops on a live date,
+   *  a failed generation, chat switch, or its own turn/time cap). */
+  autoAdvance?: boolean
+  onToggleAutoAdvance?: () => void
+  onAutoAdvanceFire?: () => void
 }
 
 export function VNStage({
@@ -201,10 +245,18 @@ export function VNStage({
   onBack,
   parentChatLink,
   choiceListSlot,
+  activeChoiceData,
   assistSlot,
   composerSlot,
+  autoAdvance = false,
+  onToggleAutoAdvance,
+  onAutoAdvanceFire,
 }: VNStageProps) {
   const [showLog, setShowLog] = useState(false)
+  // Universal VN convention: hides everything but the background/sprites/CG, restored by clicking
+  // anywhere on the scene (see the root `onClick` below) — same discoverability contract as every
+  // other VN's hide-UI, so no on-screen hint is needed to find your way back.
+  const [hideUI, setHideUI] = useState(false)
   const logRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -262,6 +314,16 @@ export function VNStage({
   const triggeredCgImageUrl = triggeredCgEntry
     ? pickVariant([triggeredCgEntry.imageUrl, ...(triggeredCgEntry.variants ?? [])].filter(Boolean), lastCharMsg?.id ?? triggeredCgEntry.id)
     : undefined
+  // CG reveal ceremony: a brief full-screen beat (see `.vn-cg-reveal` — the `key` below already
+  // remounts the <img> per distinct CG, which is what makes the enter animation replay each time)
+  // plus a one-time "new in Gallery" toast, fired the first time this component instance sees a
+  // given CG id trigger — never again for the same id, even as it keeps showing across re-renders.
+  const cgToastedIdsRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    if (!triggeredCgEntry || cgToastedIdsRef.current.has(triggeredCgEntry.id)) return
+    cgToastedIdsRef.current.add(triggeredCgEntry.id)
+    toastSuccess(`New in Gallery: "${triggeredCgEntry.title}"`, { chime: true })
+  }, [triggeredCgEntry])
   const liveDateActive = isLiveScene(chat.activeEvent)
   const isHangoutEvent = chat.activeEvent?.kind === 'hangout'
   const expression = scene?.expression || 'neutral'
@@ -292,6 +354,37 @@ export function VNStage({
       onClick: canPickSpeaker ? () => onSelectSpeaker!(member.id === character?.id ? null : member.id) : undefined,
     }
   })
+
+  // Sprite staging: slide+fade a cast member in the first time they appear (including a chat's very
+  // first render — opening a chat is itself a "first appearance"), and keep someone who just left
+  // the roster around briefly for a matching exit, instead of a hard cut either way.
+  const ENTER_EXIT_MS = 450
+  const [enteringIds, setEnteringIds] = useState<Set<string>>(new Set())
+  const [departedMembers, setDepartedMembers] = useState<typeof castMembers>([])
+  const prevCastRef = useRef<typeof castMembers>([])
+  useEffect(() => {
+    const prevIds = new Set(prevCastRef.current.map((m) => m.id))
+    const currentIds = new Set(castMembers.map((m) => m.id))
+    const entered = castMembers.filter((m) => !prevIds.has(m.id))
+    const left = prevCastRef.current.filter((m) => !currentIds.has(m.id))
+    if (entered.length) {
+      const ids = entered.map((m) => m.id)
+      setEnteringIds((prev) => new Set([...prev, ...ids]))
+      setTimeout(() => setEnteringIds((prev) => {
+        const next = new Set(prev)
+        ids.forEach((id) => next.delete(id))
+        return next
+      }), ENTER_EXIT_MS)
+    }
+    if (left.length) {
+      setDepartedMembers((prev) => [...prev, ...left])
+      const ids = left.map((m) => m.id)
+      setTimeout(() => setDepartedMembers((prev) => prev.filter((m) => !ids.includes(m.id))), ENTER_EXIT_MS)
+    }
+    prevCastRef.current = castMembers
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [castMembers.map((m) => m.id).join(',')])
+
   const slotClass = slotWidthClass(castMembers.length)
   const activeMember = castMembers.find((m) => m.isActive) ?? castMembers[0]
   const speakerName = lastCharMsg?.name ?? activeMember?.name ?? character?.card.name ?? ''
@@ -310,7 +403,13 @@ export function VNStage({
         edge: 'rgb(var(--c-romance) / 0.45)',
         chip: 'rgb(var(--c-romance))',
       }
-  const sceneBackground = scene?.background ?? chat.activeEvent?.backgroundId
+  // The tagged scene background wins whenever it's actually valid and unlocked; otherwise fall
+  // back to the world's author-picked opening shot, which covers a missing tag (no model, or the
+  // model omitted `<<scene:>>`) and a still-locked one alike — VN mode is never a bare placeholder
+  // gradient just because the tag ahead of it happens to be gated.
+  const taggedBackground = scene?.background ?? chat.activeEvent?.backgroundId
+  const taggedUnlocked = !!taggedBackground && affection >= Number(world?.backgroundUnlocks?.[taggedBackground] ?? 0)
+  const sceneBackground = taggedUnlocked ? taggedBackground : (world?.defaultBackgroundId ?? taggedBackground)
   const bgUnlocked = sceneBackground
     ? affection >= Number(world?.backgroundUnlocks?.[sceneBackground] ?? 0)
     : false
@@ -328,6 +427,134 @@ export function VNStage({
   const artHint = vnArtHint(character, world, vnArtHintDismissed)
   const personaName = persona?.name
   const reducedMotion = useSettingsStore((s) => s.reducedMotion)
+  const vnTextSpeedMs = useSettingsStore((s) => s.vnTextSpeedMs)
+  const vnChoiceStyle = useSettingsStore((s) => s.vnChoiceStyle)
+
+  // Per-line voice: "read this line aloud" via the same TTS stack Companion mode uses. Manual and
+  // one line at a time only — no auto-voice-on-every-reply, unlike Auto above; that's a
+  // recurring-cost surface this pass intentionally doesn't take on.
+  const koboldBaseUrl = useSettingsStore((s) => s.baseUrl)
+  const ttsProvider = useSettingsStore((s) => s.ttsProvider)
+  const ttsApiKey = useSettingsStore((s) => s.ttsApiKey)
+  const ttsBaseUrl = useSettingsStore((s) => s.ttsBaseUrl)
+  const ttsRegion = useSettingsStore((s) => s.ttsRegion)
+  const ttsVoice = useSettingsStore((s) => s.ttsVoice)
+  const [speakState, setSpeakState] = useState<'idle' | 'loading' | 'playing'>('idle')
+  const speakAudioRef = useRef<HTMLAudioElement | null>(null)
+  const stopSpeaking = () => {
+    speakAudioRef.current?.pause()
+    speakAudioRef.current = null
+    setSpeakState('idle')
+  }
+  // Always starts fresh (cancelling anything already playing) — shared by the manual button's
+  // "start" half and by auto-voice, which must never be subject to the button's own toggle-to-stop
+  // semantics (a second reply arriving mid-playback should cut in, not silently no-op as a "stop").
+  const startSpeaking = async (rawText: string) => {
+    stopSpeaking()
+    const text = toSpeakableText(rawText)
+    if (!text) return
+    setSpeakState('loading')
+    try {
+      const blob = await synthesizeSpeech(
+        {
+          provider: character?.voice?.provider ?? ttsProvider,
+          apiKey: ttsApiKey,
+          baseUrl: ttsBaseUrl,
+          region: ttsRegion,
+          voice: character?.voice?.voiceId || ttsVoice,
+        },
+        text,
+        koboldBaseUrl,
+      )
+      const url = URL.createObjectURL(blob)
+      const audio = new Audio(url)
+      speakAudioRef.current = audio
+      setSpeakState('playing')
+      const finish = () => {
+        URL.revokeObjectURL(url)
+        if (speakAudioRef.current === audio) {
+          speakAudioRef.current = null
+          setSpeakState('idle')
+        }
+      }
+      audio.onended = finish
+      audio.onerror = finish
+      await audio.play().catch(finish)
+    } catch (e) {
+      setSpeakState('idle')
+      toastError(errorMessage(e))
+    }
+  }
+  // The manual button: toggles, since a deliberate click while already speaking means "stop."
+  const speakLine = () => {
+    if (speakState !== 'idle') {
+      stopSpeaking()
+      return
+    }
+    startSpeaking(displayText)
+  }
+  // Swiping to a different line, or leaving the message entirely, cuts off whatever was playing —
+  // it no longer matches what's on screen.
+  useEffect(() => stopSpeaking, [lastCharMsg?.id, activeSwipe])
+  const [autoVoice, setAutoVoice] = useState(false)
+
+  // Every message id this component instance has watched stream in live — its text already
+  // appeared token-by-token, so re-running the typewriter over it (e.g. once `isStreamingThis`
+  // flips false, or on a later swipe back to it) would just replay content the player already
+  // watched arrive. Only a line that shows up already-complete (a static greeting, an
+  // alternate-greeting swipe, or reopening a chat) gets the reveal treatment.
+  const streamedIdsRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    if (isStreamingThis && lastCharMsg) streamedIdsRef.current.add(lastCharMsg.id)
+  }, [isStreamingThis, lastCharMsg?.id])
+  const typewriterActive = !isStreamingThis && !!lastCharMsg?.text && !lastCharMsg?.failed && !streamedIdsRef.current.has(lastCharMsg?.id ?? '')
+  const {
+    revealed: revealedDialogueText,
+    done: dialogueRevealDone,
+    skip: skipTypewriter,
+  } = useTypewriterReveal(displayText, reducedMotion ? 0 : vnTextSpeedMs, typewriterActive)
+  const shownDialogueText = typewriterActive ? revealedDialogueText : displayText
+  // The ADV "done typing" glyph — only for an actual, complete character line, never the empty-chat
+  // placeholder or a still-in-flight stream.
+  const dialogueComplete = !isStreamingThis && !!lastCharMsg?.text && !lastCharMsg?.failed && dialogueRevealDone
+  // Auto-voice: speaks each new reply once it finishes typing, unprompted — opt-in, off by
+  // default, never persisted (resets with everything else on a chat switch, same as Auto-advance).
+  // Unlike Auto-advance this can't chain into extra generations on its own: it only ever narrates a
+  // reply that already happened, so it carries none of Auto-advance's runaway-cost risk and needs
+  // none of its safety caps.
+  const autoVoiceSpokenIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!autoVoice || !dialogueComplete || !lastCharMsg) return
+    if (autoVoiceSpokenIdRef.current === lastCharMsg.id) return
+    autoVoiceSpokenIdRef.current = lastCharMsg.id
+    startSpeaking(lastCharMsg.text)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoVoice, dialogueComplete, lastCharMsg?.id])
+  // Keeps the growing edge of the reveal (and, once done, the glyph right after it) in view instead
+  // of leaving a long reply scrolled to its own top inside the capped-height box.
+  const dialogueBoxRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    dialogueBoxRef.current?.scrollTo({ top: dialogueBoxRef.current.scrollHeight })
+  }, [shownDialogueText])
+
+  // Auto mode: once a reply's typewriter finishes, wait a beat scaled to its length, then hand off
+  // to `onAutoAdvanceFire` — real VN autoplay. Keyed on the message id + completion flag so this
+  // schedules exactly once per newly-completed reply, not on every unrelated re-render while it
+  // stays complete. A "latest callback" ref means the fire, whenever it lands, always sees
+  // `ChatWindow`'s current guards (isGenerating/activeChoices/live-date/etc.), not a stale closure
+  // from the moment the timer was scheduled.
+  const onAutoAdvanceFireRef = useRef(onAutoAdvanceFire)
+  useEffect(() => {
+    onAutoAdvanceFireRef.current = onAutoAdvanceFire
+  })
+  useEffect(() => {
+    if (!autoAdvance || !dialogueComplete) return
+    const delayMs = Math.min(8000, Math.max(900, 700 + shownDialogueText.length * 22))
+    const t = setTimeout(() => onAutoAdvanceFireRef.current?.(), delayMs)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoAdvance, dialogueComplete, lastCharMsg?.id])
+
   const regexScripts = useSettingsStore((s) => s.regexScripts)
   const sfxEnabled = useSettingsStore((s) => s.sfxBursts)
   const sfxWordsSetting = useSettingsStore((s) => s.sfxWords)
@@ -342,11 +569,30 @@ export function VNStage({
   const showPetals = !reducedMotion && !!sceneBackground && OUTDOOR_BACKGROUNDS.has(sceneBackground)
 
   return (
-    <div className="relative flex flex-1 flex-col overflow-hidden">
+    <div
+      className="relative flex flex-1 flex-col overflow-hidden"
+      // Click-anywhere-on-scene: brings the UI back first if it's hidden (the universal way back —
+      // no on-screen hint needed), otherwise skips an in-progress typewriter reveal. Both are
+      // harmless no-ops the rest of the time; nested buttons/inputs still get their own click first,
+      // this never blocks or duplicates their own action.
+      onClick={() => {
+        if (hideUI) {
+          setHideUI(false)
+          return
+        }
+        if (!showLog && typewriterActive && !dialogueRevealDone) skipTypewriter()
+      }}
+    >
       <div className="absolute inset-0 transition-[background] duration-500" style={bgStyle} />
       {triggeredCgEntry && triggeredCgImageUrl && (
-        // Full-bleed CG in place of the ordinary background — sprites are skipped below while one's showing.
-        <img key={triggeredCgEntry.id} src={triggeredCgImageUrl} alt={triggeredCgEntry.title} className="absolute inset-0 h-full w-full object-cover" />
+        // Full-bleed CG in place of the ordinary background — sprites are skipped below while one's
+        // showing. `key` remounts per distinct CG, which is what replays `.vn-cg-reveal` each time.
+        <img
+          key={triggeredCgEntry.id}
+          src={triggeredCgImageUrl}
+          alt={triggeredCgEntry.title}
+          className="vn-cg-reveal absolute inset-0 h-full w-full object-cover"
+        />
       )}
       <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/10 to-black/35" />
       {/* Cinematic vignette rather than a flat scrim. */}
@@ -356,16 +602,30 @@ export function VNStage({
       />
       {showPetals && <SakuraPetals />}
 
+      {/* Hidden along with the rest of the chrome under Hide-UI — click the scene to bring it back. */}
+      {!hideUI && (
+      <>
       {/* One flex row (not two absolute overlays) so the HUD card and toolbar don't collide on phones. */}
       <div className="absolute inset-x-4 top-4 z-20 flex items-start justify-between gap-3">
         <div className="min-w-0 overflow-hidden rounded-xl bg-black/40 text-white backdrop-blur-sm sm:max-w-[65%]">
-          {(personaName || parentChatLink) && (
-            <div className="flex items-center gap-2 px-3 pb-1.5 pt-2 text-[11px] text-white/70">
+          {(personaName || chat.mode || parentChatLink) && (
+            <div className="flex items-center gap-1.5 px-3 pb-1.5 pt-2 text-[11px] text-white/70">
               {personaName && <span className="truncate">as {personaName}</span>}
-              {parentChatLink}
+              {chat.mode && (
+                <>
+                  {personaName && <span className="text-white/30">·</span>}
+                  <span className="truncate">{getWorldTemplate(chat.mode).label}</span>
+                </>
+              )}
+              {parentChatLink && (
+                <>
+                  {(personaName || chat.mode) && <span className="text-white/30">·</span>}
+                  {parentChatLink}
+                </>
+              )}
             </div>
           )}
-          <div className={`px-3 py-2 text-xs ${personaName || parentChatLink ? 'border-t border-white/10' : ''}`}>
+          <div className={`px-3 py-2 text-xs ${personaName || chat.mode || parentChatLink ? 'border-t border-white/10' : ''}`}>
             <div className="mb-1 flex min-w-0 items-center gap-1.5">
               <Heart size={11} strokeWidth={2.25} className="shrink-0 text-romance" fill="currentColor" fillOpacity={0.4} />
               <span className="shrink-0 uppercase tracking-wide text-white/70">
@@ -410,17 +670,56 @@ export function VNStage({
           )}
           {topBarExtra}
           <span className="h-4 w-px bg-white/15" />
+          {/* Minimal VN quick menu — History (the log below), Auto, Skip, Hide-UI. Icon-only; each
+              has its own tooltip/aria-label rather than a text chip, so the row stays compact
+              enough to sit beside the title block down to phone width. */}
+          {onToggleAutoAdvance && (
+            <button
+              onClick={onToggleAutoAdvance}
+              title={autoAdvance ? 'Auto-advance: on — click to stop' : 'Auto-advance the story after each reply'}
+              aria-label={autoAdvance ? 'Auto-advance: on' : 'Auto-advance: off'}
+              aria-pressed={autoAdvance}
+              className={`relative flex h-7 w-7 items-center justify-center rounded-full transition-colors hover:bg-white/15 ${
+                autoAdvance ? 'text-accent' : 'text-white/85 hover:text-white'
+              }`}
+            >
+              <Play size={13} strokeWidth={2} fill={autoAdvance ? 'currentColor' : 'none'} />
+              {autoAdvance && <span className="vn-auto-pulse absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-accent" />}
+            </button>
+          )}
+          <button
+            onClick={() => {
+              if (typewriterActive && !dialogueRevealDone) skipTypewriter()
+            }}
+            disabled={!typewriterActive || dialogueRevealDone}
+            title="Skip ahead"
+            aria-label="Skip typewriter reveal"
+            className="flex h-7 w-7 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/15 hover:text-white disabled:opacity-30"
+          >
+            <ChevronsRight size={15} strokeWidth={2} />
+          </button>
+          <button
+            onClick={() => setHideUI(true)}
+            title="Hide UI — click the scene to bring it back"
+            aria-label="Hide UI"
+            className="flex h-7 w-7 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/15 hover:text-white"
+          >
+            <EyeOff size={14} strokeWidth={2} />
+          </button>
+          <span className="h-4 w-px bg-white/15" />
           <button
             onClick={() => setShowLog((v) => !v)}
-            title={showLog ? 'Close log' : 'Open log'}
-            aria-label={showLog ? 'Close log' : 'Open log'}
+            title={showLog ? 'Close history' : 'Open history'}
+            aria-label={showLog ? 'Close history' : 'Open history'}
             className="flex h-7 items-center gap-1.5 rounded-full px-2 text-xs text-white/85 transition-colors hover:bg-white/15 hover:text-white sm:pr-3"
           >
             {showLog ? <X size={14} strokeWidth={2} /> : <History size={14} strokeWidth={2} />}
-            <span className="hidden sm:inline">{showLog ? 'Close' : 'Log'}</span>
+            <span className="hidden sm:inline">{showLog ? 'Close' : 'History'}</span>
           </button>
         </div>
       </div>
+      </>
+      )}
 
       {showLog ? (
         <div ref={logRef} className="relative z-10 flex-1 overflow-y-auto bg-bg/95 px-6 py-6 backdrop-blur">
@@ -469,6 +768,18 @@ export function VNStage({
             {/* h-full is required for each slot's h-[NN%] to resolve against a definite height. Skipped while a CG is showing full-bleed — sprites composited over unrelated CG art would look wrong. */}
             {!triggeredCgEntry && (
             <div className="flex h-full w-full items-end justify-center gap-2 sm:gap-5">
+              {departedMembers.map((m) => (
+                <VNCharacterSprite
+                  key={m.id}
+                  spriteUrl={m.spriteUrl}
+                  name={m.name}
+                  hue={m.hue}
+                  isActive={m.isActive}
+                  dim={!m.isActive}
+                  slotClass={slotClass}
+                  phase="exiting"
+                />
+              ))}
               {castMembers.map((m) => (
                 <VNCharacterSprite
                   key={m.id}
@@ -479,12 +790,16 @@ export function VNStage({
                   dim={isGroupScene && !m.isActive}
                   slotClass={slotClass}
                   onClick={m.onClick}
+                  phase={enteringIds.has(m.id) ? 'entering' : undefined}
                 />
               ))}
             </div>
             )}
           </div>
 
+          {/* Hidden under Hide-UI too — only the background/sprites/CG stay up, full-scene. */}
+          {!hideUI && (
+          <>
           {lastUserMsg && (
             // mb-5 keeps the bubble clear of the speaker nameplate overlapping the panel below.
             <div className="relative z-10 mx-4 mb-5 flex flex-col items-end gap-1 sm:mx-6 sm:mb-3">
@@ -505,7 +820,7 @@ export function VNStage({
 
           {/* Docked flush to the bottom edge, full width, like a real VN textbox. */}
           <div
-            className="group/vnpanel relative z-10 flex flex-col border-t border-white/10 bg-black/65 backdrop-blur-md"
+            className="group/vnpanel relative z-10 flex flex-col border-t border-white/15 bg-black/75 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.08),0_-18px_36px_-22px_rgb(0_0_0_/_0.85)] backdrop-blur-md"
             style={{ borderTopColor: plate.edge }}
           >
             {/* Speaker nameplate tab, overlapping the panel's top edge. */}
@@ -576,6 +891,32 @@ export function VNStage({
                 <>
                   {canSwipe && <span className="mx-1 h-4 w-px bg-white/15" />}
                   <button
+                    onClick={speakLine}
+                    title={speakState === 'idle' ? 'Read this line aloud' : speakState === 'loading' ? 'Loading…' : 'Stop'}
+                    aria-label={speakState === 'idle' ? 'Read this line aloud' : 'Stop reading aloud'}
+                    className={`flex h-7 w-7 items-center justify-center rounded-full transition-colors hover:bg-white/10 ${speakState !== 'idle' ? 'text-accent' : 'text-white/70'}`}
+                  >
+                    {speakState === 'loading' ? (
+                      <Loader2 size={14} strokeWidth={2} className="animate-spin" />
+                    ) : speakState === 'playing' ? (
+                      <Volume2 size={14} strokeWidth={2} />
+                    ) : (
+                      <Volume1 size={14} strokeWidth={2} />
+                    )}
+                  </button>
+                  <button
+                    onClick={() => setAutoVoice((v) => !v)}
+                    title={autoVoice ? 'Auto-voice: on — reads each new reply aloud' : 'Auto-voice: read each new reply aloud automatically'}
+                    aria-label={autoVoice ? 'Auto-voice: on' : 'Auto-voice: off'}
+                    aria-pressed={autoVoice}
+                    className={`relative flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-bold transition-colors hover:bg-white/10 ${
+                      autoVoice ? 'text-accent' : 'text-white/70'
+                    }`}
+                  >
+                    A
+                    {autoVoice && <span className="vn-auto-pulse absolute right-0.5 top-1 h-1.5 w-1.5 rounded-full bg-accent" />}
+                  </button>
+                  <button
                     onClick={() => onTogglePin(lastCharMsg!.id)}
                     title={lastCharMsg.pinned ? 'Unpin' : 'Pin this moment'}
                     aria-label={lastCharMsg.pinned ? 'Unpin message' : 'Pin message'}
@@ -586,23 +927,67 @@ export function VNStage({
                 </>
               )}
             </div>
-            {/* Capped height, not left to grow with reply length — scrolls in place instead. */}
-            <div className="max-h-[22vh] overflow-y-auto px-4 pb-3 pt-1.5 sm:max-h-[26vh] sm:px-6">
+            {/* Fixed height, not just capped — a one-line reply and a ten-line one occupy the same
+                footprint, so the panel never jumps between turns. Scrolls in place instead. More
+                headroom on a phone (~40vh, where the sprite above can afford to give up the room)
+                than on a wider viewport (22-26vh, where it's needed for the cast). */}
+            <div ref={dialogueBoxRef} className="h-[40vh] overflow-y-auto px-4 pb-3 pt-1.5 sm:h-[22vh] sm:px-6 md:h-[26vh]">
               <p
-                className="vn-dialogue whitespace-pre-wrap text-[15px] leading-relaxed text-white/95"
+                // Capped, centered line-width — full viewport width reads as a teleprompter on an
+                // ultra-wide monitor, not a VN textbox.
+                className="vn-dialogue mx-auto max-w-3xl whitespace-pre-wrap text-[15px] leading-relaxed text-white/95"
                 style={{ textShadow: '0 1px 3px rgb(0 0 0 / 0.5)' }}
               >
-                {renderMessageText(displayText, regexScripts, dialogueSfx)}
+                {renderMessageText(shownDialogueText, regexScripts, dialogueSfx)}
                 {isStreamingThis && <span className="cursor-blink font-mono">▋</span>}
+                {dialogueComplete && (
+                  // Classic ADV "done typing" glyph, right after the last line — click the scene
+                  // to skip ahead while a reply is still typing out.
+                  <ChevronDown
+                    size={13}
+                    strokeWidth={2.5}
+                    className="vn-next-glyph ml-1 inline-block align-[-1px] text-white/70"
+                    aria-hidden
+                  />
+                )}
               </p>
             </div>
-            {/* Same capped-height treatment as the dialogue box above. */}
+            {/* AI-suggested choices: docked pills here (same treatment as the dialogue box above),
+                or nothing at all when `vnChoiceStyle` is 'centered' — that style renders as a
+                full-stage overlay instead, below. Quick replies (`choiceListSlot`) always stay
+                docked either way; they're not a real decision point. */}
+            {activeChoiceData && vnChoiceStyle === 'docked' && (
+              <div className="max-h-[15vh] overflow-y-auto border-t border-white/10 px-3 pb-2.5 pt-2.5 sm:px-5">
+                <ChoiceList
+                  variant="vn"
+                  choices={activeChoiceData.choices}
+                  onPick={activeChoiceData.onPick}
+                  onRefresh={activeChoiceData.onRefresh}
+                  refreshing={activeChoiceData.refreshing}
+                />
+              </div>
+            )}
             {choiceListSlot && (
               <div className="max-h-[15vh] overflow-y-auto border-t border-white/10 px-3 pb-2.5 pt-2.5 sm:px-5">{choiceListSlot}</div>
             )}
             {assistSlot}
             <div className="border-t border-white/10 p-2.5 sm:px-4">{composerSlot}</div>
           </div>
+          </>
+          )}
+
+          {/* The 'centered' choice style: a full-stage, scene-dimmed decision moment instead of the
+              docked pills above — a real VN choice screen. Sits outside the Hide-UI gate above on
+              purpose in the sense that it's its own conditional, but still never shows while
+              Hide-UI is on (a pending choice just waits; clicking the scene restores the UI first). */}
+          {activeChoiceData && vnChoiceStyle === 'centered' && !hideUI && (
+            <VNCenteredChoices
+              choices={activeChoiceData.choices}
+              onPick={activeChoiceData.onPick}
+              onRefresh={activeChoiceData.onRefresh}
+              refreshing={activeChoiceData.refreshing}
+            />
+          )}
         </>
       )}
     </div>

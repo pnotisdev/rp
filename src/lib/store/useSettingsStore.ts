@@ -131,6 +131,10 @@ interface SettingsState {
   fontScale: number
   blurPx: number
   shadowStrength: number
+  /** VN mode's per-character typewriter delay, in ms — 0 is instant (no typewriter at all).
+   *  `reducedMotion` always reveals instantly regardless of this value, same as every other
+   *  animation in the app. */
+  vnTextSpeedMs: number
   reducedMotion: boolean
   reducedAudio: boolean
   /** Style standalone comic sound words ("BOOM!", "knock knock") as manga-style bursts in messages. */
@@ -146,7 +150,14 @@ interface SettingsState {
   showGenerationHud: boolean
   tagsAsFolders: boolean
   clickToEdit: boolean
-  visualNovelMode: boolean
+  /** `'auto'` (only via `setVisualNovelMode`, not `toggleFlag` — it's a tri-state) turns VN mode on
+   *  only once `isVnReady` says there's actually art for it; never a blank void. */
+  visualNovelMode: boolean | 'auto'
+  setVisualNovelMode: (v: boolean | 'auto') => void
+  /** Docked pill row (today's default) vs. a full-screen, scene-dimmed, stacked choice screen —
+   *  VN mode only; the ordinary chat layout's choices/quick-replies are unaffected either way. */
+  vnChoiceStyle: 'docked' | 'centered'
+  setVnChoiceStyle: (v: 'docked' | 'centered') => void
   /** With a vision-capable model loaded, runs a post-reply pass to correct the model's `<<scene:>>` tag. Off by default. */
   visionSceneDetection: boolean
   setChatStyle: (s: ChatStyle) => void
@@ -156,6 +167,7 @@ interface SettingsState {
     fontScale: number
     blurPx: number
     shadowStrength: number
+    vnTextSpeedMs: number
   }>) => void
   toggleFlag: (
     key:
@@ -167,7 +179,6 @@ interface SettingsState {
       | 'showGenerationHud'
       | 'tagsAsFolders'
       | 'clickToEdit'
-      | 'visualNovelMode'
       | 'visionSceneDetection',
   ) => void
 
@@ -194,6 +205,11 @@ interface SettingsState {
   /** Character ids whose "VN mode has no art yet" setup hint the user has dismissed. */
   vnArtHintDismissed: string[]
   dismissVnArtHint: (characterId: string) => void
+
+  /** The post-first-reply tip card ("turn on VN mode" / "bind a world") — shown once, ever, then
+   *  gone for good. Not per-character like the one above; this is a one-time orientation nudge. */
+  firstReplyTipDismissed: boolean
+  dismissFirstReplyTip: () => void
 
   // long-term memory
   autoSummarize: boolean
@@ -350,6 +366,7 @@ export const useSettingsStore = create<SettingsState>()(
       fontScale: 1,
       blurPx: 0,
       shadowStrength: 1,
+      vnTextSpeedMs: 18,
       reducedMotion: false,
       reducedAudio: false,
       sfxBursts: true,
@@ -363,6 +380,9 @@ export const useSettingsStore = create<SettingsState>()(
       tagsAsFolders: true,
       clickToEdit: true,
       visualNovelMode: false,
+      setVisualNovelMode: (v) => set({ visualNovelMode: v }),
+      vnChoiceStyle: 'docked',
+      setVnChoiceStyle: (v) => set({ vnChoiceStyle: v }),
       visionSceneDetection: false,
       setChatStyle: (s) => set({ chatStyle: s }),
       setAvatarShape: (s) => set({ avatarShape: s }),
@@ -394,6 +414,9 @@ export const useSettingsStore = create<SettingsState>()(
             ? s
             : { vnArtHintDismissed: [...s.vnArtHintDismissed, characterId] },
         ),
+
+      firstReplyTipDismissed: false,
+      dismissFirstReplyTip: () => set({ firstReplyTipDismissed: true }),
 
       autoSummarize: true,
       keepRecentMessages: 12,

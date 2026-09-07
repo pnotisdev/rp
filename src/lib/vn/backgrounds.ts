@@ -38,6 +38,26 @@ export function slugifyBackgroundId(label: string, existingIds: string[]): strin
   return slugifyId(label, existingIds, 'location')
 }
 
+/**
+ * Deterministic, no-model fallback for tagging a chat's opening scene: matches greeting text
+ * against candidate background labels/ids by keyword, so VN mode still opens on something
+ * plausible even when there's no client to run `detectGreetingScene`'s model-based pass (or it
+ * declined to answer). Longest matching needle wins so a more specific label beats a generic one;
+ * returns `undefined` when nothing in the text matches.
+ */
+export function matchBackgroundKeyword(text: string, candidates: { id: string; label: string }[]): string | undefined {
+  const lower = text.toLowerCase()
+  let best: { id: string; length: number } | undefined
+  for (const c of candidates) {
+    const needles = new Set([c.label.toLowerCase(), c.id.replace(/-/g, ' ').toLowerCase()])
+    for (const needle of needles) {
+      if (needle.length < 4) continue // skip needles too short to mean much ("bar" inside "barely")
+      if (lower.includes(needle) && (!best || needle.length > best.length)) best = { id: c.id, length: needle.length }
+    }
+  }
+  return best?.id
+}
+
 /** The human-readable label for a background id — one of the 12 defaults, or a world's own custom
  *  one. Falls back to the raw id (title-cased) for one that's been removed from both lists since it
  *  was set, rather than showing nothing. */

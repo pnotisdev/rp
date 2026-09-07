@@ -12,7 +12,7 @@ import { collectImageBase64, composeMessageText, type PendingAttachment } from '
 import { makeGenKey } from '@/lib/api/kobold'
 import { generateWithTimeout } from '@/lib/api/generateWithTimeout'
 import { useChatBackendClient } from '@/lib/hooks/useChatBackendClient'
-import { buildPrompt, estimateTokens, type ChatMessage } from '@/lib/prompt/builder'
+import { BUILTIN_SYSTEM_PROMPTS, buildPrompt, estimateTokens, type ChatMessage } from '@/lib/prompt/builder'
 import { SUMMARY_MAX_LENGTH, summarizeMessages } from '@/lib/prompt/summarize'
 import { generateChoices } from '@/lib/prompt/choices'
 import { detectCompletedTasks, generateTasks, suggestObjective } from '@/lib/objectives/objectiveAssist'
@@ -58,6 +58,7 @@ import { detectPersonaAgencyViolation } from '@/lib/dating/agencyGuard'
 import { buildSteerDirective, hardFailCorrectionDirective } from '@/lib/dating/steer'
 import {
   activityPhase,
+  daysUntilAnnualDate,
   describePresence,
   describeWeather,
   describeWorldMoment,
@@ -68,6 +69,7 @@ import {
   PHASES,
   spendEnergy,
 } from '@/lib/world/calendar'
+import { dateEventCardForActivity, type DayPlannerActivity } from '@/lib/world/dayPlanner'
 import { sceneContinuityNote } from '@/lib/prompt/sceneContinuity'
 import { evaluateTriggers } from '@/lib/world/triggers'
 import {
@@ -100,14 +102,17 @@ import {
 } from '@/lib/dating/stage'
 import {
   appendGiftLog,
+  birthdayGiftGuidance,
   defaultGiftInventory,
   getGiftCatalog,
+  giftBirthdayMultiplier,
   giftById,
+  giftCadenceMultiplier,
   giftImpactBase,
   giftMismatchPenalty,
   giftReactionGuidance,
-  giftRepetitionMultiplier,
   isReciprocityCueActive,
+  recentGiftCount,
   recentMeaningfulGiftName,
   reciprocityGuidance,
   trailingSameGiftRun,
@@ -620,6 +625,7 @@ export function useChatSession(chatId: string | null) {
               goals: speaker.goals,
               frequentedLocations: speaker.frequentedLocations,
               weatherPreferences: speaker.weatherPreferences,
+              birthday: speaker.birthday,
             }),
           })
 
@@ -810,7 +816,7 @@ export function useChatSession(chatId: string | null) {
           [emDashRule, styleGuidanceNote.trim(), opts?.extraStyleGuidance ?? ''].filter(Boolean).join(' ') || undefined
         : [
             emDashRule,
-            slowBurnPacing
+            effectiveAssistFlag(freshChat.assistOverrides?.slowBurnPacing, slowBurnPacing)
               ? slowBurnPacingNote(speaker.card.name, speakerTrack.mood, speakerHoldingBackByPlan, speakerTrack.currentNeed)
               : '',
             intimacyGuidance(intimacyLevel),
@@ -858,6 +864,7 @@ export function useChatSession(chatId: string | null) {
         personaName: persona?.name || 'You',
         personaDescription: persona?.description || '',
         globalSystemPrompt,
+        chatSystemPrompt: BUILTIN_SYSTEM_PROMPTS.find((p) => p.id === freshChat.assistOverrides?.systemPromptId)?.prompt,
         globalPostHistory,
         history: recentHistory,
         chatSummary: freshChat.summary,
@@ -1152,6 +1159,9 @@ export function useChatSession(chatId: string | null) {
           )
         : undefined
       if (triggerResult) {
+        // A rare authoring accident (two rules satisfying the same turn) just takes the first
+        // start_scene and ignores the rest, rather than one clobbering the other's activeEvent.
+        let sceneStarted = false
         for (const action of triggerResult.actions) {
           if (action.kind === 'set_flag') existingFlags.add(action.flag)
           else if (action.kind === 'remember') {
@@ -1169,6 +1179,20 @@ export function useChatSession(chatId: string | null) {
                 .create({ chatId: chatIdForRelationship, text: describeSocialReaction(speaker.card.name, reaction) })
                 .catch(() => {})
             }
+          } else if (action.kind === 'start_scene' && !sceneStarted) {
+            sceneStarted = true
+            // Not awaited: startDateEvent runs its own beginGeneration() liveness check and
+            // gracefully defers with a toast if a generation is already in flight (this turn's own
+            // reply), exactly like the marriage/moving-in auto-scene already does via the same ref.
+            startDateEventRef.current({
+              id: `heart-event-${Date.now()}`,
+              title: action.title,
+              description: action.description,
+              objectiveTitle: action.objectiveTitle,
+              objectiveDescription: action.objectiveDescription,
+              kind: 'hangout',
+              free: true,
+            })
           }
         }
       }
@@ -1499,6 +1523,10 @@ export function useChatSession(chatId: string | null) {
         relationshipStats: nextStats,
         relationshipStage,
         commitmentStatus: risk.commitmentStatus,
+        // The relationship's anniversary — stamped once, the very first time it moves off 'none',
+        // and left alone on every later tier change (marriage doesn't reset it).
+        commitmentStartedDay:
+          currentStatus === 'none' && risk.commitmentStatus !== 'none' ? (world?.currentDay ?? 0) : track.commitmentStartedDay,
         relationshipWarning: risk.relationshipWarning ?? null,
         breakupCount: risk.breakupCount,
         recentRebuff: nextRebuff,
@@ -2380,9 +2408,15 @@ export function useChatSession(chatId: string | null) {
           const priorTimesGivenThisGift = track.giftsGiven?.[opts.choice.giftId] ?? 0
           const sameGiftRun = trailingSameGiftRun(track.giftLog, opts.choice.giftId)
           const isMismatch = preferenceScore <= -0.5
+          const isBirthdayToday =
+            giftTarget.birthday !== undefined && daysUntilAnnualDate(world?.currentDay ?? 0, giftTarget.birthday) === 0
+          // Any gifts (not just this exact one) given in the recent turn window — the soft "don't
+          // gift-spam" cap, distinct from sameGiftRun's "not the same gift over and over" one.
+          const recentCount = recentGiftCount(track.giftLog, messages.length)
           const baseDelta = giftImpactBase(opts.choice.giftId, world) + preferenceScore
+          const birthdayOrRepetitionScaled = giftBirthdayMultiplier(baseDelta, isBirthdayToday, sameGiftRun)
           const giftDelta = Math.round(
-            (baseDelta > 0 ? baseDelta * giftRepetitionMultiplier(sameGiftRun) : baseDelta) +
+            (isBirthdayToday ? birthdayOrRepetitionScaled : birthdayOrRepetitionScaled * giftCadenceMultiplier(recentCount)) +
               giftMismatchPenalty(preferenceScore, priorTimesGivenThisGift),
           )
           const affection = clampAffection((track.affection ?? 0) + giftDelta)
@@ -2406,15 +2440,19 @@ export function useChatSession(chatId: string | null) {
           giftId = opts.choice.giftId
           if (gift) {
             text = `*I give ${giftTarget.card.name} ${withIndefiniteArticle(gift.name)}.* ${text}`
-            giftReactionDirective = giftReactionGuidance(
-              giftTarget.card.name,
-              persona?.name || 'You',
-              gift.name,
-              sameGiftRun,
-              isMismatch,
-              priorTimesGivenThisGift,
-              isMismatch ? undefined : { rarity: gift.rarity, preferenceScore },
-            )
+            // A birthday supersedes the normal taste-based read entirely, not just amplifies it.
+            giftReactionDirective = isBirthdayToday
+              ? birthdayGiftGuidance(giftTarget.card.name, gift.name)
+              : giftReactionGuidance(
+                  giftTarget.card.name,
+                  persona?.name || 'You',
+                  gift.name,
+                  sameGiftRun,
+                  isMismatch,
+                  priorTimesGivenThisGift,
+                  recentCount,
+                  isMismatch ? undefined : { rarity: gift.rarity, preferenceScore },
+                )
             // A genuinely meaningful gift, the first couple of times, earns a durable remembered fact so the character can call back to it later.
             if (preferenceScore >= 2 && priorTimesGivenThisGift < 2) {
               chatFactsApi
@@ -2917,7 +2955,10 @@ export function useChatSession(chatId: string | null) {
         const freshWorld = await worldsApi.get(world.id)
         const day = freshWorld?.currentDay ?? 0
         const phaseIndex = freshWorld?.currentPhaseIndex ?? 0
-        if (getEnergyRemaining(day, phaseIndex) <= 0) {
+        // `free` (a world-triggered scene, never a player-picked one) skips the energy gate and
+        // spend entirely — the player didn't choose to spend a day's action on this, so it
+        // shouldn't cost one, and it must not silently fail to fire just because today's are gone.
+        if (!event.free && getEnergyRemaining(day, phaseIndex) <= 0) {
           toastError(`No energy left today — get some rest before starting another ${event.kind === 'hangout' ? 'hangout' : 'date'}.`)
           return
         }
@@ -2932,11 +2973,13 @@ export function useChatSession(chatId: string | null) {
             weatherPreferences: character.weatherPreferences,
           }).replace(/\{\{char\}\}/g, character.card.name)
         }
-        const result = spendEnergy(day, phaseIndex)
-        await worldsApi.update(world.id, { currentDay: result.day, currentPhaseIndex: result.phaseIndex })
-        if (result.slept) {
-          const weather = getWeather(world.id, result.day)
-          toastSuccess(`Tired after a full day, you call it a night. A new morning dawns — ${describeWeather(weather)}.`)
+        if (!event.free) {
+          const result = spendEnergy(day, phaseIndex)
+          await worldsApi.update(world.id, { currentDay: result.day, currentPhaseIndex: result.phaseIndex })
+          if (result.slept) {
+            const weather = getWeather(world.id, result.day)
+            toastSuccess(`Tired after a full day, you call it a night. A new morning dawns — ${describeWeather(weather)}.`)
+          }
         }
       }
       await createObjective(event.objectiveTitle, event.objectiveDescription ?? event.description ?? '', 'ai')
@@ -3133,6 +3176,40 @@ export function useChatSession(chatId: string | null) {
     }
   }, [activeFacts, activeObjective, character, chatId, client, messages, persona?.name, relationshipDifficulty, world])
 
+  /**
+   * Runs one activity picked from `DayPlannerPanel`. A 'rest' just spends the world's energy and
+   * advances the clock, mirroring the energy-spend block already inside `startDateEvent` — no
+   * scene, no objective, no `activeEvent` touched, so it's free of any LLM cost. A 'hangout'
+   * (Meet/Text) builds a deterministic `DateEventCard` and hands it to the *existing*,
+   * already-tested `startDateEvent`/`endDateEvent` pipeline unchanged, then — only for Meet, the
+   * one gap that pipeline actually has — calls `updateScene({ location })` so the scene picks up
+   * the activity's location instead of staying wherever it last was.
+   */
+  const runDayPlannerActivity = useCallback(
+    async (activity: DayPlannerActivity) => {
+      if (activity.kind === 'rest') {
+        if (!world) return
+        const freshWorld = await worldsApi.get(world.id)
+        const day = freshWorld?.currentDay ?? 0
+        const phaseIndex = freshWorld?.currentPhaseIndex ?? 0
+        const result = spendEnergy(day, phaseIndex)
+        await worldsApi.update(world.id, { currentDay: result.day, currentPhaseIndex: result.phaseIndex })
+        const weather = getWeather(world.id, result.day)
+        toastSuccess(
+          result.slept
+            ? `You call it a night. A new morning dawns — ${describeWeather(weather)}.`
+            : `You take some time to rest and recharge.`,
+        )
+        return
+      }
+      if (!character) return
+      const card = dateEventCardForActivity(activity, character.card.name)
+      await startDateEvent(card)
+      if (activity.location) await updateScene({ location: activity.location })
+    },
+    [character, startDateEvent, updateScene, world],
+  )
+
   const forkChat = useCallback(
     async (messageId?: string) => {
       if (!chatId) return
@@ -3234,6 +3311,7 @@ export function useChatSession(chatId: string | null) {
     suggestDateEventIdea,
     startDateEvent,
     endDateEvent,
+    runDayPlannerActivity,
     regenerateChoices,
     buyGift,
     buyItem,

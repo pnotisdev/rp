@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Globe, ImagePlus, Music, Plus, X } from 'lucide-react'
+import { Globe, ImagePlus, Music, Plus, Star, X } from 'lucide-react'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { worldsApi } from '@/lib/api/client'
 import type { CustomSceneFlag, GiftItem, GiftRarity, ItemDef, ItemEffect, RelationshipDimension, WorldCard } from '@/lib/types'
@@ -9,7 +9,7 @@ import { BGM_DEFAULT_KEY, SCENE_MOODS } from '@/lib/vn/moods'
 import { combinedSceneFlags, COMMITMENT_ORDER, formatCommitmentStatus, formatRelationshipStage, RELATIONSHIP_MILESTONES } from '@/lib/dating/stage'
 import { type IntimacyCategory, type IntimacyUnlockable } from '@/lib/dating/intimacyCatalog'
 import { advancePhase, getCalendarInfo, getEnergyRemaining, getMaxEnergyForDay, getWeather, describeWeather, PHASES } from '@/lib/world/calendar'
-import { WORLD_TEMPLATES, getWorldTemplate, hiddenWorldTabs, type WorldTemplateId } from '@/lib/world/worldTemplates'
+import { WORLD_TEMPLATES, getWorldTemplate, hiddenWorldTabs, normalizeWorldTemplateId, type WorldTemplateId } from '@/lib/world/worldTemplates'
 import { newId } from '@/lib/id'
 import { NumberField, SelectField, TextAreaField, TextField } from '@/components/ui/Field'
 import type { IntimacyDetailLevel } from '@/lib/store/useSettingsStore'
@@ -187,12 +187,14 @@ function WorldEditor({
   const [name, setName] = useState(base.name)
   const [description, setDescription] = useState(base.description)
   const [rules, setRules] = useState(base.rules ?? '')
-  const [template, setTemplate] = useState<WorldTemplateId>(base.template ?? 'dating_sim')
+  const [template, setTemplate] = useState<WorldTemplateId>(normalizeWorldTemplateId(base.template))
   const [lorebook, setLorebook] = useState(base.lorebook)
   const [avatarDataUrl, setAvatarDataUrl] = useState(base.avatarDataUrl)
   const [backgrounds, setBackgrounds] = useState<Record<string, string>>(base.backgrounds ?? {})
   const [backgroundUnlocks, setBackgroundUnlocks] = useState<Record<string, number>>(base.backgroundUnlocks ?? {})
   const [customBackgrounds, setCustomBackgrounds] = useState<CustomBackground[]>(base.customBackgrounds ?? [])
+  /** The opening shot VN mode falls back to whenever a scene has no valid tag of its own. */
+  const [defaultBackgroundId, setDefaultBackgroundId] = useState<string | undefined>(base.defaultBackgroundId)
   const [newBackgroundLabel, setNewBackgroundLabel] = useState('')
   const [music, setMusic] = useState<Record<string, string>>(base.music ?? {})
   const [gifts, setGifts] = useState<GiftItem[]>(base.gifts ?? [])
@@ -245,6 +247,9 @@ function WorldEditor({
       backgrounds,
       backgroundUnlocks,
       customBackgrounds,
+      // `null`, not `undefined` — see the `intimacyLevel` comment below on why a cleared nullable
+      // field has to be sent explicitly rather than just omitted.
+      defaultBackgroundId: defaultBackgroundId ?? null,
       music,
       gifts,
       items,
@@ -358,6 +363,7 @@ function WorldEditor({
       return next
     })
   }
+  const setDefaultBackground = (tagId: string) => setDefaultBackgroundId((cur) => (cur === tagId ? undefined : tagId))
   const setBackgroundUnlock = (tagId: string, minAffection: number) =>
     setBackgroundUnlocks((b) => ({ ...b, [tagId]: Math.max(0, Math.min(100, minAffection)) }))
 
@@ -372,6 +378,7 @@ function WorldEditor({
   const removeCustomBackground = (backgroundId: string) => {
     setCustomBackgrounds((list) => list.filter((b) => b.id !== backgroundId))
     removeBackground(backgroundId)
+    setDefaultBackgroundId((cur) => (cur === backgroundId ? undefined : cur))
   }
 
   const advanceClock = async () => {
@@ -525,7 +532,9 @@ function WorldEditor({
         >
           <p className="mb-4 text-xs text-text-muted">
             {Object.keys(backgrounds).length}/{allBackgrounds.length} set. The number under each is
-            the warmth needed before that background can appear.
+            the warmth needed before that background can appear. The <Star size={11} strokeWidth={2} className="mb-0.5 inline text-accent" />{' '}
+            marks the opening scene — where a new chat starts before the model (or nothing, if
+            there's no model connected) has tagged one of its own.
           </p>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
             {allBackgrounds.map((bg) => (
@@ -558,6 +567,26 @@ function WorldEditor({
                       ✕
                     </button>
                   )}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault()
+                      setDefaultBackground(bg.id)
+                    }}
+                    aria-pressed={defaultBackgroundId === bg.id}
+                    aria-label={
+                      defaultBackgroundId === bg.id
+                        ? `Unset ${bg.label} as the opening scene`
+                        : `Set ${bg.label} as the opening scene`
+                    }
+                    className={`absolute left-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-lg bg-bg-elevated/90 transition-opacity ${
+                      defaultBackgroundId === bg.id
+                        ? 'text-accent opacity-100'
+                        : 'text-text-muted opacity-0 hover:text-accent group-hover:opacity-100'
+                    }`}
+                  >
+                    <Star size={13} strokeWidth={2} fill={defaultBackgroundId === bg.id ? 'currentColor' : 'none'} />
+                  </button>
                 </label>
                 <div className="absolute bottom-8 right-1.5 hidden group-hover:block">
                   <GenerateImageButton

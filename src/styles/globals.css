@@ -197,6 +197,80 @@ select:focus-visible,
   .vn-sprite { animation: none; }
 }
 
+/* Sprite staging: a cast member slides+fades in the first time they appear (a chat's very first
+   render counts), and out again the moment they leave the roster — VNStage keeps them mounted a
+   beat longer under `phase="exiting"` specifically so this has something to animate. */
+@keyframes vn-sprite-enter {
+  0% { opacity: 0; transform: translateY(18px) scale(0.96); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+.vn-sprite-enter-anim {
+  animation: vn-sprite-enter 450ms ease-out both;
+}
+@keyframes vn-sprite-exit {
+  0% { opacity: 1; transform: translateY(0) scale(1); }
+  100% { opacity: 0; transform: translateY(18px) scale(0.96); }
+}
+.vn-sprite-exit-anim {
+  animation: vn-sprite-exit 450ms ease-in both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .vn-sprite-enter-anim,
+  .vn-sprite-exit-anim {
+    animation: none;
+  }
+}
+
+/* CG reveal ceremony: a brief beat when a gallery CG first surfaces full-bleed, instead of it just
+   quietly replacing the background. VNStage remounts the <img> per distinct CG id (`key`), which is
+   what makes this replay each time a *different* CG appears. */
+@keyframes vn-cg-reveal {
+  0% { opacity: 0; transform: scale(1.03); }
+  100% { opacity: 1; transform: scale(1); }
+}
+.vn-cg-reveal {
+  animation: vn-cg-reveal 600ms ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .vn-cg-reveal { animation: none; }
+}
+
+/* `vnChoiceStyle: 'centered'` — the full-stage choice screen fades/scales in as a decision beat. */
+@keyframes vn-centered-choices-in {
+  0% { opacity: 0; transform: scale(0.98); }
+  100% { opacity: 1; transform: scale(1); }
+}
+.vn-centered-choices {
+  animation: vn-centered-choices-in 250ms ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .vn-centered-choices { animation: none; }
+}
+
+/* The quick menu's Auto toggle — a small pulsing dot on the icon while auto-advance is running. */
+@keyframes vn-auto-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.7); }
+}
+.vn-auto-pulse {
+  animation: vn-auto-pulse 1.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .vn-auto-pulse { animation: none; }
+}
+
+/* The ADV "more/done" glyph in VNStage's dialogue box — appears once a reply has fully typed out. */
+@keyframes vn-next-glyph-bob {
+  0%, 100% { transform: translateY(0); opacity: 0.55; }
+  50% { transform: translateY(3px); opacity: 0.95; }
+}
+.vn-next-glyph {
+  animation: vn-next-glyph-bob 1.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .vn-next-glyph { animation: none; opacity: 0.75; }
+}
+
 /* A handful of sakura petals drifting down behind the scene — VNStage renders this layer only
    for outdoor backgrounds (park/forest/rooftop/city-street/beach) where falling petals actually
    make sense, and never at all when the app's own reducedMotion setting is on. The @media rule

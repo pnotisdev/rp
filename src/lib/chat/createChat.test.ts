@@ -1,6 +1,16 @@
-import { describe, expect, it } from 'vitest'
-import { availableGreetings } from './createChat'
+import { describe, expect, it, vi } from 'vitest'
 import type { Character, CharacterCardData } from '@/lib/characters/cardSpec'
+import type { WorldCard } from '@/lib/types'
+
+// `createChat` writes through `chatsApi`/`messagesApi` — stubbed so these tests only exercise its
+// own resolution logic (mode/assistOverrides), not the real HTTP layer.
+vi.mock('@/lib/api/client', () => ({
+  chatsApi: { create: vi.fn(async (input: unknown) => ({ id: 'chat-1', createdAt: 0, updatedAt: 0, ...(input as object) })) },
+  messagesApi: { create: vi.fn(), update: vi.fn() },
+}))
+
+import { availableGreetings, createChat } from './createChat'
+import { chatsApi } from '@/lib/api/client'
 
 function character(overrides: Partial<CharacterCardData> = {}): Character {
   return {
@@ -18,6 +28,70 @@ function character(overrides: Partial<CharacterCardData> = {}): Character {
     },
   }
 }
+
+function world(overrides: Partial<WorldCard> = {}): WorldCard {
+  return {
+    id: 'world-1',
+    name: 'Test World',
+    description: '',
+    lorebook: { name: '', entries: [], token_budget: 512, scan_depth: 8 },
+    createdAt: 0,
+    updatedAt: 0,
+    ...overrides,
+  }
+}
+
+/** The payload `createChat` most recently handed to `chatsApi.create`. */
+function lastCreatePayload(): { mode?: string; assistOverrides?: object } {
+  const calls = vi.mocked(chatsApi.create).mock.calls
+  return calls[calls.length - 1][0] as { mode?: string; assistOverrides?: object }
+}
+
+describe('createChat: mode resolution', () => {
+  it('writes the explicit mode, overriding the bound world template', async () => {
+    await createChat({
+      character: character(),
+      world: world({ template: 'dating_sim' }),
+      personaId: '',
+      mode: 'freeform',
+    })
+    const payload = lastCreatePayload()
+    expect(payload.mode).toBe('freeform')
+    // Freeform disables the relationship assists (and its other romance-flavored bundling) even
+    // though the bound world's own template (dating_sim) wouldn't.
+    expect(payload.assistOverrides).toEqual({
+      autoTrackRelationship: false,
+      autoSuggestChoices: false,
+      slowBurnPacing: false,
+      showIntentChips: false,
+      showDateEventButton: false,
+      systemPromptId: 'balanced',
+    })
+  })
+
+  it("falls back to the bound world's template when no mode is given", async () => {
+    await createChat({
+      character: character(),
+      world: world({ template: 'freeform' }),
+      personaId: '',
+    })
+    expect(lastCreatePayload().mode).toBe('freeform')
+  })
+
+  it("normalizes a bound world's retired template id (from before Slice of Life merged into Freeform) to its live replacement", async () => {
+    await createChat({
+      character: character(),
+      world: world({ template: 'slice_of_life' as never }),
+      personaId: '',
+    })
+    expect(lastCreatePayload().mode).toBe('freeform')
+  })
+
+  it("falls back to 'dating_sim' when there's neither an explicit mode nor a bound world", async () => {
+    await createChat({ character: character(), world: undefined, personaId: '' })
+    expect(lastCreatePayload().mode).toBe('dating_sim')
+  })
+})
 
 describe('availableGreetings', () => {
   it('returns just first_mes when there are no alternates', () => {

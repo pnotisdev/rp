@@ -1,5 +1,5 @@
 import type { PresenceStatus, ScheduleEntry, WeatherPreferences } from '@/lib/world/calendar'
-import { describeWeather, getCalendarInfo, getCurrentActivity, getWeather, pickFrom, seededFraction } from '@/lib/world/calendar'
+import { daysUntilAnnualDate, describeWeather, getCalendarInfo, getCurrentActivity, getWeather, pickFrom, seededFraction } from '@/lib/world/calendar'
 
 /**
  * Deterministic "something is going on" hooks derived from a character's already-authored world
@@ -10,6 +10,8 @@ import { describeWeather, getCalendarInfo, getCurrentActivity, getWeather, pickF
 
 export const AMBIENT_EVENT_KINDS = [
   'holiday',
+  'birthday',
+  'birthday_soon',
   'weather_loved',
   'weather_hated',
   'routine_absence',
@@ -24,6 +26,8 @@ export interface AmbientEvent {
   detail: string
   /** Only set for `'routine_absence'`. */
   daysSinceVisited?: number
+  /** Only set for `'birthday_soon'`. */
+  daysUntil?: number
 }
 
 export interface AmbientEventContext {
@@ -37,6 +41,19 @@ export interface AmbientEventContext {
   goals?: string[]
   frequentedLocations?: string[]
   weatherPreferences?: WeatherPreferences
+  /** Day-of-year (`Character.birthday`) — powers the `'birthday'`/`'birthday_soon'` hooks below. */
+  birthday?: number
+}
+
+/** How many days out a birthday starts being worth an ambient "it's coming up" mention. */
+const BIRTHDAY_SOON_WINDOW_DAYS = 7
+
+/** 1–`BIRTHDAY_SOON_WINDOW_DAYS` days out only — the day itself is `selectAmbientEvent`'s own unconditional `'birthday'` check, not this. */
+function selectBirthdaySoon(ctx: AmbientEventContext): AmbientEvent | undefined {
+  if (ctx.birthday === undefined) return undefined
+  const daysUntil = daysUntilAnnualDate(ctx.day, ctx.birthday)
+  if (daysUntil <= 0 || daysUntil > BIRTHDAY_SOON_WINDOW_DAYS) return undefined
+  return { kind: 'birthday_soon', detail: '', daysUntil }
 }
 
 /** Plausible range for a "hasn't been there in a while" gap, in in-fiction days. */
@@ -83,8 +100,15 @@ function selectFreeTimeInterest(ctx: AmbientEventContext): AmbientEvent | undefi
 export function selectAmbientEvent(ctx: AmbientEventContext): AmbientEvent | undefined {
   const info = getCalendarInfo(ctx.day)
   if (info.holiday) return { kind: 'holiday', detail: info.holiday }
+  // Same unconditional priority as a holiday — a real, once-a-year occasion, not something that
+  // should have to win a coin flip against "free time interest" to ever come up on the actual day.
+  if (ctx.birthday !== undefined && daysUntilAnnualDate(ctx.day, ctx.birthday) === 0) {
+    return { kind: 'birthday', detail: '' }
+  }
 
   const candidates: AmbientEvent[] = []
+  const birthdaySoon = selectBirthdaySoon(ctx)
+  if (birthdaySoon) candidates.push(birthdaySoon)
   if (ctx.worldId) {
     const weather = getWeather(ctx.worldId, ctx.day)
     if (ctx.weatherPreferences?.loves?.includes(weather)) candidates.push({ kind: 'weather_loved', detail: describeWeather(weather) })
@@ -104,6 +128,10 @@ export function selectAmbientEvent(ctx: AmbientEventContext): AmbientEvent | und
 const HOOK_LINES: Record<AmbientEventKind, (charName: string, event: AmbientEvent) => string> = {
   holiday: (charName, event) =>
     `Today is ${event.detail} — a real, recognized occasion in this world. It doesn't have to take over the scene, but it's a fair, specific thing for ${charName} to notice, mention, or feel some way about today.`,
+  birthday: (charName) =>
+    `Today is ${charName}'s actual birthday — a real, once-a-year occasion for them personally, not just a world holiday. It doesn't have to take over the scene, but it's fair and natural for ${charName} to notice it, feel some way about it (however they'd genuinely feel about their own birthday), or bring it up themselves today.`,
+  birthday_soon: (charName, event) =>
+    `${charName}'s birthday is coming up in about ${event.daysUntil} day${event.daysUntil === 1 ? '' : 's'} — close enough that it's fair for ${charName} to naturally mention it's coming, drop a hint about wanting something, or seem a little more aware of the date than usual. Not something to force.`,
   weather_loved: (charName, event) =>
     `Today's weather (${event.detail}) happens to be exactly the kind ${charName} genuinely loves. Worth ${charName} noticing or reacting to today, in whatever small way actually fits their mood right now.`,
   weather_hated: (charName, event) =>

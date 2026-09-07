@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
-import { useConnectionStatus, type ConnectionStatus } from '@/lib/hooks/useConnectionStatus'
+import { useConnectionStatus } from '@/lib/hooks/useConnectionStatus'
 import { useHostedBackendStatus } from '@/lib/hooks/useHostedBackendStatus'
 import { BUILTIN_INSTRUCT_TEMPLATES } from '@/lib/prompt/instructTemplates'
 import { CHAT_BACKEND_LABELS, KNOWN_CHAT_PROVIDERS, NOVELAI_MODELS, type ChatBackendId } from '@/lib/api/chatBackend'
@@ -9,32 +9,10 @@ import { Section } from '@/components/ui/Section'
 import { SettingsPage } from '@/components/ui/SettingsPage'
 import { Button } from '@/components/ui/Button'
 import { toastSuccess } from '@/lib/store/useToastStore'
+import { HostedConnectionStatus, STATUS_DOT, STATUS_LABEL } from './HostedConnectionStatus'
 
 const CHAT_BACKENDS = Object.keys(CHAT_BACKEND_LABELS) as ChatBackendId[]
-
-const STATUS_DOT = { online: 'bg-success', offline: 'bg-danger', checking: 'bg-warning' } as const
-const STATUS_LABEL = { online: 'Connected', offline: 'Not reachable', checking: 'Checking…' } as const
 const BUILTIN_IDS = new Set(BUILTIN_INSTRUCT_TEMPLATES.map((t) => t.id))
-
-/**
- * The hosted-backend (OpenAI-compatible / NovelAI) equivalent of the KoboldCpp status block above —
- * a "Test connection" button rather than an always-running poll, since `useHostedBackendStatus`
- * only checks once per distinct config plus on demand (see that hook's own doc comment for why).
- */
-function HostedConnectionStatus({ status, detail, recheck }: { status: ConnectionStatus; detail: string | null; recheck: () => void }) {
-  return (
-    <div className="mt-2 rounded-xl bg-bg-elevated p-5 text-xs">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-1.5">
-          <span className={`h-2 w-2 rounded-full ${STATUS_DOT[status]}`} />
-          <span className="text-text">{STATUS_LABEL[status]}</span>
-        </div>
-        <Button onClick={recheck}>{status === 'checking' ? 'Testing…' : 'Test connection'}</Button>
-      </div>
-      {detail && <div className="mt-1 text-text-muted">{detail}</div>}
-    </div>
-  )
-}
 
 export function ConnectionSettings() {
   const baseUrl = useSettingsStore((s) => s.baseUrl)

@@ -27,6 +27,29 @@ describe('selectAmbientEvent', () => {
     expect(event).toEqual({ kind: 'holiday', detail: 'First Bloom' })
   })
 
+  it('a birthday today takes unconditional priority over every other qualifying hook, same as a holiday', () => {
+    const event = selectAmbientEvent({
+      characterId: 'c1',
+      day: 0, // spring, dayOfSeason 1 -- not a holiday
+      phaseIndex: 0,
+      worldId: 'w1',
+      birthday: 0,
+      weatherPreferences: { loves: [...WEATHER_KINDS] }, // guaranteed weather match too
+    })
+    expect(event).toEqual({ kind: 'birthday', detail: '' })
+  })
+
+  it('surfaces birthday_soon when the birthday is 1-7 days out and nothing else qualifies', () => {
+    const event = selectAmbientEvent({ characterId: 'c1', day: 0, phaseIndex: 0, birthday: 5 })
+    expect(event).toEqual({ kind: 'birthday_soon', detail: '', daysUntil: 5 })
+  })
+
+  it('does not surface birthday_soon outside the 1-7 day window', () => {
+    expect(selectAmbientEvent({ characterId: 'c1', day: 0, phaseIndex: 0, birthday: 8 })).toBeUndefined()
+    // 0 days out is today -- the unconditional 'birthday' branch's job, not birthday_soon's.
+    expect(selectAmbientEvent({ characterId: 'c1', day: 0, phaseIndex: 0, birthday: 0 })).toEqual({ kind: 'birthday', detail: '' })
+  })
+
   it('surfaces weather_loved when today\'s weather is one the character loves', () => {
     const event = selectAmbientEvent({
       characterId: 'c1',
@@ -159,6 +182,18 @@ describe('describeAmbientEvent', () => {
     const hated = describeAmbientEvent('Sumire', { kind: 'weather_hated', detail: 'stormy' })
     expect(hated).toContain('stormy')
     expect(hated).toContain('dislikes')
+  })
+
+  it('names the character for birthday', () => {
+    const line = describeAmbientEvent('Sumire', { kind: 'birthday', detail: '' })
+    expect(line).toContain('Sumire')
+    expect(line).toContain('birthday')
+  })
+
+  it('names the character and day count for birthday_soon', () => {
+    const line = describeAmbientEvent('Sumire', { kind: 'birthday_soon', detail: '', daysUntil: 3 })
+    expect(line).toContain('Sumire')
+    expect(line).toContain('3')
   })
 
   it('names the location and day count for routine_absence', () => {
