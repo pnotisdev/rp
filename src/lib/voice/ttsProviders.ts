@@ -75,17 +75,24 @@ async function speakAzure(apiKey: string, region: string, voiceName: string, tex
 export async function synthesizeSpeech(config: TtsConfig, text: string, koboldBaseUrl: string): Promise<Blob> {
   const trimmed = text.trim()
   if (!trimmed) throw new Error('Nothing to speak')
+  // A pasted key/id/region with a trailing space or newline is a common, silent cause of a 401 —
+  // trimmed here (at the point of use) rather than on every keystroke in Settings, so it also
+  // heals a key that's already saved with stray whitespace, without fighting the user mid-type.
+  const apiKey = config.apiKey?.trim()
+  const voice = config.voice?.trim() ?? ''
+  const baseUrl = config.baseUrl?.trim()
+  const region = config.region?.trim()
 
   switch (config.provider) {
     case 'koboldcpp':
-      return speakOpenAiCompatible(koboldBaseUrl, undefined, trimmed, config.voice)
+      return speakOpenAiCompatible(koboldBaseUrl, undefined, trimmed, voice)
     case 'openai-compatible':
-      if (!config.baseUrl) throw new Error('Set a server URL for the OpenAI-compatible provider (Settings → Voice)')
-      return speakOpenAiCompatible(config.baseUrl, config.apiKey, trimmed, config.voice)
+      if (!baseUrl) throw new Error('Set a server URL for the OpenAI-compatible provider (Settings → Voice)')
+      return speakOpenAiCompatible(baseUrl, apiKey, trimmed, voice)
     case 'elevenlabs':
-      return speakElevenLabs(config.apiKey ?? '', config.voice, trimmed)
+      return speakElevenLabs(apiKey ?? '', voice, trimmed)
     case 'azure':
-      return speakAzure(config.apiKey ?? '', config.region ?? '', config.voice, trimmed)
+      return speakAzure(apiKey ?? '', region ?? '', voice, trimmed)
     case 'alibaba':
       // DashScope's TTS request/response shape hasn't been confirmed against a live account —
       // rather than guess at an API contract, this is left honestly unimplemented.
