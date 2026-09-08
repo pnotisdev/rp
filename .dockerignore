@@ -1,0 +1,22 @@
+# Keep the build context small and never ship local state or machine-specific config.
+node_modules
+dist
+data
+presets
+screenshots
+tools/comfy/out
+tools/comfy/backups
+.git
+.vscode
+.claude
+.mcp.json
+.env
+.env.*
+*.local
+npm-debug.log*
+
+# Docs / planning that don't belong in the image
+ROADMAP.md
+TODO.md
+FIXES_TODO.md
+PLAYTHROUGH_REPORT.md

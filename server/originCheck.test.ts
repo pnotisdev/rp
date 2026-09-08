@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { originAllowed } from './originCheck.ts'
 
 describe('originAllowed', () => {
@@ -26,5 +26,24 @@ describe('originAllowed', () => {
   it('rejects an unparseable or scheme-less Origin rather than trusting it', () => {
     expect(originAllowed('not a url')).toBe(false)
     expect(originAllowed('localhost:5173')).toBe(false) // no scheme: parses with an empty hostname
+  })
+
+  describe('RP_ALLOWED_ORIGINS (network deployments)', () => {
+    afterEach(() => {
+      delete process.env.RP_ALLOWED_ORIGINS
+    })
+
+    it('allows an exact origin listed in the env var, still rejecting others', () => {
+      process.env.RP_ALLOWED_ORIGINS = 'http://192.168.1.9:8080, https://rp.example.com/'
+      expect(originAllowed('http://192.168.1.9:8080')).toBe(true)
+      expect(originAllowed('https://rp.example.com')).toBe(true)
+      expect(originAllowed('http://192.168.1.9:9999')).toBe(false)
+      expect(originAllowed('https://evil.example')).toBe(false)
+    })
+
+    it('treats a lone "*" as "disable the origin check"', () => {
+      process.env.RP_ALLOWED_ORIGINS = '*'
+      expect(originAllowed('https://anything.example')).toBe(true)
+    })
   })
 })

@@ -29,10 +29,21 @@ That starts the client on `http://localhost:5173` and a local Express + SQLite A
 
 ```bash
 npm run build       # type-check, then production build
+npm start           # serve that build (API + client) on one port, no Vite
 npm run typecheck   # type-check only
 npm test            # run the suite once
 npm run test:watch  # watch mode
 ```
+
+### Docker
+
+```bash
+docker compose up -d --build
+```
+
+Serves the API and the built client together on `http://localhost:3001`, with your data in
+`./data`. Your model backend still runs wherever it already does. See [DOCKER.md](DOCKER.md) for
+environment variables and exposing it beyond localhost.
 
 ## What's in it
 

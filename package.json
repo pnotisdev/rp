@@ -9,6 +9,7 @@
     "dev:client": "vite",
     "dev:server": "tsx watch --experimental-sqlite server/index.ts",
     "build": "tsc --noEmit -p tsconfig.json && vite build",
+    "start": "node --experimental-sqlite server/index.ts",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.server.json",
     "test": "vitest run",

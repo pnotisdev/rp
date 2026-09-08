@@ -1,6 +1,7 @@
 import express from 'express'
 import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   characterStore,
   chatFactStore,
@@ -1130,6 +1131,20 @@ app.post('/api/novelai/tokenize', async (req, res) => {
   const ids = await encodeTokens(text, tokenizerId)
   res.json({ ids })
 })
+
+// Serve the built client (Docker, or `npm run build` && `npm start`). In dev this is Vite's job and
+// `dist/` doesn't exist, so the whole block is skipped and `npm run dev` is untouched. Registered
+// after every `/api` route so those still win; the SPA fallback then hands any other GET the app
+// shell so a deep-link reload works, while unknown `/api` paths fall through to the 404 below.
+const clientDir = path.resolve(fileURLToPath(import.meta.url), '..', '..', 'dist')
+if (fs.existsSync(path.join(clientDir, 'index.html'))) {
+  app.use(express.static(clientDir))
+  app.use((req, res, next) => {
+    if (req.method !== 'GET' && req.method !== 'HEAD') return next()
+    if (req.path.startsWith('/api/') || req.path.startsWith('/avatars/')) return next()
+    res.sendFile(path.join(clientDir, 'index.html'))
+  })
+}
 
 // Catches throws from any route above and returns clean JSON instead of Express's default HTML error page. Must be last.
 app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

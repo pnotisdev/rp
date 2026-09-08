@@ -7,10 +7,14 @@ purgeExpiredTrash()
 
 const port = Number(process.env.API_PORT) || 3001
 
-// 127.0.0.1 only — this API has no auth and full read/write/delete access to every
-// character/chat/world, so it must never be reachable from other devices on the network.
-app.listen(port, '127.0.0.1', () => {
-  console.log(`[rp-server] listening on http://localhost:${port} — data stored in ${dataDir}`)
+// Loopback-only by default — this API has no auth and full read/write/delete access to every
+// character/chat/world, so it must never be casually reachable from other devices. A container
+// can't publish a port it can't reach, so Docker sets API_HOST=0.0.0.0 and leans on Docker's own
+// port mapping (and whatever firewall / reverse-proxy auth you put in front) to control access.
+const host = process.env.API_HOST || '127.0.0.1'
+
+app.listen(port, host, () => {
+  console.log(`[rp-server] listening on http://${host}:${port} — data stored in ${dataDir}`)
 })
 
 // On a clean exit (Ctrl+C, or the dev watcher restarting the process), fold the write-ahead log

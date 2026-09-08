@@ -1,0 +1,20 @@
+# Minimal single-service setup. `docker compose up -d --build`, then open http://localhost:3001
+# and point Settings -> Connection at your model backend.
+services:
+  rp:
+    build: .
+    ports:
+      - "3001:3001"
+    volumes:
+      # Characters, chats, worlds, personas and every uploaded image. Back this up.
+      - ./data:/app/data
+    environment:
+      # Uncomment if you reach the UI from another device / a reverse proxy, so the API accepts
+      # that browser's Origin (comma-separated; a lone "*" turns the check off).
+      # RP_ALLOWED_ORIGINS: "http://192.168.1.9:3001"
+      #
+      # If you also run KoboldCpp in a container, the browser reaches it directly, not through this
+      # service — set the backend URL in Settings to something the browser can resolve
+      # (http://host.docker.internal:5001 when KoboldCpp is on the Docker host).
+      TZ: "UTC"
+    restart: unless-stopped
