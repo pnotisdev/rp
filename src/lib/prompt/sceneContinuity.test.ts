@@ -36,6 +36,13 @@ describe('sceneContinuityNote', () => {
     )
   })
 
+  it('does not double up punctuation when a fact text already ends in a period', () => {
+    expect(sceneContinuityNote({ openThreads: ['Sumire agreed to meet Kai if he brings the artbook.'] })).toBe(
+      'Open threads: Sumire agreed to meet Kai if he brings the artbook.',
+    )
+    expect(sceneContinuityNote({ currentActivity: 'watching a film together.' })).toBe('Currently: watching a film together.')
+  })
+
   it('combines every known fact into one block, in a fixed order', () => {
     const note = sceneContinuityNote({
       location: 'the rooftop',

@@ -111,6 +111,8 @@ export function DirectorPanel({ chat, character, world, onClose }: DirectorPanel
     try {
       const next = advancePhase(day, phaseIndex)
       await worldsApi.update(world.id, { currentDay: next.day, currentPhaseIndex: next.phaseIndex })
+      // The world clock moved — a per-chat narrated-time override from before is stale now.
+      if (chat.scene?.timePhase) await chatsApi.update(chat.id, { scene: { ...chat.scene, timePhase: null } })
       toastSuccess(`Advanced to ${PHASES[next.phaseIndex]}${next.day !== day ? ', next day' : ''}`)
     } catch (e) {
       toastError(errorMessage(e))

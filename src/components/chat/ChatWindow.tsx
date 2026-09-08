@@ -30,7 +30,7 @@ import { buildChatTranscriptHtml, chatTranscriptFilename, downloadChatTranscript
 import { parseSfxWordList } from '@/lib/text/messageSegments'
 import { useBgmSceneStore } from '@/lib/store/useBgmSceneStore'
 import { errorMessage, toastError } from '@/lib/store/useToastStore'
-import { getCurrentActivity, getEnergyRemaining, presenceLabel } from '@/lib/world/calendar'
+import { getEnergyRemaining, PHASES, presenceLabel, resolveScheduledPresence } from '@/lib/world/calendar'
 import { getWorldTemplate } from '@/lib/world/worldTemplates'
 import {
   computeWarmth,
@@ -335,9 +335,16 @@ export function ChatWindow({
     { variants: character?.spriteVariants, seed: lastChar?.id ?? 'no-message' },
   )
   // Only meaningful for a world-bound character with an authored schedule; most stay unbadged.
+  // Uses the same scene-reconciled presence the prompt does (per-chat time-of-day override, an
+  // established scene location) so the badge can't say "in class" while the scene is elsewhere.
   const presence =
     world && character?.schedule?.length
-      ? getCurrentActivity(character.schedule, world.currentDay ?? 0, world.currentPhaseIndex ?? 0)
+      ? resolveScheduledPresence(
+          character.schedule,
+          world.currentDay ?? 0,
+          chat.scene?.timePhase ? PHASES.indexOf(chat.scene.timePhase) : (world.currentPhaseIndex ?? 0),
+          chat.scene?.location,
+        )
       : undefined
   // Always the primary character's warmth, unlike VNStage's Bond card — this header's identity is always the primary's.
   const warmth = computeWarmth(chat.affection ?? 0, getRelationshipStats(chat))

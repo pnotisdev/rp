@@ -7,6 +7,7 @@ import {
   extractExampleCharTurns,
   replyMaxTokens,
   resolveReplyLength,
+  usesActionMarkup,
 } from './voice'
 
 const TERSE_EXAMPLES = [
@@ -89,6 +90,22 @@ describe('collectCharacterTurns', () => {
 
   it('returns just the example turns when there is no greeting', () => {
     expect(collectCharacterTurns({ mes_example: TERSE_EXAMPLES, first_mes: '' })).toHaveLength(2)
+  })
+})
+
+describe('usesActionMarkup', () => {
+  it('is true when the card uses *asterisk* action beats anywhere in its authored text', () => {
+    expect(usesActionMarkup({ mes_example: TERSE_EXAMPLES, first_mes: 'Hey.' })).toBe(true)
+    expect(usesActionMarkup({ mes_example: '', first_mes: '*She looks up.* "Oh. You."' })).toBe(true)
+  })
+
+  it('is false for a deliberately plain-prose card with no asterisks', () => {
+    expect(
+      usesActionMarkup({
+        mes_example: '<START>\n{{user}}: Hi.\n{{char}}: She just nods, not looking up from the book.',
+        first_mes: 'The bell over the door rings. She does not look up.',
+      }),
+    ).toBe(false)
   })
 })
 

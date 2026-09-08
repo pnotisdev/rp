@@ -14,6 +14,7 @@ import {
   getMaxEnergyForDay,
   getMoodOfDay,
   getWeather,
+  detectNarratedPhase,
   isNightPhase,
   PHASES,
   resolveScheduledPresence,
@@ -296,37 +297,76 @@ describe('getCurrentActivity', () => {
   })
 })
 
+describe('detectNarratedPhase', () => {
+  it('returns undefined when nothing time-anchoring is said', () => {
+    expect(detectNarratedPhase('She shelves a book and does not look up.')).toBeUndefined()
+    expect(detectNarratedPhase('')).toBeUndefined()
+    expect(detectNarratedPhase(undefined)).toBeUndefined()
+  })
+
+  it('reads an explicit day jump as the next morning', () => {
+    expect(detectNarratedPhase('The next morning. Rain again.')).toBe('morning')
+    expect(detectNarratedPhase('*The following day, I catch her at the gate.*')).toBe('morning')
+  })
+
+  it('maps lunch / after-school cues to afternoon', () => {
+    expect(detectNarratedPhase('At lunch, on the covered rooftop.')).toBe('afternoon')
+    expect(detectNarratedPhase('After school she is still at the same table.')).toBe('afternoon')
+  })
+
+  it('maps dusk / that evening to evening, and that night / after dark to night', () => {
+    expect(detectNarratedPhase('Later that evening, the library has emptied out.')).toBe('evening')
+    expect(detectNarratedPhase('We talk until late that night.')).toBe('night')
+    expect(detectNarratedPhase('It is well after dark by the time we leave.')).toBe('night')
+  })
+
+  it('takes the earliest cue when a message mentions time more than once', () => {
+    expect(detectNarratedPhase('The next morning was slow; by that night nothing had changed.')).toBe('morning')
+  })
+})
+
 describe('resolveScheduledPresence', () => {
-  // Mirrors the shipped Sumire seed: weekday mornings are "busy — In class", but her greeting
-  // opens in the library — one of her own `available` afternoon slots.
+  // Mirrors the shipped Sumire seed: weekday mornings are "busy — In class", weekday evenings are
+  // "free — Home ... at Her apartment", and one afternoon slot is "free ... at School Library".
   const schedule: ScheduleEntry[] = [
     { id: 'classes', days: ['monday', 'tuesday'], phase: 'morning', status: 'busy', activity: 'In class', location: 'Sakura Hill High School' },
     { id: 'mwf-lib', days: ['monday'], phase: 'afternoon', status: 'available', activity: 'At her library table', location: 'School Library' },
+    { id: 'evening-home', phase: 'evening', status: 'available', activity: 'Home with a light novel', location: 'Her apartment' },
   ]
 
-  it('passes the clock activity straight through when it already reads as available', () => {
-    // day 0 (Monday) afternoon — the available library slot.
-    expect(resolveScheduledPresence(schedule, 0, 1, 'anywhere')).toEqual({
+  it('keeps the clock slot wholesale when no scene location is set', () => {
+    expect(resolveScheduledPresence(schedule, 0, 0, undefined)).toEqual(getCurrentActivity(schedule, 0, 0))
+    expect(resolveScheduledPresence(schedule, 0, 0, '  ')).toMatchObject({ status: 'busy', activity: 'In class' })
+  })
+
+  it('keeps the clock slot wholesale when its own location already matches the scene', () => {
+    // day 0 (Monday) afternoon — the library slot, and the scene is the library.
+    expect(resolveScheduledPresence(schedule, 0, 1, 'Library')).toEqual({
       status: 'available',
       activity: 'At her library table',
       location: 'School Library',
     })
   })
 
-  it('keeps the busy clock activity when no scene location is set', () => {
-    // day 0 (Monday) morning — "In class".
-    expect(resolveScheduledPresence(schedule, 0, 0, undefined)).toEqual(getCurrentActivity(schedule, 0, 0))
-    expect(resolveScheduledPresence(schedule, 0, 0, '  ')).toMatchObject({ status: 'busy' })
-  })
-
-  it('trusts an established scene that tolerantly matches a different available slot over the frozen busy clock', () => {
+  it('trusts an established scene that matches a different available slot over the frozen busy clock', () => {
     const resolved = resolveScheduledPresence(schedule, 0, 0, 'Library')
-    expect(resolved.status).toBe('available')
-    expect(resolved.location).toBe('School Library')
+    expect(resolved).toEqual({ status: 'available', activity: 'At her library table', location: 'School Library' })
   })
 
-  it('keeps the busy clock activity when the scene matches nothing available in the schedule', () => {
-    expect(resolveScheduledPresence(schedule, 0, 0, 'the train station')).toMatchObject({ status: 'busy', activity: 'In class' })
+  it('trusts the scene-matching slot over an available clock slot that points somewhere else', () => {
+    // day 0 (Monday) evening — clock says "Home ... at Her apartment", but the scene is the library.
+    expect(resolveScheduledPresence(schedule, 0, 2, 'Library')).toEqual({
+      status: 'available',
+      activity: 'At her library table',
+      location: 'School Library',
+    })
+  })
+
+  it('drops the stale activity/location but keeps the status when the scene is somewhere the schedule never describes', () => {
+    // Busy clock + a scene the schedule can't place → status only, and the busy-conflict friction still fires downstream.
+    expect(resolveScheduledPresence(schedule, 0, 0, 'the train station')).toEqual({ status: 'busy' })
+    // Available clock + an unlisted scene spot → "free", no contradicting apartment/activity clause.
+    expect(resolveScheduledPresence(schedule, 0, 2, 'the rooftop')).toEqual({ status: 'available' })
   })
 })
 

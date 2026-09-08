@@ -63,6 +63,7 @@ import {
   describePresence,
   describeWeather,
   describeWorldMoment,
+  detectNarratedPhase,
   getCalendarInfo,
   resolveScheduledPresence,
   getEnergyRemaining,
@@ -142,7 +143,7 @@ import {
 } from '@/lib/text/slop'
 import { substituteMacros } from '@/lib/characters/macros'
 import { normalizeRpMarkup } from '@/lib/text/messageSegments'
-import { replyMaxTokens, resolveReplyLength } from '@/lib/characters/voice'
+import { replyMaxTokens, resolveReplyLength, usesActionMarkup } from '@/lib/characters/voice'
 import { SCENE_MOOD_IDS } from '@/lib/vn/moods'
 import { DEFAULT_EXPRESSIONS, expressionCandidatesFor } from '@/lib/vn/expressions'
 import { getUnlockedBackgroundIds, getUnlockedExpressionIds } from '@/lib/vn/unlocks'
@@ -562,6 +563,11 @@ export function useChatSession(chatId: string | null) {
       const affection = freshChat.affection ?? 0
       // One read of the char-reply count for the whole build — every turn-scoped window check below keys off it.
       const charReplyCount = countCharReplies(messages)
+      // Time-of-day for the prompt's scene framing: a per-chat `scene.timePhase` override (set in the
+      // Scene panel or auto-detected from narration) wins over the shared world clock. Weekday still
+      // comes from the world clock — only the phase is per-chat.
+      const scenePhaseIndex = freshChat.scene?.timePhase ? PHASES.indexOf(freshChat.scene.timePhase) : -1
+      const promptPhaseIndex = scenePhaseIndex >= 0 ? scenePhaseIndex : (world?.currentPhaseIndex ?? 0)
       const worldDescriptionLines = [
         ...(world
           ? [
@@ -571,7 +577,7 @@ export function useChatSession(chatId: string | null) {
                 worldId: world.id,
                 characterId: speaker.id,
                 day: world.currentDay ?? 0,
-                phaseIndex: world.currentPhaseIndex ?? 0,
+                phaseIndex: promptPhaseIndex,
                 weatherPreferences: speaker.weatherPreferences,
               }),
               // Only worth a line when this character actually has a schedule authored.
@@ -580,7 +586,7 @@ export function useChatSession(chatId: string | null) {
                     resolveScheduledPresence(
                       speaker.schedule,
                       world.currentDay ?? 0,
-                      world.currentPhaseIndex ?? 0,
+                      promptPhaseIndex,
                       freshChat.scene?.location,
                     ),
                   )
@@ -601,7 +607,7 @@ export function useChatSession(chatId: string | null) {
         ? resolveScheduledPresence(
             speaker.schedule,
             world?.currentDay ?? 0,
-            world?.currentPhaseIndex ?? 0,
+            promptPhaseIndex,
             freshChat.scene?.location,
           )
         : undefined
@@ -609,11 +615,21 @@ export function useChatSession(chatId: string | null) {
       // A genuine schedule conflict (busy/sleeping/traveling) reads as a noticed cost. Suppressed during a live event, which already carries its own cost.
       const scheduleConflictLine =
         !freshChat.activeEvent && speakerPresence ? scheduleConflictGuidance(speaker.card.name, speakerPresence) : ''
+      // Don't tell the model to "drift toward" a place the scene is already set — offer other backgrounds instead.
+      const sceneLocationNow = freshChat.scene?.location?.trim().toLowerCase() ?? ''
+      const scheduleLocationNorm = scheduleLocation?.trim().toLowerCase() ?? ''
+      const sceneAlreadyAtScheduleSpot =
+        !!scheduleLocationNorm &&
+        !!sceneLocationNow &&
+        (scheduleLocationNorm === sceneLocationNow ||
+          scheduleLocationNorm.includes(sceneLocationNow) ||
+          sceneLocationNow.includes(scheduleLocationNorm))
+      const nudgeScheduleLocation = sceneAlreadyAtScheduleSpot ? undefined : scheduleLocation
       const sceneNudge = freshChat.activeEvent
         ? ''
         : sceneProgressionNudge(staticSceneTurns, {
-            scheduleLocation,
-            alternateBackgroundLabels: scheduleLocation
+            scheduleLocation: nudgeScheduleLocation,
+            alternateBackgroundLabels: nudgeScheduleLocation
               ? undefined
               : getUnlockedBackgroundIds(world, affection)
                   .filter((id) => id !== staticSceneBackground)
@@ -749,7 +765,7 @@ export function useChatSession(chatId: string | null) {
       // Compact, always-computed ledger of concrete scene facts, consolidated into one block instead of scattered across separate lines.
       const sceneContinuityLine = sceneContinuityNote({
         location: freshChat.scene?.location ?? scheduleLocation,
-        timePhase: world ? `${getCalendarInfo(world.currentDay ?? 0).weekday} ${PHASES[world.currentPhaseIndex ?? 0]}` : undefined,
+        timePhase: world ? `${getCalendarInfo(world.currentDay ?? 0).weekday} ${PHASES[promptPhaseIndex]}` : freshChat.scene?.timePhase || undefined,
         presentNames: roster.map((c) => c.card.name),
         currentActivity: speakerSceneActive ? speakerTrack.intimacyScene!.activityLabel : freshChat.activeEvent?.title,
         openThreads: activeFacts.filter((f) => f.unresolved).map((f) => f.text),
@@ -830,11 +846,18 @@ export function useChatSession(chatId: string | null) {
         avoidEmDashes && !builtinSystemPrompt
           ? 'Never use em dashes (the — character) in your writing. Use a comma, period, or parentheses instead.'
           : ''
+      // Nothing in the default prompt states the *action* / "speech" convention — a strong model
+      // picks it up from the card's examples, a weak one drifts (bare narration, half-quoted lines).
+      // Only held to it when the card's own authored text already uses it.
+      const markupRule = usesActionMarkup(speaker.card)
+        ? 'Put every action and piece of narration in *asterisks* and every line of spoken dialogue in "quotes". Close every mark you open: no half-quoted sentence, no narration sentence left bare between two quoted lines.'
+        : ''
       const styleGuidance = impersonating
         ? // Impersonation only gets the rules that shape prose, not {{char}}'s behaviour/phrasing.
           [emDashRule, styleGuidanceNote.trim(), opts?.extraStyleGuidance ?? ''].filter(Boolean).join('\n') || undefined
         : [
             emDashRule,
+            markupRule,
             effectiveAssistFlag(freshChat.assistOverrides?.slowBurnPacing, slowBurnPacing)
               ? slowBurnPacingNote(speaker.card.name, speakerTrack.mood, speakerHoldingBackByPlan)
               : '',
@@ -2190,6 +2213,20 @@ export function useChatSession(chatId: string | null) {
           // Rolls world-info sticky/cooldown state forward for next turn.
           await chatsApi.update(chat.id, { worldInfoState: built.worldInfoState ?? {} })
 
+          // Keep `Chat.scene.location` following the story: the reply's own detected background is
+          // the app's existing "where is this scene" signal (it already drives VN mode), so when it
+          // moves, the prompt's scene/presence lines should move with it rather than staying pinned
+          // to wherever the chat opened. One-reply latency, self-correcting, same as the VN backdrop.
+          if (isUsableReply && scene?.background) {
+            const movedLocation = backgroundLabel(scene.background, world)
+            const currentLocation = chat.scene?.location ?? undefined
+            if (movedLocation && movedLocation !== currentLocation) {
+              await chatsApi.update(chat.id, {
+                scene: { turnPolicy: 'manual', ...chat.scene, location: movedLocation },
+              })
+            }
+          }
+
           const generatedTokens = !abort.signal.aborted && newText.trim() ? await countTokens(newText) : 0
           const hitCap = !abort.signal.aborted && generatedTokens >= effectiveMaxLength - 1
           // A round that stopped well under the cap but leaves the reply mid-sentence was cut by a
@@ -2296,6 +2333,12 @@ export function useChatSession(chatId: string | null) {
         let tasksHandledByMerge = false
         if (effectiveAssistFlag(chat.assistOverrides?.autoTrackRelationship, autoTrackRelationship) && !inLiveDate && shouldRunRelationshipJudge) {
           const latestIntent = opts?.intent ?? [...messages].reverse().find((m) => m.role === 'user')?.intent
+          // Marked judged NOW, while the caller still holds the generation lock — not inside the
+          // fire-and-forget assist below, which finishes seconds later after the lock is released.
+          // A regenerate clicked during that gap would otherwise re-read `relationshipJudged` as
+          // false and stack a second stat delta on the same message. A judge that then fails just
+          // means no delta this turn, same as any other best-effort assist failure.
+          await messagesApi.update(targetMessageId, { relationshipJudged: true }).catch(() => {})
           if (autoDetectTasks) {
             tasksHandledByMerge = true
             runAssist('relationship', 'Updating relationship', async () => {
@@ -2304,12 +2347,10 @@ export function useChatSession(chatId: string | null) {
               const pending = objective?.tasks.filter((t) => t.status === 'pending') ?? []
               const completedIndices = await updateAffectionFromReply(chat.id, relationshipHistory, combined, latestIntent, speaker, pending)
               if (objective && completedIndices.length > 0) await applyCompletedTasks(objective, pending, completedIndices)
-              await messagesApi.update(targetMessageId, { relationshipJudged: true }).catch(() => {})
             })
           } else {
             runAssist('relationship', 'Updating relationship', async () => {
               await updateAffectionFromReply(chat.id, relationshipHistory, combined, latestIntent, speaker)
-              await messagesApi.update(targetMessageId, { relationshipJudged: true }).catch(() => {})
             })
           }
         }
@@ -2553,6 +2594,20 @@ export function useChatSession(chatId: string | null) {
           createdAt: now,
         }
         await messagesApi.create(userMsg)
+
+        // Follow a time-of-day the player just narrated ("the next morning", "at lunch", "that night"):
+        // a per-chat override of the shared world clock's phase, cleared back to null once the
+        // narration lands back on the world clock's own phase.
+        const narratedPhase = detectNarratedPhase(composedText)
+        if (narratedPhase) {
+          const worldPhase = PHASES[world?.currentPhaseIndex ?? 0]
+          const nextPhaseOverride = narratedPhase === worldPhase ? null : narratedPhase
+          if ((freshChat.scene?.timePhase ?? null) !== nextPhaseOverride) {
+            await chatsApi.update(chatId, {
+              scene: { turnPolicy: 'manual', ...freshChat.scene, timePhase: nextPhaseOverride },
+            })
+          }
+        }
 
         // Who actually replies, per the chat's turn policy — `manual` keeps the "reply as" choice above; the others need a roster to pick from.
         let speaker = giftTarget
@@ -2999,6 +3054,8 @@ export function useChatSession(chatId: string | null) {
         if (!event.free) {
           const result = spendEnergy(day, phaseIndex)
           await worldsApi.update(world.id, { currentDay: result.day, currentPhaseIndex: result.phaseIndex })
+          // The world clock just moved — a narrated-time override from before is stale now.
+          if (chat?.scene?.timePhase) await chatsApi.update(chatId, { scene: { ...chat.scene, timePhase: null } })
           if (result.slept) {
             const weather = getWeather(world.id, result.day)
             toastSuccess(`Tired after a full day, you call it a night. A new morning dawns — ${describeWeather(weather)}.`)
@@ -3217,6 +3274,7 @@ export function useChatSession(chatId: string | null) {
         const phaseIndex = freshWorld?.currentPhaseIndex ?? 0
         const result = spendEnergy(day, phaseIndex)
         await worldsApi.update(world.id, { currentDay: result.day, currentPhaseIndex: result.phaseIndex })
+        if (chatId && chat?.scene?.timePhase) await chatsApi.update(chatId, { scene: { ...chat.scene, timePhase: null } })
         const weather = getWeather(world.id, result.day)
         toastSuccess(
           result.slept

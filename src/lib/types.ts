@@ -14,6 +14,7 @@ import type { CharacterMood, CharacterNeed } from '@/lib/prompt/mindGuidance'
 import type { IntimacyUnlockable } from '@/lib/dating/intimacyCatalog'
 import type { Afterglow } from '@/lib/dating/aftercare'
 import type { Trigger } from '@/lib/world/triggers'
+import type { DayPhase } from '@/lib/world/calendar'
 import type { IntimacyDetailLevel } from '@/lib/store/useSettingsStore'
 import type { IntimacyScene } from '@/lib/dating/intimacyScene'
 import type { RecentRebuff } from '@/lib/dating/rebuff'
@@ -176,6 +177,11 @@ export interface Scene {
   turnPolicy: ScenePolicy
   /** Round-robin bookkeeping: index into `[primaryId, ...participantIds]`. Read defensively (clamped/modulo) since the roster can shrink. */
   roundRobinIndex?: number
+  /** Per-chat override of the shared `WorldCard` clock's time-of-day, so a chat that has narrated
+   *  its way to "lunch" or "that night" isn't prompted with the world clock's frozen phase. Set
+   *  manually in the Scene panel or auto-detected from the player's narration; `null`/unset falls
+   *  back to the world clock. Day-of-week still comes from the world clock. */
+  timePhase?: DayPhase | null
 }
 
 /** A discrete, durable fact about the user worth recalling later, distinct from `Chat.summary`'s lossy rolling prose. Fed into the prompt as a synthetic lorebook entry (`useChatSession.ts`'s `buildCurrentPrompt`). */

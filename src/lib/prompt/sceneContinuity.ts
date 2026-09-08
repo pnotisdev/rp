@@ -15,13 +15,18 @@ export interface SceneContinuityFacts {
   openThreads?: string[]
 }
 
+/** A fact's own text may or may not end in punctuation — trim a trailing `.`/`;`/`,` so the clause below adds exactly one. */
+function trimTrailingPunct(text: string): string {
+  return text.replace(/[.;,\s]+$/, '')
+}
+
 export function sceneContinuityNote(facts: SceneContinuityFacts): string {
   const whereWhen = [facts.location ? `at ${facts.location}` : '', facts.timePhase ?? ''].filter(Boolean).join(', ')
   const lines = [
     whereWhen ? `Scene: ${whereWhen}.` : '',
     facts.presentNames?.length ? `Also present: ${facts.presentNames.join(', ')}.` : '',
-    facts.currentActivity ? `Currently: ${facts.currentActivity}.` : '',
-    facts.openThreads?.length ? `Open threads: ${facts.openThreads.join('; ')}.` : '',
+    facts.currentActivity ? `Currently: ${trimTrailingPunct(facts.currentActivity)}.` : '',
+    facts.openThreads?.length ? `Open threads: ${facts.openThreads.map(trimTrailingPunct).join('; ')}.` : '',
   ].filter(Boolean)
   return lines.join(' ')
 }

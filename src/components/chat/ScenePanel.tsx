@@ -1,9 +1,19 @@
 import { useState } from 'react'
 import type { Scene, ScenePolicy } from '@/lib/types'
+import type { DayPhase } from '@/lib/world/calendar'
 import { Button } from '@/components/ui/Button'
 import { Chip } from '@/components/ui/Chip'
 import { TextAreaField } from '@/components/ui/Field'
 import { Modal } from '@/components/ui/Modal'
+import { SegmentedControl } from '@/components/ui/SegmentedControl'
+
+const TIME_OF_DAY: { value: DayPhase | 'clock'; label: string }[] = [
+  { value: 'clock', label: 'World clock' },
+  { value: 'morning', label: 'Morning' },
+  { value: 'afternoon', label: 'Afternoon' },
+  { value: 'evening', label: 'Evening' },
+  { value: 'night', label: 'Night' },
+]
 
 const POLICIES: { id: ScenePolicy; label: string; hint: string }[] = [
   {
@@ -50,6 +60,7 @@ export function ScenePanel({
 }) {
   const [location, setLocation] = useState(scene?.location ?? '')
   const [atmosphere, setAtmosphere] = useState(scene?.atmosphere ?? '')
+  const [timeOfDay, setTimeOfDay] = useState<DayPhase | 'clock'>(scene?.timePhase ?? 'clock')
   const [turnPolicy, setTurnPolicy] = useState<ScenePolicy>(scene?.turnPolicy ?? 'manual')
   const [participants, setParticipants] = useState<string[]>(participantIds)
   const [busy, setBusy] = useState(false)
@@ -112,6 +123,20 @@ export function ScenePanel({
           placeholder="e.g. Tense, right after an argument"
         />
 
+        <div className="mb-4">
+          <span className="mb-1 block text-xs font-medium text-text-muted">Time of day</span>
+          <SegmentedControl
+            fill
+            options={TIME_OF_DAY}
+            value={timeOfDay}
+            onChange={setTimeOfDay}
+          />
+          <p className="mt-1.5 text-[11px] text-text-muted">
+            Overrides the shared world clock's time-of-day for this chat only — useful once the story has drifted past it.
+            Auto-follows what you narrate ("the next morning", "at lunch"); the weekday still comes from the world clock.
+          </p>
+        </div>
+
         <div className="mb-3">
           <span className="mb-1 block text-xs font-medium text-text-muted">Turn policy</span>
           <div className="flex flex-col gap-1.5">
@@ -151,6 +176,7 @@ export function ScenePanel({
               save({
                 location: location.trim() || null,
                 atmosphere: atmosphere.trim() || null,
+                timePhase: timeOfDay === 'clock' ? null : timeOfDay,
                 turnPolicy,
                 // A fresh policy pick starts its own bookkeeping from scratch rather than
                 // inheriting a stale round-robin index from a previous policy.

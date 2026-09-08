@@ -228,6 +228,40 @@ export function getCurrentActivity(
   return { status: entry.status, activity: entry.activity, location: entry.location }
 }
 
+/** Time-of-day words in narration, mapped to a phase — longest/most-specific patterns first so
+ *  "late at night" beats "late". Only whole-phrase matches on word boundaries count. */
+const PHASE_CUES: { re: RegExp; phase: DayPhase }[] = [
+  { re: /\b(?:the )?(?:next|following) morning\b/i, phase: 'morning' },
+  { re: /\b(?:that|the) (?:same )?night\b/i, phase: 'night' },
+  { re: /\b(?:later )?that evening\b/i, phase: 'evening' },
+  { re: /\b(?:the )?(?:next|following) day\b/i, phase: 'morning' },
+  { re: /\bearly (?:the )?next\b/i, phase: 'morning' },
+  { re: /\b(?:at )?(?:day ?break|dawn|sunrise|first light)\b/i, phase: 'morning' },
+  { re: /\b(?:this |early |mid[- ]?|late )?morning\b/i, phase: 'morning' },
+  { re: /\b(?:before|after) (?:first )?class(?:es)?\b/i, phase: 'morning' },
+  { re: /\b(?:at |around |over )?(?:lunch(?:time)?|noon|midday)\b/i, phase: 'afternoon' },
+  { re: /\b(?:this |early |mid[- ]?|late )?afternoon\b/i, phase: 'afternoon' },
+  { re: /\bafter (?:school|work|classes?)\b/i, phase: 'afternoon' },
+  { re: /\b(?:at |around )?(?:dusk|sunset|sundown|nightfall|twilight)\b/i, phase: 'evening' },
+  { re: /\b(?:this |early |mid[- ]?|late )?evening\b/i, phase: 'evening' },
+  { re: /\b(?:at |around |by )?(?:night ?time|midnight|the small hours)\b/i, phase: 'night' },
+  { re: /\b(?:this |late |deep in the )?night\b/i, phase: 'night' },
+  { re: /\bafter (?:dark|midnight)\b/i, phase: 'night' },
+]
+
+/** A time-of-day the text explicitly narrates ("the next morning", "at lunch", "that night"), or
+ *  undefined when nothing time-anchoring is said. First-match wins on the ordered list above, so a
+ *  message that only mentions time once resolves cleanly; a rambling one takes its earliest cue. */
+export function detectNarratedPhase(text: string | null | undefined): DayPhase | undefined {
+  if (!text?.trim()) return undefined
+  let earliest: { index: number; phase: DayPhase } | undefined
+  for (const { re, phase } of PHASE_CUES) {
+    const m = text.match(re)
+    if (m?.index !== undefined && (!earliest || m.index < earliest.index)) earliest = { index: m.index, phase }
+  }
+  return earliest?.phase
+}
+
 /** Case-insensitive, whitespace-tolerant "these name the same place" check — an exact match or
  *  either string containing the other ("Library" vs "School Library"). */
 function locationsOverlap(a: string, b: string): boolean {
@@ -240,10 +274,14 @@ function locationsOverlap(a: string, b: string): boolean {
 /**
  * Presence for the prompt, reconciling the frozen world clock against an already-established scene.
  * `WorldCard.currentDay`/`currentPhaseIndex` only ever advance by explicit user action, so a chat
- * that opens with a greeting placing the character somewhere would otherwise be prompted for the
- * whole session with schedule framing ("busy — in class") that contradicts the scene the greeting
- * set. When the clock says busy/sleeping/traveling but the scene location tolerantly matches a
- * *different*, `available` schedule entry, trust the scene.
+ * that opens with a greeting placing the character somewhere would otherwise be prompted the whole
+ * session with a schedule slot ("busy — in class", or "free at her apartment") that contradicts the
+ * scene the greeting set. The established scene owns *where* the character is; the schedule only
+ * still owns their status/activity, and only when it doesn't fight the scene:
+ *  - clock slot's own location matches the scene → keep it wholesale (its activity is real colour)
+ *  - scene sits at a spot some other `available` slot covers → use that slot instead
+ *  - scene is somewhere the schedule doesn't describe → keep only the status, drop the stale
+ *    activity/location (a genuine busy/asleep/traveling conflict still surfaces as friction)
  */
 export function resolveScheduledPresence(
   schedule: ScheduleEntry[] | undefined,
@@ -252,10 +290,12 @@ export function resolveScheduledPresence(
   sceneLocation: string | null | undefined,
 ): { status: PresenceStatus; activity?: string; location?: string } {
   const clockActivity = getCurrentActivity(schedule, day, phaseIndex)
-  if (clockActivity.status === 'available' || !sceneLocation?.trim() || !schedule?.length) return clockActivity
-  const match = schedule.find((e) => e.status === 'available' && e.location && locationsOverlap(e.location, sceneLocation))
-  if (!match) return clockActivity
-  return { status: 'available', activity: match.activity, location: match.location }
+  const loc = sceneLocation?.trim()
+  if (!loc || !schedule?.length) return clockActivity
+  if (clockActivity.location && locationsOverlap(clockActivity.location, loc)) return clockActivity
+  const sceneSlot = schedule.find((e) => e.status === 'available' && e.location && locationsOverlap(e.location, loc))
+  if (sceneSlot) return { status: 'available', activity: sceneSlot.activity, location: sceneSlot.location }
+  return { status: clockActivity.status }
 }
 
 const PRESENCE_LABELS: Record<PresenceStatus, string> = {

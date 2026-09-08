@@ -226,6 +226,13 @@ export function collectCharacterTurns(
   return [...exampleTurns, ...greetings]
 }
 
+/** Whether this card's own authored text uses the `*action*` / `"speech"` convention — i.e. the
+ *  author opted into it. Used to decide whether the prompt should hold a weak model to it; a
+ *  deliberately plain-prose card (no asterisks anywhere) is left alone. */
+export function usesActionMarkup(card: Pick<CharacterCardData, 'mes_example' | 'first_mes' | 'alternate_greetings'>): boolean {
+  return collectCharacterTurns(card).some((t) => /\*[^*\n]+\*/.test(t))
+}
+
 /** Detects a `VoiceFingerprint` draft from the card's examples/greetings. Needs at least two turns to find recurring patterns; below that every list comes back empty. */
 export function detectVoiceFingerprint(
   card: Pick<CharacterCardData, 'mes_example' | 'first_mes' | 'alternate_greetings'>,
