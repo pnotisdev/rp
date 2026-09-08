@@ -32,7 +32,7 @@ export function DataSettings() {
     setBusy('restore')
     try {
       await restoreBackupFile(file)
-      toastSuccess('Restore complete — reloading…')
+      toastSuccess('Restore complete. Reloading…')
       window.location.reload()
     } catch (e) {
       toastError(errorMessage(e))
@@ -44,7 +44,7 @@ export function DataSettings() {
     <SettingsPage>
       <Section
         title="Backup"
-        description="Downloads everything in this app — every character, chat, world, persona, and setting, plus every avatar/sprite/background/gallery image — as one JSON file."
+        description="Downloads everything in this app: every character, chat, world, persona, and setting, plus every avatar/sprite/background/gallery image, all as one JSON file."
       >
         <Button variant="primary" onClick={runBackup} disabled={busy !== null}>
           {busy === 'backup' ? 'Preparing…' : 'Download backup'}
@@ -53,7 +53,7 @@ export function DataSettings() {
 
       <Section
         title="Restore"
-        description="Replaces everything currently in this app with the contents of a backup file. This is destructive and cannot be undone — anything created since that backup was taken is lost."
+        description="Replaces everything currently in this app with the contents of a backup file. This is destructive and cannot be undone. Anything created since that backup was taken is lost."
       >
         <Button variant="danger" onClick={() => fileRef.current?.click()} disabled={busy !== null}>
           {busy === 'restore' ? 'Restoring…' : 'Restore from backup…'}

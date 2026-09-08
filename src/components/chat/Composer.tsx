@@ -196,7 +196,7 @@ export function Composer({
           <div className="flex items-center gap-1">
             {turnPolicyHint ? (
               <span
-                title="The scene's turn policy is deciding who replies — see the Scene panel to change it"
+                title="The scene's turn policy is deciding who replies. See the Scene panel to change it"
                 className={`mr-1 rounded-full px-2.5 py-1.5 text-xs ${vn ? 'bg-white/10 text-white/70' : 'bg-bg-elevated text-text-muted'}`}
               >
                 {turnPolicyHint}

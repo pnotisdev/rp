@@ -54,7 +54,7 @@ export function PromptInspector({
     <Modal onClose={onClose} title="Prompt inspector" size="2xl" scrollable>
         {result === null && <p className="text-sm text-text-muted">Building…</p>}
         {result === 'error' && (
-          <p className="text-sm text-danger">Couldn't build the prompt — pick a character first.</p>
+          <p className="text-sm text-danger">Couldn't build the prompt. Pick a character first.</p>
         )}
         {result && result !== 'error' && (
           <div className="flex-1 overflow-y-auto">
@@ -90,7 +90,7 @@ export function PromptInspector({
                     })}
                 </ul>
                 <p className="mt-2 text-[11px] text-text-muted">
-                  Each section counted on its own — these won't sum to exactly the total above (formatting between
+                  Each section counted on its own. These won't sum to exactly the total above (formatting between
                   sections adds a few tokens), close enough to see where it's actually going.
                 </p>
               </div>
@@ -109,7 +109,7 @@ export function PromptInspector({
                 <p className="text-xs text-text">{summary}</p>
               ) : (
                 <p className="text-xs text-text-muted">
-                  No summary yet — once this chat has enough history, older turns are folded in here
+                  No summary yet. Once this chat has enough history, older turns are folded in here
                   automatically so they aren't just dropped when the context fills up.
                 </p>
               )}
@@ -120,7 +120,7 @@ export function PromptInspector({
             </h3>
             {result.activatedEntries.length === 0 ? (
               <p className="mb-5 text-xs text-text-muted">
-                None matched the recent conversation yet — add keywords, or set an entry to "Always".
+                None matched the recent conversation yet. Add keywords, or set an entry to "Always".
               </p>
             ) : (
               <ul className="mb-5 space-y-1 text-xs">
@@ -131,7 +131,7 @@ export function PromptInspector({
                 {result.activatedEntries.map((e, i) => (
                   <li key={i} className="rounded-lg bg-bg-sunken px-2.5 py-1.5">
                     <span className="font-medium text-text">{e.keys.join(', ') || '(no keys)'}</span>
-                    <span className="text-text-muted"> — {e.content.slice(0, 80)}</span>
+                    <span className="text-text-muted"> · {e.content.slice(0, 80)}</span>
                   </li>
                 ))}
               </ul>
@@ -186,7 +186,7 @@ export function PromptInspector({
                 )}
                 {!lastReply.raw && (
                   <p className="mt-2 text-xs text-text-muted">
-                    Raw output isn't available for this reply — it was generated before this toggle existed.
+                    Raw output isn't available for this reply. It was generated before this toggle existed.
                   </p>
                 )}
               </div>

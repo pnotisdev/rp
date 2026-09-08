@@ -20,7 +20,7 @@ const PHASE_LABEL: Record<Phase, string> = {
   listening: 'Listening…',
   transcribing: 'Making out what you said…',
   thinking: 'Thinking…',
-  speaking: 'Speaking — tap to interrupt',
+  speaking: 'Speaking. Tap to interrupt',
   error: 'Something went wrong',
 }
 
@@ -164,7 +164,7 @@ export function CompanionView() {
     try {
       rec = await startVadRecording()
     } catch {
-      setError('Could not access the microphone — check your browser permissions.')
+      setError('Could not access the microphone. Check your browser permissions.')
       setPhase('error')
       return
     }
@@ -229,7 +229,7 @@ export function CompanionView() {
         <span className="font-mono text-3xl text-text-muted">))</span>
         <p className="text-xl font-medium text-text">Pick who to talk to</p>
         <p className="max-w-sm text-sm text-text-muted">
-          The Companion talks out loud instead of typing — it uses an existing chat, so memory and
+          The Companion talks out loud instead of typing. It uses an existing chat, so memory and
           personality carry over exactly like text mode.
         </p>
         <select
@@ -240,12 +240,12 @@ export function CompanionView() {
           <option value="">Select a chat…</option>
           {chats.map((c) => (
             <option key={c.id} value={c.id}>
-              {charFor(c.characterId)?.card.name ?? c.title} — {c.title}
+              {charFor(c.characterId)?.card.name ?? c.title} · {c.title}
             </option>
           ))}
         </select>
         {chats.length === 0 && (
-          <p className="text-xs text-text-muted">No chats yet — start one in Chat mode first.</p>
+          <p className="text-xs text-text-muted">No chats yet. Start one in Chat mode first.</p>
         )}
       </div>
     )

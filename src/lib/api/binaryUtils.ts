@@ -40,5 +40,5 @@ export async function extractFirstFileFromZip(buffer: ArrayBuffer): Promise<Uint
     const stream = new Blob([compressedData]).stream().pipeThrough(new DecompressionStream('deflate-raw'))
     return new Uint8Array(await new Response(stream).arrayBuffer())
   }
-  throw new Error(`Unsupported ZIP compression method (${compressionMethod}) — expected stored (0) or deflate (8).`)
+  throw new Error(`Unsupported ZIP compression method (${compressionMethod}). Expected stored (0) or deflate (8).`)
 }

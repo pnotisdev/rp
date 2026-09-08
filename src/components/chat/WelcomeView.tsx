@@ -130,7 +130,7 @@ export function WelcomeView({
       setBaseUrl(found.baseUrl)
       setChatBackendConfig({ chatBackend: 'koboldcpp' })
       setUrlDraft(found.baseUrl)
-      toastSuccess(found.model ? `Connected to KoboldCpp — ${found.model}` : 'Connected to KoboldCpp')
+      toastSuccess(found.model ? `Connected to KoboldCpp: ${found.model}` : 'Connected to KoboldCpp')
       return
     }
     const list = found.models ?? []
@@ -138,7 +138,7 @@ export function WelcomeView({
     setChatBackendConfig({ chatBackend: 'openai-compatible', chatBackendBaseUrl: found.baseUrl, chatBackendModel: keepModel })
     setUrlDraft(found.baseUrl)
     setCustomModel(false)
-    toastSuccess(list.length ? `Connected — ${list.length} model${list.length === 1 ? '' : 's'} available` : 'Connected')
+    toastSuccess(list.length ? `Connected: ${list.length} model${list.length === 1 ? '' : 's'} available` : 'Connected')
   }
 
   const runDetect = async (url: string) => {
@@ -223,7 +223,7 @@ export function WelcomeView({
               {m}
             </option>
           ))}
-          <option value="__custom__">Other — type the id…</option>
+          <option value="__custom__">Other (type it in)…</option>
         </select>
       ) : (
         <>
@@ -249,8 +249,8 @@ export function WelcomeView({
         <MessageCircle size={30} strokeWidth={1.25} className="mb-4 text-accent" />
         <h1 className="font-display text-2xl text-text">Welcome to RP Suite</h1>
         <p className="mt-1.5 text-sm text-text-muted">
-          A local-first roleplay client. Bring your own model — running locally, or a hosted API key.
-          Two steps and you're talking.
+          A local-first roleplay client. Bring your own model, running locally or through a hosted
+          API key. Two steps and you're talking.
         </p>
 
         {/* 1. Connection */}
@@ -279,13 +279,13 @@ export function WelcomeView({
             <div className="space-y-3 text-xs text-text-muted">
               {chatBackend === 'koboldcpp' && koboldStatus === 'online' ? (
                 <p>
-                  {model ?? 'A model'} is loaded{maxContext ? ` — ${maxContext.toLocaleString()} token context` : ''}. You're
+                  {model ?? 'A model'} is loaded{maxContext ? ` (${maxContext.toLocaleString()} token context)` : ''}. You're
                   ready to chat.
                 </p>
               ) : localOpenAi && hostedStatus.status === 'online' ? (
                 <p>
                   Connected to {normalizeUrl(chatBackendBaseUrl)}
-                  {chatBackendModel ? ` — ${chatBackendModel}` : ''}. You're ready to chat.
+                  {chatBackendModel ? ` (${chatBackendModel})` : ''}. You're ready to chat.
                 </p>
               ) : (
                 <p>
@@ -431,7 +431,7 @@ export function WelcomeView({
           ) : (
             <>
               <p className="text-xs text-text-muted">
-                You don't have any characters yet — make one from scratch, generate it with the model, or import a
+                You don't have any characters yet. Make one from scratch, generate it with the model, or import a
                 SillyTavern / Character-Card-V3 file.
               </p>
               <div className="mt-4 flex flex-wrap gap-2">

@@ -68,7 +68,7 @@ export function InstructTemplateSection() {
           imported++
           lastId = created.id
         } else if (parsed?.kind === 'sysprompt') {
-          skipped.push(`${file.name} is a system-prompt preset — import it in the System prompt section`)
+          skipped.push(`${file.name} is a system-prompt preset. Import it in the System prompt section`)
         } else {
           skipped.push(`${file.name}: ${parsed?.kind === 'unsupported' ? parsed.detail : 'not a SillyTavern preset'}`)
         }
@@ -87,7 +87,7 @@ export function InstructTemplateSection() {
   return (
     <Section
       title="Instruct template"
-      description="How turns are formatted for the model — match this to your model's training format. Duplicate a builtin below to tweak it, or import a SillyTavern instruct preset."
+      description="How turns are formatted for the model. Match this to your model's training format. Duplicate a builtin below to tweak it, or import a SillyTavern instruct preset."
       surface="bare"
       action={
         <FileButton onPick={importPresets} accept=".json,application/json" multiple title="Import a SillyTavern instruct/*.json preset (multiple allowed)">
@@ -203,7 +203,7 @@ export function InstructTemplateSection() {
             checked={draft.namesInPrompt}
             onChange={(v) => set('namesInPrompt', v)}
             label="Wrap turns with speaker names"
-            description="e.g. “{name}: ” before each turn — off for formats like ChatML that carry the role in the prefix/suffix tokens instead."
+            description="e.g. “{name}: ” before each turn. Off for formats like ChatML that carry the role in the prefix/suffix tokens instead."
           />
         </div>
         <div className="mt-4 flex justify-end">

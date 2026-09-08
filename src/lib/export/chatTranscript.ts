@@ -75,7 +75,7 @@ export async function buildChatTranscriptHtml(opts: {
     })
     .join('\n')
 
-  const title = `${escapeHtml(chat.title || 'Chat')} — ${escapeHtml(characterName)}`
+  const title = `${escapeHtml(chat.title || 'Chat')}. ${escapeHtml(characterName)}`
 
   return `<!doctype html>
 <html lang="en">

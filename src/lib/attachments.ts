@@ -52,7 +52,7 @@ export async function readAttachment(file: File): Promise<PendingAttachment> {
     TEXT_EXTENSIONS.some((ext) => file.name.toLowerCase().endsWith(ext))
   if (!looksTexty) {
     throw new Error(
-      `"${file.name}" isn't a supported type yet — attach images, or plain text/code/markdown files.`,
+      `"${file.name}" isn't a supported type yet. Attach images, or plain text/code/markdown files.`,
     )
   }
   let text = await file.text()

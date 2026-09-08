@@ -8,7 +8,7 @@ const POSITIONS: { id: AuthorNote['position']; label: string; hint: string }[] =
   {
     id: 'at_depth',
     label: 'In the conversation, near the end',
-    hint: "Strongest. Sits a few messages up from the latest — like a note the character just read.",
+    hint: "Strongest. Sits a few messages up from the latest. Like a note the character just read.",
   },
   {
     id: 'after_char',
@@ -51,7 +51,7 @@ export function AuthorNotePanel({
       onClose={onClose}
       title="Author's note"
       description={
-        'A steering note for this chat only — folded into every prompt without ever becoming something a character "said". Good for tone ("keep replies short and tense"), a detail the model keeps forgetting, or a scene direction. It travels with this conversation, not the character card. Clear the text to turn it off.'
+        'A steering note for this chat only. Folded into every prompt without ever becoming something a character "said". Good for tone ("keep replies short and tense"), a detail the model keeps forgetting, or a scene direction. It travels with this conversation, not the character card. Clear the text to turn it off.'
       }
       size="lg"
       scrollable

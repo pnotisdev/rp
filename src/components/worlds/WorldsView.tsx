@@ -105,7 +105,7 @@ export function WorldsView({
     <ViewShell
       title="Worlds"
       width="wide"
-      description="A world is a shared setting — its tone, its rules, its lore, and its scene backgrounds. Any number of characters can live in one; assign a world from the character's editor."
+      description="A world is a shared setting: its tone, its rules, its lore, and its scene backgrounds. Any number of characters can live in one; assign a world from the character's editor."
       actions={
         <Button variant="primary" onClick={() => setShowTemplateGallery(true)}>
           New world
@@ -154,8 +154,8 @@ export function WorldsView({
               </Button>
             }
           >
-            No worlds yet. Start from a template — Freeform RP, Visual Novel, Dating Sim, or Slice of
-            Life — and reshape it from there.
+            No worlds yet. Start from a template (Freeform RP, Visual Novel, Dating Sim, or Slice of
+            Life) and reshape it from there.
           </EmptyState>
         )}
       </div>
@@ -384,7 +384,7 @@ function WorldEditor({
     if (Object.keys(dayUpdates).length > 0) setBackgrounds((b) => ({ ...b, ...dayUpdates }))
     if (Object.keys(nightUpdates).length > 0) setBackgroundsNight((b) => ({ ...b, ...nightUpdates }))
     if (matched.length > 0) toastSuccess(`Matched ${matched.length} background image${matched.length === 1 ? '' : 's'}`)
-    if (unmatched.length > 0) toastError(`No matching location for: ${unmatched.join(', ')} — rename to "<id>_day.png"/"<id>_night.png", or add a custom location with that id first.`)
+    if (unmatched.length > 0) toastError(`No matching location for: ${unmatched.join(', ')}. Rename to "<id>_day.png"/"<id>_night.png", or add a custom location with that id first.`)
   }
   const handleMusicPick = async (key: string, file: File) => {
     const dataUrl = await fileToDataUrl(file)
@@ -525,14 +525,14 @@ function WorldEditor({
 
           <TextAreaField
             label="Description"
-            hint="Setting, tone, atmosphere — always included for any character living here."
+            hint="Setting, tone, atmosphere. Always included for any character living here."
             rows={5}
             value={description}
             onChange={(e) => setDescription(e.target.value)}
           />
           <TextAreaField
             label="Rules"
-            hint="Hard constraints the model should never contradict — magic system, tech level, taboos."
+            hint="Hard constraints the model should never contradict. Magic system, tech level, taboos."
             rows={3}
             value={rules}
             onChange={(e) => setRules(e.target.value)}
@@ -540,7 +540,7 @@ function WorldEditor({
           <div>
             <div className="mb-1.5 text-sm text-text">Template</div>
             <p className="mb-2 text-xs text-text-muted">
-              Which tabs this world shows — gifts/items/thresholds ("Dating sim") and the world clock
+              Which tabs this world shows. Gifts/items/thresholds ("Dating sim") and the world clock
               ("Clock") aren't every setting's business. Switching doesn't touch anything you've already
               entered on a hidden tab.
             </p>
@@ -579,10 +579,10 @@ function WorldEditor({
           <p className="mb-2 text-xs text-text-muted">
             {Object.keys(backgrounds).length}/{allBackgrounds.length} set. The number under each is
             the warmth needed before that background can appear. The <Star size={11} strokeWidth={2} className="mb-0.5 inline text-accent" />{' '}
-            marks the opening scene — where a new chat starts before the model (or nothing, if
+            marks the opening scene. Where a new chat starts before the model (or nothing, if
             there's no model connected) has tagged one of its own. The small moon toggle on each
             tile switches it to a night variant, shown automatically once the world clock (Clock tab)
-            reaches evening or night — leave it unset to always show the day art.
+            reaches evening or night. Leave it unset to always show the day art.
           </p>
           <div className="mb-4 flex flex-wrap items-center gap-2">
             <FileButton onPick={handleBulkBackgroundPick} accept="image/png,image/jpeg,image/webp" multiple>
@@ -698,7 +698,7 @@ function WorldEditor({
               value={newBackgroundLabel}
               onChange={(e) => setNewBackgroundLabel(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && addCustomBackground()}
-              placeholder="Custom location — e.g. Her family's bookshop"
+              placeholder="Custom location (e.g. Her family)'s bookshop"
               className="flex-1 rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40"
             />
             <Button onClick={addCustomBackground} disabled={!newBackgroundLabel.trim()} className="flex items-center gap-1.5">
@@ -710,11 +710,11 @@ function WorldEditor({
 
         <Section
           title="Background music"
-          description="One looping track per scene mood, for Visual Novel mode. The model tags each reply's mood; the matching track crossfades in. “Default” plays whenever nothing more specific applies — set at least that one. Turn playback on with the volume slider in Settings → Appearance."
+          description="One looping track per scene mood, for Visual Novel mode. The model tags each reply's mood; the matching track crossfades in. “Default” plays whenever nothing more specific applies. Set at least that one. Turn playback on with the volume slider in Settings → Appearance."
           surface="bare"
         >
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            {[{ id: BGM_DEFAULT_KEY, label: 'Default', hint: 'The fallback loop — plays when no mood-specific track is set or tagged' }, ...SCENE_MOODS].map(
+            {[{ id: BGM_DEFAULT_KEY, label: 'Default', hint: 'The fallback loop. Plays when no mood-specific track is set or tagged' }, ...SCENE_MOODS].map(
               (slot) => (
                 <div
                   key={slot.id}
@@ -780,7 +780,7 @@ function WorldEditor({
 
           <Section
             title="Content rating"
-            description="How explicit intimate scenes get written for characters living here, and which intimate actions the Relationship panel offers. Overrides the global Settings value — so a wholesome world and an explicit one can sit side by side without touching Settings between chats."
+            description="How explicit intimate scenes get written for characters living here, and which intimate actions the Relationship panel offers. Overrides the global Settings value. So a wholesome world and an explicit one can sit side by side without touching Settings between chats."
             surface="bare"
           >
             <SelectField
@@ -816,7 +816,7 @@ function WorldEditor({
               onAdd={addGift}
               onRemove={(g) => removeGift(g.id)}
               addLabel="Add gift"
-              emptyHint="No custom gifts — the built-in catalog is used."
+              emptyHint="No custom gifts. The built-in catalog is used."
               renderItem={(gift) => (
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-[1fr_140px_100px]">
                   <TextField label="Name" value={gift.name} onChange={(e) => updateGift(gift.id, { name: e.target.value })} />
@@ -843,12 +843,12 @@ function WorldEditor({
 
           <Section
             title="Intimacy catalog"
-            description="Kissing spots, positions, toys, and other intimate beats a relationship living here can unlock, beyond the ~37 built-in defaults. Positions/toys/activities only ever surface in the prompt once the user's own Intimacy detail setting is 'Explicit'. Give a toy a price and it has to actually be bought (from the Relationship panel) before it's usable or ever mentioned to the model — leave it at 0 for no purchase step, same as every non-toy category."
+            description="Kissing spots, positions, toys, and other intimate beats a relationship living here can unlock, beyond the ~37 built-in defaults. Positions/toys/activities only ever surface in the prompt once the user's own Intimacy detail setting is 'Explicit'. Give a toy a price and it has to actually be bought (from the Relationship panel) before it's usable or ever mentioned to the model. Leave it at 0 for no purchase step, same as every non-toy category."
             surface="bare"
           >
             <label
               className="mb-3 flex items-center gap-1.5 text-[11px] text-text-muted"
-              title="For a non-humanoid or otherwise very different character/setting the built-in catalog (hands, hips, knees, a back to lie on) doesn't fit — this makes your own additions below the entire catalog instead of a supplement to the defaults."
+              title="For a non-humanoid or otherwise very different character/setting the built-in catalog (hands, hips, knees, a back to lie on) doesn't fit. This makes your own additions below the entire catalog instead of a supplement to the defaults."
             >
               <input
                 type="checkbox"
@@ -865,7 +865,7 @@ function WorldEditor({
               onAdd={addIntimacyOption}
               onRemove={(o) => removeIntimacyOption(o.id)}
               addLabel="Add unlockable"
-              emptyHint="No custom additions — the built-in catalog of ~37 is used."
+              emptyHint="No custom additions. The built-in catalog of ~37 is used."
               renderItem={(option) => (
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-[1fr_140px_90px_100px_140px]">
                   <TextField label="Label" value={option.label} onChange={(e) => updateIntimacyOption(option.id, { label: e.target.value })} />
@@ -914,7 +914,7 @@ function WorldEditor({
 
           <Section
             title="Item catalog"
-            description="Consumables used from the Bag for an immediate authored effect — separate from gifts, which are given to a character in a scene."
+            description="Consumables used from the Bag for an immediate authored effect. Separate from gifts, which are given to a character in a scene."
             surface="bare"
           >
             <ListEditor
@@ -1011,7 +1011,7 @@ function WorldEditor({
 
           <Section
             title="Custom scene flags"
-            description="Branching-memory beats beyond the built-in four (first date, confession, jealousy, promise). Each needs a description — that's the AI classifier's bar for firing it."
+            description="Branching-memory beats beyond the built-in four (first date, confession, jealousy, promise). Each needs a description. That's the AI classifier's bar for firing it."
             surface="bare"
           >
             <ListEditor
@@ -1043,13 +1043,13 @@ function WorldEditor({
 
           <Section
             title="Rules"
-            description="When every condition holds, the actions run once. The app already produces all of these signals — this is what lets you hang an authored beat off one without writing code."
+            description="When every condition holds, the actions run once. The app already produces all of these signals. This is what lets you hang an authored beat off one without writing code."
             surface="bare"
           >
             {triggers.length === 0 && (
               <p className="mb-3 text-xs text-text-muted">
                 No rules yet. For example: when <em>trust ≥ 70</em> and the <em>confession</em> flag is set → remember
-                "She has told him about her father" — which then rides into every later prompt.
+                "She has told him about her father". Which then rides into every later prompt.
               </p>
             )}
             <div className="space-y-3">
@@ -1113,7 +1113,7 @@ function WorldEditor({
                 value={newTriggerLabel}
                 onChange={(e) => setNewTriggerLabel(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && addTrigger()}
-                placeholder="New rule — e.g. She opens up about her father"
+                placeholder="New rule (e.g. She opens up about her father)"
                 className="flex-1 rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40"
               />
               <Button onClick={addTrigger} disabled={!newTriggerLabel.trim()} className="flex items-center gap-1.5">
@@ -1128,7 +1128,7 @@ function WorldEditor({
       {tab === 'clock' && world && (
         <Section
           title="World clock"
-          description="Shared by every chat in this world. Advancing it moves every character's mood and weather forward — a manual authoring step that doesn't spend an action."
+          description="Shared by every chat in this world. Advancing it moves every character's mood and weather forward. A manual authoring step that doesn't spend an action."
         >
           {(() => {
             const info = getCalendarInfo(currentDay)
@@ -1136,8 +1136,8 @@ function WorldEditor({
             return (
               <>
                 <div className="mb-1 text-sm text-text">
-                  Day {info.day} — {info.weekday}, {info.season} ({info.dayOfSeason}/28)
-                  {info.holiday ? <span className="text-romance"> — {info.holiday}</span> : null}
+                  Day {info.day} · {info.weekday}, {info.season} ({info.dayOfSeason}/28)
+                  {info.holiday ? <span className="text-romance"> · {info.holiday}</span> : null}
                 </div>
                 <div className="mb-4 text-xs text-text-muted">
                   {PHASES[currentPhaseIndex]}, {describeWeather(weather)} ·{' '}

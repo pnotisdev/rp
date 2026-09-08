@@ -197,7 +197,7 @@ export function DirectorPanel({ chat, character, world, onClose }: DirectorPanel
                   {PHASES[phaseIndex]}
                   {calendar.holiday ? ` · ${calendar.holiday}` : ''}
                 </div>
-                <div className="capitalize text-text">{weather ? describeWeather(weather) : '—'}</div>
+                <div className="capitalize text-text">{weather ? describeWeather(weather) : 'not set'}</div>
               </div>
               {character && (
                 <p className="mb-3 text-xs text-text-muted">
@@ -205,7 +205,7 @@ export function DirectorPanel({ chat, character, world, onClose }: DirectorPanel
                   {presence && (
                     <>
                       , currently <span className="text-text">{presenceLabel(presence.status)}</span>
-                      {presence.activity && ` — ${presence.activity}`}
+                      {presence.activity && `. ${presence.activity}`}
                       {presence.location && ` @ ${presence.location}`}
                     </>
                   )}
@@ -253,7 +253,7 @@ export function DirectorPanel({ chat, character, world, onClose }: DirectorPanel
 
         <Section
           title="Scene flags"
-          description="Toggling one is the lightweight stand-in for “trigger an event” — for a full date/event card, use the Event panel instead."
+          description="Toggling one is the lightweight stand-in for “trigger an event”. For a full date/event card, use the Event panel instead."
           surface="sunken"
         >
           <div className="flex flex-wrap gap-2">
@@ -293,7 +293,7 @@ export function DirectorPanel({ chat, character, world, onClose }: DirectorPanel
 
         <Section
           title="Plans"
-          description="What the character is quietly working toward on their own, formed and retired by the per-turn judge — read-only."
+          description="What the character is quietly working toward on their own, formed and retired by the per-turn judge. Read-only."
           surface="sunken"
         >
           <div className="space-y-1.5">
@@ -320,7 +320,7 @@ export function DirectorPanel({ chat, character, world, onClose }: DirectorPanel
               Intimacy scene:{' '}
               {chat.intimacyScene ? (
                 <span className="text-text">
-                  {chat.intimacyScene.phase} — {chat.intimacyScene.activityLabel}
+                  {chat.intimacyScene.phase} · {chat.intimacyScene.activityLabel}
                 </span>
               ) : (
                 'none active'
@@ -345,7 +345,7 @@ export function DirectorPanel({ chat, character, world, onClose }: DirectorPanel
 
         <Section
           title="Beliefs, expectations, fear & desire"
-          description="What the character has come to think of you, what they've quietly started counting on, what they're privately afraid of, and what deeper drive underlies it all — formed and retired by the per-turn judge, read-only."
+          description="What the character has come to think of you, what they've quietly started counting on, what they're privately afraid of, and what deeper drive underlies it all. Formed and retired by the per-turn judge, read-only."
           surface="sunken"
         >
           <div className="space-y-1.5">
@@ -387,7 +387,7 @@ export function DirectorPanel({ chat, character, world, onClose }: DirectorPanel
 
         <Section
           title="Hand over an item"
-          description="A direct inventory grant for testing — doesn't send a chat message the way giving a gift in-scene does."
+          description="A direct inventory grant for testing. Doesn't send a chat message the way giving a gift in-scene does."
           surface="sunken"
           className="md:col-span-2"
         >

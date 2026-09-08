@@ -59,8 +59,8 @@ export function VoiceSettings() {
   return (
     <SettingsPage>
       <Section
-        title="Voice — the Companion's mouth"
-        description="Text-to-speech provider for the Companion view. Keys are stored only in this browser and sent directly to the provider you pick — never through any other server."
+        title="Voice: the Companion's mouth"
+        description="Text-to-speech provider for the Companion view. Keys are stored only in this browser and sent directly to the provider you pick. Never through any other server."
       >
           <label className="mb-3 block">
             <span className="mb-1 block text-xs font-medium text-text-muted">Provider</span>
@@ -83,7 +83,7 @@ export function VoiceSettings() {
           {ttsProvider === 'koboldcpp' && (
             <>
               <p className="mb-2 text-xs text-text-muted">
-                Uses your existing KoboldCpp connection — needs a TTS-capable model (e.g. OuteTTS, Kokoro)
+                Uses your existing KoboldCpp connection. Needs a TTS-capable model (e.g. OuteTTS, Kokoro)
                 loaded there.
               </p>
               <div className="mb-3 flex items-end gap-2">
@@ -179,7 +179,7 @@ export function VoiceSettings() {
               {testState === 'ok' && (
                 <span className="flex items-center gap-1 text-xs text-success">
                   <CheckCircle2 size={14} strokeWidth={2} />
-                  It spoke — connection works.
+                  It spoke. Connection works.
                 </span>
               )}
               {testState === 'error' && (
@@ -193,7 +193,7 @@ export function VoiceSettings() {
 
           {ttsProvider === 'alibaba' && (
             <p className="text-xs text-danger">
-              Not wired up yet — Model Studio's request format hasn't been confirmed against a live
+              Not wired up yet. Model Studio's request format hasn't been confirmed against a live
               account, so this was left honest rather than guessed at. The other four providers work now.
             </p>
           )}
@@ -203,7 +203,7 @@ export function VoiceSettings() {
         title="Ears (speech-to-text)"
         description={
           <>
-            Uses KoboldCpp's own Whisper endpoint over your existing connection — no separate setup.
+            Uses KoboldCpp's own Whisper endpoint over your existing connection. No separate setup.
             Launch KoboldCpp with a Whisper model loaded (<code className="font-mono">--whispermodel</code>)
             for the Companion's push-to-talk mic to work.
           </>

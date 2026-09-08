@@ -295,7 +295,7 @@ export function ChatWindow({
       <div className="flex flex-1 flex-col items-center justify-center gap-3">
         <MessageCircle size={40} strokeWidth={1.25} className="text-text-muted" />
         <p className="text-xl font-medium text-text">Pick a character to start a conversation</p>
-        <p className="text-sm text-text-muted">Or create a new one — you can even ask the model to write it for you.</p>
+        <p className="text-sm text-text-muted">Or create a new one. You can even ask the model to write it for you.</p>
       </div>
     )
   }
@@ -364,7 +364,7 @@ export function ChatWindow({
     {
       key: 'tuning',
       icon: SlidersHorizontal,
-      label: 'Quick tuning — sampler & system prompt',
+      label: 'Quick tuning: sampler & system prompt',
       priority: 'primary',
       active: showTuning,
       onClick: () => setShowTuning((v) => !v),
@@ -442,12 +442,12 @@ export function ChatWindow({
       onClick: () => setShowPinned(true),
     },
     { key: 'search', icon: Search, label: 'Search messages', onClick: () => setShowSearch(true) },
-    { key: 'bag', icon: Backpack, label: 'Bag — give a gift you own', onClick: () => setShowBag(true) },
+    { key: 'bag', icon: Backpack, label: 'Bag: give a gift you own', onClick: () => setShowBag(true) },
     { key: 'inspector', icon: ScrollText, label: 'Inspect prompt & memory', onClick: () => setShowInspector(true) },
     {
       key: 'director',
       icon: Wrench,
-      label: 'Director — adjust world & relationship state',
+      label: 'Director: adjust world & relationship state',
       onClick: () => setShowDirector(true),
     },
     {
@@ -463,7 +463,7 @@ export function ChatWindow({
   const parentChatLink = chat.parentChatId ? (
     <button
       onClick={() => setActiveChatId(chat.parentChatId!)}
-      title="This chat was forked from another one — jump back to it"
+      title="This chat was forked from another one. Jump back to it"
       className="flex shrink-0 items-center gap-1 hover:text-text"
     >
       <GitFork size={11} strokeWidth={2} />
@@ -638,13 +638,13 @@ export function ChatWindow({
               <li>
                 <button onClick={toggleVnForChat} className="font-medium text-accent hover:underline">
                   Turn on Visual Novel mode
-                </button>{' '}
-                — full-bleed scene art and a dialogue box, instead of the plain chat log.
+                </button>
+                {': '}full-bleed scene art and a dialogue box, instead of the plain chat log.
               </li>
             )}
             {!character?.worldId && (
               <li>
-                <span className="font-medium text-text">Bind a world</span> — in the character
+                <span className="font-medium text-text">Bind a world</span> in the character
                 editor's Identity tab, for scene backgrounds and a shared clock.
               </li>
             )}
@@ -682,7 +682,7 @@ export function ChatWindow({
                     <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${presence.status === 'available' ? 'bg-accent' : 'bg-text-muted'}`} />
                     <span className="truncate capitalize">
                       {presenceLabel(presence.status)}
-                      {presence.activity && ` — ${presence.activity}`}
+                      {presence.activity && `. ${presence.activity}`}
                     </span>
                   </span>
                 )}

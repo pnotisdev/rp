@@ -100,7 +100,7 @@ export function MessageLog({
       ))}
       {messages.length === 0 && (
         <p className="text-center text-sm text-text-muted py-8">
-          No messages yet — say hello, or the character's first message will appear once you send one.
+          No messages yet. Say hello, or the character's first message will appear once you send one.
         </p>
       )}
     </div>

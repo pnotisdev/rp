@@ -90,7 +90,7 @@ export function WorldInfoView() {
   return (
     <ViewShell
       title="World Info"
-      description="Standalone lorebooks — locations, factions, history, world rules. A book with no scope is available to every chat; scope it to a character or world to keep unrelated lore out. Lore that belongs to one character lives on the character card instead."
+      description="Standalone lorebooks. Locations, factions, history, world rules. A book with no scope is available to every chat; scope it to a character or world to keep unrelated lore out. Lore that belongs to one character lives on the character card instead."
       actions={
         <Button variant="primary" onClick={createBook}>
           New book
@@ -128,8 +128,7 @@ export function WorldInfoView() {
               </Button>
             }
           >
-            No standalone world info books yet. Most lore can live on a character or world instead —
-            reach for a book when the same lore spans several of them.
+            No standalone world info books yet. Most lore can live on a character or world instead. Reach for a book when the same lore spans several of them.
           </EmptyState>
         )}
       </div>

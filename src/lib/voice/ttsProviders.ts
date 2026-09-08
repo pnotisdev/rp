@@ -96,7 +96,7 @@ export async function synthesizeSpeech(config: TtsConfig, text: string, koboldBa
     case 'alibaba':
       // DashScope's TTS request/response shape hasn't been confirmed against a live account —
       // rather than guess at an API contract, this is left honestly unimplemented.
-      throw new Error('Alibaba Cloud Model Studio isn\'t wired up yet — the other providers are ready to use.')
+      throw new Error('Alibaba Cloud Model Studio isn\'t wired up yet. The other providers are ready to use.')
   }
 }
 

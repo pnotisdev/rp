@@ -31,7 +31,7 @@ export function SearchPanel({ chatId, messages, onClose, onJumpToMessage, onJump
     const c = chats.find((c) => c.id === id)
     if (!c) return 'Unknown chat'
     const char = characters.find((ch) => ch.id === c.characterId)
-    return `${char?.card.name ?? '?'} — ${c.title}`
+    return `${char?.card.name ?? '?'}. ${c.title}`
   }
 
   const q = query.trim()

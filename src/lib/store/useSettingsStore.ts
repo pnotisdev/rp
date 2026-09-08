@@ -20,7 +20,7 @@ import { DEFAULT_PROMPT_SECTIONS } from '@/lib/prompt/builder'
 const DEFAULT_QUICK_REPLIES: QuickReply[] = [
   { id: 'qr-surroundings', label: 'Look around', message: '*takes a moment to look around and take in the surroundings*' },
   { id: 'qr-time-skip', label: 'Let time pass', message: '*lets some time pass*' },
-  { id: 'qr-change-subject', label: 'Change the subject', message: 'Anyway — so, what else is new with you?' },
+  { id: 'qr-change-subject', label: 'Change the subject', message: 'Anyway. So, what else is new with you?' },
 ]
 
 export interface PromptPreset {

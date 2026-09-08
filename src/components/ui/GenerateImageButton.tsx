@@ -83,7 +83,7 @@ export function GenerateImageButton({
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
         placeholder="e.g. portrait of a young woman, dark purple twintails, library background"
-        hint={`Sends to ${imageBackend} — see Settings → Images.`}
+        hint={`Sends to ${imageBackend}. See Settings → Images.`}
       />
       <div className="mt-2 flex justify-end gap-2">
         <Button variant="ghost" onClick={() => setOpen(false)} disabled={busy}>

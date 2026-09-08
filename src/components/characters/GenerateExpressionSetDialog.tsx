@@ -107,7 +107,7 @@ export function GenerateExpressionSetDialog({
     <Modal
       onClose={onClose}
       title="Generate expression set"
-      description="One base description, generated once per expression below — each lands in its slot as it finishes, so stopping partway still keeps what's already done."
+      description="One base description, generated once per expression below. Each lands in its slot as it finishes, so stopping partway still keeps what's already done."
       size="lg"
       scrollable
     >
@@ -118,7 +118,7 @@ export function GenerateExpressionSetDialog({
         value={basePrompt}
         onChange={(e) => setBasePrompt(e.target.value)}
         placeholder="e.g. portrait of Sumire, dark purple twintails, library background"
-        hint={`Sends to ${imageBackend} — see Settings → Images. Each expression appends its own name to this.`}
+        hint={`Sends to ${imageBackend}. See Settings → Images. Each expression appends its own name to this.`}
       />
 
       <div className="mt-4">

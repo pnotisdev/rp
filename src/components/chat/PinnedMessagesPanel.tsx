@@ -45,7 +45,7 @@ export function PinnedMessagesPanel({ messages, onClose, onJump, onUnpin }: Pinn
           ))}
           {pinned.length === 0 && (
             <p className="flex items-center justify-center gap-1 py-8 text-center text-xs text-text-muted">
-              No pinned moments yet — click the <Star size={12} strokeWidth={2} className="inline" /> on any message to save it here.
+              No pinned moments yet. Click the <Star size={12} strokeWidth={2} className="inline" /> on any message to save it here.
             </p>
           )}
         </div>

@@ -25,7 +25,7 @@ export function PersonasView() {
       title="Personas"
       description={
         <>
-          A persona is who you play as in a chat — your name and a short description, used as{' '}
+          A persona is who you play as in a chat: your name and a short description, used as{' '}
           {'{{user}}'} context. Pick one when starting a chat.
         </>
       }
@@ -62,7 +62,7 @@ export function PersonasView() {
             }
           >
             No personas yet. If you start a chat without one, the app just tells the model your name
-            is "You" — a persona gives it something to work with.
+            is "You". A persona gives it something to work with.
           </EmptyState>
         )}
       </div>
@@ -150,7 +150,7 @@ function PersonaEditor({ persona, onDone }: { persona: Persona | null; onDone: (
       </div>
       <TextAreaField
         label="Description"
-        hint={`Who you are in this chat — appearance, background, traits. Used as {{user}} context.`}
+        hint={`Who you are in this chat. Appearance, background, traits. Used as {{user}} context.`}
         rows={6}
         value={description}
         onChange={(e) => setDescription(e.target.value)}

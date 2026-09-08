@@ -32,7 +32,7 @@ let unreachableToastId: string | null = null
 function reportUnreachable(): void {
   if (unreachableToastId) return
   unreachableToastId = toastError(
-    "Can't reach your local server — nothing is being saved right now. Check that your dev server " +
+    "Can't reach your local server. Nothing is being saved right now. Check that your dev server " +
       '(`npm run dev`) is still running, then try again.',
   )
 }
@@ -41,7 +41,7 @@ function reportReachable(): void {
   if (!unreachableToastId) return
   useToastStore.getState().dismiss(unreachableToastId)
   unreachableToastId = null
-  toastSuccess('Reconnected — your local server is back.')
+  toastSuccess('Reconnected. Your local server is back.')
 }
 
 /** Test-only: `unreachableToastId` is deliberately module-level (one toast per outage, tracked

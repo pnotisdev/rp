@@ -67,7 +67,7 @@ function fixedFieldHint(base: ReactNode, value: string): ReactNode {
       {base}
       {base ? ' ' : null}
       <span className="text-amber-500">
-        ~{tokens} tokens — this field is sent in full every turn and never trimmed; consider tightening it or moving
+        ~{tokens} tokens. This field is sent in full every turn and never trimmed; consider tightening it or moving
         detail into Character lore.
       </span>
     </>
@@ -247,13 +247,13 @@ export function CharacterEditor({
   const detectVoiceFromExamples = () => {
     const detected = detectVoiceFingerprint(form)
     if (detected.turnsAnalyzed < 2) {
-      toastInfo('Not enough example dialogue or greetings to detect a pattern — write a couple of example turns first.')
+      toastInfo('Not enough example dialogue or greetings to detect a pattern. Write a couple of example turns first.')
       return
     }
     const foundAnything =
       detected.verbalTics.length || detected.catchphrases.length || detected.sentenceRhythm || detected.punctuationNotes
     if (!foundAnything) {
-      toastInfo(`Looked at ${detected.turnsAnalyzed} turns but found nothing that clearly recurs — try adding more example dialogue.`)
+      toastInfo(`Looked at ${detected.turnsAnalyzed} turns but found nothing that clearly recurs. Try adding more example dialogue.`)
       return
     }
     setVerbalTics((cur) => [...new Set([...cur, ...detected.verbalTics])])
@@ -410,7 +410,7 @@ export function CharacterEditor({
     }
     if (Object.keys(updates).length > 0) setSprites((s) => ({ ...s, ...updates }))
     if (matched.length > 0) toastSuccess(`Matched ${matched.length} expression${matched.length === 1 ? '' : 's'} into ${activeOutfitLabel}: ${matched.join(', ')}`)
-    if (unmatched.length > 0) toastError(`No matching expression for: ${unmatched.join(', ')} — rename to match an expression id, or add a custom expression with that id first.`)
+    if (unmatched.length > 0) toastError(`No matching expression for: ${unmatched.join(', ')}. Rename to match an expression id, or add a custom expression with that id first.`)
   }
 
   /** Drops one expression's art in the outfit currently being edited. */
@@ -606,7 +606,7 @@ export function CharacterEditor({
               <FileButton
                 onPick={(f) => handleImportPackFile(f[0])}
                 accept=".json"
-                title="Restore a character exported with 'Export pack' — sprites, gallery, and bound world included"
+                title="Restore a character exported with 'Export pack': sprites, gallery, and bound world included"
               >
                 Import pack
               </FileButton>
@@ -677,7 +677,7 @@ export function CharacterEditor({
             <div className="flex-1 space-y-0">
               <TextField label="Name" value={form.name} onChange={(e) => set('name', e.target.value)} />
               <SelectField label="World" value={worldId} onChange={(e) => setWorldId(e.target.value)}>
-                <option value="">No world — standalone</option>
+                <option value="">No world (standalone)</option>
                 {worlds.map((w) => (
                   <option key={w.id} value={w.id}>
                     {w.name}
@@ -698,7 +698,7 @@ export function CharacterEditor({
           <TextAreaField
             label="Personality"
             hint={fixedFieldHint(
-              'How they speak, act, and feel — the more specific, the more the model imitates their voice.',
+              'How they speak, act, and feel. The more specific, the more the model imitates their voice.',
               form.personality,
             )}
             rows={3}
@@ -744,7 +744,7 @@ export function CharacterEditor({
         <div className="space-y-10">
           <Section
             title="Life & background"
-            description="Reaches the model as part of this character's identity — so it applies to any use of them, not just dating-sim chats. Comma-separated where it's a list."
+            description="Reaches the model as part of this character's identity. So it applies to any use of them, not just dating-sim chats. Comma-separated where it's a list."
             surface="bare"
           >
             <div className="grid grid-cols-1 gap-x-3 sm:grid-cols-2">
@@ -757,14 +757,14 @@ export function CharacterEditor({
                 max={111}
                 value={birthday ?? ''}
                 onChange={(e) => setBirthday(e.target.value === '' ? undefined : Math.max(0, Math.min(111, Math.round(Number(e.target.value)))))}
-                placeholder="0–111"
+                placeholder="0-111"
                 hint={
                   birthday !== undefined
                     ? (() => {
                         const info = getCalendarInfo(birthday)
                         return `→ ${info.season.charAt(0).toUpperCase() + info.season.slice(1)}, day ${info.dayOfSeason}/28`
                       })()
-                    : 'An 8x gift bonus on the day, plus a nudge that it’s coming up — day 0 is the first day of Spring, wrapping every 112 days.'
+                    : 'An 8x gift bonus on the day, plus a nudge that it’s coming up. Day 0 is the first day of Spring, wrapping every 112 days.'
                 }
               />
               <TextField
@@ -798,7 +798,7 @@ export function CharacterEditor({
 
           <Section
             title="Social connections"
-            description="Who this character knows and how — reaches the model so it can reference them naturally in conversation."
+            description="Who this character knows and how. Reaches the model so it can reference them naturally in conversation."
             surface="bare"
           >
             <ListEditor
@@ -832,7 +832,7 @@ export function CharacterEditor({
 
           <Section
             title="Behavioral rules"
-            description={'Structured "when X, she Y" / "never Z" contracts — followed exactly as written, more precise than free-text personality. Good for desire, hesitation, and aftercare.'}
+            description={'Structured "when X, she Y" / "never Z" contracts. Followed exactly as written, more precise than free-text personality. Good for desire, hesitation, and aftercare.'}
             surface="bare"
           >
             <ListEditor
@@ -879,7 +879,7 @@ export function CharacterEditor({
         <div className="space-y-10">
         {!worldId && (
           <p className="rounded-xl bg-bg-sunken px-4 py-3 text-xs text-text-muted">
-            Sprites show in Visual Novel mode, but scene <em>backgrounds</em> come from a world — this character isn't
+            Sprites show in Visual Novel mode, but scene <em>backgrounds</em> come from a world. This character isn't
             bound to one, so VN scenes will fall back to a placeholder gradient. Pick a world in the{' '}
             <button type="button" onClick={() => setTab('identity')} className="text-accent hover:underline">
               Identity tab
@@ -922,7 +922,7 @@ export function CharacterEditor({
                 value={newOutfitLabel}
                 onChange={(e) => setNewOutfitLabel(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && addOutfit()}
-                placeholder="New outfit — e.g. Swimsuit"
+                placeholder="New outfit (e.g. Swimsuit)"
                 aria-label="New outfit name"
                 className="ml-1 w-44 rounded-full bg-bg px-2.5 py-1 text-[11px] text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40"
               />
@@ -933,8 +933,7 @@ export function CharacterEditor({
 
             {activeOutfit === BASE_OUTFIT_ID ? (
               <p className="text-[11px] text-text-muted">
-                The character's default art. Add an outfit to give them a second look the model can switch to mid-scene —
-                any expression you don't draw for it falls back to this one.
+                The character's default art. Add an outfit to give them a second look the model can switch to mid-scene. Any expression you don't draw for it falls back to this one.
               </p>
             ) : (
               (() => {
@@ -962,7 +961,7 @@ export function CharacterEditor({
                         className="w-12 rounded-md bg-bg px-1 py-1 text-center text-[11px] text-text outline-none"
                       />
                     </label>
-                    <label className="flex items-center gap-1.5 text-[11px] text-text-muted" title="The model is never offered this outfit — it only appears if the story unlocks it another way. For a state you don't want picked just because a reply read as suggestive.">
+                    <label className="flex items-center gap-1.5 text-[11px] text-text-muted" title="The model is never offered this outfit. It only appears if the story unlocks it another way. For a state you don't want picked just because a reply read as suggestive.">
                       <input
                         type="checkbox"
                         checked={!!outfit.manualOnly}
@@ -971,7 +970,7 @@ export function CharacterEditor({
                       />
                       Never chosen by the model
                     </label>
-                    <label className="flex items-center gap-1.5 text-[11px] text-text-muted" title="Using an explicit action from the Relationship panel (a position, toy, or activity — not a kissing spot) switches to this outfit automatically. The story tags its own way back out afterwards.">
+                    <label className="flex items-center gap-1.5 text-[11px] text-text-muted" title="Using an explicit action from the Relationship panel (a position, toy, or activity, not a kissing spot) switches to this outfit automatically. The story tags its own way back out afterwards.">
                       <input
                         type="checkbox"
                         checked={!!outfit.intimate}
@@ -1080,7 +1079,7 @@ export function CharacterEditor({
                       </div>
                     ))}
                     <label
-                      title={`Add a variant for ${exp.label} — shown alongside the primary art for visual variety`}
+                      title={`Add a variant for ${exp.label}. Shown alongside the primary art for visual variety`}
                       className="flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md border border-dashed border-border text-text-muted hover:text-text"
                     >
                       <Plus size={12} strokeWidth={2} />
@@ -1119,7 +1118,7 @@ export function CharacterEditor({
               value={newExpressionLabel}
               onChange={(e) => setNewExpressionLabel(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && addCustomExpression()}
-              placeholder="Custom expression name — e.g. Sly grin"
+              placeholder="Custom expression name (e.g. Sly grin)"
               className="flex-1 rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40"
             />
             <Button onClick={addCustomExpression} disabled={!newExpressionLabel.trim()} className="flex items-center gap-1.5">
@@ -1131,7 +1130,7 @@ export function CharacterEditor({
 
         <Section
           title="Sound effects"
-          description="This character's own comic sound words, on top of the built-in list and any global ones — a catgirl's “nya, nyaa, mrrp”, an imouto's tics. They get the manga-style burst styling in her messages. Display-only; the model never sees this. Turn the whole feature on/off in Settings → Appearance."
+          description="This character's own comic sound words, on top of the built-in list and any global ones. A catgirl's “nya, nyaa, mrrp”, an imouto's tics. They get the manga-style burst styling in her messages. Display-only; the model never sees this. Turn the whole feature on/off in Settings → Appearance."
           surface="bare"
         >
           <TextField
@@ -1149,7 +1148,7 @@ export function CharacterEditor({
         <div className="space-y-10">
           <Section
             title="CG gallery"
-            description="Unlockable images shown in the Gallery tab — by warmth threshold, story beat, or (for endings) reaching Sweethearts."
+            description="Unlockable images shown in the Gallery tab. By warmth threshold, story beat, or (for endings) reaching Sweethearts."
             surface="bare"
           >
             <ListEditor
@@ -1215,7 +1214,7 @@ export function CharacterEditor({
                         </div>
                       ))}
                       <label
-                        title={`Add a variant for "${entry.title}" — picked alongside the primary image for visual variety`}
+                        title={`Add a variant for "${entry.title}". Picked alongside the primary image for visual variety`}
                         className="flex h-10 w-14 shrink-0 cursor-pointer items-center justify-center rounded-md border border-dashed border-border text-text-muted hover:text-text"
                       >
                         <Plus size={13} strokeWidth={2} />
@@ -1252,13 +1251,13 @@ export function CharacterEditor({
                     checked={entry.isEnding ?? false}
                     onChange={(v) => updateGalleryEntry(entry.id, { isEnding: v || undefined })}
                     label="Ending"
-                    description="Unlocks the moment the relationship reaches Sweethearts, ignoring the fields above — a once-per-relationship epilogue."
+                    description="Unlocks the moment the relationship reaches Sweethearts, ignoring the fields above. A once-per-relationship epilogue."
                   />
                   {!entry.isEnding && (
                     <div className="grid grid-cols-1 gap-x-3 gap-y-2 rounded-lg bg-bg-sunken p-3 sm:grid-cols-2">
                       <SelectField
                         label="Auto-show full-bleed when…"
-                        hint="Once unlocked (above), swaps this in for the ordinary sprite/background live on the VN stage — no need to browse the Gallery to see it."
+                        hint="Once unlocked (above), swaps this in for the ordinary sprite/background live on the VN stage. No need to browse the Gallery to see it."
                         value={entry.autoTrigger?.kind ?? 'none'}
                         onChange={(e) => {
                           const kind = e.target.value
@@ -1406,13 +1405,13 @@ export function CharacterEditor({
             />
           </Section>
 
-          <Section title="Content & features" description="An authorial opt-out — unlike every warmth gate elsewhere, this doesn't unlock with progress." surface="bare">
+          <Section title="Content & features" description="An authorial opt-out. Unlike every warmth gate elsewhere, this doesn't unlock with progress." surface="bare">
             <div className="rounded-xl bg-bg-sunken px-4 py-1">
               <Toggle
                 checked={dateModeOptOut}
                 onChange={setDateModeOptOut}
                 label="Opt out of date / event mode"
-                description="Hides the date button for this character entirely — for one better suited to lore, reference, or plain-assistant use."
+                description="Hides the date button for this character entirely. For one better suited to lore, reference, or plain-assistant use."
               />
             </div>
           </Section>
@@ -1423,7 +1422,7 @@ export function CharacterEditor({
         <div className="space-y-10">
           <Section
             title="Weather preferences"
-            description="Nudges the world-clock line fed into the prompt when today's weather matches — never dictates the scene. A kind can be loved or hated, not both."
+            description="Nudges the world-clock line fed into the prompt when today's weather matches. Never dictates the scene. A kind can be loved or hated, not both."
             surface="bare"
           >
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6">
@@ -1452,7 +1451,7 @@ export function CharacterEditor({
 
           <Section
             title="Schedule"
-            description="Where this character is and what they're doing at a given time — reads the world's shared clock, so it only matters for a world-bound character. A day-specific slot beats an 'every day' one."
+            description="Where this character is and what they're doing at a given time. Reads the world's shared clock, so it only matters for a world-bound character. A day-specific slot beats an 'every day' one."
             surface="bare"
           >
             <ListEditor
@@ -1461,7 +1460,7 @@ export function CharacterEditor({
               onAdd={addScheduleEntry}
               onRemove={(e) => removeScheduleEntry(e.id)}
               addLabel="Add slot"
-              emptyHint="No schedule — always shows as available."
+              emptyHint="No schedule. Always shows as available."
               renderItem={(entry) => (
                 <div className="space-y-2">
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -1504,7 +1503,7 @@ export function CharacterEditor({
 
           <Section
             title="Outreach"
-            description="How often this character might text you first, unprompted, based on how long it's been and how things are going. Off by default — a character that never reaches out is a valid, intentional choice, not a missing feature."
+            description="How often this character might text you first, unprompted, based on how long it's been and how things are going. Off by default. A character that never reaches out is a valid, intentional choice, not a missing feature."
             surface="bare"
           >
             <SelectField
@@ -1512,7 +1511,7 @@ export function CharacterEditor({
               value={outreachFrequency}
               onChange={(e) => setOutreachFrequency(e.target.value as OutreachFrequency)}
             >
-              <option value="never">Off — never texts first</option>
+              <option value="never">Off (never texts first)</option>
               <option value="rare">Rare</option>
               <option value="normal">Normal</option>
               <option value="eager">Eager</option>
@@ -1549,7 +1548,7 @@ export function CharacterEditor({
       {tab === 'voice' && (
         <Section
           title="Voice fingerprint"
-          description="Concrete, recurring speech patterns — not a general impression like personality, but the actual repeatable tells that make a line unmistakably theirs. Reaches the model every turn alongside their description and personality, plus a short standalone reminder of the single most important catchphrase/tic/register so it doesn't get diluted once a chat runs long."
+          description="Concrete, recurring speech patterns. Not a general impression like personality, but the actual repeatable tells that make a line unmistakably theirs. Reaches the model every turn alongside their description and personality, plus a short standalone reminder of the single most important catchphrase/tic/register so it doesn't get diluted once a chat runs long."
           surface="bare"
           action={
             <Button variant="ghost" onClick={detectVoiceFromExamples} className="inline-flex items-center">
@@ -1578,7 +1577,7 @@ export function CharacterEditor({
               value={dialectNotes}
               onChange={(e) => setDialectNotes(e.target.value)}
               placeholder="Clipped and formal, never contracts a verb. Or: Kansai-ben, drops word endings. Or: never swears, even when hurt."
-              hint="Formality, slang density, sentence complexity, and how they handle taboo language all belong here too — your own words, not a fixed list."
+              hint="Formality, slang density, sentence complexity, and how they handle taboo language all belong here too. Your own words, not a fixed list."
               className="sm:col-span-2"
             />
             <TextField
@@ -1590,8 +1589,7 @@ export function CharacterEditor({
             />
           </div>
           <p className="mt-2 text-[11px] text-text-muted">
-            "Detect from examples" reads this card's own example dialogue and greetings for patterns that actually recur —
-            it never calls the model, so it's instant and never wrong about what's on the page, but it can only find what's
+            "Detect from examples" reads this card's own example dialogue and greetings for patterns that actually recur. It never calls the model, so it's instant and never wrong about what's on the page, but it can only find what's
             already written. It adds to what's here rather than replacing it; edit or remove anything it gets wrong.
           </p>
           <div className="mt-4">
@@ -1600,7 +1598,7 @@ export function CharacterEditor({
               rows={2}
               value={explicitVoiceNote}
               onChange={(e) => setExplicitVoiceNote(e.target.value)}
-              placeholder="Goes quieter and shorter, not louder — full sentences stop happening. Or: gets mouthier and more in control, not less."
+              placeholder="Goes quieter and shorter, not louder. Full sentences stop happening. Or: gets mouthier and more in control, not less."
               hint="1-2 lines on how this specific voice holds up, cracks, or changes under strain during an explicit scene. Only used while the explicit content rating is on; leave blank to fall back to a generic stay-in-character instruction."
             />
           </div>
@@ -1643,14 +1641,14 @@ export function CharacterEditor({
             />
             <TextAreaField
               label="Post-history instructions"
-              hint="Injected right before the model's turn — good for reinforcing style or rules."
+              hint="Injected right before the model's turn. Good for reinforcing style or rules."
               rows={2}
               value={form.post_history_instructions ?? ''}
               onChange={(e) => set('post_history_instructions', e.target.value)}
             />
             <SelectField
               label="Instruct template override"
-              hint="Overrides the global Settings → Generation default for chats with this character — useful for a character you always run against a specific model."
+              hint="Overrides the global Settings → Generation default for chats with this character. Useful for a character you always run against a specific model."
               value={instructTemplateId}
               onChange={(e) => setInstructTemplateId(e.target.value)}
             >
@@ -1683,7 +1681,7 @@ export function CharacterEditor({
                           ? 'measured from this card’s example dialogue'
                           : d.source === 'greeting'
                             ? 'estimated from the greeting (no example dialogue to measure)'
-                            : 'default — this card has no example dialogue or greeting to measure'
+                            : 'default. This card has no example dialogue or greeting to measure'
                       return `${REPLY_LENGTH_HINTS.auto} Currently resolves to "${REPLY_LENGTH_LABELS[d.band]}"${
                         d.measuredWords ? ` (~${d.measuredWords} words/turn)` : ''
                       }, ${from}.`
@@ -1714,7 +1712,7 @@ export function CharacterEditor({
             <TextAreaField label="Creator notes" rows={2} value={form.creator_notes ?? ''} onChange={(e) => set('creator_notes', e.target.value)} />
           </Section>
 
-          <Section title="Character lore" description="Lore that belongs to this character specifically — travels with the card, unlike a standalone World Info book." surface="bare">
+          <Section title="Character lore" description="Lore that belongs to this character specifically. Travels with the card, unlike a standalone World Info book." surface="bare">
             <LorebookEditor
               book={form.character_book ?? { name: `${form.name} Lore`, entries: [], token_budget: 512, scan_depth: 8 }}
               onChange={(book) => set('character_book', book)}

@@ -38,7 +38,7 @@ export function GalleryView() {
     <ViewShell
       title="Gallery"
       width="wide"
-      description="CG art unlocks as a relationship deepens — by raising affection and hitting key story beats in chat events."
+      description="CG art unlocks as a relationship deepens: by raising affection and hitting key story beats in chat events."
       actions={
         <label className="flex items-center gap-2 text-xs text-text-muted">
           Persona

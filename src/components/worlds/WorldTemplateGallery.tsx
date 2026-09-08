@@ -12,7 +12,7 @@ export function WorldTemplateGallery({
     <Modal
       onClose={onClose}
       title="Start a new world"
-      description="Picks a sensible starting point — which editor tabs show up, and a nudge for the rules field. Nothing here is locked in; change it any time from the world's Overview tab."
+      description="Picks a sensible starting point. Which editor tabs show up, and a nudge for the rules field. Nothing here is locked in; change it any time from the world's Overview tab."
       size="lg"
     >
       <div className="space-y-3">

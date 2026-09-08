@@ -62,7 +62,7 @@ export function LorebookEditor({
     setSuggesting(true)
     try {
       const suggestions = await suggestLoreEntries(client, aiContext, book.entries)
-      if (suggestions.length === 0) throw new Error("The model didn't propose any usable entries — try again.")
+      if (suggestions.length === 0) throw new Error("The model didn't propose any usable entries. Try again.")
       let nextBook = book
       for (const s of suggestions) {
         nextBook = {
@@ -116,7 +116,7 @@ export function LorebookEditor({
                   {anyKeyIsRisky(entry.keys) && (
                     <p className="-mt-2 mb-3 text-[11px] text-warning">
                       One of these regex keys has a nested-quantifier shape that can run catastrophically slowly on
-                      the wrong input — worth double-checking, though plenty of legitimate patterns look like this too.
+                      the wrong input. Worth double-checking, though plenty of legitimate patterns look like this too.
                     </p>
                   )}
                 </div>
@@ -311,7 +311,7 @@ export function LorebookEditor({
                         <>
                           <TextField
                             label="Secondary keys"
-                            hint="Comma separated — any one is enough, alongside a primary key match."
+                            hint="Comma separated. Any one is enough, alongside a primary key match."
                             value={(entry.secondary_keys ?? []).join(', ')}
                             onChange={(e) =>
                               updateEntry(entry.id!, {
@@ -322,7 +322,7 @@ export function LorebookEditor({
                           {anyKeyIsRisky(entry.secondary_keys ?? []) && (
                             <p className="-mt-2 mb-3 text-[11px] text-warning">
                               One of these regex keys has a nested-quantifier shape that can run catastrophically
-                              slowly on the wrong input — worth double-checking, though plenty of legitimate patterns
+                              slowly on the wrong input. Worth double-checking, though plenty of legitimate patterns
                               look like this too.
                             </p>
                           )}

@@ -100,7 +100,7 @@ export function ObjectivePanel({
 
             <div className="my-4 space-y-1.5">
               {activeObjective.tasks.length === 0 && (
-                <p className="text-xs text-text-muted">No tasks yet — generate some, or add your own below.</p>
+                <p className="text-xs text-text-muted">No tasks yet. Generate some, or add your own below.</p>
               )}
               {[...pending, ...done].map((task) => (
                 <label

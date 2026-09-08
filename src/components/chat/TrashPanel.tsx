@@ -53,7 +53,7 @@ export function TrashPanel({ onClose, onRestored }: { onClose: () => void; onRes
     <Modal
       onClose={onClose}
       title="Trash"
-      description="Deleted chats sit here for 30 days before they're purged automatically — restore one, or delete it for good right away."
+      description="Deleted chats sit here for 30 days before they're purged automatically. Restore one, or delete it for good right away."
       size="lg"
       scrollable
     >

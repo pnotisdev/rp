@@ -27,14 +27,14 @@ export function ConnectionBadge() {
   const tooltip =
     chatBackend === 'koboldcpp'
       ? status === 'online'
-        ? `Connected — ${kobold.model || baseUrl}${kobold.maxContext !== null ? ` (${kobold.maxContext.toLocaleString()} ctx)` : ''}`
+        ? `Connected. ${kobold.model || baseUrl}${kobold.maxContext !== null ? ` (${kobold.maxContext.toLocaleString()} ctx)` : ''}`
         : status === 'offline'
-          ? `Not reachable — ${baseUrl}`
+          ? `Not reachable. ${baseUrl}`
           : `Checking ${baseUrl}…`
       : status === 'online'
-        ? `Connected — ${backendLabel}${hosted.detail ? ` (${hosted.detail})` : ''}`
+        ? `Connected. ${backendLabel}${hosted.detail ? ` (${hosted.detail})` : ''}`
         : status === 'offline'
-          ? `Not reachable — ${backendLabel}: ${endpointLabel}${hosted.detail ? ` (${hosted.detail})` : ''}`
+          ? `Not reachable. ${backendLabel}: ${endpointLabel}${hosted.detail ? ` (${hosted.detail})` : ''}`
           : `Checking ${backendLabel}…`
 
   return (

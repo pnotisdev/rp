@@ -33,7 +33,7 @@ export function DayPlannerPanel({ character, world, activeEvent, onOpenActiveEve
       <Modal
         onClose={onClose}
         title="Plan your day"
-        description={`You're partway through ${activeEvent.title} — wrap that up first before planning what's next.`}
+        description={`You're partway through ${activeEvent.title}. Wrap that up first before planning what's next.`}
         size="lg"
       >
         <Button variant="primary" onClick={onOpenActiveEvent}>

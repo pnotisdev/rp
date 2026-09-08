@@ -29,12 +29,12 @@ const POLICIES: { id: ScenePolicy; label: string; hint: string }[] = [
   {
     id: 'director',
     label: 'AI director',
-    hint: 'A quick read of the scene picks whoever would naturally respond — falls back to the primary if it can’t decide.',
+    hint: 'A quick read of the scene picks whoever would naturally respond. Falls back to the primary if it can’t decide.',
   },
   {
     id: 'mention',
     label: '@Mention',
-    hint: 'Write "@Name" in your own message to address them directly — otherwise falls back to the primary.',
+    hint: 'Write "@Name" in your own message to address them directly. Otherwise falls back to the primary.',
   },
 ]
 
@@ -86,7 +86,7 @@ export function ScenePanel({
     <Modal
       onClose={onClose}
       title="Scene"
-      description="Frames where this group scene is happening and who replies next — section 4/12's Scene entity. Location/atmosphere fold into the prompt the same way an active event's own does; turn policy only matters once more than one character is present."
+      description="Frames where this group scene is happening and who replies next. Section 4/12's Scene entity. Location/atmosphere fold into the prompt the same way an active event's own does; turn policy only matters once more than one character is present."
       size="lg"
       scrollable
     >
@@ -102,7 +102,7 @@ export function ScenePanel({
               ))}
             </div>
             <p className="mt-1.5 text-[11px] text-text-muted">
-              Add someone mid-scene, or drop someone who's left — past messages keep the name/art they were sent
+              Add someone mid-scene, or drop someone who's left. Past messages keep the name/art they were sent
               with either way, this only changes who can speak next.
             </p>
           </div>
@@ -132,7 +132,7 @@ export function ScenePanel({
             onChange={setTimeOfDay}
           />
           <p className="mt-1.5 text-[11px] text-text-muted">
-            Overrides the shared world clock's time-of-day for this chat only — useful once the story has drifted past it.
+            Overrides the shared world clock's time-of-day for this chat only. Useful once the story has drifted past it.
             Auto-follows what you narrate ("the next morning", "at lunch"); the weekday still comes from the world clock.
           </p>
         </div>

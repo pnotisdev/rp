@@ -64,7 +64,7 @@ export function ConnectionSettings() {
     <SettingsPage>
       <Section
         title="Chat generation backend"
-        description="Which provider generates replies — the main chat and every background judge/assist call. Leave it on 'KoboldCpp (local)' for a local model and set its URL below; switch it to a hosted provider (OpenRouter has a free tier) to run everything through their API instead."
+        description="Which provider generates replies: the main chat and every background judge/assist call. Leave it on 'KoboldCpp (local)' for a local model and set its URL below; switch it to a hosted provider (OpenRouter has a free tier) to run everything through their API instead."
         surface="bare"
       >
         <SelectField
@@ -86,7 +86,7 @@ export function ConnectionSettings() {
               account: three real turns against OpenRouter's free <code className="font-mono">minimax/minimax-m3:free</code>{' '}
               came back in character with working streaming, relationship scoring, and choice
               suggestions (ROADMAP.md #121). The rest of the list below is each vendor's own
-              documented endpoint, not independently re-checked here — worth a quick sanity check on
+              documented endpoint, not independently re-checked here. Worth a quick sanity check on
               your first real reply with a new one.
             </p>
             <SelectField
@@ -124,7 +124,7 @@ export function ConnectionSettings() {
                   if (e.target.value === '__type__') return setTypeModel(true)
                   setChatBackendConfig({ chatBackendModel: e.target.value })
                 }}
-                hint={`${openAiModels.length} models from /models — pick "Type it in" for one that isn't listed.`}
+                hint={`${openAiModels.length} models from /models. For one that isn't listed, pick "Type it in".`}
               >
                 {!openAiModels.includes(chatBackendModel) && <option value="">Choose a model…</option>}
                 {openAiModels.map((m) => (
@@ -145,7 +145,7 @@ export function ConnectionSettings() {
                     ? 'Checking /models…'
                     : openAiModels && openAiModels.length > 0
                       ? 'Back to the model list once you set a base URL and key.'
-                      : "This provider's /models list isn't reachable — enter the id by hand."
+                      : "This provider's /models list isn't reachable. Enter the id by hand."
                 }
               />
             )}
@@ -172,10 +172,10 @@ export function ConnectionSettings() {
         {chatBackend === 'novelai' && (
           <>
             <p className="mb-2 text-xs text-text-muted">
-              NovelAI's own hosted models — a paid subscription, not something verified live while
+              NovelAI's own hosted models: a paid subscription, not something verified live while
               building this (see ROADMAP.md #123). Built against NovelAI's documented contract,
               cross-checked against SillyTavern's own current source rather than guessed at.
-              Erato isn't offered here — it needs a different tokenizer this app doesn't bundle yet;
+              Erato isn't offered here. It needs a different tokenizer this app doesn't bundle yet;
               Kayra and Clio both work through the local tokenizer for stop sequences.
             </p>
             <SelectField
@@ -198,7 +198,7 @@ export function ConnectionSettings() {
             />
             <HostedConnectionStatus status={hostedStatus.status} detail={hostedStatus.detail} recheck={hostedStatus.recheck} />
             <p className="mt-2 text-xs text-text-muted">
-              Keys are stored only in this browser and sent directly to NovelAI — never through any
+              Keys are stored only in this browser and sent directly to NovelAI, never through any
               other server. The KoboldCpp sampler below supplies temperature/top P/penalties for
               this backend too, since NovelAI's own sampler shape is close enough to reuse directly.
             </p>
@@ -227,7 +227,7 @@ export function ConnectionSettings() {
           {version && <div className="text-text-muted">KoboldCpp {version}</div>}
           {maxContext !== null && (
             <div className="text-text-muted">
-              Max context: {maxContext.toLocaleString()} tokens — used automatically for judge/assist
+              Max context: {maxContext.toLocaleString()} tokens, used automatically for judge/assist
               calls (relationship scoring, choices, objectives, lore suggestions) instead of a fixed
               guess.
             </div>

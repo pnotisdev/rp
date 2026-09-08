@@ -23,7 +23,7 @@ export async function generateWithTimeout(
   } catch (e) {
     if (external?.aborted) throw e instanceof Error ? e : new Error('aborted')
     if (controller.signal.aborted) {
-      throw new Error(`${label} timed out after ${Math.round(ASSIST_TIMEOUT_MS / 1000)}s — the model backend didn't respond in time.`)
+      throw new Error(`${label} timed out after ${Math.round(ASSIST_TIMEOUT_MS / 1000)}s. The model backend didn't respond in time.`)
     }
     throw e
   } finally {

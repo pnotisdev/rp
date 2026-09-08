@@ -123,7 +123,7 @@ export function ChatsPanel({
     setMenuForId(null)
     const ok = await confirmDialog({
       title: `Delete "${chat.title}"?`,
-      body: 'Moves it to the trash — recoverable there for 30 days, or you can delete it for good right away.',
+      body: 'Moves it to the trash. Recoverable there for 30 days, or you can delete it for good right away.',
       confirmLabel: 'Delete chat',
       tone: 'danger',
     })
@@ -253,7 +253,7 @@ export function ChatsPanel({
                   )}
                   {presence && (
                     <span
-                      title={`${presenceLabel(presence.status)}${presence.activity ? ` — ${presence.activity}` : ''}`}
+                      title={`${presenceLabel(presence.status)}${presence.activity ? `. ${presence.activity}` : ''}`}
                       className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-bg-elevated ${
                         presence.status === 'available' ? 'bg-accent' : 'bg-text-muted'
                       }`}

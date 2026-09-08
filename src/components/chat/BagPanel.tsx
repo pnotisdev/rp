@@ -45,7 +45,7 @@ export function BagPanel({
     <Modal
       onClose={onClose}
       title="Bag"
-      description={`Gifts you already own — give one to ${characterName} now, in person. Buy more from the relationship panel.`}
+      description={`Gifts you already own. Give one to ${characterName} now, in person. Buy more from the relationship panel.`}
       size="lg"
       scrollable
     >
@@ -66,7 +66,7 @@ export function BagPanel({
           ))}
           {ownedGifts.length === 0 && (
             <div className="rounded-xl bg-bg-sunken p-4 text-xs text-text-muted">
-              Nothing in your bag yet — buy a gift from the relationship panel first.
+              Nothing in your bag yet. Buy a gift from the relationship panel first.
             </div>
           )}
         </div>
@@ -74,7 +74,7 @@ export function BagPanel({
         {itemCatalog.length > 0 && (
           <>
             <p className="mb-3 mt-6 text-sm font-medium text-text">
-              Items <span className="font-normal text-text-muted">— used on the spot for their effect, not given in a scene.</span>
+              Items <span className="font-normal text-text-muted">used on the spot for their effect, not given in a scene.</span>
             </p>
             <div className="space-y-2">
               {ownedItems.map((item) => (
@@ -92,7 +92,7 @@ export function BagPanel({
               ))}
               {ownedItems.length === 0 && (
                 <div className="rounded-xl bg-bg-sunken p-4 text-xs text-text-muted">
-                  No items owned yet — buy one from the relationship panel first.
+                  No items owned yet. Buy one from the relationship panel first.
                 </div>
               )}
             </div>

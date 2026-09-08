@@ -292,7 +292,7 @@ export function VNStage({
     : showUserAsCurrent
       ? lastUserMsg!.text
       : lastCharMsg?.failed
-        ? '⚠ Generation failed — try regenerating (⟲) from the log.'
+        ? '⚠ Generation failed. Try regenerating (⟲) from the log.'
         : lastCharMsg?.text || (messages.length === 0 ? 'Say hello to begin the scene…' : '')
 
   const activeSwipe = lastCharMsg?.activeSwipe ?? 0
@@ -693,7 +693,7 @@ export function VNStage({
           {onToggleAutoAdvance && (
             <button
               onClick={onToggleAutoAdvance}
-              title={autoAdvance ? 'Auto-advance: on — click to stop' : 'Auto-advance the story after each reply'}
+              title={autoAdvance ? 'Auto-advance: on. Click to stop' : 'Auto-advance the story after each reply'}
               aria-label={autoAdvance ? 'Auto-advance: on' : 'Auto-advance: off'}
               aria-pressed={autoAdvance}
               className={`relative flex h-7 w-7 items-center justify-center rounded-full transition-colors hover:bg-white/15 ${
@@ -717,7 +717,7 @@ export function VNStage({
           </button>
           <button
             onClick={() => setHideUI(true)}
-            title="Hide UI — click the scene to bring it back"
+            title="Hide UI. Click the scene to bring it back"
             aria-label="Hide UI"
             className="flex h-7 w-7 items-center justify-center rounded-full text-white/85 transition-colors hover:bg-white/15 hover:text-white"
           >
@@ -918,7 +918,7 @@ export function VNStage({
                   </button>
                   <button
                     onClick={() => setAutoVoice((v) => !v)}
-                    title={autoVoice ? 'Auto-voice: on — reads each new reply aloud' : 'Auto-voice: read each new reply aloud automatically'}
+                    title={autoVoice ? 'Auto-voice: on. Reads each new reply aloud' : 'Auto-voice: read each new reply aloud automatically'}
                     aria-label={autoVoice ? 'Auto-voice: on' : 'Auto-voice: off'}
                     aria-pressed={autoVoice}
                     className={`relative flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-bold transition-colors hover:bg-white/10 ${
@@ -967,7 +967,7 @@ export function VNStage({
                 // The failure itself, as a small caption rather than the main line — the player's
                 // actual words stay the primary content; this just explains the silence.
                 <p className="mx-auto mt-2 max-w-3xl text-[12px] text-danger/90">
-                  ⚠ {activeMember?.name ?? character?.card.name ?? "Their"}'s reply failed — try regenerating (⟲) from the log.
+                  ⚠ {activeMember?.name ?? character?.card.name ?? "Their"}'s reply failed. Try regenerating (⟲) from the log.
                 </p>
               )}
             </div>

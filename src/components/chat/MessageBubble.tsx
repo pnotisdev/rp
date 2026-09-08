@@ -131,7 +131,7 @@ export const MessageBubble = memo(function MessageBubble({
       <button
         onClick={() => setSteering((v) => !v)}
         className={`flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-bg-sunken ${steering ? 'bg-bg-sunken text-accent' : 'hover:text-text'}`}
-        title="Steer — correct this reply and regenerate"
+        title="Steer. Correct this reply and regenerate"
         aria-label="Steer this reply"
       >
         <Compass size={13} strokeWidth={2} />
@@ -156,7 +156,7 @@ export const MessageBubble = memo(function MessageBubble({
               className="w-full resize-none rounded-lg bg-bg-sunken p-2 text-xs text-text outline-none ring-1 ring-accent/40"
             />
             <div className="mt-1.5 flex items-center justify-between gap-2">
-              <span className="text-[10px] text-text-muted">Regenerates with this correction — nothing is saved.</span>
+              <span className="text-[10px] text-text-muted">Regenerates with this correction. Nothing is saved.</span>
               <div className="flex shrink-0 items-center gap-1">
                 <button
                   onClick={closeSteer}
@@ -208,7 +208,7 @@ export const MessageBubble = memo(function MessageBubble({
       {showFailedIndicator ? (
         <span className="flex items-center gap-1.5 text-danger">
           <TriangleAlert size={14} strokeWidth={2} className="shrink-0" />
-          Generation failed — try regenerating below.
+          Generation failed. Try regenerating below.
         </span>
       ) : (
         renderMessageText(displayText, regexScripts, sfx)
@@ -282,7 +282,7 @@ export const MessageBubble = memo(function MessageBubble({
             }}
             className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-bg-sunken hover:text-danger"
             title="Rewind to here (delete this and everything after)"
-            aria-label="Rewind to here — delete this message and everything after it"
+            aria-label="Rewind to here. Delete this message and everything after it"
           >
             <History size={13} strokeWidth={2} />
           </button>
@@ -385,7 +385,7 @@ export const MessageBubble = memo(function MessageBubble({
               {showFailedIndicator ? (
                 <span className="inline-flex items-center gap-1.5 text-danger">
                   <TriangleAlert size={14} strokeWidth={2} className="shrink-0" />
-                  Generation failed — try regenerating below.
+                  Generation failed. Try regenerating below.
                 </span>
               ) : (
                 renderMessageText(displayText, regexScripts, sfx)

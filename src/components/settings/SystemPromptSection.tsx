@@ -69,9 +69,9 @@ export function SystemPromptSection() {
       if (parsed?.kind === 'sysprompt') {
         setSystemPrompt(parsed.prompt)
         setPostHistoryInstructions(parsed.postHistory)
-        toastSuccess(`Loaded "${parsed.name}" — edit or save it as a preset below`)
+        toastSuccess(`Loaded "${parsed.name}". Edit or save it as a preset below`)
       } else if (parsed?.kind === 'instruct') {
-        toastInfo('That is an instruct preset — import it in the Instruct template section instead.')
+        toastInfo('That is an instruct preset. Import it in the Instruct template section instead.')
       } else {
         toastError(parsed?.kind === 'unsupported' ? `Can't import ${parsed.detail}` : 'Not a SillyTavern system-prompt preset')
       }

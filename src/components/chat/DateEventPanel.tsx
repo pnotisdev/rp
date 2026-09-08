@@ -42,8 +42,8 @@ export function DateEventPanel({ currentEvent, energyRemaining, onClose, onSugge
         title={liveIsHangout ? 'Live hangout in progress' : 'Live date in progress'}
         description={
           liveIsHangout
-            ? "Relationship movement is scored once, gently, when the hangout ends — not turn by turn while it's happening. This is low-stakes: no hidden agenda, no risk of it ending badly."
-            : "Relationship movement is scored once, honestly, when the date ends — not turn by turn while it's happening. A flat or awkward date won't quietly move things forward."
+            ? "Relationship movement is scored once, gently, when the hangout ends. Not turn by turn while it's happening. This is low-stakes: no hidden agenda, no risk of it ending badly."
+            : "Relationship movement is scored once, honestly, when the date ends. Not turn by turn while it's happening. A flat or awkward date won't quietly move things forward."
         }
         size="lg"
       >
@@ -72,7 +72,7 @@ export function DateEventPanel({ currentEvent, energyRemaining, onClose, onSugge
       onClose={onClose}
       title="Date / Event"
       description={
-        'Generate a scene event card and start it as the active objective. This also biases VN backgrounds to the event location. Starting a "date" or "hangout" card begins a live, end-of-scene-scored scene — a hangout is the lower-stakes version, with no hidden agenda and no risk of it going badly.'
+        'Generate a scene event card and start it as the active objective. This also biases VN backgrounds to the event location. Starting a "date" or "hangout" card begins a live, end-of-scene-scored scene. A hangout is the lower-stakes version, with no hidden agenda and no risk of it going badly.'
       }
       size="lg"
     >
@@ -118,7 +118,7 @@ export function DateEventPanel({ currentEvent, energyRemaining, onClose, onSugge
         {spendsEnergy && energyRemaining !== undefined && (
           <p className="mt-2 text-[11px] text-text-muted">
             {outOfEnergy
-              ? `No energy left today — get some rest before starting another ${isHangout ? 'hangout' : 'date'}.`
+              ? `No energy left today. Get some rest before starting another ${isHangout ? 'hangout' : 'date'}.`
               : `Uses 1 of your ${energyRemaining} remaining actions today.`}
           </p>
         )}

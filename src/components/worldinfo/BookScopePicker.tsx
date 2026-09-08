@@ -46,7 +46,7 @@ export function BookScopePicker({
       </div>
       <p className="mb-3 text-[11px] text-text-muted">
         {scoped
-          ? 'Only chats whose character — or that character’s world — is selected below.'
+          ? 'Only chats whose character (or that character’s world) is selected below.'
           : 'Every chat. Select a character or world below to limit it.'}
       </p>
 

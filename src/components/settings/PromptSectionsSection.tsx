@@ -10,7 +10,7 @@ const SECTION_DESCRIPTIONS: Record<PromptSectionId, string> = {
   description: 'The character\'s description, personality, scenario, and any authored profile fields (likes, goals, schedule…).',
   participants: 'The roster line for other characters present in a group chat.',
   persona: 'A short "About {{user}}" line built from the active persona\'s description.',
-  examples: "The character's example dialogue (mes_example) — useful for voice, costly in tokens.",
+  examples: "The character's example dialogue (mes_example). Useful for voice, costly in tokens.",
 }
 
 const SECTION_ORDER: PromptSectionId[] = ['system', 'description', 'world', 'persona', 'participants', 'summary', 'examples']
@@ -29,7 +29,7 @@ export function PromptSectionsSection() {
   return (
     <Section
       title="Prompt sections"
-      description="What goes into every generation, beyond the conversation itself — turn off anything you don't need to save tokens or simplify the prompt."
+      description="What goes into every generation, beyond the conversation itself. Turn off anything you don't need to save tokens or simplify the prompt."
       surface="bare"
     >
       <div className="divide-y divide-border rounded-xl bg-bg-elevated px-5">

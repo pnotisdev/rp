@@ -48,7 +48,7 @@ export function CalendarPanel({ world, character, participantCharacters, chat, o
     <Modal
       onClose={onClose}
       title="Key dates"
-      description={`Day ${info.day} — ${info.weekday}, ${info.season} (${info.dayOfSeason}/28)`}
+      description={`Day ${info.day}. ${info.weekday}, ${info.season} (${info.dayOfSeason}/28)`}
       size="lg"
       scrollable
     >

@@ -13,7 +13,7 @@ export function TemplateGallery({
     <Modal
       onClose={onClose}
       title="Start from a template"
-      description="A finished card to try right away, or tweak into something new — nothing's locked in."
+      description="A finished card to try right away, or tweak into something new. Nothing's locked in."
       size="lg"
     >
       <div className="space-y-3">

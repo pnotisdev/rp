@@ -56,7 +56,7 @@ export function RegexScriptsSection() {
                   label="Find (regex)"
                   value={script.find}
                   onChange={(e) => update(script.id, { find: e.target.value })}
-                  placeholder="\s+—\s+"
+                  placeholder="\s+ \s+"
                   className={valid ? '' : 'ring-1 ring-danger/50'}
                 />
                 <TextField
@@ -72,11 +72,11 @@ export function RegexScriptsSection() {
                   placeholder="i"
                 />
               </div>
-              {!valid && <p className="text-[11px] text-danger">That pattern doesn't compile — it's being skipped.</p>}
+              {!valid && <p className="text-[11px] text-danger">That pattern doesn't compile. It's being skipped.</p>}
               {risky && (
                 <p className="text-[11px] text-warning">
                   This has a nested-quantifier shape (a repeated group inside another repetition) that can run
-                  catastrophically slowly on the wrong input — worth double-checking, though plenty of legitimate
+                  catastrophically slowly on the wrong input. Worth double-checking, though plenty of legitimate
                   patterns look like this too.
                 </p>
               )}

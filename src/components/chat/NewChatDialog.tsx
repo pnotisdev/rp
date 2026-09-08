@@ -149,7 +149,7 @@ export function NewChatDialog({
             <p className="mt-1.5 text-xs text-text-muted">
               {participantIds.length > 0
                 ? "They'll be able to speak, but relationship tracking/gifts/gallery stay with the character above."
-                : 'A group scene — pick who else can speak besides the character above.'}
+                : 'A group scene. Pick who else can speak besides the character above.'}
             </p>
           </div>
         )}
@@ -190,7 +190,7 @@ export function NewChatDialog({
             />
             <p className="mt-1.5 text-[11px] text-text-muted">
               {personaName.trim()
-                ? 'Saved as a reusable persona — the model addresses you by this.'
+                ? 'Saved as a reusable persona. The model addresses you by this.'
                 : "Leave blank and you're just “You”. Even a name gives the model something to work with."}
             </p>
           </div>
@@ -220,7 +220,7 @@ export function NewChatDialog({
               onChange={(e) => setStarterId(e.target.value)}
               className="w-full rounded-xl bg-bg-sunken px-3 py-2.5 text-base text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40 sm:py-2 sm:text-sm"
             >
-              <option value="">Blank slate — near strangers, 0 affection</option>
+              <option value="">Blank slate (near strangers, 0 affection)</option>
               {starters.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.label} ({s.startingAffection} affection)

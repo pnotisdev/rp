@@ -132,11 +132,11 @@ export function SamplingControls() {
             Not everything below applies to every kind of story. <strong className="text-text">Relationship
             tracking</strong>, its <strong className="text-text">Difficulty</strong>/<strong className="text-text">
             Intimacy detail</strong> sub-settings, and <strong className="text-text">Suggest choices</strong> are the
-            dating-sim/VN layer — if you're doing plain roleplay, an adventure, or lore-only chat, it's completely
+            dating-sim/VN layer. If you're doing plain roleplay, an adventure, or lore-only chat, it's completely
             fine to turn all three off. <strong className="text-text">Auto-detect completed tasks</strong> only ever
             does anything while an Objective is set, in any kind of chat. <strong className="text-text">Visual Novel
-            mode</strong> (Appearance tab) is a presentation choice, not a mechanic — independent of all of this, on
-            or off either way. A world's own template (Freeform RP, Visual Novel, Dating Sim, Slice of Life — set on
+            mode</strong> (Appearance tab) is a presentation choice, not a mechanic, independent of all of this, on
+            or off either way. A world's own template (Freeform RP, Visual Novel, Dating Sim, Slice of Life, set on
             its Overview tab) already presets sensible per-chat defaults for the dating-sim toggles automatically;
             what you pick here is just the global fallback for a chat that doesn't override it.
           </>
@@ -145,7 +145,7 @@ export function SamplingControls() {
 
       <Section
         title="Background AI assists"
-        description="Four independent toggles below (relationship tracking, choices, task detection, summarization) each fire their own model call after a reply — useful signal, but a real cost on a local single-GPU server, where they queue with each other and ahead of your next message. These two are a shortcut to set all four at once; each stays individually adjustable in its own section below either way."
+        description="Four independent toggles below (relationship tracking, choices, task detection, summarization) each fire their own model call after a reply: useful signal, but a real cost on a local single-GPU server, where they queue with each other and ahead of your next message. These two are a shortcut to set all four at once; each stays individually adjustable in its own section below either way."
       >
         <div className="flex gap-2">
           <Chip on={allAssistsOn} onClick={() => setAllAssists(true)}>
@@ -162,7 +162,7 @@ export function SamplingControls() {
           checked={contextLengthAuto}
           onChange={setContextLengthAuto}
           label="Match the model's context automatically"
-          description="Tracks the connected model's real limit — KoboldCpp reports it directly, some hosted providers list it in /models. Turn off to pin your own value."
+          description="Tracks the connected model's real limit. KoboldCpp reports it directly, some hosted providers list it in /models. Turn off to pin your own value."
         />
         <NumberField
           label="Max context length"
@@ -177,7 +177,7 @@ export function SamplingControls() {
           }}
           hint={
             contextLengthAuto
-              ? `Auto — currently ${sampler.max_context_length.toLocaleString()} tokens. Editing this switches to manual.`
+              ? `Auto, currently ${sampler.max_context_length.toLocaleString()} tokens. Editing this switches to manual.`
               : 'No fixed ceiling; set whatever your model and hardware allow.'
           }
         />
@@ -242,19 +242,19 @@ export function SamplingControls() {
           checked={autoDetectTasks}
           onChange={setAutoDetectTasks}
           label="Auto-detect completed tasks"
-          description="One model call after a reply, only while an objective is active — conservative, so it only ticks things off, never invents progress"
+          description="One model call after a reply, only while an objective is active, and conservative: it only ticks things off, never invents progress"
         />
       </Section>
 
       <Section
         title="Relationship tracking"
-        description="Scores affection and six relationship dimensions after each reply, gating gift/sprite/background/gallery unlocks — turn off for a chat you don't want dating-sim mechanics in."
+        description="Scores affection and six relationship dimensions after each reply, gating gift/sprite/background/gallery unlocks. Turn off for a chat you don't want dating-sim mechanics in."
       >
         <Toggle
           checked={autoTrackRelationship}
           onChange={setAutoTrackRelationship}
           label="Auto-track relationship"
-          description="A model call after each reply. It won't hold up the reply you just got, but on a local single-GPU server it queues with the other post-reply assists ahead of your next message — the chat shows a strip while it runs."
+          description="A model call after each reply. It won't hold up the reply you just got, but on a local single-GPU server it queues with the other post-reply assists ahead of your next message. The chat shows a strip while it runs."
         />
         <div className="pt-3">
           <div className="mb-1.5 text-sm text-text">Difficulty</div>
@@ -272,7 +272,7 @@ export function SamplingControls() {
             ))}
           </div>
           <p className="mt-1.5 text-xs text-text-muted">
-            How far affection and relationship stats swing on any given moment or date — never what
+            How far affection and relationship stats swing on any given moment or date, not what
             a character says or how a scene plays out. Gentle softens the swings, harsh sharpens them.
           </p>
         </div>
@@ -307,7 +307,7 @@ export function SamplingControls() {
             ))}
           </div>
           <p className="mt-1.5 text-xs text-text-muted">
-            How explicit intimate scenes get written once a scene has actually earned one — separate
+            How explicit intimate scenes get written once a scene has actually earned one, separate
             from the pacing above, which only governs how fast that point is reached. Default sends
             no instruction at all (whatever the connected model already does on its own); the other
             three are your own explicit choice, in either direction.
@@ -317,13 +317,13 @@ export function SamplingControls() {
 
       <Section
         title="Roleplay choices"
-        description="A few suggested next lines/actions appear above the composer after each reply — pick one to steer the scene forward, or ignore them and write your own."
+        description="A few suggested next lines/actions appear above the composer after each reply. Pick one to steer the scene forward, or ignore them and write your own."
       >
         <Toggle
           checked={autoSuggestChoices}
           onChange={setAutoSuggestChoices}
           label="Suggest choices after each reply"
-          description="One model call after each reply. Same as relationship tracking, it shares the GPU with your next message — turn it off for pure freeform writing."
+          description="One model call after each reply. Same as relationship tracking, it shares the GPU with your next message. Turn it off for pure freeform writing."
         />
       </Section>
 

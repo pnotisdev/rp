@@ -4,7 +4,7 @@ const isMac = typeof navigator !== 'undefined' && navigator.platform.toLowerCase
 const mod = isMac ? '⌘' : 'Ctrl'
 
 const SHORTCUTS: { keys: string; description: string }[] = [
-  { keys: `${mod} K`, description: 'Search everywhere — jump to a chat, character, world, or persona' },
+  { keys: `${mod} K`, description: 'Search everywhere: jump to a chat, character, world, or persona' },
   { keys: '← →', description: "Swipe to the previous/next reply, when the last message is the character's" },
   { keys: 'Esc', description: 'Close the open panel or dialog' },
   { keys: '?', description: 'Show this shortcuts sheet' },

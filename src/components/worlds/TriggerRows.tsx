@@ -232,7 +232,7 @@ export function TriggerActionRows({
             <input
               value={a.topic}
               onChange={(e) => set(i, { kind: 'social_reaction', topic: e.target.value })}
-              placeholder="What they heard about, e.g. the engagement — picks one of the character's own authored connections to react"
+              placeholder="What they heard about, e.g. the engagement. Picks one of the character's own authored connections to react"
               aria-label="Topic a connection reacts to"
               className="min-w-0 flex-1 rounded-md bg-bg px-2 py-1 text-text outline-none"
             />
@@ -241,7 +241,7 @@ export function TriggerActionRows({
               <input
                 value={a.title}
                 onChange={(e) => set(i, { ...a, title: e.target.value })}
-                placeholder="Scene title — e.g. She asks you to walk her home"
+                placeholder="Scene title (e.g. She asks you to walk her home)"
                 aria-label="Scene title"
                 className="w-full rounded-md bg-bg px-2 py-1 text-text outline-none"
               />
@@ -255,7 +255,7 @@ export function TriggerActionRows({
               <input
                 value={a.objectiveTitle}
                 onChange={(e) => set(i, { ...a, objectiveTitle: e.target.value })}
-                placeholder="Objective shown to the player — e.g. Walk her home"
+                placeholder="Objective shown to the player (e.g. Walk her home)"
                 aria-label="Scene objective"
                 className="w-full rounded-md bg-bg px-2 py-1 text-text outline-none"
               />
@@ -267,7 +267,7 @@ export function TriggerActionRows({
                 className="w-full rounded-md bg-bg px-2 py-1 text-text outline-none"
               />
               <p className="text-text-muted">
-                Fires as a free, no-energy-cost live scene — no hidden agenda or walkout risk, same as any other hangout.
+                Fires as a free, no-energy-cost live scene. No hidden agenda or walkout risk, same as any other hangout.
               </p>
             </div>
           ) : (

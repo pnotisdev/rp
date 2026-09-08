@@ -16,13 +16,13 @@ export async function transcribeAudio(koboldBaseUrl: string, audio: Blob): Promi
   if (!res.ok) {
     throw new Error(
       serverMessage ??
-        `Transcription failed (${res.status}) — make sure KoboldCpp was launched with a Whisper model loaded.`,
+        `Transcription failed (${res.status}). Make sure KoboldCpp was launched with a Whisper model loaded.`,
     )
   }
   const text = data?.text
   if (typeof text !== 'string') {
     throw new Error(
-      serverMessage ?? 'Transcription returned no text — make sure KoboldCpp was launched with a Whisper model loaded.',
+      serverMessage ?? 'Transcription returned no text. Make sure KoboldCpp was launched with a Whisper model loaded.',
     )
   }
   return text.trim()

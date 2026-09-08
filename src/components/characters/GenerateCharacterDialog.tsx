@@ -203,9 +203,9 @@ export function GenerateCharacterDialog({
       setFailed(true)
       const hint =
         mode === 'portrait'
-          ? "the model's output wasn't valid JSON, or it isn't a vision-capable model — a portrait draft needs one loaded (mmproj)."
+          ? "the model's output wasn't valid JSON, or it isn't a vision-capable model. A portrait draft needs one loaded (mmproj)."
           : "the model's output wasn't valid JSON. Try again, or try a lower-temperature/more instruction-following model."
-      toastError(`${errorMessage(e)} — ${hint}`)
+      toastError(`${errorMessage(e)}. ${hint}`)
     } finally {
       abortRef.current = null
       setBusy(false)
@@ -240,7 +240,7 @@ export function GenerateCharacterDialog({
       </div>
       <p className="mb-3 text-[11px] text-text-muted">
         {scope === 'full'
-          ? 'Drafts the card, then life & background, gift and relationship starters, wardrobe, and a character lorebook — one step at a time.'
+          ? 'Drafts the card, then life & background, gift and relationship starters, wardrobe, and a character lorebook. One step at a time.'
           : 'Drafts just the core card: identity, personality, scenario, first message.'}
         {styleGuidance.trim() && ' Your writing style from Settings is applied.'}
       </p>
@@ -261,9 +261,9 @@ export function GenerateCharacterDialog({
         <div className="mb-3 space-y-2.5">
           <div className="flex items-start justify-between gap-2">
             <p className="text-[11px] text-text-muted">
-              Pick a trait per row — click again to clear one. Sits between a fixed template and a blank brief:
+              Pick a trait per row. Click again to clear one. Sits between a fixed template and a blank brief:
               independent pieces the model assembles into a character. Every option below is freshly generated,
-              never a fixed list — ask for a new batch anytime.
+              never a fixed list. Ask for a new batch anytime.
             </p>
             <div className="flex shrink-0 gap-1.5">
               <Button variant="ghost" onClick={loadTraitPool} disabled={busy || traitPoolLoading} className="gap-1">
@@ -341,7 +341,7 @@ export function GenerateCharacterDialog({
             />
           </label>
           <p className="mt-1.5 text-[11px] text-text-muted">
-            Needs a vision-capable model loaded (mmproj) — the same requirement Settings → Appearance's
+            Needs a vision-capable model loaded (mmproj). The same requirement Settings → Appearance's
             "Vision scene detection" already has.
           </p>
         </div>
@@ -380,7 +380,7 @@ export function GenerateCharacterDialog({
                 <span className="inline-block w-4 tabular-nums">{STATUS_GLYPH[st]}</span>
                 {STAGE_LABELS[s]}
                 {st === 'start' && ' …'}
-                {st === 'failed' && ' — skipped'}
+                {st === 'failed' && ' (skipped)'}
               </li>
             )
           })}

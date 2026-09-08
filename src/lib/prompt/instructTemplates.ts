@@ -77,7 +77,7 @@ export const BUILTIN_INSTRUCT_TEMPLATES: InstructTemplate[] = [
   },
   {
     id: 'mistral',
-    name: 'Mistral v1–v3',
+    name: 'Mistral v1-v3',
     systemPrefix: '[INST] ',
     systemSuffix: '\n\n',
     userPrefix: '[INST] {name}: ',

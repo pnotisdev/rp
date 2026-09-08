@@ -36,7 +36,7 @@ export function ImageGenSettings() {
     <SettingsPage>
       <Section
         title="Image generation"
-        description="Generates portraits, sprites, gallery CGs, and backgrounds — none of these four have been run against a real server yet (see ROADMAP.md section 11); each is built to that project's own documented API."
+        description="Generates portraits, sprites, gallery CGs, and backgrounds. None of these four have been run against a real server yet (see ROADMAP.md section 11); each is built to that project's own documented API."
         surface="bare"
       >
         <SelectField
@@ -93,7 +93,7 @@ export function ImageGenSettings() {
         {imageBackend === 'comfyui' && (
           <p className="mb-2 text-xs text-text-muted">
             Uses ComfyUI's own default txt2img workflow (checkpoint → positive/negative prompt →
-            sampler → save) with your prompt and settings substituted in — a heavily customized
+            sampler → save) with your prompt and settings substituted in. A heavily customized
             workflow of your own isn't supported yet.
           </p>
         )}
@@ -101,7 +101,7 @@ export function ImageGenSettings() {
         {imageBackend === 'swarmui' && (
           <p className="mb-2 text-xs text-text-muted">
             No login needed for a default local install. If yours requires an account, this isn't
-            wired up yet — sessions are requested anonymously.
+            wired up yet. Sessions are requested anonymously.
           </p>
         )}
 
@@ -128,14 +128,14 @@ export function ImageGenSettings() {
             type="password"
             value={imageBackendUsername}
             onChange={(e) => setImageBackendConfig({ imageBackendUsername: e.target.value })}
-            hint="Same NovelAI account as the chat backend, if you use both — not shared automatically since either can be configured alone."
+            hint="Same NovelAI account as the chat backend, if you use both. Not shared automatically since either can be configured alone."
           />
         )}
 
         <p className="mt-2 text-xs text-text-muted">
           {imageBackend === 'novelai-image'
-            ? 'Keys are stored only in this browser and sent directly to NovelAI — never through any other server.'
-            : 'Requests go straight from this browser to the server URL above — never through any other server.'}
+            ? 'Keys are stored only in this browser and sent directly to NovelAI. Never through any other server.'
+            : 'Requests go straight from this browser to the server URL above. Never through any other server.'}
         </p>
       </Section>
     </SettingsPage>

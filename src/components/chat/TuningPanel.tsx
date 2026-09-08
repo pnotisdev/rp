@@ -265,7 +265,7 @@ export function TuningPanel({
               </div>
             </div>
             <p className="mt-1.5 text-[11px] text-text-muted">
-              Applies to every chat. Separate from the KoboldCpp sampler above — switch backends in
+              Applies to every chat. Separate from the KoboldCpp sampler above. Switch backends in
               Settings → Connection.
             </p>
           </div>
@@ -300,7 +300,7 @@ export function TuningPanel({
               )}
             </select>
             <p className="mt-1.5 text-[11px] text-text-muted">
-              How turns are formatted for the model — match this to your model's training format.
+              How turns are formatted for the model. Match this to your model's training format.
             </p>
           </div>
         )}
@@ -327,7 +327,7 @@ export function TuningPanel({
             value={postHistoryInstructions}
             onChange={(e) => setPostHistoryInstructions(e.target.value)}
             placeholder="e.g. Keep replies to two or three paragraphs."
-            hint="Injected right before the model's turn — a reliable slot for a rule it keeps forgetting."
+            hint="Injected right before the model's turn. A reliable slot for a rule it keeps forgetting."
           />
         </div>
       </div>

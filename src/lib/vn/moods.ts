@@ -13,7 +13,7 @@ export interface SceneMood {
 
 export const SCENE_MOODS: SceneMood[] = [
   { id: 'tender', label: 'Tender', hint: 'Closeness, vulnerability, a quiet confession' },
-  { id: 'romantic', label: 'Romantic', hint: 'The charged, swaying kind — a first kiss, a slow dance' },
+  { id: 'romantic', label: 'Romantic', hint: 'The charged, swaying kind. A first kiss, a slow dance' },
   { id: 'cheerful', label: 'Cheerful', hint: 'Light, easy, everything is going well' },
   { id: 'playful', label: 'Playful', hint: 'Teasing, banter, a game between the two of you' },
   { id: 'lively', label: 'Lively', hint: 'A festival, a crowd, somewhere loud and moving' },

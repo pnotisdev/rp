@@ -200,7 +200,7 @@ export function ThemeEditor() {
     <SettingsPage>
       <Section
         title="Presets"
-        description="A starting palette — every swatch below stays editable afterward. Pick Default to undo one, or save the colours you've tuned as a preset of your own."
+        description="A starting palette. Every swatch below stays editable afterward. Pick Default to undo one, or save the colours you've tuned as a preset of your own."
         surface="bare"
       >
         <div className="flex flex-wrap items-center gap-3">
@@ -355,7 +355,7 @@ export function ThemeEditor() {
         />
         <Slider
           label="VN text speed"
-          description="How fast a reply types out in Visual Novel mode's dialogue box. Click the scene to skip ahead — always instant with Reduced motion on, regardless of this."
+          description="How fast a reply types out in Visual Novel mode's dialogue box. Click the scene to skip ahead. Always instant with Reduced motion on, regardless of this."
           min={0}
           max={48}
           step={2}
@@ -388,7 +388,7 @@ export function ThemeEditor() {
             <span className="text-sm text-text">Visual Novel mode</span>
             <span className="text-xs text-text-muted">
               Full-bleed scene art with a docked dialogue box, in place of the ordinary scrolling chat
-              log. A presentation choice only — independent of the dating-sim mechanics in Generation
+              log. A presentation choice only. Independent of the dating-sim mechanics in Generation
               settings, on or off either way. "Auto" turns it on only once a character has expression
               sprites and the world has scene backgrounds, so it's never a blank void.
             </span>
@@ -409,7 +409,7 @@ export function ThemeEditor() {
             <span className="text-sm text-text">VN choice style</span>
             <span className="text-xs text-text-muted">
               "Docked" keeps AI-suggested choices as pills in the dialogue box. "Centered" surfaces
-              them as a full-screen, scene-dimmed choice screen instead — a real decision moment.
+              them as a full-screen, scene-dimmed choice screen instead. A real decision moment.
               Quick replies (Look around, Let time pass, …) always stay docked either way.
             </span>
           </span>
@@ -427,13 +427,13 @@ export function ThemeEditor() {
           checked={visionSceneDetection}
           onChange={() => toggleFlag('visionSceneDetection')}
           label="Vision scene detection"
-          description="After each reply, a vision-capable model looks at the character's actual expression sprites (and any photo you attached) to correct the expression, background and mood. Needs a loaded mmproj and adds a slow image pass per turn — leave off if your model has no vision support."
+          description="After each reply, a vision-capable model looks at the character's actual expression sprites (and any photo you attached) to correct the expression, background and mood. Needs a loaded mmproj and adds a slow image pass per turn. Leave off if your model has no vision support."
         />
       </Section>
 
       <Section
         title="Sound-effect bursts"
-        description="Styles a standalone comic sound word in a message — “BOOM!”, “knock knock”, “KA-CHUNK” — as a manga-style burst. Never touches sound words inside spoken dialogue."
+        description="Styles a standalone comic sound word in a message (“BOOM!”, “knock knock”, “KA-CHUNK”) as a manga-style burst. Never touches sound words inside spoken dialogue."
         surface="bare"
       >
         <Toggle

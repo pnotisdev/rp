@@ -371,7 +371,7 @@ export function RelationshipPanel({
             ]
               .filter(Boolean)
               .join(' · ')}
-            {' — '}a passing read, separate from the bond above.
+            {'. '}A passing read, separate from the bond above.
           </p>
         )}
         {isIntimacySceneActive(track.intimacyScene, charReplyCount) && (
@@ -382,7 +382,7 @@ export function RelationshipPanel({
         {afterglowRemaining !== null && (
           // Says what's true, not what to do — the window scores what the player does with it.
           <p className="mt-2 border-t border-bg-elevated pt-2 text-xs italic text-romance">
-            Still in the hours after being intimate — {afterglowRemaining} more{' '}
+            Still in the hours after being intimate. {afterglowRemaining} more{' '}
             {afterglowRemaining === 1 ? 'reply' : 'replies'} before it settles into how it felt.
           </p>
         )}
@@ -390,7 +390,7 @@ export function RelationshipPanel({
           // Same restraint as the afterglow line above: says what's true, not what to do about it.
           <p className="mt-2 border-t border-bg-elevated pt-2 text-xs italic text-text-muted">
             Still a little guarded since {track.recentRebuff!.kind === 'commitment' ? 'the last ask' : 'last time'} was put off
-            {track.recentRebuff!.severity === 'backfire' ? ' — that one genuinely stung' : ''}.
+            {track.recentRebuff!.severity === 'backfire' ? '. That one genuinely stung' : ''}.
           </p>
         )}
       </div>
@@ -399,7 +399,7 @@ export function RelationshipPanel({
         <div className="mb-4 rounded-xl border border-danger/40 bg-danger/10 p-4">
           <div className="text-sm font-semibold text-danger">On the rocks</div>
           <p className="mt-1 text-xs text-text-muted">
-            {track.relationshipWarning.reason.charAt(0).toUpperCase() + track.relationshipWarning.reason.slice(1)} — if this
+            {track.relationshipWarning.reason.charAt(0).toUpperCase() + track.relationshipWarning.reason.slice(1)} if this
             isn't resolved soon, the relationship will break on its own.
           </p>
         </div>
@@ -430,7 +430,7 @@ export function RelationshipPanel({
               <div className="text-sm capitalize text-text">{formatCommitmentStatus(commitmentStatus)}</div>
               {track.breakupCount ? (
                 <div className="mt-0.5 text-[11px] text-text-muted">
-                  Broken up before ({track.breakupCount}×) — trust, comfort, and chemistry still carry that scar.
+                  Broken up before ({track.breakupCount}×). Trust, comfort, and chemistry still carry that scar.
                 </div>
               ) : null}
             </div>
@@ -449,7 +449,7 @@ export function RelationshipPanel({
                     {/* After a few deflects, point at whichever tracked dimension is lagging behind. */}
                     {nextTierAskAttempts >= 3 && (
                       <p className="max-w-[16rem] text-right text-[11px] text-text-muted">
-                        Deflected {nextTierAskAttempts}× so far — {viewingCharacter?.card.name ?? 'their'}{' '}
+                        Deflected {nextTierAskAttempts}× so far. {viewingCharacter?.card.name ?? 'their'}{' '}
                         {DIMENSION_LABELS[lowestWarmthDimension(stats)].toLowerCase()} has been trailing the rest; worth warming that up before asking again.
                       </p>
                     )}
@@ -527,7 +527,7 @@ export function RelationshipPanel({
                                 key={i.id}
                                 onClick={() => handleUseIntimacyOption(i)}
                                 disabled={!!pendingActionId}
-                                title={`${i.label} — the model writes your move into it, adapted to the scene, for you to review`}
+                                title={`${i.label}. The model writes your move into it, adapted to the scene, for you to review`}
                                 className="rounded-lg bg-romance/15 px-2 py-1 text-xs text-romance transition-colors hover:bg-romance/25 disabled:opacity-40"
                               >
                                 {pendingActionId === i.id ? 'Writing…' : i.label}
@@ -565,7 +565,7 @@ export function RelationshipPanel({
           {(canTakeFirstTime || track.firstIntimateSceneAt) && (
             <Section title="Milestone" surface="sunken">
               {track.firstIntimateSceneAt ? (
-                <p className="text-xs text-text-muted">Already happened — their first time together.</p>
+                <p className="text-xs text-text-muted">Already happened. Their first time together.</p>
               ) : (
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-xs text-text-muted">Ready to take things all the way, for the first time.</p>
@@ -585,7 +585,7 @@ export function RelationshipPanel({
                 <div key={g.id}>
                   Gallery: {g.title}
                   {g.missingAffection > 0 ? ` (+${g.missingAffection} affection)` : ''}
-                  {g.missingFlags.length > 0 ? ` — missing flags: ${g.missingFlags.join(', ')}` : ''}
+                  {g.missingFlags.length > 0 ? `. Missing flags: ${g.missingFlags.join(', ')}` : ''}
                 </div>
               ))}
               {upcoming.length === 0 && <div>Everything unlocked for this character.</div>}
@@ -604,7 +604,7 @@ export function RelationshipPanel({
             world &&
             daysUntilAnnualDate(world.currentDay ?? 0, viewingCharacter.birthday) === 0 && (
               <div className="rounded-xl bg-romance/10 px-3 py-2.5 text-sm text-romance">
-                🎂 It's {viewingCharacter.card.name}'s birthday today — a gift means a lot more than usual.
+                🎂 It's {viewingCharacter.card.name}'s birthday today. A gift means a lot more than usual.
               </div>
             )}
           <Section title="Gift inventory" description={`Coins: ${chat.giftCoins ?? 0}`} surface="sunken">
@@ -651,7 +651,7 @@ export function RelationshipPanel({
           {allowedCategories.includes('toy') && toyCatalogAll.length > 0 && (
             <Section
               title="Toy shop"
-              description="Warmth/commitment unlocks which of these are buyable — also reachable from the Unlocks tab once a toy is eligible."
+              description="Warmth/commitment unlocks which of these are buyable. Also reachable from the Unlocks tab once a toy is eligible."
               surface="sunken"
             >
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -693,7 +693,7 @@ export function RelationshipPanel({
           <Section title="Chat settings" surface="sunken" contentClassName="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <SelectField
               label="Play style"
-              hint="Just a label, shown in the header and chat list — it doesn't touch the toggles below."
+              hint="Just a label, shown in the header and chat list. It doesn't touch the toggles below."
               value={normalizeWorldTemplateId(chat.mode)}
               onChange={(e) => setChatMode(e.target.value as WorldTemplateId)}
             >
@@ -757,7 +757,7 @@ export function RelationshipPanel({
                 value={newFactText}
                 onChange={(e) => setNewFactText(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && addFact()}
-                placeholder="Add a fact by hand — e.g. 'Allergic to cats'"
+                placeholder="Add a fact by hand (e.g. )'Allergic to cats'"
                 className="flex-1 rounded-xl bg-bg-elevated px-3 py-2 text-xs text-text outline-none"
               />
               <Button onClick={addFact} disabled={!newFactText.trim()}>Add</Button>

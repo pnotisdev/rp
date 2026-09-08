@@ -34,7 +34,7 @@ export function WritingStyleSection() {
       const managed: RegexScript = {
         id: EM_DASH_SCRIPT_ID,
         name: 'Avoid em dashes (managed)',
-        find: '\\s*—\\s*',
+        find: '\\s* \\s*',
         replace: ', ',
         target: 'both',
         enabled: true,
@@ -48,7 +48,7 @@ export function WritingStyleSection() {
   return (
     <Section
       title="Writing style"
-      description="Steers every reply's prose, on top of whatever this character's own voice already is. Injected right before generation, the same slot as an active objective or relationship nudge — the closer to generation an instruction sits, the more reliably a model actually follows it."
+      description="Steers every reply's prose, on top of whatever this character's own voice already is. Injected right before generation, the same slot as an active objective or relationship nudge. The closer to generation an instruction sits, the more reliably a model actually follows it."
       surface="bare"
     >
       <Toggle
@@ -59,7 +59,7 @@ export function WritingStyleSection() {
       />
       <TextAreaField
         label="Additional style notes"
-        hint="Freeform, applies to every chat. Keep it short — a long block competes with the character's own voice for attention."
+        hint="Freeform, applies to every chat. Keep it short. A long block competes with the character's own voice for attention."
         rows={3}
         value={styleGuidance}
         onChange={(e) => setStyleGuidance(e.target.value)}

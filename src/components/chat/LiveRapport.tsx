@@ -40,7 +40,7 @@ export function LiveRapport({
   return (
     <span
       className={`inline-flex min-w-0 items-center gap-1.5 ${vn ? 'text-white/85' : 'text-text-muted'}`}
-      title={read.note ? `${spec.label} — ${read.note}` : spec.label}
+      title={read.note ? `${spec.label}. ${read.note}` : spec.label}
     >
       <span className={`shrink-0 text-[10px] uppercase tracking-[0.06em] ${vn ? 'text-white/45' : 'text-text-muted/60'}`}>
         {label}

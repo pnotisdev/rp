@@ -17,7 +17,7 @@ export function QuickRepliesSection() {
   return (
     <Section
       title="Quick replies"
-      description="A fixed row of buttons above the composer, in every chat. Clicking one sends its message immediately, exactly as if you'd typed and sent it yourself — handy for narrative beats you reach for often, like skipping ahead or describing your surroundings."
+      description="A fixed row of buttons above the composer, in every chat. Clicking one sends its message immediately, exactly as if you'd typed and sent it yourself. Handy for narrative beats you reach for often, like skipping ahead or describing your surroundings."
       surface="bare"
     >
       <ListEditor

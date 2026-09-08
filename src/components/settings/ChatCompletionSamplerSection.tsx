@@ -19,7 +19,7 @@ export function ChatCompletionSamplerSection() {
   return (
     <Section
       title="Generation (chat completion)"
-      description="Real OpenAI Chat Completions parameters for the backend configured in Settings → Connection — kept separate from the KoboldCpp sampler above so switching backends never overwrites either one's tuning."
+      description="Real OpenAI Chat Completions parameters for the backend configured in Settings → Connection. Kept separate from the KoboldCpp sampler above so switching backends never overwrites either one's tuning."
       surface="bare"
     >
       <div className="rounded-xl bg-bg-elevated p-5">
