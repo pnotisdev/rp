@@ -29,9 +29,12 @@ export function useHostedBackendStatus(
 
   useEffect(() => {
     if (!enabled) return
-    if (!apiKey.trim()) {
+    // A missing key isn't a hard failure — a local OpenAI-compatible server (LM Studio, llama.cpp,
+    // Ollama, TabbyAPI) usually needs none. NovelAI genuinely can't work without one; everything
+    // else gets the real check and shows the provider's own 401 if a key was actually required.
+    if (!apiKey.trim() && backend === 'novelai') {
       setStatus('offline')
-      setDetail('No API key set.')
+      setDetail('NovelAI needs an API key.')
       return
     }
     let cancelled = false

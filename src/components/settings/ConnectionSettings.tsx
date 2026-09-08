@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import { useConnectionStatus } from '@/lib/hooks/useConnectionStatus'
 import { useHostedBackendStatus } from '@/lib/hooks/useHostedBackendStatus'
+import { useOpenAiModels } from '@/lib/hooks/useOpenAiModels'
 import { BUILTIN_INSTRUCT_TEMPLATES } from '@/lib/prompt/instructTemplates'
 import { CHAT_BACKEND_LABELS, KNOWN_CHAT_PROVIDERS, NOVELAI_MODELS, type ChatBackendId } from '@/lib/api/chatBackend'
 import { TextField, SelectField } from '@/components/ui/Field'
@@ -50,6 +51,14 @@ export function ConnectionSettings() {
   // Settings) — picking a provider is a one-time convenience fill-in, not a lock; editing the Base
   // URL afterward is exactly what quietly falls back to "Custom" here.
   const matchedProvider = KNOWN_CHAT_PROVIDERS.find((p) => p.baseUrl === chatBackendBaseUrl)
+
+  const { models: openAiModels, loading: modelsLoading, reload: reloadModels } = useOpenAiModels(
+    chatBackendBaseUrl,
+    chatBackendApiKey,
+    chatBackend === 'openai-compatible',
+  )
+  const [typeModel, setTypeModel] = useState(false)
+  const useModelList = openAiModels && openAiModels.length > 0 && !typeModel
 
   return (
     <SettingsPage>
@@ -107,19 +116,55 @@ export function ConnectionSettings() {
               value={chatBackendApiKey}
               onChange={(e) => setChatBackendConfig({ chatBackendApiKey: e.target.value })}
             />
-            <TextField
-              label="Model"
-              value={chatBackendModel}
-              onChange={(e) => setChatBackendConfig({ chatBackendModel: e.target.value })}
-              placeholder={matchedProvider ? `e.g. ${matchedProvider.modelExample}` : 'e.g. gpt-4o-mini'}
-            />
-            <HostedConnectionStatus status={hostedStatus.status} detail={hostedStatus.detail} recheck={hostedStatus.recheck} />
+            {useModelList ? (
+              <SelectField
+                label="Model"
+                value={openAiModels.includes(chatBackendModel) ? chatBackendModel : ''}
+                onChange={(e) => {
+                  if (e.target.value === '__type__') return setTypeModel(true)
+                  setChatBackendConfig({ chatBackendModel: e.target.value })
+                }}
+                hint={`${openAiModels.length} models from /models — pick "Type it in" for one that isn't listed.`}
+              >
+                {!openAiModels.includes(chatBackendModel) && <option value="">Choose a model…</option>}
+                {openAiModels.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+                <option value="__type__">Type it in…</option>
+              </SelectField>
+            ) : (
+              <TextField
+                label="Model"
+                value={chatBackendModel}
+                onChange={(e) => setChatBackendConfig({ chatBackendModel: e.target.value })}
+                placeholder={matchedProvider ? `e.g. ${matchedProvider.modelExample}` : 'e.g. gpt-4o-mini'}
+                hint={
+                  modelsLoading
+                    ? 'Checking /models…'
+                    : openAiModels && openAiModels.length > 0
+                      ? 'Back to the model list once you set a base URL and key.'
+                      : "This provider's /models list isn't reachable — enter the id by hand."
+                }
+              />
+            )}
+            {openAiModels && openAiModels.length > 0 && typeModel && (
+              <button
+                className="mb-3 -mt-1 block text-xs text-accent transition-colors hover:underline"
+                onClick={() => setTypeModel(false)}
+              >
+                Back to the model list
+              </button>
+            )}
+            <HostedConnectionStatus status={hostedStatus.status} detail={hostedStatus.detail} recheck={() => { reloadModels(); hostedStatus.recheck() }} />
             <p className="mt-2 text-xs text-text-muted">
-              Keys are stored only in this browser and sent directly to the base URL above — never
-              through any other server. Context-size and tokenizer figures elsewhere in the app fall
-              back to an estimate for this backend, since hosted providers don't expose either. Temperature,
-              top P, penalties, and reasoning effort for this backend live in Settings → Generation,
-              separate from the KoboldCpp sampler below.
+              Keys are stored only in this browser and sent directly to the base URL above, never
+              through any other server. Token counts fall back to an estimate for this backend (no
+              shared tokenizer endpoint); context size is read from the provider's model list when
+              it publishes one, otherwise it falls back too. Temperature, top P, penalties and
+              reasoning effort for this backend live in Settings → Generation, separate from the
+              KoboldCpp sampler below.
             </p>
           </>
         )}

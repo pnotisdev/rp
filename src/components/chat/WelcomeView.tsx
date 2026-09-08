@@ -1,11 +1,14 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { MessageCircle, Sparkles, Trash2, Upload, Wand2 } from 'lucide-react'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { charactersApi, chatsApi } from '@/lib/api/client'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import { useConnectionStatus } from '@/lib/hooks/useConnectionStatus'
 import { useHostedBackendStatus } from '@/lib/hooks/useHostedBackendStatus'
+import { useOpenAiModels } from '@/lib/hooks/useOpenAiModels'
+import { detectLocalBackend } from '@/lib/api/detectBackend'
 import { KNOWN_CHAT_PROVIDERS, NOVELAI_MODELS } from '@/lib/api/chatBackend'
+import { toastError, toastSuccess } from '@/lib/store/useToastStore'
 import type { ViewId } from '@/components/layout/Sidebar'
 import { Button } from '@/components/ui/Button'
 import { Chip } from '@/components/ui/Chip'
@@ -16,11 +19,15 @@ import { TrashPanel } from './TrashPanel'
 const INPUT_CLASS =
   'flex-1 rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40'
 
-/** Every hosted option the welcome screen's compact picker offers — the full OpenAI-compatible
- *  roster plus NovelAI folded in as one more choice, so there's a single "Provider" dropdown
- *  instead of a separate backend-kind selector (Settings → Connection's fuller, two-step version). */
+/** Providers that are really local runners — kept off the cloud picker, since the "Local server" tab auto-detects them. */
+const LOCAL_PROVIDER_IDS = new Set(['lmstudio', 'ollama'])
+
+/** Every cloud option the welcome screen's compact picker offers — the hosted OpenAI-compatible
+ *  roster (the local runners belong on the "Local server" tab, which auto-detects them) plus
+ *  NovelAI folded in as one more choice, so there's a single "Provider" dropdown instead of a
+ *  separate backend-kind selector (Settings → Connection's fuller, two-step version). */
 const HOSTED_PROVIDER_OPTIONS: { id: string; label: string; kind: 'openai-compatible' | 'novelai'; baseUrl?: string; modelExample?: string }[] = [
-  ...KNOWN_CHAT_PROVIDERS.map((p) => ({ id: p.id, label: p.label, kind: 'openai-compatible' as const, baseUrl: p.baseUrl, modelExample: p.modelExample })),
+  ...KNOWN_CHAT_PROVIDERS.filter((p) => !LOCAL_PROVIDER_IDS.has(p.id)).map((p) => ({ id: p.id, label: p.label, kind: 'openai-compatible' as const, baseUrl: p.baseUrl, modelExample: p.modelExample })),
   { id: 'novelai', label: 'NovelAI (hosted, subscription)', kind: 'novelai' as const },
 ]
 const DEFAULT_HOSTED_PROVIDER = KNOWN_CHAT_PROVIDERS.find((p) => p.id === 'openrouter')!
@@ -31,23 +38,23 @@ const SEED_CHARACTER_ID = 'a0000000-0000-4000-8000-000000000002'
 
 const normalizeUrl = (u: string) => u.trim().replace(/\/+$/, '')
 
-/** A fast, self-contained reachability check — the KoboldClient's own calls default to a 30s timeout, too long for probing several URLs. */
-async function probeUrl(url: string, timeoutMs = 2500): Promise<string | null> {
-  const ctrl = new AbortController()
-  const t = setTimeout(() => ctrl.abort(), timeoutMs)
+const isLoopbackUrl = (u: string) => {
   try {
-    const res = await fetch(`${normalizeUrl(url)}/api/v1/model`, { signal: ctrl.signal })
-    if (!res.ok) return null
-    const body = (await res.json()) as { result?: unknown }
-    return typeof body.result === 'string' ? body.result : null
+    return ['localhost', '127.0.0.1', '0.0.0.0', '[::1]'].includes(new URL(u).hostname)
   } catch {
-    return null
-  } finally {
-    clearTimeout(t)
+    return false
   }
 }
 
-const COMMON_URLS = ['http://localhost:5001', 'http://127.0.0.1:5001', 'http://localhost:5000']
+// Default ports for the local runners this understands — only tried when the user clicks
+// "try common addresses", never automatically.
+const COMMON_LOCAL_URLS = [
+  'http://localhost:5001', // KoboldCpp
+  'http://localhost:1234', // LM Studio
+  'http://localhost:11434', // Ollama
+  'http://localhost:8080', // llama.cpp server
+  'http://localhost:5000', // KoboldAI / older
+]
 
 export function WelcomeView({
   onStarted,
@@ -68,8 +75,14 @@ export function WelcomeView({
   const chatBackendApiKey = useSettingsStore((s) => s.chatBackendApiKey)
   const chatBackendModel = useSettingsStore((s) => s.chatBackendModel)
   const setChatBackendConfig = useSettingsStore((s) => s.setChatBackendConfig)
-  // Which of the two connection paths is showing — directly the same setting Settings → Connection
-  // reads, so switching here and there can never disagree.
+
+  // Which panel is showing. Local now covers both KoboldCpp and an OpenAI-compatible server on
+  // localhost (LM Studio, llama.cpp, Ollama, ...) — the Check button auto-detects which. Seeded
+  // from the stored backend, then owned by the tab clicks; the stored config always stays the
+  // source of truth Settings → Connection reads.
+  const [mode, setMode] = useState<'local' | 'cloud'>(() =>
+    chatBackend === 'koboldcpp' ? 'local' : chatBackend === 'novelai' ? 'cloud' : isLoopbackUrl(chatBackendBaseUrl) ? 'local' : 'cloud',
+  )
   const isHosted = chatBackend !== 'koboldcpp'
   const matchedProvider = KNOWN_CHAT_PROVIDERS.find((p) => p.baseUrl === chatBackendBaseUrl)
   const selectedProviderId = chatBackend === 'novelai' ? 'novelai' : (matchedProvider?.id ?? DEFAULT_HOSTED_PROVIDER.id)
@@ -80,12 +93,19 @@ export function WelcomeView({
     chatBackendApiKey,
     chatBackendModel,
   )
-  const activeStatus = isHosted ? hostedStatus.status : koboldStatus
+  const localOpenAi = mode === 'local' && chatBackend === 'openai-compatible'
+  const activeStatus = mode === 'cloud' || localOpenAi ? hostedStatus.status : koboldStatus
 
-  const [urlDraft, setUrlDraft] = useState(baseUrl)
-  const [probing, setProbing] = useState(false)
-  const [probeHit, setProbeHit] = useState<{ url: string; model: string } | null>(null)
-  const probedFor = useRef<string | null>(null)
+  const { models: cloudModels } = useOpenAiModels(chatBackendBaseUrl, chatBackendApiKey, chatBackend === 'openai-compatible')
+
+  // The Local tab's address field. Seeded from whichever local address we already have — a
+  // detected local OpenAI server, else the KoboldCpp URL setting. Never the cloud provider URL.
+  const [urlDraft, setUrlDraft] = useState(
+    chatBackend === 'openai-compatible' && isLoopbackUrl(chatBackendBaseUrl) ? chatBackendBaseUrl : baseUrl,
+  )
+  const [detecting, setDetecting] = useState(false)
+  const [scanning, setScanning] = useState(false)
+  const [customModel, setCustomModel] = useState(false)
   const [showNewChat, setShowNewChat] = useState(false)
   const [showTrash, setShowTrash] = useState(false)
   // This screen only shows at all once `chats.length === 0` — the one place a deleted chat's
@@ -96,55 +116,82 @@ export function WelcomeView({
   const seed = characters.find((c) => c.id === SEED_CHARACTER_ID)
   const featured = seed ?? characters[0]
 
-  useEffect(() => setUrlDraft(baseUrl), [baseUrl])
-
-  // Once, when we're offline on the current URL, quietly try the usual KoboldCpp defaults — pointless
-  // (and a wasted local request) while the hosted path is the one actually selected.
+  // Reflect a KoboldCpp-URL change made in Settings while this screen is mounted, unless a detect
+  // is mid-flight or the field is already showing a detected local OpenAI server.
   useEffect(() => {
-    if (isHosted || koboldStatus !== 'offline' || probedFor.current === baseUrl) return
-    probedFor.current = baseUrl
-    setProbing(true)
-    setProbeHit(null)
-    let cancelled = false
-    ;(async () => {
-      for (const url of COMMON_URLS) {
-        if (normalizeUrl(url) === normalizeUrl(baseUrl)) continue
-        const found = await probeUrl(url)
-        if (cancelled) return
-        if (found) {
-          setProbeHit({ url, model: found })
-          break
-        }
-      }
-      if (!cancelled) setProbing(false)
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [isHosted, koboldStatus, baseUrl])
+    if (detecting || scanning) return
+    if (chatBackend === 'openai-compatible' && isLoopbackUrl(chatBackendBaseUrl)) return
+    setUrlDraft(baseUrl)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [baseUrl])
 
-  const applyUrl = (url: string) => {
-    probedFor.current = null
-    setProbeHit(null)
-    setBaseUrl(normalizeUrl(url))
-  }
-
-  // Switching path never touches the *other* path's already-entered settings — flipping back and
-  // forth is always non-destructive. Picking 'hosted' for the first time (still 'koboldcpp')
-  // defaults to OpenRouter's free tier rather than landing on an unconfigured, connectionless state.
-  const selectPath = (path: 'local' | 'hosted') => {
-    if (path === 'local') {
+  const applyDetected = (found: NonNullable<Awaited<ReturnType<typeof detectLocalBackend>>>) => {
+    if (found.kind === 'koboldcpp') {
+      setBaseUrl(found.baseUrl)
       setChatBackendConfig({ chatBackend: 'koboldcpp' })
+      setUrlDraft(found.baseUrl)
+      toastSuccess(found.model ? `Connected to KoboldCpp — ${found.model}` : 'Connected to KoboldCpp')
       return
     }
-    if (chatBackend === 'koboldcpp') {
-      setChatBackendConfig({ chatBackend: 'openai-compatible', chatBackendBaseUrl: chatBackendBaseUrl || DEFAULT_HOSTED_PROVIDER.baseUrl })
+    const list = found.models ?? []
+    const keepModel = list.includes(chatBackendModel) ? chatBackendModel : (list[0] ?? chatBackendModel)
+    setChatBackendConfig({ chatBackend: 'openai-compatible', chatBackendBaseUrl: found.baseUrl, chatBackendModel: keepModel })
+    setUrlDraft(found.baseUrl)
+    setCustomModel(false)
+    toastSuccess(list.length ? `Connected — ${list.length} model${list.length === 1 ? '' : 's'} available` : 'Connected')
+  }
+
+  const runDetect = async (url: string) => {
+    const u = normalizeUrl(url)
+    if (!u || detecting) return
+    setDetecting(true)
+    try {
+      const found = await detectLocalBackend(u)
+      if (found) applyDetected(found)
+      else toastError(`Nothing answered at ${u}. Is the server running, and is the address right?`)
+    } finally {
+      setDetecting(false)
+    }
+  }
+
+  const scanCommon = async () => {
+    if (scanning) return
+    setScanning(true)
+    try {
+      for (const candidate of COMMON_LOCAL_URLS) {
+        const found = await detectLocalBackend(candidate)
+        if (found) {
+          applyDetected(found)
+          return
+        }
+      }
+      toastError('No model server found on the usual local ports. Enter the address manually.')
+    } finally {
+      setScanning(false)
+    }
+  }
+
+  // Switching panel never touches the other panel's entered settings — flipping back and forth is
+  // non-destructive. The local panel needs *a* local backend selected so its status line means
+  // something before detection; the cloud panel defaults to OpenRouter's free tier.
+  const selectMode = (next: 'local' | 'cloud') => {
+    setMode(next)
+    setCustomModel(false)
+    if (next === 'local') {
+      const localOpenAiConfig = chatBackend === 'openai-compatible' && isLoopbackUrl(chatBackendBaseUrl)
+      setUrlDraft(localOpenAiConfig ? chatBackendBaseUrl : baseUrl)
+      // Anything but an already-local backend: fall back to KoboldCpp so the status line and the
+      // address field are both about a local server, not the cloud provider left selected.
+      if (!localOpenAiConfig && chatBackend !== 'koboldcpp') setChatBackendConfig({ chatBackend: 'koboldcpp' })
+    } else if (chatBackend === 'koboldcpp' || (chatBackend === 'openai-compatible' && isLoopbackUrl(chatBackendBaseUrl))) {
+      setChatBackendConfig({ chatBackend: 'openai-compatible', chatBackendBaseUrl: DEFAULT_HOSTED_PROVIDER.baseUrl })
     }
   }
 
   const selectHostedProvider = (id: string) => {
     const chosen = HOSTED_PROVIDER_OPTIONS.find((p) => p.id === id)
     if (!chosen) return
+    setCustomModel(false)
     if (chosen.kind === 'novelai') {
       setChatBackendConfig({
         chatBackend: 'novelai',
@@ -154,6 +201,47 @@ export function WelcomeView({
       setChatBackendConfig({ chatBackend: 'openai-compatible', chatBackendBaseUrl: chosen.baseUrl })
     }
   }
+
+  // Shared by the local and cloud panels for any OpenAI-compatible backend: a real dropdown of the
+  // ids `/models` returned, with a "type it in" escape hatch, falling back to a plain field when
+  // the provider doesn't expose `/models`.
+  const openAiModelField = (
+    <div>
+      <label className="mb-1 block text-text-muted">Model</label>
+      {cloudModels && cloudModels.length > 0 && !customModel ? (
+        <select
+          value={cloudModels.includes(chatBackendModel) ? chatBackendModel : ''}
+          onChange={(e) => {
+            if (e.target.value === '__custom__') return setCustomModel(true)
+            setChatBackendConfig({ chatBackendModel: e.target.value })
+          }}
+          className={`${INPUT_CLASS} w-full cursor-pointer`}
+        >
+          {!cloudModels.includes(chatBackendModel) && <option value="">Choose a model…</option>}
+          {cloudModels.map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
+          <option value="__custom__">Other — type the id…</option>
+        </select>
+      ) : (
+        <>
+          <input
+            value={chatBackendModel}
+            onChange={(e) => setChatBackendConfig({ chatBackendModel: e.target.value })}
+            placeholder={matchedProvider ? `e.g. ${matchedProvider.modelExample}` : 'e.g. gpt-4o-mini'}
+            className={`${INPUT_CLASS} w-full`}
+          />
+          {cloudModels && cloudModels.length > 0 && (
+            <button className="mt-1 text-accent transition-colors hover:underline" onClick={() => setCustomModel(false)}>
+              Back to the model list
+            </button>
+          )}
+        </>
+      )}
+    </div>
+  )
 
   return (
     <div className="flex flex-1 items-center justify-center overflow-y-auto p-8">
@@ -179,60 +267,71 @@ export function WelcomeView({
           </div>
 
           <div className="mb-4 flex gap-2">
-            <Chip on={!isHosted} onClick={() => selectPath('local')}>
-              Local model
+            <Chip on={mode === 'local'} onClick={() => selectMode('local')}>
+              Local server
             </Chip>
-            <Chip on={isHosted} onClick={() => selectPath('hosted')}>
-              Hosted API key
+            <Chip on={mode === 'cloud'} onClick={() => selectMode('cloud')}>
+              Cloud provider
             </Chip>
           </div>
 
-          {!isHosted && koboldStatus === 'online' && (
-            <p className="text-xs text-text-muted">
-              {model ?? 'A model'} is loaded{maxContext ? ` — ${maxContext.toLocaleString()} token context` : ''}. You're
-              ready to chat.
-            </p>
-          )}
-
-          {!isHosted && koboldStatus !== 'online' && (
+          {mode === 'local' && (
             <div className="space-y-3 text-xs text-text-muted">
-              <p>
-                Point this at a local model server — KoboldCpp, LM Studio, Ollama, or any
-                OpenAI-compatible endpoint — then check again. Running it on another machine? Launch
-                with{' '}
-                <code className="rounded-md bg-bg-sunken px-1 py-0.5 font-mono text-[11px]">--host 0.0.0.0</code>{' '}
-                (or your usual tunnel) and put that address below.
-              </p>
+              {chatBackend === 'koboldcpp' && koboldStatus === 'online' ? (
+                <p>
+                  {model ?? 'A model'} is loaded{maxContext ? ` — ${maxContext.toLocaleString()} token context` : ''}. You're
+                  ready to chat.
+                </p>
+              ) : localOpenAi && hostedStatus.status === 'online' ? (
+                <p>
+                  Connected to {normalizeUrl(chatBackendBaseUrl)}
+                  {chatBackendModel ? ` — ${chatBackendModel}` : ''}. You're ready to chat.
+                </p>
+              ) : (
+                <p>
+                  Enter the address of a local model server. KoboldCpp, LM Studio, Ollama, llama.cpp
+                  and TabbyAPI all work; Check figures out which one it is. Running it on another
+                  machine? Start it bound to{' '}
+                  <code className="rounded-md bg-bg-sunken px-1 py-0.5 font-mono text-[11px]">0.0.0.0</code> and use that
+                  address.
+                </p>
+              )}
               <div className="flex gap-2">
                 <input
                   value={urlDraft}
                   onChange={(e) => setUrlDraft(e.target.value)}
-                  onBlur={() => urlDraft !== baseUrl && applyUrl(urlDraft)}
+                  onKeyDown={(e) => e.key === 'Enter' && runDetect(urlDraft)}
                   placeholder="http://localhost:5001"
                   className={INPUT_CLASS}
                 />
-                <Button onClick={() => applyUrl(urlDraft)}>Check</Button>
+                <Button onClick={() => runDetect(urlDraft)} disabled={detecting || scanning}>
+                  {detecting ? 'Checking…' : 'Check'}
+                </Button>
               </div>
-              {probing && <p>Trying the usual addresses…</p>}
-              {probeHit && (
-                <div className="flex items-center justify-between gap-2 rounded-xl bg-bg-sunken px-3 py-2">
-                  <span className="text-text">
-                    Found <span className="font-medium">{probeHit.model}</span> at {probeHit.url}
-                  </span>
-                  <Button variant="primary" onClick={() => applyUrl(probeHit.url)}>
-                    Use it
-                  </Button>
-                </div>
+              <button
+                className="text-accent transition-colors hover:underline disabled:opacity-50"
+                onClick={scanCommon}
+                disabled={detecting || scanning}
+              >
+                {scanning ? 'Trying common addresses…' : "Not sure of the address? Try the common local ports"}
+              </button>
+
+              {localOpenAi && (
+                <>
+                  {openAiModelField}
+                  <HostedConnectionStatus status={hostedStatus.status} detail={hostedStatus.detail} recheck={hostedStatus.recheck} />
+                </>
               )}
-              <p>You can set this up later — it only matters when a character actually needs to reply.</p>
+              <p>You can set this up later. It only matters when a character actually needs to reply.</p>
             </div>
           )}
 
-          {isHosted && (
+          {mode === 'cloud' && (
             <div className="space-y-3 text-xs text-text-muted">
               <p>
-                OpenRouter has a free tier — nothing to pay to try this. Your key is stored only in this
-                browser and sent directly to the provider below, never through any other server.
+                OpenRouter has a free tier, so there's nothing to pay to try this. Your key is stored
+                only in this browser and sent straight to the provider below, never through any other
+                server.
               </p>
               <div>
                 <label className="mb-1 block text-text-muted">Provider</label>
@@ -249,7 +348,9 @@ export function WelcomeView({
                 </select>
               </div>
               <div>
-                <label className="mb-1 block text-text-muted">API key</label>
+                <label className="mb-1 block text-text-muted">
+                  API key {chatBackend !== 'novelai' && <span className="text-text-muted/70">(some providers don't need one)</span>}
+                </label>
                 <input
                   type="password"
                   value={chatBackendApiKey}
@@ -257,9 +358,9 @@ export function WelcomeView({
                   className={`${INPUT_CLASS} w-full`}
                 />
               </div>
-              <div>
-                <label className="mb-1 block text-text-muted">Model</label>
-                {chatBackend === 'novelai' ? (
+              {chatBackend === 'novelai' ? (
+                <div>
+                  <label className="mb-1 block text-text-muted">Model</label>
                   <select
                     value={NOVELAI_MODELS.some((m) => m.id === chatBackendModel) ? chatBackendModel : NOVELAI_MODELS[0].id}
                     onChange={(e) => setChatBackendConfig({ chatBackendModel: e.target.value })}
@@ -271,15 +372,10 @@ export function WelcomeView({
                       </option>
                     ))}
                   </select>
-                ) : (
-                  <input
-                    value={chatBackendModel}
-                    onChange={(e) => setChatBackendConfig({ chatBackendModel: e.target.value })}
-                    placeholder={matchedProvider ? `e.g. ${matchedProvider.modelExample}` : 'e.g. gpt-4o-mini'}
-                    className={`${INPUT_CLASS} w-full`}
-                  />
-                )}
-              </div>
+                </div>
+              ) : (
+                openAiModelField
+              )}
               <HostedConnectionStatus status={hostedStatus.status} detail={hostedStatus.detail} recheck={hostedStatus.recheck} />
               <p>
                 Need more control (custom base URL, per-provider notes)?{' '}

@@ -74,8 +74,11 @@ export const DEFAULT_THEME_TOKENS_DARK: Record<string, string> = {
 
 // Kept in sync with the "Balanced" built-in preset (builtinPresets.ts) so a fresh install shows it selected.
 export const DEFAULT_SAMPLER: GenerationParams = {
-  max_context_length: 8192,
-  max_length: 300,
+  // A modern floor, not a real limit: `contextLengthAuto` (on by default) raises this to the
+  // connected model's actual context as soon as one reports it. Only backends with no way to
+  // introspect that (most hosted OpenAI-compatible providers) keep this value.
+  max_context_length: 32768,
+  max_length: 512,
   temperature: 0.9,
   top_p: 1,
   top_k: 0,
@@ -185,11 +188,16 @@ interface SettingsState {
   // generation
   advancedSamplerMode: boolean
   sampler: GenerationParams
+  /** When true, `sampler.max_context_length` tracks the connected model's real limit (see `useAutoContextLength`). Any manual edit to that field turns it off. */
+  contextLengthAuto: boolean
   instructTemplateId: string
   /** Which of `builder.ts`'s fixed prompt sections are included; a missing key defaults to on. */
   promptSections: Record<PromptSectionId, boolean>
   setAdvancedSamplerMode: (v: boolean) => void
   setSampler: (patch: Partial<GenerationParams>) => void
+  /** Sets `max_context_length` without turning `contextLengthAuto` off — the auto-detect path only. */
+  setDetectedContextLength: (n: number) => void
+  setContextLengthAuto: (v: boolean) => void
   setInstructTemplateId: (id: string) => void
   setPromptSectionEnabled: (id: PromptSectionId, enabled: boolean) => void
 
@@ -391,10 +399,14 @@ export const useSettingsStore = create<SettingsState>()(
 
       advancedSamplerMode: false,
       sampler: { ...DEFAULT_SAMPLER },
+      contextLengthAuto: true,
       instructTemplateId: 'plain-chat',
       promptSections: DEFAULT_PROMPT_SECTIONS,
       setAdvancedSamplerMode: (v) => set({ advancedSamplerMode: v }),
       setSampler: (patch) => set((s) => ({ sampler: { ...s.sampler, ...patch } })),
+      setDetectedContextLength: (n) =>
+        set((s) => (s.sampler.max_context_length === n ? {} : { sampler: { ...s.sampler, max_context_length: n } })),
+      setContextLengthAuto: (v) => set({ contextLengthAuto: v }),
       setInstructTemplateId: (id) => set({ instructTemplateId: id }),
       setPromptSectionEnabled: (id, enabled) => set((s) => ({ promptSections: { ...s.promptSections, [id]: enabled } })),
 

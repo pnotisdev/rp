@@ -16,7 +16,7 @@ import { Slider } from '@/components/ui/Slider'
 import { Toggle } from '@/components/ui/Toggle'
 import { Chip } from '@/components/ui/Chip'
 import { Button } from '@/components/ui/Button'
-import { TextField } from '@/components/ui/Field'
+import { TextField, NumberField } from '@/components/ui/Field'
 import { Section } from '@/components/ui/Section'
 import { SettingsPage } from '@/components/ui/SettingsPage'
 import { SettingsEyebrow } from '@/components/ui/SettingsEyebrow'
@@ -53,6 +53,8 @@ export function SamplingControls() {
   const setAdvancedSamplerMode = useSettingsStore((s) => s.setAdvancedSamplerMode)
   const sampler = useSettingsStore((s) => s.sampler)
   const setSampler = useSettingsStore((s) => s.setSampler)
+  const contextLengthAuto = useSettingsStore((s) => s.contextLengthAuto)
+  const setContextLengthAuto = useSettingsStore((s) => s.setContextLengthAuto)
   const autoSummarize = useSettingsStore((s) => s.autoSummarize)
   const setAutoSummarize = useSettingsStore((s) => s.setAutoSummarize)
   const keepRecentMessages = useSettingsStore((s) => s.keepRecentMessages)
@@ -156,23 +158,37 @@ export function SamplingControls() {
       </Section>
 
       <Section title="Context & length">
-        <Slider
-          label="Max context length"
-          min={512}
-          max={131072}
-          step={512}
-          value={sampler.max_context_length}
-          onChange={(v) => setSampler({ max_context_length: v })}
-          formatValue={(v) => `${v.toLocaleString()} tok`}
+        <Toggle
+          checked={contextLengthAuto}
+          onChange={setContextLengthAuto}
+          label="Match the model's context automatically"
+          description="Tracks the connected model's real limit — KoboldCpp reports it directly, some hosted providers list it in /models. Turn off to pin your own value."
         />
-        <Slider
+        <NumberField
+          label="Max context length"
+          suffix="tokens"
+          min={512}
+          step={512}
+          disabled={contextLengthAuto}
+          value={String(sampler.max_context_length)}
+          onChange={(e) => {
+            setSampler({ max_context_length: Math.max(512, Math.round(Number(e.target.value) || 0)) })
+            setContextLengthAuto(false)
+          }}
+          hint={
+            contextLengthAuto
+              ? `Auto — currently ${sampler.max_context_length.toLocaleString()} tokens. Editing this switches to manual.`
+              : 'No fixed ceiling; set whatever your model and hardware allow.'
+          }
+        />
+        <NumberField
           label="Max response length"
+          suffix="tokens"
           min={16}
-          max={4096}
           step={16}
-          value={sampler.max_length}
-          onChange={(v) => setSampler({ max_length: v })}
-          formatValue={(v) => `${v} tok`}
+          value={String(sampler.max_length)}
+          onChange={(e) => setSampler({ max_length: Math.max(1, Math.round(Number(e.target.value) || 0)) })}
+          hint="Ceiling for a single reply. A character's own reply-length band can still cap it lower."
         />
       </Section>
 
