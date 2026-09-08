@@ -61,6 +61,12 @@ export const KNOWN_CHAT_PROVIDERS: KnownChatProvider[] = [
     baseUrl: 'https://openrouter.ai/api/v1',
     modelExample: 'openrouter/anthropic/claude-3.5-sonnet',
   },
+  {
+    id: 'nano-gpt',
+    label: 'Nano-GPT',
+    baseUrl: 'https://nano-gpt.com/api/v1',
+    modelExample: 'anthropic/claude-sonnet-5',
+  },
   { id: 'groq', label: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', modelExample: 'llama-3.3-70b-versatile' },
   { id: 'mistral', label: 'Mistral', baseUrl: 'https://api.mistral.ai/v1', modelExample: 'mistral-large-latest' },
   { id: 'deepseek', label: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', modelExample: 'deepseek-chat' },

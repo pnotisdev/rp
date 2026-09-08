@@ -38,7 +38,7 @@ npm run test:watch  # watch mode
 
 ### Model backends
 
-KoboldCpp is the main target, with streaming, vision, abort handling and token counting written against its own API rather than a lowest common denominator. Any OpenAI-compatible endpoint also works: OpenRouter, LM Studio, llama.cpp, TabbyAPI, oobabooga. NovelAI is supported for both text and images, with its own tokenizer.
+KoboldCpp is the main target, with streaming, vision, abort handling and token counting written against its own API rather than a lowest common denominator. Any OpenAI-compatible endpoint also works: OpenRouter, Nano-GPT, LM Studio, llama.cpp, TabbyAPI, oobabooga. NovelAI is supported for both text and images, with its own tokenizer.
 
 Each backend reports its connection state in the header, and Settings has a Test connection button that hits a free metadata endpoint instead of burning a real generation on a paid provider.
 

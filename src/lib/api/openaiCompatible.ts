@@ -168,10 +168,11 @@ export class OpenAICompatibleClient implements ChatBackend {
     return null
   }
 
-  /** Settings → Connection's reachability+auth check, without a real (billed) chat completion. Uses `GET /models` (validates the key on most providers) except for OpenRouter, whose `/models` is public — `/key` is used there instead. */
+  /** Settings → Connection's reachability+auth check, without a real (billed) chat completion. Uses `GET /models` (validates the key on most providers) except for OpenRouter and Nano-GPT, whose `/models` is public and returns 200 for any key — `/key` (OpenRouter) and the balance endpoint (Nano-GPT) are used there instead, and double as a usage/balance readout for the success detail. */
   async checkConnection(): Promise<ConnectionCheckResult> {
     const trimmed = this.baseUrl.replace(/\/+$/, '')
     if (!trimmed) return { ok: false, detail: 'No base URL set.' }
+    if (trimmed.includes('nano-gpt.com')) return this.checkNanoGptBalance(trimmed)
     const isOpenRouter = trimmed.includes('openrouter.ai')
     const url = isOpenRouter ? `${trimmed}/key` : `${trimmed}/models`
     let res: Response
@@ -201,6 +202,32 @@ export class OpenAICompatibleClient implements ChatBackend {
       } catch {
         // Already authenticated (status checked above) — an unparseable body just means no bonus detail.
       }
+    }
+    return { ok: true }
+  }
+
+  /**
+   * Nano-GPT's key check: `POST {host}/api/check-balance` (deliberately not under `/v1`), with the
+   * key as `x-api-key`, returning `{ usd_balance, nano_balance, nanoDepositAddress }`. A bad key
+   * comes back non-2xx (live: 401 for a malformed key, with its own error body), so any non-ok
+   * response here is treated as a rejected key. The USD balance becomes the success detail,
+   * mirroring OpenRouter's usage readout.
+   */
+  private async checkNanoGptBalance(trimmed: string): Promise<ConnectionCheckResult> {
+    const balanceUrl = `${trimmed.replace(/\/v1$/, '')}/check-balance`
+    let res: Response
+    try {
+      res = await fetch(balanceUrl, { method: 'POST', headers: { ...this.headers(), 'x-api-key': this.apiKey } })
+    } catch {
+      return { ok: false, detail: `Could not reach ${this.baseUrl}.` }
+    }
+    if (!res.ok) return { ok: false, detail: 'The API key was rejected.' }
+    try {
+      const data = (await res.json()) as { usd_balance?: string | number }
+      const usd = Number(data.usd_balance)
+      if (Number.isFinite(usd)) return { ok: true, detail: `$${usd.toFixed(2)} balance` }
+    } catch {
+      // Already authenticated (status ok) — an unparseable body just means no balance figure to show.
     }
     return { ok: true }
   }

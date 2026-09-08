@@ -368,4 +368,56 @@ describe('checkConnection', () => {
     const client = new OpenAICompatibleClient('https://openrouter.ai/api/v1', 'sk-or-bad', 'minimax/minimax-m3:free')
     expect(await client.checkConnection()).toEqual({ ok: false, detail: 'The API key was rejected.' })
   })
+
+  // Nano-GPT's /models is public too (200s for any key), so — like OpenRouter — it needs a
+  // dedicated key check. Its balance endpoint lives at /api/check-balance, one level up from the
+  // configured /api/v1 base URL, and wants the key as x-api-key.
+  describe('Nano-GPT', () => {
+    it('POSTs to /api/check-balance (not /v1/models), sending the key as x-api-key', async () => {
+      const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { usd_balance: '5.00', nano_balance: '1.0', nanoDepositAddress: 'nano_x' }))
+      vi.stubGlobal('fetch', fetchMock)
+      const client = new OpenAICompatibleClient('https://nano-gpt.com/api/v1', 'sk-nano-real', 'anthropic/claude-sonnet-5')
+      await client.checkConnection()
+      expect(fetchMock).toHaveBeenCalledWith('https://nano-gpt.com/api/check-balance', expect.objectContaining({ method: 'POST' }))
+      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+      expect((init.headers as Record<string, string>)['x-api-key']).toBe('sk-nano-real')
+    })
+
+    it('surfaces the USD balance as the success detail', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, { usd_balance: '12.3456', nano_balance: '4.2', nanoDepositAddress: 'nano_x' })))
+      const client = new OpenAICompatibleClient('https://nano-gpt.com/api/v1', 'sk-nano-real', 'anthropic/claude-sonnet-5')
+      expect(await client.checkConnection()).toEqual({ ok: true, detail: '$12.35 balance' })
+    })
+
+    it('treats any non-2xx balance response as a rejected key (live: a bad key 401s with its own error body)', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(jsonResponse(401, { error: { message: 'Malformed API key.', code: 'malformed_api_key' } })),
+      )
+      const client = new OpenAICompatibleClient('https://nano-gpt.com/api/v1', 'sk-nano-bad', 'anthropic/claude-sonnet-5')
+      expect(await client.checkConnection()).toEqual({ ok: false, detail: 'The API key was rejected.' })
+    })
+
+    it('reports unreachable (not a key problem) when the balance fetch itself fails', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')))
+      const client = new OpenAICompatibleClient('https://nano-gpt.com/api/v1', 'sk-nano-real', 'anthropic/claude-sonnet-5')
+      const result = await client.checkConnection()
+      expect(result.ok).toBe(false)
+      expect(result.detail).toContain('Could not reach')
+    })
+
+    it('still reports ok (just without a figure) when the balance body is unparseable', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => {
+          throw new Error('not json')
+        },
+        text: async () => 'not json',
+      } as unknown as Response))
+      const client = new OpenAICompatibleClient('https://nano-gpt.com/api/v1', 'sk-nano-real', 'anthropic/claude-sonnet-5')
+      expect(await client.checkConnection()).toEqual({ ok: true })
+    })
+  })
 })
