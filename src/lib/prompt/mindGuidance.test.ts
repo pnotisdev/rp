@@ -10,6 +10,7 @@ import {
   moodGuidance,
   NEED_VOCAB,
   needGuidance,
+  STOCK_ROMANCE_PHRASES,
   stockRomancePhrasingNote,
 } from './mindGuidance'
 
@@ -128,6 +129,16 @@ describe('stockRomancePhrasingNote', () => {
 
   it('never emits a {{char}}/{{user}} macro', () => {
     expect(stockRomancePhrasingNote(true)).not.toContain('{{')
+  })
+
+  it('drops a phrase the character has already used — the reactive slop note names that one instead', () => {
+    const note = stockRomancePhrasingNote(true, ['She grinned despite herself and looked away.'])
+    expect(note).not.toContain('despite herself')
+    expect(note).toContain('electricity between them')
+  })
+
+  it('says nothing at all once every listed phrase has already been used', () => {
+    expect(stockRomancePhrasingNote(true, [STOCK_ROMANCE_PHRASES.join('\n')])).toBe('')
   })
 })
 

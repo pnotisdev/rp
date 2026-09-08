@@ -71,6 +71,9 @@ export function activateWorldInfo(
     let matched: LorebookEntry[] = []
     const matchedIds = new Set<number>()
     const keywordEntries: LorebookEntry[] = []
+    // Always-on ('always'/constant) entries are a book's baseline lore — they get first claim on
+    // the token budget below so a burst of keyword hits can't silently starve them out.
+    const alwaysEntries = new Set<LorebookEntry>()
 
     for (const entry of book.entries) {
       const mode = entry.activationMode ?? (entry.constant ? 'always' : 'keyword')
@@ -82,6 +85,7 @@ export function activateWorldInfo(
       if (runtime && entry.delay !== undefined && runtime.turn < entry.delay) continue
       if (mode === 'always') {
         matched.push(entry)
+        alwaysEntries.add(entry)
         continue
       }
       if (mode === 'manual') {
@@ -156,8 +160,13 @@ export function activateWorldInfo(
       droppedForGroup.push(...group.filter((e) => e !== winner))
     }
 
-    // Higher insertion_order = higher priority = filled into the budget first.
-    const byPriority = [...matched].sort((a, b) => b.insertion_order - a.insertion_order)
+    // Always-on entries fill first; within each partition, higher insertion_order = higher priority.
+    const byPriority = [...matched].sort((a, b) => {
+      const aAlways = alwaysEntries.has(a)
+      const bAlways = alwaysEntries.has(b)
+      if (aAlways !== bAlways) return aAlways ? -1 : 1
+      return b.insertion_order - a.insertion_order
+    })
     const budget = book.token_budget ?? Infinity
     let used = 0
     for (const entry of byPriority) {

@@ -5,12 +5,21 @@ import type { WorldCard } from '@/lib/types'
 // `createChat` writes through `chatsApi`/`messagesApi` — stubbed so these tests only exercise its
 // own resolution logic (mode/assistOverrides), not the real HTTP layer.
 vi.mock('@/lib/api/client', () => ({
-  chatsApi: { create: vi.fn(async (input: unknown) => ({ id: 'chat-1', createdAt: 0, updatedAt: 0, ...(input as object) })) },
-  messagesApi: { create: vi.fn(), update: vi.fn() },
+  chatsApi: {
+    create: vi.fn(async (input: unknown) => ({ id: 'chat-1', createdAt: 0, updatedAt: 0, ...(input as object) })),
+    update: vi.fn(),
+  },
+  messagesApi: { create: vi.fn(async (input: unknown) => ({ id: 'msg-1', ...(input as object) })), update: vi.fn() },
 }))
 
 import { availableGreetings, createChat } from './createChat'
 import { chatsApi } from '@/lib/api/client'
+
+/** The most recent `chatsApi.update` payload, or undefined if it was never called. */
+function lastUpdatePayload(): { scene?: { location?: string | null } } | undefined {
+  const calls = vi.mocked(chatsApi.update).mock.calls
+  return calls.length ? (calls[calls.length - 1][1] as { scene?: { location?: string | null } }) : undefined
+}
 
 function character(overrides: Partial<CharacterCardData> = {}): Character {
   return {
@@ -90,6 +99,30 @@ describe('createChat: mode resolution', () => {
   it("falls back to 'dating_sim' when there's neither an explicit mode nor a bound world", async () => {
     await createChat({ character: character(), world: undefined, personaId: '' })
     expect(lastCreatePayload().mode).toBe('dating_sim')
+  })
+})
+
+describe('createChat: scene location seeding', () => {
+  it("seeds Chat.scene.location from the greeting's detected background, with no client needed", async () => {
+    vi.mocked(chatsApi.update).mockClear()
+    await createChat({
+      character: character({ first_mes: "*The library's second floor is cold enough that the windows have fogged.*" }),
+      world: undefined,
+      personaId: '',
+      personaName: 'Kai',
+    })
+    expect(lastUpdatePayload()?.scene?.location).toBe('Library')
+  })
+
+  it('leaves the scene unset when the greeting matches no known background', async () => {
+    vi.mocked(chatsApi.update).mockClear()
+    await createChat({
+      character: character({ first_mes: '*She looks up from whatever she was scribbling.* "Oh. You."' }),
+      world: undefined,
+      personaId: '',
+      personaName: 'Kai',
+    })
+    expect(lastUpdatePayload()).toBeUndefined()
   })
 })
 

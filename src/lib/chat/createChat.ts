@@ -120,7 +120,18 @@ export async function createChat(opts: CreateChatOptions): Promise<Chat> {
     const applyScene = (scene: SceneTag | null) => {
       if (!scene) return
       const swipeScenes = rendered.map((_, i) => (i === activeSwipe ? scene : undefined))
-      return messagesApi.update(greetingMessage.id, { scene, swipeScenes })
+      const writes: Promise<unknown>[] = [messagesApi.update(greetingMessage.id, { scene, swipeScenes })]
+      // Seed the chat's own scene location from the resolved background so the prompt's
+      // schedule-presence framing has an established place to reconcile against from turn one,
+      // rather than contradicting a greeting that already placed the character somewhere.
+      if (scene.background) {
+        writes.push(
+          chatsApi.update(chat.id, {
+            scene: { turnPolicy: 'manual', location: backgroundLabel(scene.background, world) },
+          }),
+        )
+      }
+      return Promise.all(writes)
     }
     if (client && hasCustomArt) {
       detectGreetingScene(client, {

@@ -64,7 +64,7 @@ import {
   describeWeather,
   describeWorldMoment,
   getCalendarInfo,
-  getCurrentActivity,
+  resolveScheduledPresence,
   getEnergyRemaining,
   getWeather,
   PHASES,
@@ -137,6 +137,7 @@ import {
   EXPLICIT_ANTI_PATTERN_ENTRIES,
   isDuplicateOfRecentText,
   isVerbatimEcho,
+  SLOP_SCAN_TURNS,
   trimToLastSentence,
 } from '@/lib/text/slop'
 import { substituteMacros } from '@/lib/characters/macros'
@@ -559,6 +560,8 @@ export function useChatSession(chatId: string | null) {
       const worldLorebook = world?.lorebook ? [{ ...world.lorebook, sourceKey: `world:${world.id}` }] : []
       const factsLorebook = buildFactsLorebook(activeFacts).map((b) => ({ ...b, sourceKey: 'facts' }))
       const affection = freshChat.affection ?? 0
+      // One read of the char-reply count for the whole build — every turn-scoped window check below keys off it.
+      const charReplyCount = countCharReplies(messages)
       const worldDescriptionLines = [
         ...(world
           ? [
@@ -573,7 +576,14 @@ export function useChatSession(chatId: string | null) {
               }),
               // Only worth a line when this character actually has a schedule authored.
               speaker.schedule?.length
-                ? describePresence(getCurrentActivity(speaker.schedule, world.currentDay ?? 0, world.currentPhaseIndex ?? 0))
+                ? describePresence(
+                    resolveScheduledPresence(
+                      speaker.schedule,
+                      world.currentDay ?? 0,
+                      world.currentPhaseIndex ?? 0,
+                      freshChat.scene?.location,
+                    ),
+                  )
                 : '',
             ]
           : []),
@@ -588,7 +598,12 @@ export function useChatSession(chatId: string | null) {
 
       const { count: staticSceneTurns, currentBackground: staticSceneBackground } = countStaticSceneTurns(messages)
       const speakerPresence = speaker.schedule?.length
-        ? getCurrentActivity(speaker.schedule, world?.currentDay ?? 0, world?.currentPhaseIndex ?? 0)
+        ? resolveScheduledPresence(
+            speaker.schedule,
+            world?.currentDay ?? 0,
+            world?.currentPhaseIndex ?? 0,
+            freshChat.scene?.location,
+          )
         : undefined
       const scheduleLocation = speakerPresence?.location
       // A genuine schedule conflict (busy/sleeping/traveling) reads as a noticed cost. Suppressed during a live event, which already carries its own cost.
@@ -615,7 +630,7 @@ export function useChatSession(chatId: string | null) {
             charName: speaker.card.name,
             characterId: speaker.id,
             chatId: freshChat.id,
-            charTurnCount: countCharReplies(messages),
+            charTurnCount: charReplyCount,
             event: selectAmbientEvent({
               worldId: world?.id,
               characterId: speaker.id,
@@ -664,9 +679,9 @@ export function useChatSession(chatId: string | null) {
 
       // "Character Mind" — transient mood/need/intent, separate from the relationship track (`prompt/mindGuidance.ts`).
       // Aftermath window of an intimate scene, app-known rather than judge-inferred (`aftercare.ts`).
-      const afterglowSince = afterglowTurnsSince(speakerTrack.afterglow ?? undefined, countCharReplies(messages))
+      const afterglowSince = afterglowTurnsSince(speakerTrack.afterglow ?? undefined, charReplyCount)
       const afterglowLine =
-        afterglowSince !== null && isAfterglowActive(speakerTrack.afterglow ?? undefined, countCharReplies(messages))
+        afterglowSince !== null && isAfterglowActive(speakerTrack.afterglow ?? undefined, charReplyCount)
           ? afterglowGuidance(speaker.card.name, persona?.name || 'You', afterglowSince, speakerTrack.afterglow?.sourceLabel)
           : ''
       // Immediate post-climax physical beat — separate from `afterglowLine`, which stays content-rating-agnostic and non-physical by its own test. Explicit setting only, first couple of replies after the scene resolves.
@@ -693,7 +708,7 @@ export function useChatSession(chatId: string | null) {
       const speakerPace = intimacyPaceFor(speakerTrack.mood, speakerHoldingBackByPlan, speaker.boundaries?.length ?? 0)
       const latestUserText = [...historyForPrompt].reverse().find((m) => m.role === 'user')?.text
       const earlyEscalationLine = earlyEscalationGuidance(speakerWarmth, latestUserText, speaker.card.name)
-      const speakerSceneActive = isIntimacySceneActive(speakerTrack.intimacyScene, countCharReplies(messages))
+      const speakerSceneActive = isIntimacySceneActive(speakerTrack.intimacyScene, charReplyCount)
       // Physical continuity + phase-scaled sensory guidance while a scene is active.
       const intimacySceneLine = speakerSceneActive
         ? intimacySceneGuidance(speaker.card.name, speakerTrack.intimacyScene!, speakerPace)
@@ -714,18 +729,22 @@ export function useChatSession(chatId: string | null) {
         ? (intimacyAnticipationGuidance(speaker.card.name, persona?.name || 'You', speakerStats.chemistry, speakerStats.comfort) ?? '')
         : ''
       // "Missed opportunity" cost after a real deflection/backfire, distinct from the hard `relationshipWarning` banner.
-      const rebuffLine = isRebuffActive(speakerTrack.recentRebuff, countCharReplies(messages))
+      const rebuffLine = isRebuffActive(speakerTrack.recentRebuff, charReplyCount)
         ? rebuffGuidance(speaker.card.name, persona?.name || 'You', speakerTrack.recentRebuff!)
         : ''
-      const reciprocityLine = isReciprocityCueActive(speakerTrack.reciprocityCue, countCharReplies(messages))
+      const reciprocityLine = isReciprocityCueActive(speakerTrack.reciprocityCue, charReplyCount)
         ? reciprocityGuidance(speaker.card.name, persona?.name || 'You', speakerTrack.reciprocityCue!.reason)
         : ''
       // Stock romance-writing tells, regardless of whether they've come up before in this chat (unlike `buildSlopAvoidanceNote`, which only catches this character's own repeats).
       const isRomanticOrIntimateMoment =
-        speakerSceneActive || isAfterglowActive(speakerTrack.afterglow ?? undefined, countCharReplies(messages)) || speakerStats.chemistry >= 70
-      const stockRomancePhrasingLine = stockRomancePhrasingNote(isRomanticOrIntimateMoment)
-      // Agency/POV guard, broader than `explicitSceneGuidance`'s own — also covers freeform intimacy that never opened a catalog-driven `IntimacyScene`.
-      const agencyGuardLine = explicitSceneLine ? '' : agencyGuardNote(isRomanticOrIntimateMoment, speaker.card.name, persona?.name || 'You')
+        speakerSceneActive || isAfterglowActive(speakerTrack.afterglow ?? undefined, charReplyCount) || speakerStats.chemistry >= 70
+      const recentSpeakerTurns = messages
+        .filter((m) => m.role === 'char' && m.name === speaker.card.name)
+        .slice(-SLOP_SCAN_TURNS)
+        .map((m) => m.text)
+      const stockRomancePhrasingLine = stockRomancePhrasingNote(isRomanticOrIntimateMoment, recentSpeakerTurns)
+      // The one canonical POV guard — fires on any romantic/intimate moment, catalog-driven scene or freeform.
+      const agencyGuardLine = agencyGuardNote(isRomanticOrIntimateMoment, speaker.card.name, persona?.name || 'You')
 
       // Compact, always-computed ledger of concrete scene facts, consolidated into one block instead of scattered across separate lines.
       const sceneContinuityLine = sceneContinuityNote({
@@ -792,7 +811,7 @@ export function useChatSession(chatId: string | null) {
       // hard token cap lives in `runGeneration` so brevity survives a model that ignores the line.
       const replyLengthInstruction = resolveReplyLength(speaker.replyLength, speaker.card).instruction
       const activityInitiativeGuidance =
-        speakerWarmth >= 20 && countCharReplies(messages) >= 3
+        speakerWarmth >= 20 && charReplyCount >= 3
           ? `Do not only react: let ${speaker.card.name} sometimes suggest something that fits their own interests or routine.`
           : ''
       // "Repeated same interaction → diminishing returns": if the player has leaned on the same
@@ -805,12 +824,15 @@ export function useChatSession(chatId: string | null) {
         speaker.card.name,
         persona?.name || 'You',
       )
-      const emDashRule = avoidEmDashes
-        ? 'Never use em dashes (the — character) in your writing. Use a comma, period, or parentheses instead.'
-        : ''
+      // Every built-in system prompt already forbids em dashes, so the standalone line is pure redundancy when one is active.
+      const builtinSystemPrompt = BUILTIN_SYSTEM_PROMPTS.find((p) => p.id === freshChat.assistOverrides?.systemPromptId)
+      const emDashRule =
+        avoidEmDashes && !builtinSystemPrompt
+          ? 'Never use em dashes (the — character) in your writing. Use a comma, period, or parentheses instead.'
+          : ''
       const styleGuidance = impersonating
         ? // Impersonation only gets the rules that shape prose, not {{char}}'s behaviour/phrasing.
-          [emDashRule, styleGuidanceNote.trim(), opts?.extraStyleGuidance ?? ''].filter(Boolean).join(' ') || undefined
+          [emDashRule, styleGuidanceNote.trim(), opts?.extraStyleGuidance ?? ''].filter(Boolean).join('\n') || undefined
         : [
             emDashRule,
             effectiveAssistFlag(freshChat.assistOverrides?.slowBurnPacing, slowBurnPacing)
@@ -853,7 +875,7 @@ export function useChatSession(chatId: string | null) {
             opts?.extraStyleGuidance ?? '',
           ]
             .filter(Boolean)
-            .join(' ') || undefined
+            .join('\n') || undefined
 
       const contextBudget = sampler.max_context_length - sampler.max_length - 32
       return buildPrompt({
@@ -862,7 +884,7 @@ export function useChatSession(chatId: string | null) {
         personaName: persona?.name || 'You',
         personaDescription: persona?.description || '',
         globalSystemPrompt,
-        chatSystemPrompt: BUILTIN_SYSTEM_PROMPTS.find((p) => p.id === freshChat.assistOverrides?.systemPromptId)?.prompt,
+        chatSystemPrompt: builtinSystemPrompt?.prompt,
         globalPostHistory,
         history: recentHistory,
         chatSummary: freshChat.summary,
@@ -2962,14 +2984,17 @@ export function useChatSession(chatId: string | null) {
         }
         if (character) {
           const moment = activityPhase(day, phaseIndex)
-          // `styleGuidance` isn't macro-substituted, so `{{char}}` is resolved by hand here rather than leaking literally into the prompt.
-          openingMomentNote = describeWorldMoment({
-            worldId: world.id,
-            characterId: character.id,
-            day: moment.day,
-            phaseIndex: moment.phaseIndex,
-            weatherPreferences: character.weatherPreferences,
-          }).replace(/\{\{char\}\}/g, character.card.name)
+          // `styleGuidance` isn't macro-substituted, so macros are resolved here rather than leaking literally into the prompt.
+          openingMomentNote = substituteMacros(
+            describeWorldMoment({
+              worldId: world.id,
+              characterId: character.id,
+              day: moment.day,
+              phaseIndex: moment.phaseIndex,
+              weatherPreferences: character.weatherPreferences,
+            }),
+            { charName: character.card.name, userName: persona?.name || 'You' },
+          )
         }
         if (!event.free) {
           const result = spendEnergy(day, phaseIndex)

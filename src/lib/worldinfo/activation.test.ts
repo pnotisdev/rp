@@ -108,6 +108,22 @@ describe('activateWorldInfo', () => {
       expect(result.droppedForBudget[0].insertion_order).toBe(50)
     })
 
+    it('keeps an always-on entry over a keyword hit under budget pressure, even when the keyword hit sorts higher', () => {
+      const filler = 'k'.repeat(40) // ~10 estimated tokens each
+      const b = book(
+        [
+          entry({ content: filler, keys: ['tavern'], insertion_order: 300 }), // higher insertion_order, but only a keyword hit
+          entry({ content: filler, constant: true, activationMode: 'always', insertion_order: 10 }), // baseline lore
+        ],
+        15, // room for exactly one
+      )
+      const result = activateWorldInfo([b], 'we went to the tavern')
+      expect(result.activated).toHaveLength(1)
+      expect(result.activated[0].constant).toBe(true)
+      expect(result.droppedForBudget).toHaveLength(1)
+      expect(result.droppedForBudget[0].insertion_order).toBe(300)
+    })
+
     it('treats an unset token_budget as unlimited', () => {
       const long = 'word '.repeat(500)
       const b = book([entry({ content: long, constant: true, activationMode: 'always' })])

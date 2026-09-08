@@ -109,10 +109,13 @@ export function authoredStatePriorityNote(
   return `${charName} is ${because}. A generic romance story would have a character soften, lean in, or escalate anyway just because the moment invites it — resist that trained instinct here. ${charName}'s actual authored state wins over generic romantic instinct: however high warmth or affection reads right now, it does not override a mood like this, an unmet need, or what ${charName} is actually doing right now.${boundaryClause} Write the character who is actually anxious/guarded/holding back, not the version of this scene a stock romance would write.`
 }
 
-// Stock romance-writing tells a model reaches for regardless of character/relationship. Distinct
-// from `voice.ts`'s buildSlopAvoidanceNote, which only catches a character's own repeats within
-// this chat.
-const STOCK_ROMANCE_PHRASES = [
+// Stock romance-writing tells a model reaches for regardless of character/relationship. This is the
+// STATIC pre-warning list; `text/slop.ts`'s `SLOP_PATTERNS` is the REACTIVE corpus that names back
+// a tell the character has actually just used. They deliberately overlap on a few phrases
+// ("despite herself", "the air was thick with", "couldn't help but", "sent shivers down"): when a
+// phrase has already been used, `stockRomancePhrasingNote` drops it here so the reactive catch is
+// the only place it's named.
+export const STOCK_ROMANCE_PHRASES = [
   'electricity between them',
   'the air was thick with',
   'despite herself',
@@ -128,10 +131,15 @@ const STOCK_ROMANCE_PHRASES = [
   'electric touch',
 ] as const
 
-/** Warns off stock romance-writing tells. Only worth the tokens during an actually romantic/intimate moment. */
-export function stockRomancePhrasingNote(isRomanticMoment: boolean): string {
+/** Warns off stock romance-writing tells. Only worth the tokens during an actually romantic/intimate
+ *  moment. Any phrase already present in `recentCharTurns` is dropped — the reactive slop note
+ *  (`buildSlopAvoidanceNote`) names those, and one place is enough. */
+export function stockRomancePhrasingNote(isRomanticMoment: boolean, recentCharTurns: string[] = []): string {
   if (!isRomanticMoment) return ''
-  return `This is a romantic/intimate moment, which is exactly where a model's own generic training shows up hardest. Avoid reaching for stock romance-writing tells here regardless of whether they've come up before in this chat — things like "${STOCK_ROMANCE_PHRASES.join('", "')}". Write what's actually specific to this character and this moment instead of the generic version of a romance scene.`
+  const recent = recentCharTurns.join('\n').toLowerCase()
+  const phrases = STOCK_ROMANCE_PHRASES.filter((p) => !recent.includes(p.toLowerCase()))
+  if (phrases.length === 0) return ''
+  return `This is a romantic/intimate moment, which is exactly where a model's own generic training shows up hardest. Avoid reaching for stock romance-writing tells here regardless of whether they've come up before in this chat — things like "${phrases.join('", "')}". Write what's actually specific to this character and this moment instead of the generic version of a romance scene.`
 }
 
 /** POV guard: only the player's own actions belong to the player. Fires on any romantic/intimate moment, not just an active catalog-driven `IntimacyScene` — covers freeform-only intimacy too. */

@@ -228,6 +228,36 @@ export function getCurrentActivity(
   return { status: entry.status, activity: entry.activity, location: entry.location }
 }
 
+/** Case-insensitive, whitespace-tolerant "these name the same place" check — an exact match or
+ *  either string containing the other ("Library" vs "School Library"). */
+function locationsOverlap(a: string, b: string): boolean {
+  const x = a.trim().toLowerCase()
+  const y = b.trim().toLowerCase()
+  if (!x || !y) return false
+  return x === y || x.includes(y) || y.includes(x)
+}
+
+/**
+ * Presence for the prompt, reconciling the frozen world clock against an already-established scene.
+ * `WorldCard.currentDay`/`currentPhaseIndex` only ever advance by explicit user action, so a chat
+ * that opens with a greeting placing the character somewhere would otherwise be prompted for the
+ * whole session with schedule framing ("busy — in class") that contradicts the scene the greeting
+ * set. When the clock says busy/sleeping/traveling but the scene location tolerantly matches a
+ * *different*, `available` schedule entry, trust the scene.
+ */
+export function resolveScheduledPresence(
+  schedule: ScheduleEntry[] | undefined,
+  day: number,
+  phaseIndex: number,
+  sceneLocation: string | null | undefined,
+): { status: PresenceStatus; activity?: string; location?: string } {
+  const clockActivity = getCurrentActivity(schedule, day, phaseIndex)
+  if (clockActivity.status === 'available' || !sceneLocation?.trim() || !schedule?.length) return clockActivity
+  const match = schedule.find((e) => e.status === 'available' && e.location && locationsOverlap(e.location, sceneLocation))
+  if (!match) return clockActivity
+  return { status: 'available', activity: match.activity, location: match.location }
+}
+
 const PRESENCE_LABELS: Record<PresenceStatus, string> = {
   available: 'free',
   busy: 'busy',

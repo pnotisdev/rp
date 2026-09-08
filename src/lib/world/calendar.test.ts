@@ -16,6 +16,7 @@ import {
   getWeather,
   isNightPhase,
   PHASES,
+  resolveScheduledPresence,
   spendEnergy,
   WEATHER_KINDS,
   type ScheduleEntry,
@@ -292,6 +293,40 @@ describe('getCurrentActivity', () => {
     ]
     // day 0 (Monday) isn't in the entry's days, and there's no every-day fallback.
     expect(getCurrentActivity(schedule, 0, 2)).toEqual({ status: 'available' })
+  })
+})
+
+describe('resolveScheduledPresence', () => {
+  // Mirrors the shipped Sumire seed: weekday mornings are "busy — In class", but her greeting
+  // opens in the library — one of her own `available` afternoon slots.
+  const schedule: ScheduleEntry[] = [
+    { id: 'classes', days: ['monday', 'tuesday'], phase: 'morning', status: 'busy', activity: 'In class', location: 'Sakura Hill High School' },
+    { id: 'mwf-lib', days: ['monday'], phase: 'afternoon', status: 'available', activity: 'At her library table', location: 'School Library' },
+  ]
+
+  it('passes the clock activity straight through when it already reads as available', () => {
+    // day 0 (Monday) afternoon — the available library slot.
+    expect(resolveScheduledPresence(schedule, 0, 1, 'anywhere')).toEqual({
+      status: 'available',
+      activity: 'At her library table',
+      location: 'School Library',
+    })
+  })
+
+  it('keeps the busy clock activity when no scene location is set', () => {
+    // day 0 (Monday) morning — "In class".
+    expect(resolveScheduledPresence(schedule, 0, 0, undefined)).toEqual(getCurrentActivity(schedule, 0, 0))
+    expect(resolveScheduledPresence(schedule, 0, 0, '  ')).toMatchObject({ status: 'busy' })
+  })
+
+  it('trusts an established scene that tolerantly matches a different available slot over the frozen busy clock', () => {
+    const resolved = resolveScheduledPresence(schedule, 0, 0, 'Library')
+    expect(resolved.status).toBe('available')
+    expect(resolved.location).toBe('School Library')
+  })
+
+  it('keeps the busy clock activity when the scene matches nothing available in the schedule', () => {
+    expect(resolveScheduledPresence(schedule, 0, 0, 'the train station')).toMatchObject({ status: 'busy', activity: 'In class' })
   })
 })
 

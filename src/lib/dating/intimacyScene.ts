@@ -184,12 +184,13 @@ export function explicitSceneGuidance(
   const antiPatterns = `Avoid stock explicit-writing tells here regardless of whether they've come up before in this chat — things like "${EXPLICIT_ANTI_PATTERNS.join('", "')}". Reach for one specific physical sensation instead (stretch, resistance, heat, pressure, friction, a pulse) rather than an emotion word or a metaphor standing in for one.`
   const voiceNoteClause = voiceNote?.trim() ? ` For ${charName} specifically: ${voiceNote.trim()}` : ''
   const voice = `${charName}'s established voice doesn't reset here — if they're normally clipped, sarcastic, or formal, that stays true under strain too; their sounds and word choice should still read as them, not a generic register swap into stock scene-narrator voice. The same goes for anything said out loud in the moment — dirty talk, begging, wordless sounds — keep it in ${charName}'s own register (short and broken, silent, or formal cracking under strain, whichever actually fits them) rather than switching to fluent, generic porn dialogue just because the scene turned explicit.${voiceNoteClause}`
-  const povGuard = `Only ${userName}'s own actions belong to ${userName} — write what ${charName} can feel or observe on their own side of it, never ${userName}'s sensations, reactions, or climax for them.`
   const reservedClause =
     pace === 'reserved'
       ? ` Given who ${charName} is right now, this still shows through even here: more checking in, smaller and less certain reactions, a real chance they need a moment or a full pause rather than just riding the momentum — dirty talk or a confident running commentary would read false for them unless that's genuinely who they are underneath it.`
       : ''
-  return [mechanics, antiPatterns, voice + reservedClause, povGuard].join(' ')
+  // The POV guard is carried once, canonically, by `mindGuidance.ts`'s `agencyGuardNote`, which
+  // fires on every romantic/intimate moment (this scene included) — not repeated here.
+  return [mechanics, antiPatterns, voice + reservedClause].join(' ')
 }
 
 /** Immediate post-climax physical beat, fired alongside (not instead of) the content-agnostic `afterglowGuidance` when explicit content is on. */

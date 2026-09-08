@@ -261,9 +261,9 @@ describe('explicitSceneGuidance', () => {
     expect(line).toMatch(/voice doesn't reset/i)
   })
 
-  it("guards against narrating the other person's own sensations/climax", () => {
+  it('no longer carries its own POV guard — that is `agencyGuardNote`\'s single canonical job now', () => {
     const line = explicitSceneGuidance('Sumire', 'Kai', 'peak')
-    expect(line.toLowerCase()).toMatch(/never kai's sensations, reactions, or climax/)
+    expect(line.toLowerCase()).not.toMatch(/only kai's own actions belong to kai/)
   })
 
   it('includes the newer anti-patterns too', () => {

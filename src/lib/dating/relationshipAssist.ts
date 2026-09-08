@@ -6,6 +6,7 @@ import type { CommitmentStatus, CustomSceneFlag, DateEventCard, RelationshipDime
 import type { ChatMessage } from '@/lib/prompt/builder'
 import { formatCommitmentStatus, RELATIONSHIP_DIMENSIONS, SCENE_FLAGS } from '@/lib/dating/stage'
 import { describeIntentForJudge, describeIntentsForDate } from '@/lib/dating/intent'
+import { substituteMacros } from '@/lib/characters/macros'
 import { AFTERCARE_VERDICTS, isAftercareVerdict, type AftercareVerdict } from '@/lib/dating/aftercare'
 import { MOOD_VOCAB, NEED_VOCAB, type CharacterMood, type CharacterNeed } from '@/lib/prompt/mindGuidance'
 import type { AftercarePace } from '@/lib/dating/aftercare'
@@ -276,7 +277,7 @@ export async function assessRelationshipMoment(
     hasOthersPresent
       ? `Also actually present and speaking in this scene right now: ${params.presentParticipants!.join(', ')}. If jealousy is genuinely building, someone else being physically here for it to happen in front of is a stronger, more concrete signal than the same feeling from a conversation or a memory alone — weigh that when deciding whether "jealousy" is established this exchange.`
       : '',
-    describeIntentForJudge(params.intent)?.replace(/\{\{char\}\}/g, params.charName) ?? '',
+    substituteMacros(describeIntentForJudge(params.intent) ?? '', { charName: params.charName, userName: params.userName }),
     params.knownFacts?.length ? `Facts already remembered (don't repeat these): ${params.knownFacts.join('; ')}.` : '',
     hasOpenThreads
       ? `Open threads still unresolved (something between them the story hasn't closed):\n${params.unresolvedFacts!.map((f, i) => `${i}: ${f}`).join('\n')}`
@@ -504,7 +505,7 @@ export async function assessDateOutcome(
     `Full transcript of the ${sceneNoun}:\n${transcriptText || '(nothing was said)'}`,
     `Dimension meanings: ${DELTA_KEYS.map((k) => `${k} = ${DIMENSION_GLOSSARY[k]}`).join('; ')}.`,
     `Known route flags: ${describeFlags(params.customFlags, excludedFlags)}.`,
-    describeIntentsForDate(params.intents ?? [])?.replace(/\{\{char\}\}/g, params.charName) ?? '',
+    substituteMacros(describeIntentsForDate(params.intents ?? []) ?? '', { charName: params.charName, userName: params.userName }),
     params.hiddenAgenda
       ? `${params.charName} went into this secretly wanting: ${params.hiddenAgenda} (never told to the other person). Weigh whether the date actually met that, ignored it, or worked against it — but never name "agenda" or break the fourth wall in the recap.`
       : '',

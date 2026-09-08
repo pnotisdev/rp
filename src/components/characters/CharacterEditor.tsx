@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { ImagePlus, Plus, Sparkles, X } from 'lucide-react'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { charactersApi, instructTemplatesApi, worldsApi } from '@/lib/api/client'
@@ -18,6 +18,7 @@ import { DEFAULT_EXPRESSIONS, slugifyExpressionId, type CustomExpression } from 
 import { BASE_OUTFIT_ID, expressionIdsForOutfit, outfitCoverage, slugifyOutfitId, spriteKey, type Outfit } from '@/lib/vn/outfits'
 import { combinedSceneFlags } from '@/lib/dating/stage'
 import { getCalendarInfo } from '@/lib/world/calendar'
+import { estimateTokens } from '@/lib/tokenEstimate'
 import { newId } from '@/lib/id'
 import { NumberField, SelectField, TextAreaField, TextField } from '@/components/ui/Field'
 import { Button } from '@/components/ui/Button'
@@ -51,6 +52,27 @@ import {
   type WeatherKind,
   type Weekday,
 } from '@/lib/world/calendar'
+
+/** `description`/`personality`/`scenario`/`mes_example` all sit in the prompt's always-included,
+ *  never-trimmed section — past roughly this many tokens a field starts crowding out history and
+ *  world info every single turn. Soft, advisory only. */
+const FIXED_FIELD_TOKEN_HINT = 400
+
+/** Appends a soft "this field is getting large" note to a fixed-section field's hint. */
+function fixedFieldHint(base: ReactNode, value: string): ReactNode {
+  const tokens = estimateTokens(value)
+  if (tokens <= FIXED_FIELD_TOKEN_HINT) return base
+  return (
+    <>
+      {base}
+      {base ? ' ' : null}
+      <span className="text-amber-500">
+        ~{tokens} tokens — this field is sent in full every turn and never trimmed; consider tightening it or moving
+        detail into Character lore.
+      </span>
+    </>
+  )
+}
 
 const TABS: EditorTab[] = [
   { id: 'identity', label: 'Identity' },
@@ -667,7 +689,7 @@ export function CharacterEditor({
 
           <TextAreaField
             label="Description"
-            hint="Appearance, background, core facts. Supports {{char}} / {{user}}."
+            hint={fixedFieldHint('Appearance, background, core facts. Supports {{char}} / {{user}}.', form.description)}
             rows={4}
             value={form.description}
             onChange={(e) => set('description', e.target.value)}
@@ -675,7 +697,10 @@ export function CharacterEditor({
           />
           <TextAreaField
             label="Personality"
-            hint="How they speak, act, and feel — the more specific, the more the model imitates their voice."
+            hint={fixedFieldHint(
+              'How they speak, act, and feel — the more specific, the more the model imitates their voice.',
+              form.personality,
+            )}
             rows={3}
             value={form.personality}
             onChange={(e) => set('personality', e.target.value)}
@@ -683,7 +708,7 @@ export function CharacterEditor({
           />
           <TextAreaField
             label="Scenario"
-            hint="The situation the chat starts in."
+            hint={fixedFieldHint('The situation the chat starts in.', form.scenario)}
             rows={2}
             value={form.scenario}
             onChange={(e) => set('scenario', e.target.value)}
@@ -704,7 +729,10 @@ export function CharacterEditor({
           />
           <TextAreaField
             label="Example messages"
-            hint={'Few-shot dialogue examples, e.g. <START>\\n{{user}}: ...\\n{{char}}: ...'}
+            hint={fixedFieldHint(
+              'Few-shot dialogue examples, e.g. <START>\\n{{user}}: ...\\n{{char}}: ...',
+              form.mes_example,
+            )}
             rows={4}
             value={form.mes_example}
             onChange={(e) => set('mes_example', e.target.value)}
