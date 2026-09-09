@@ -7,7 +7,9 @@ import { fileToDataUrl } from '@/lib/characters/importExport'
 import { DEFAULT_BACKGROUNDS, DEFAULT_BACKGROUND_IDS, slugifyBackgroundId, type CustomBackground } from '@/lib/vn/backgrounds'
 import { BGM_DEFAULT_KEY, SCENE_MOODS } from '@/lib/vn/moods'
 import { combinedSceneFlags, COMMITMENT_ORDER, formatCommitmentStatus, formatRelationshipStage, RELATIONSHIP_MILESTONES } from '@/lib/dating/stage'
-import { type IntimacyCategory, type IntimacyUnlockable } from '@/lib/dating/intimacyCatalog'
+import { intimacyArousalWeight, type IntimacyCategory, type IntimacyUnlockable } from '@/lib/dating/intimacyCatalog'
+import { BODY_REGIONS } from '@/lib/dating/arousal'
+import { BUILT_IN_KINKS } from '@/lib/dating/kinks'
 import { advancePhase, getCalendarInfo, getEnergyRemaining, getMaxEnergyForDay, getWeather, describeWeather, PHASES } from '@/lib/world/calendar'
 import { WORLD_TEMPLATES, getWorldTemplate, hiddenWorldTabs, normalizeWorldTemplateId, type WorldTemplateId } from '@/lib/world/worldTemplates'
 import { newId } from '@/lib/id'
@@ -55,6 +57,46 @@ function blankWorld(template?: WorldTemplateId): Omit<WorldCard, 'id' | 'created
     lorebook: { name: '', entries: [], token_budget: 512, scan_depth: 8 },
     template,
   }
+}
+
+/**
+ * A comma-separated list of ids, committed on blur rather than per keystroke. Live filtering against
+ * a closed vocabulary would delete each character before the word could become a valid one, so the
+ * raw text is held locally and only parsed when the field is left.
+ */
+function TokenListField({
+  label,
+  hint,
+  value,
+  allowed,
+  onCommit,
+}: {
+  label: string
+  hint?: string
+  value: readonly string[] | undefined
+  /** Closed vocabulary to filter against, or `undefined` to accept any non-empty token. */
+  allowed?: readonly string[]
+  onCommit: (next: string[] | undefined) => void
+}) {
+  const [raw, setRaw] = useState((value ?? []).join(', '))
+  // Re-sync when the row's own value changes from outside (a different entry scrolled into this slot).
+  const joined = (value ?? []).join(', ')
+  const [lastJoined, setLastJoined] = useState(joined)
+  if (joined !== lastJoined) {
+    setLastJoined(joined)
+    setRaw(joined)
+  }
+  const commit = () => {
+    const tokens = raw
+      .split(',')
+      .map((t) => t.trim().toLowerCase().replace(/\s+/g, '_'))
+      .filter(Boolean)
+    const kept = allowed ? tokens.filter((t) => allowed.includes(t)) : tokens
+    const unique = [...new Set(kept)]
+    setRaw(unique.join(', '))
+    onCommit(unique.length ? unique : undefined)
+  }
+  return <TextField label={label} hint={hint} value={raw} onChange={(e) => setRaw(e.target.value)} onBlur={commit} />
 }
 
 export function WorldsView({
@@ -867,7 +909,7 @@ function WorldEditor({
               addLabel="Add unlockable"
               emptyHint="No custom additions. The built-in catalog of ~37 is used."
               renderItem={(option) => (
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-[1fr_140px_90px_100px_140px]">
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
                   <TextField label="Label" value={option.label} onChange={(e) => updateIntimacyOption(option.id, { label: e.target.value })} />
                   <SelectField
                     label="Category"
@@ -907,6 +949,52 @@ function WorldEditor({
                       </option>
                     ))}
                   </SelectField>
+                  {/* Second row: the fields the engine actually enforces on. Without `regions` and
+                      `kinks` a custom entry silently bypasses a character's own off-limit regions
+                      (`dating/touch.ts`) and hard limits (`dating/kinks.ts`), because it declares
+                      nothing for either to match against. */}
+                  <NumberField
+                    label="Intensity"
+                    min={0}
+                    max={20}
+                    placeholder={String(intimacyArousalWeight({ ...option, arousalWeight: undefined }))}
+                    hint="How much this drives a scene per turn. Blank uses the per-category default."
+                    value={option.arousalWeight ?? ''}
+                    onChange={(e) =>
+                      updateIntimacyOption(option.id, {
+                        arousalWeight: e.target.value === '' ? undefined : Math.max(0, Math.min(20, Number(e.target.value) || 0)),
+                      })
+                    }
+                  />
+                  <TokenListField
+                    label="Body regions"
+                    hint={`Regions this involves. An entry that names none is never filtered by a character's limits. One of: ${BODY_REGIONS.join(', ')}.`}
+                    value={option.regions}
+                    allowed={BODY_REGIONS}
+                    onCommit={(regions) => updateIntimacyOption(option.id, { regions: regions as IntimacyUnlockable['regions'] })}
+                  />
+                  <TokenListField
+                    label="Kinks"
+                    hint={`Kinks this involves; one hard limit here and the entry is never offered. Built-ins: ${BUILT_IN_KINKS.join(', ')}. Your own names work too.`}
+                    value={option.kinks}
+                    onCommit={(kinks) => updateIntimacyOption(option.id, { kinks })}
+                  />
+                  <TextAreaField
+                    label="Player action line"
+                    rows={2}
+                    className="sm:col-span-3"
+                    hint="What lands in the composer when this is clicked. {char} becomes the name. Blank uses a generic line."
+                    value={option.actionText ?? ''}
+                    onChange={(e) => updateIntimacyOption(option.id, { actionText: e.target.value || undefined })}
+                  />
+                  <TextAreaField
+                    label="Model-facing note"
+                    rows={2}
+                    className="sm:col-span-2"
+                    hint="How the act is described to the model. {char} becomes the name; the player is always 'you'."
+                    value={option.promptNote ?? ''}
+                    onChange={(e) => updateIntimacyOption(option.id, { promptNote: e.target.value || undefined })}
+                  />
                 </div>
               )}
             />

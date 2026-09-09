@@ -551,16 +551,16 @@ describe('resolveIntimacyChoice', () => {
       pendingChoice: {
         fromStage: 'fork',
         options: [
-          { edgeTo: 'left', label: 'Left' },
-          { edgeTo: RESOLVE_STAGE, label: 'Bring it to a close' },
+          { id: 'fork:0', edgeTo: 'left', label: 'Left' },
+          { id: 'fork:1', edgeTo: RESOLVE_STAGE, label: 'Bring it to a close' },
         ],
-        defaultEdgeTo: 'left',
+        defaultOptionId: 'fork:0',
         sinceTurn: 10,
       },
     })
 
   it('moves the scene onto the chosen stage and clears the branch', () => {
-    const next = resolveIntimacyChoice(blocked(), 'left', 12, graph)
+    const next = resolveIntimacyChoice(blocked(), 'fork:0', 12, graph)
     expect(next).not.toBeNull()
     expect((next as IntimacyScene).stageId).toBe('left')
     expect((next as IntimacyScene).pendingChoice).toBeUndefined()
@@ -568,7 +568,12 @@ describe('resolveIntimacyChoice', () => {
   })
 
   it('ends the scene when that is what was chosen', () => {
+    expect(resolveIntimacyChoice(blocked(), 'fork:1', 12, graph)).toBeNull()
+  })
+
+  it('still answers an option named by its target, for a branch persisted before options had ids', () => {
     expect(resolveIntimacyChoice(blocked(), RESOLVE_STAGE, 12, graph)).toBeNull()
+    expect((resolveIntimacyChoice(blocked(), 'left', 12, graph) as IntimacyScene).stageId).toBe('left')
   })
 
   it('ignores a target the branch never offered, rather than jumping the scene somewhere', () => {
@@ -579,7 +584,7 @@ describe('resolveIntimacyChoice', () => {
 
   it('is a no-op on a scene with no branch open', () => {
     const plain = scene({ stageId: 'fork' })
-    expect(resolveIntimacyChoice(plain, 'left', 12, graph)).toBe(plain)
+    expect(resolveIntimacyChoice(plain, 'fork:0', 12, graph)).toBe(plain)
   })
 })
 

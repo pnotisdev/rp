@@ -6,7 +6,7 @@ import { ChatsPanel } from '@/components/chat/ChatsPanel'
 import { ChatWindow } from '@/components/chat/ChatWindow'
 import { GlobalBgm } from '@/components/chat/GlobalBgm'
 import { WelcomeView } from '@/components/chat/WelcomeView'
-import { CompanionView } from '@/components/companion/CompanionView'
+import { AssistantView } from '@/components/assistant/AssistantView'
 import { CharactersView } from '@/components/characters/CharactersView'
 import { WorldsView } from '@/components/worlds/WorldsView'
 import { PersonasView } from '@/components/personas/PersonasView'
@@ -129,7 +129,7 @@ export default function App() {
         {view === 'chat' && (
           <ChatSurface activeChatId={activeChatId} onSelect={setActiveChatId} onNavigate={setView} onNavigateToWorld={navigateToWorld} />
         )}
-        {view === 'companion' && <CompanionView />}
+        {view === 'assistant' && <AssistantView />}
         {view === 'characters' && (
           <CharactersView initialCharacterId={pendingCharacterId} onConsumedInitial={() => setPendingCharacterId(null)} />
         )}
@@ -148,9 +148,9 @@ export default function App() {
         {view === 'gallery' && <GalleryView />}
         {view === 'settings' && <SettingsView />}
       </div>
-      {/* App-level so a world's music keeps playing across view switches. Companion mode runs its
-          own player against its own separately-chosen chat, so it's excluded here. */}
-      {view !== 'companion' && <GlobalBgm />}
+      {/* App-level so a world's music keeps playing across view switches. Mounted in every view:
+          the one exclusion that used to exist was for a competing player in a view since removed. */}
+      <GlobalBgm />
       <ToastViewport />
       <ConfirmDialog />
       {showPalette && (

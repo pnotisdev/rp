@@ -2,7 +2,7 @@ import { create } from 'zustand'
 
 /**
  * A one-flag cross-component signal: something with priority over background music is playing
- * right now (Companion mode's TTS). The BGM player reads it and drops its volume while true, so
+ * right now (a character's line being read aloud). The BGM player reads it and drops its volume while true, so
  * spoken lines aren't fighting the music. Not persisted — it only ever describes the current
  * instant.
  */

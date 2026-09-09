@@ -12,7 +12,7 @@ import {
   type IntimacyTurnObservation,
 } from './intimacyScene'
 import { BRANCHING_SCENARIO } from './scenarios'
-import { CHOICE_DEFAULT_AFTER_TURNS, RESOLVE_STAGE } from './intimacyStages'
+import { CHOICE_DEFAULT_AFTER_TURNS, defaultChoiceOption, RESOLVE_STAGE } from './intimacyStages'
 import { detectContinuityBreak } from './continuityGuard'
 import { sceneStateBlock } from '@/lib/prompt/sceneStateBlock'
 
@@ -65,7 +65,7 @@ class Run {
   choose(label: string): this {
     const option = this.scene?.pendingChoice?.options.find((o) => o.label === label)
     expect(option, `no option labelled "${label}"`).toBeTruthy()
-    this.scene = resolveIntimacyChoice(this.scene!, option!.edgeTo, this.turn, BRANCHING_SCENARIO)
+    this.scene = resolveIntimacyChoice(this.scene!, option!.id, this.turn, BRANCHING_SCENARIO)
     return this
   }
 
@@ -115,7 +115,7 @@ describe('a full playthrough of the branching scenario', () => {
     expect(run.scene?.pendingChoice?.options.map((o) => o.label)).toEqual([
       'Finish together, inside',
       'Pull out first',
-      'Not yet — draw it out',
+      'Not yet, draw it out',
     ])
     run.choose('Pull out first')
     expect(run.scene).toBeNull()
@@ -131,7 +131,7 @@ describe('a full playthrough of the branching scenario', () => {
 
   it("lets the closing branch send the scene back for more rather than only ending it", () => {
     const run = new Run().playToChoice().choose('Move straight on').playToChoice(20, pushing(['genitals']))
-    run.choose('Not yet — draw it out')
+    run.choose('Not yet, draw it out')
     expect(run.stageId).toBe('together')
     expect(run.scene?.pendingChoice).toBeUndefined()
   })
@@ -156,7 +156,7 @@ describe('a full playthrough of the branching scenario', () => {
 
   it("fires a closing branch's own default rather than re-asking the same question forever", () => {
     const run = new Run().playToChoice().choose('Move straight on').playToChoice(20, pushing(['genitals']))
-    expect(run.scene?.pendingChoice?.defaultEdgeTo).toBe(RESOLVE_STAGE)
+    expect(defaultChoiceOption(run.scene!.pendingChoice!)?.edgeTo).toBe(RESOLVE_STAGE)
     // Nobody answers. The authored default ends the scene, instead of the branch being cleared and
     // raised again on a loop the player can never time out of.
     run.play(CHOICE_DEFAULT_AFTER_TURNS + 1, pushing(['genitals']))
@@ -179,7 +179,7 @@ describe('a full playthrough of the branching scenario', () => {
 
   it('falls through to the authored default rather than stranding a player who never answered', () => {
     const run = new Run().playToChoice()
-    expect(run.scene?.pendingChoice?.defaultEdgeTo).toBe('together')
+    expect(defaultChoiceOption(run.scene!.pendingChoice!)?.edgeTo).toBe('together')
     run.play(4)
     expect(run.stageId).toBe('together')
     expect(run.scene?.pendingChoice).toBeUndefined()

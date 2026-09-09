@@ -34,6 +34,19 @@ export const BAND_FLOORS: Record<ArousalBand, number> = {
 const BANDS_HIGH_TO_LOW: ArousalBand[] = ['over', 'edge', 'engaged', 'warming', 'baseline']
 
 /**
+ * How each band reads in plain language. Shared by the prompt's scene-state block and the panel UI
+ * on purpose: a band the model is told is "close to the edge" should not be labelled anything else
+ * on screen, and two copies of five strings drift.
+ */
+export const AROUSAL_BAND_PHRASE: Record<ArousalBand, string> = {
+  baseline: 'not yet worked up',
+  warming: 'warming up',
+  engaged: 'well into it',
+  edge: 'close to the edge',
+  over: 'right at the edge',
+}
+
+/**
  * Stored on the active scene. `responsiveness` is deliberately absent — it's derived per turn from
  * mood/pace/stats by `responsivenessFor`, so a character who has calmed down since doesn't keep an
  * old multiplier baked into their scene state.

@@ -10,12 +10,12 @@ const STEP_MS = 40
 const DUCK_FACTOR = 0.22
 
 /**
- * Background music for VN / Companion mode. Renders nothing visible — a pair of looping `<audio>`
+ * Background music for a scene. Renders nothing visible — a pair of looping `<audio>`
  * elements that crossfade whenever the resolved track changes (the model tags a new mood, the
  * scene moves to a location with its own track, the chat switches worlds). Silent and inert until
  * the user raises `bgmVolume` above 0 in Settings — dragging that slider is itself the user
  * gesture that unlocks browser audio. Drops to a low level (not silent) while `useAudioDuckStore`
- * is ducked (Companion mode's TTS).
+ * is ducked (a line being read aloud).
  *
  * The fade is driven by a wall-clock `setInterval` rather than `requestAnimationFrame`: rAF is
  * paused outright in a background tab, which would leave a crossfade frozen half-done; a timer

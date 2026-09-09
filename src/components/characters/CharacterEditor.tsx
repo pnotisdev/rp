@@ -655,8 +655,16 @@ export function CharacterEditor({
   const handleImportPackFile = async (file: File) => {
     try {
       const pack = await parseCharacterPackFile(file)
-      const { character: created } = await importCharacterPack(pack)
+      const { character: created, rejectedScenarios } = await importCharacterPack(pack)
       toastSuccess(`Imported "${created.card.name}"${pack.world ? ' with its world' : ''}.`)
+      // A dropped scene shape has to be said out loud: the import otherwise reports success and the
+      // world quietly cannot run a scenario its author wrote.
+      if (rejectedScenarios.length) {
+        toastError(
+          `${rejectedScenarios.length === 1 ? 'One scene shape was' : `${rejectedScenarios.length} scene shapes were`} ` +
+            `left out as malformed and won't be available in this world. ${rejectedScenarios.join(' | ')}`,
+        )
+      }
       onSaved(created.id)
     } catch (e) {
       toastError(errorMessage(e))
@@ -1679,7 +1687,7 @@ export function CharacterEditor({
       {tab === 'voice' && (
         <Section
           title="Voice"
-          description="Overrides the global Settings → Voice provider/voice for this character in Companion mode. Leave blank to use the global default."
+          description="Overrides the global Settings → Voice provider/voice when this character's lines are read aloud in Visual Novel mode. Leave blank to use the global default."
           surface="bare"
         >
           <div className="grid grid-cols-1 gap-x-3 sm:grid-cols-2">

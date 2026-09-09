@@ -45,8 +45,25 @@ export interface StageEdge {
   entryId?: string
   /** Fires on its own if the player leaves a choice sitting. One per stage; the first eligible option is used when none is marked. */
   isDefault?: boolean
+  /**
+   * A scene flag recorded when this edge is taken (`Chat.sceneFlags`, the same store a `flag_set`
+   * trigger condition reads). This is what makes a branch consequential rather than decorative: two
+   * edges can lead to the same place ("finish inside" and "pull out" both end the scene), and
+   * without a flag the engine keeps no record of which the player actually chose.
+   */
+  setsFlag?: string
   /** Every condition must hold. Empty/absent means the edge is gated only by its stage's own floors. */
   conditions?: StageCondition[]
+}
+
+/** One answer a branch offers. `id`, not `edgeTo`, identifies it: two options can share a target. */
+export interface PendingChoiceOption {
+  /** Unique within the branch, and stable for as long as the scenario is. What an answer names. */
+  id: string
+  edgeTo: string
+  label: string
+  entryId?: string
+  setsFlag?: string
 }
 
 /**
@@ -57,7 +74,10 @@ export interface StageEdge {
 export interface PendingChoice {
   fromStage: string
   /** Only edges whose conditions currently hold — a limit or an unmet gate simply doesn't appear. */
-  options: { edgeTo: string; label: string; entryId?: string }[]
+  options: PendingChoiceOption[]
+  /** The option that fires if nobody answers. */
+  defaultOptionId?: string
+  /** Pre-`defaultOptionId` scenes recorded only a target. Still read, so a branch open across an upgrade can still time out. */
   defaultEdgeTo?: string
   /** Turn the branch was raised, for the default's own timer. */
   sinceTurn: number
@@ -177,22 +197,53 @@ export function eligibleChoiceEdges(stage: IntimacyStage, ctx: StageContext): St
   return edgesOfMode(stage, 'choice', ctx)
 }
 
+/** An edge's stable id within its stage — its position, since two edges can share both a target and a label. */
+export function stageEdgeId(stage: IntimacyStage, index: number): string {
+  return `${stage.id}:${index}`
+}
+
 /** The branch to raise at this stage, or `undefined` when there's nothing to ask. */
 export function buildPendingChoice(stage: IntimacyStage, ctx: StageContext, charReplyCount: number): PendingChoice | undefined {
-  const edges = eligibleChoiceEdges(stage, ctx)
+  // Mapped over the stage's own edge list rather than the filtered result, so an option's id is its
+  // real position and stays put as gates open and close around it.
+  const eligible = stage.edges
+    .map((edge, index) => ({ edge, index }))
+    .filter(({ edge }) => edge.mode === 'choice' && stageConditionsMet(edge.conditions, ctx))
+  const options: PendingChoiceOption[] = eligible.map(({ edge, index }) => ({
+    id: stageEdgeId(stage, index),
+    edgeTo: edge.to,
+    label: edge.label ?? edge.to,
+    ...(edge.entryId ? { entryId: edge.entryId } : {}),
+    ...(edge.setsFlag ? { setsFlag: edge.setsFlag } : {}),
+  }))
   // One option is not a decision — it's a transition the author should have marked `auto`.
-  if (edges.length < 2) return undefined
+  if (options.length < 2) return undefined
+  const preferred = eligible.find(({ edge }) => edge.isDefault) ?? eligible[0]
   return {
     fromStage: stage.id,
-    options: edges.map((edge) => ({ edgeTo: edge.to, label: edge.label ?? edge.to, entryId: edge.entryId })),
-    defaultEdgeTo: (edges.find((edge) => edge.isDefault) ?? edges[0]).to,
+    options,
+    defaultOptionId: stageEdgeId(stage, preferred.index),
     sinceTurn: charReplyCount,
   }
 }
 
+/**
+ * The option an answer names. Falls back to matching a target, so a branch persisted before options
+ * carried ids can still be answered instead of deadlocking across an upgrade.
+ */
+export function pendingChoiceOption(choice: PendingChoice, optionId: string): PendingChoiceOption | undefined {
+  return choice.options.find((option) => option.id === optionId) ?? choice.options.find((option) => option.edgeTo === optionId)
+}
+
+/** The option that fires when nobody answers in time, by id or by the older target-only field. */
+export function defaultChoiceOption(choice: PendingChoice): PendingChoiceOption | undefined {
+  if (choice.defaultOptionId) return pendingChoiceOption(choice, choice.defaultOptionId)
+  return choice.defaultEdgeTo ? choice.options.find((option) => option.edgeTo === choice.defaultEdgeTo) : undefined
+}
+
 /** Whether a raised branch has sat long enough for its default to take over. */
 export function choiceDefaultDue(choice: PendingChoice, charReplyCount: number): boolean {
-  return !!choice.defaultEdgeTo && charReplyCount - choice.sinceTurn >= CHOICE_DEFAULT_AFTER_TURNS
+  return !!defaultChoiceOption(choice) && charReplyCount - choice.sinceTurn >= CHOICE_DEFAULT_AFTER_TURNS
 }
 
 /** Past its soft cap, a stage is overstaying — a nudge, never a block. */
@@ -253,6 +304,7 @@ export function validateScenarioGraph(graph: ScenarioGraph): string[] {
     for (const edge of stage.edges) {
       if (edge.to !== RESOLVE_STAGE && !ids.has(edge.to)) problems.push(`stage "${stage.id}" has an edge to unknown stage "${edge.to}"`)
       if (edge.mode === 'choice' && !edge.label?.trim()) problems.push(`a choice edge out of "${stage.id}" has no player-facing label`)
+      if (edge.setsFlag !== undefined && !edge.setsFlag.trim()) problems.push(`an edge out of "${stage.id}" has a blank setsFlag`)
       for (const condition of edge.conditions ?? []) {
         if (!KNOWN_CONDITION_KINDS.has(condition.kind)) problems.push(`stage "${stage.id}" uses unknown condition "${condition.kind}"`)
       }
@@ -272,6 +324,11 @@ export function validateScenarioGraph(graph: ScenarioGraph): string[] {
   }
   for (const stage of graph.stages) {
     if (!reached.has(stage.id)) problems.push(`stage "${stage.id}" is unreachable from "${graph.entryStage}"`)
+    // Two choice edges with the same label are two identical buttons: the player cannot tell them
+    // apart, so whichever they meant, one of them was unpickable in practice.
+    const labels = stage.edges.filter((edge) => edge.mode === 'choice').map((edge) => edge.label?.trim())
+    const dupe = labels.find((label, i) => label && labels.indexOf(label) !== i)
+    if (dupe) problems.push(`stage "${stage.id}" offers two choices labelled "${dupe}"`)
   }
   // A graph with no way out would hold a scene open forever.
   if (!graph.stages.some((stage) => stage.edges.some((edge) => edge.to === RESOLVE_STAGE))) {

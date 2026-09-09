@@ -194,14 +194,16 @@ describe('buildPendingChoice', () => {
   })
 
   it('marks the authored default, falling back to the first option when none is marked', () => {
-    expect(buildPendingChoice(branch, ctx(), 5)?.defaultEdgeTo).toBe('b')
+    // Identified by option id, not by target: two options can share a target, so a target-only
+    // default would be ambiguous about which of them it meant.
+    expect(buildPendingChoice(branch, ctx(), 5)?.defaultOptionId).toBe('here:1')
     const unmarked = stage({
       edges: [
-        { to: 'x', mode: 'choice', label: 'X' },
-        { to: 'y', mode: 'choice', label: 'Y' },
+        { to: 'a', mode: 'choice', label: 'Option A' },
+        { to: 'b', mode: 'choice', label: 'Option B' },
       ],
     })
-    expect(buildPendingChoice(unmarked, ctx(), 5)?.defaultEdgeTo).toBe('x')
+    expect(buildPendingChoice(unmarked, ctx(), 5)?.defaultOptionId).toBe('here:0')
   })
 
   it('stamps the turn it was raised, for its own timer', () => {
@@ -210,7 +212,12 @@ describe('buildPendingChoice', () => {
 })
 
 describe('choiceDefaultDue', () => {
-  const choice = { fromStage: 'a', options: [{ edgeTo: 'b', label: 'B' }], defaultEdgeTo: 'b', sinceTurn: 5 }
+  const choice = {
+    fromStage: 'a',
+    options: [{ id: 'a:0', edgeTo: 'b', label: 'B' }],
+    defaultOptionId: 'a:0',
+    sinceTurn: 5,
+  }
 
   it('only comes due after the branch has sat for a few turns', () => {
     expect(choiceDefaultDue(choice, 5 + CHOICE_DEFAULT_AFTER_TURNS - 1)).toBe(false)
@@ -218,7 +225,12 @@ describe('choiceDefaultDue', () => {
   })
 
   it('never comes due for a branch with no default to fall back on', () => {
-    expect(choiceDefaultDue({ ...choice, defaultEdgeTo: undefined }, 99)).toBe(false)
+    expect(choiceDefaultDue({ ...choice, defaultOptionId: undefined }, 99)).toBe(false)
+  })
+
+  it("honours a pre-`defaultOptionId` branch's target-only default, so one open across an upgrade still times out", () => {
+    const legacy = { fromStage: 'a', options: [{ id: 'a:0', edgeTo: 'b', label: 'B' }], defaultEdgeTo: 'b', sinceTurn: 5 }
+    expect(choiceDefaultDue(legacy, 5 + CHOICE_DEFAULT_AFTER_TURNS)).toBe(true)
   })
 })
 

@@ -9,8 +9,7 @@ import { BgmPlayer } from './BgmPlayer'
  * you step into Settings or the character list — it resolves the world straight from the active
  * chat id, and the current scene (for mood-reactive track selection) from `useBgmSceneStore`,
  * which the chat view publishes. Does nothing until the user raises the volume in Settings
- * (BgmPlayer handles that). Not mounted for Companion mode, which runs its own player against its
- * own separately-chosen chat.
+ * (BgmPlayer handles that).
  */
 export function GlobalBgm() {
   const activeChatId = useSettingsStore((s) => s.activeChatId)

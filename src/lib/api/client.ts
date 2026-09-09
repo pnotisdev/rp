@@ -12,6 +12,7 @@ import type {
   WorldCard,
   WorldInfoBook,
 } from '@/lib/types'
+import type { AssistantThread } from '@/lib/assistant/thread'
 import { toastError, toastSuccess, useToastStore } from '@/lib/store/useToastStore'
 
 // The local API server runs on the same machine, but a wedged Node process (or a very large
@@ -142,6 +143,8 @@ export const charactersApi = {
   },
 }
 export const personasApi = makeResource<Persona>('personas', '/personas')
+/** Plain assistant conversations (`lib/assistant/`) — no character, no relationship track. */
+export const assistantThreadsApi = makeResource<AssistantThread>('assistant-threads', '/assistant-threads')
 export const chatsApi = {
   ...makeResource<Chat>('chats', '/chats'),
   // Soft delete — the chat moves to the trash (`trash`/`restore`/`purge` below) rather than being

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ArrowUpRight, X } from 'lucide-react'
+import { ArrowUpRight, Heart, X } from 'lucide-react'
 import type { Character, GalleryEntry } from '@/lib/characters/cardSpec'
 import type { Chat, WorldCard } from '@/lib/types'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
@@ -37,7 +37,10 @@ import { AFTERGLOW_TURNS, afterglowTurnsSince } from '@/lib/dating/aftercare'
 import { describeInitiativeBalance, describeMomentum } from '@/lib/dating/momentum'
 import { isRebuffActive } from '@/lib/dating/rebuff'
 import { isIntimacySceneActive } from '@/lib/dating/intimacyScene'
-import { isSceneParticipant, sceneParticipants } from '@/lib/dating/sceneParticipants'
+import { isSceneParticipant } from '@/lib/dating/sceneParticipants'
+import { getScenarioCatalog, scenarioById } from '@/lib/dating/scenarios'
+import { SceneStateCard } from '@/components/chat/SceneStateCard'
+import { StageLabel, StageMeter } from '@/components/ui/Stage'
 import { WORLD_TEMPLATES, normalizeWorldTemplateId, type WorldTemplateId } from '@/lib/world/worldTemplates'
 import { daysUntilAnnualDate } from '@/lib/world/calendar'
 import type { CommitmentStatus } from '@/lib/types'
@@ -92,10 +95,12 @@ interface RelationshipPanelProps {
   onNavigateToWorld?: (worldId: string, tab?: string) => void
   /** Adapts the option's action text to the scene and drops it in the composer for review; resolves once populated. */
   onIntimacyAction: (option: IntimacyUnlockable) => Promise<void>
-  /** Answers a branch the scene is blocked on (`intimacyStages.ts`'s `PendingChoice`). */
-  onIntimacyChoice: (characterId: string, edgeTo: string) => Promise<void>
+  /** Answers a branch the scene is blocked on, by the option's own id (`intimacyStages.ts`'s `PendingChoiceOption`). */
+  onIntimacyChoice: (characterId: string, optionId: string) => Promise<void>
   /** How many replies the character has given — the unit the aftercare window is counted in. */
   charReplyCount: number
+  /** The player's own display name, for the scene readout's player-side rows. */
+  personaName?: string
 }
 
 function upcomingGallery(gallery: GalleryEntry[], unlocked: Set<string>, affection: number, flags: Set<string>) {
@@ -149,6 +154,7 @@ export function RelationshipPanel({
   onIntimacyAction,
   onIntimacyChoice,
   charReplyCount,
+  personaName = 'You',
 }: RelationshipPanelProps) {
   // Everyone this chat tracks a relationship for; falls back to the primary if a picked participant leaves the roster.
   const trackedCharacters = character ? [character, ...participantCharacters] : participantCharacters
@@ -227,11 +233,11 @@ export function RelationshipPanel({
   // clicked-action path as the Unlocks tab, and one that doesn't simply moves the stage.
   const pendingChoice = viewingScene?.pendingChoice
 
-  const handleChoice = async (edgeTo: string) => {
+  const handleChoice = async (optionId: string) => {
     if (pendingChoiceEdge) return
-    setPendingChoiceEdge(edgeTo)
+    setPendingChoiceEdge(optionId)
     try {
-      await onIntimacyChoice(viewingId, edgeTo)
+      await onIntimacyChoice(viewingId, optionId)
       onClose()
     } finally {
       setPendingChoiceEdge(null)
@@ -377,15 +383,15 @@ export function RelationshipPanel({
 
       {/* Pinned above the tabs: bond/warmth, current emotional read, and the at-risk banner if any. */}
       <div className="mb-4 rounded-xl bg-bg-sunken p-4">
-        <div className="mb-1 flex items-center justify-between text-xs text-text-muted">
-          <span>Bond with {viewingCharacter?.card.name ?? 'Character'}</span>
-          <span className="capitalize">
-            {formatRelationshipStage(relationshipStage)} • {warmth} warmth
-          </span>
+        {/* The VN HUD's own Bond row, same label treatment and same meter (`ui/Stage`) — the two are
+            the same components now rather than two drifting copies of one look. */}
+        <div className="mb-1.5 flex min-w-0 items-center gap-1.5 text-xs">
+          <Heart size={11} strokeWidth={2.25} className="shrink-0 text-romance" fill="currentColor" fillOpacity={0.4} />
+          <StageLabel>Bond{trackedCharacters.length > 1 ? ` · ${viewingCharacter?.card.name ?? ''}` : ''}</StageLabel>
+          <span className="truncate font-semibold capitalize text-romance">{formatRelationshipStage(relationshipStage)}</span>
+          <span className="shrink-0 text-text">{warmth}</span>
         </div>
-        <div className="h-2 overflow-hidden rounded-full bg-bg-elevated">
-          <div className="h-full rounded-full bg-romance transition-[width] duration-500" style={{ width: `${warmth}%` }} />
-        </div>
+        <StageMeter value={warmth} />
         {nextMilestone ? (
           <p className="mt-2 text-xs text-text-muted">
             Next stage: {formatRelationshipStage(nextMilestone.stage)} at {nextMilestone.at} warmth
@@ -408,15 +414,19 @@ export function RelationshipPanel({
           </p>
         )}
         {viewingScene && (
-          <p className="mt-2 border-t border-bg-elevated pt-2 text-xs italic text-romance">
-            Currently {viewingScene.phase === 'peak' ? 'at its peak' : 'building'}: {viewingScene.activityLabel}
-            {/* Who else is in it — otherwise a shared scene reads here exactly like a private one. */}
-            {sceneParticipants(viewingScene).length > 1 &&
-              `. With ${sceneParticipants(viewingScene)
-                .filter((id) => id !== viewingId)
-                .map((id) => trackedCharacters.find((c) => c.id === id)?.card.name ?? 'someone else')
-                .join(', ')}`}
-          </p>
+          // The full engine-tracked scene, in the VN HUD's own idiom (`SceneStateCard`): stage,
+          // every participant's own meter, what's off, and who is touching whom. All of it was
+          // already being injected into the prompt and none of it was visible before.
+          <div className="mt-3 border-t border-bg-elevated pt-3">
+            <SceneStateCard
+              scene={viewingScene}
+              viewingId={viewingId}
+              nameOf={(id) => trackedCharacters.find((c) => c.id === id)?.card.name ?? 'Someone else'}
+              userName={personaName}
+              charReplyCount={charReplyCount}
+              graph={scenarioById(getScenarioCatalog(world), viewingScene.scenarioId)}
+            />
+          </div>
         )}
         {afterglowRemaining !== null && (
           // Says what's true, not what to do — the window scores what the player does with it.
@@ -450,12 +460,12 @@ export function RelationshipPanel({
           <div className="mt-3 flex flex-wrap gap-2">
             {pendingChoice.options.map((option) => (
               <button
-                key={option.edgeTo}
-                onClick={() => handleChoice(option.edgeTo)}
+                key={option.id}
+                onClick={() => handleChoice(option.id)}
                 disabled={!!pendingChoiceEdge}
                 className="rounded-lg border border-romance/40 bg-bg-elevated px-3 py-1.5 text-xs font-medium text-romance transition-colors hover:bg-romance/15 disabled:opacity-50"
               >
-                {pendingChoiceEdge === option.edgeTo ? 'Working…' : option.label}
+                {pendingChoiceEdge === option.id ? 'Working…' : option.label}
               </button>
             ))}
           </div>

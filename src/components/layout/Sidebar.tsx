@@ -4,21 +4,21 @@ import {
   GalleryHorizontalEnd,
   Globe,
   MessageCircle,
-  Mic,
   PanelLeftClose,
   PanelLeftOpen,
   Search,
   Settings as SettingsIcon,
+  Sparkles,
   Users,
   type LucideIcon,
 } from 'lucide-react'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 
-export type ViewId = 'chat' | 'companion' | 'characters' | 'worlds' | 'personas' | 'worldinfo' | 'gallery' | 'settings'
+export type ViewId = 'chat' | 'assistant' | 'characters' | 'worlds' | 'personas' | 'worldinfo' | 'gallery' | 'settings'
 
 export const NAV: { id: ViewId; label: string; icon: LucideIcon }[] = [
   { id: 'chat', label: 'Chat', icon: MessageCircle },
-  { id: 'companion', label: 'Companion', icon: Mic },
+  { id: 'assistant', label: 'Assistant', icon: Sparkles },
   { id: 'characters', label: 'Characters', icon: Users },
   { id: 'worlds', label: 'Worlds', icon: Globe },
   { id: 'personas', label: 'Personas', icon: CircleUserRound },

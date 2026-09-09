@@ -1,5 +1,5 @@
 // Multi-provider text-to-speech. Every provider returns a playable audio Blob from
-// plain text — the Companion view doesn't need to know which one is behind it.
+// plain text — a caller doesn't need to know which provider is behind it.
 
 export type TtsProviderId = 'koboldcpp' | 'openai-compatible' | 'elevenlabs' | 'azure' | 'alibaba'
 

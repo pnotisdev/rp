@@ -32,7 +32,7 @@ export function VoiceSettings() {
 
   // Round-trips a short line through whichever provider is configured right now and plays the
   // result back — a real synthesis + playback, not just a ping, so a wrong voice ID or a key with
-  // no quota left surfaces here instead of the first time it's tried from the Companion view.
+  // no quota left surfaces here instead of the first time a line is read aloud in a scene.
   const testConnection = async () => {
     testAudioRef.current?.pause()
     setTestState('loading')
@@ -59,8 +59,8 @@ export function VoiceSettings() {
   return (
     <SettingsPage>
       <Section
-        title="Voice: the Companion's mouth"
-        description="Text-to-speech provider for the Companion view. Keys are stored only in this browser and sent directly to the provider you pick. Never through any other server."
+        title="Voice (text-to-speech)"
+        description="Read a character's lines aloud from Visual Novel mode. Keys are stored only in this browser and sent directly to the provider you pick. Never through any other server."
       >
           <label className="mb-3 block">
             <span className="mb-1 block text-xs font-medium text-text-muted">Provider</span>
@@ -199,17 +199,6 @@ export function VoiceSettings() {
           )}
       </Section>
 
-      <Section
-        title="Ears (speech-to-text)"
-        description={
-          <>
-            Uses KoboldCpp's own Whisper endpoint over your existing connection. No separate setup.
-            Launch KoboldCpp with a Whisper model loaded (<code className="font-mono">--whispermodel</code>)
-            for the Companion's push-to-talk mic to work.
-          </>
-        }
-        surface="bare"
-      />
     </SettingsPage>
   )
 }

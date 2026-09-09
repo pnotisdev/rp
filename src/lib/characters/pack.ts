@@ -189,10 +189,30 @@ export async function parseCharacterPackFile(file: File): Promise<CharacterPackV
   return raw as CharacterPackV1
 }
 
-/** Recreates a character — and its bundled world, if present — from a pack, as brand-new records. */
-export async function importCharacterPack(pack: CharacterPackV1): Promise<{ character: Character; world?: WorldCard }> {
+/**
+ * Recreates a character — and its bundled world, if present — from a pack, as brand-new records.
+ *
+ * `rejectedScenarios` names any scene shape that failed validation and was left out, so the caller
+ * can say so. A malformed scenario is still never loaded (it would strand a live scene), but dropping
+ * one in silence is its own failure: the author sees an import that reported success and a world that
+ * quietly cannot run the scene they wrote.
+ */
+export async function importCharacterPack(
+  pack: CharacterPackV1,
+): Promise<{ character: Character; world?: WorldCard; rejectedScenarios: string[] }> {
   let world: WorldCard | undefined
+  const rejectedScenarios: string[] = []
   if (pack.world) {
+    const scenarios: NonNullable<WorldCard['scenarios']> = []
+    for (const [i, graph] of (pack.world.scenarios ?? []).entries()) {
+      const problems = validateScenarioSource(graph)
+      if (problems.length === 0) {
+        scenarios.push(graph)
+        continue
+      }
+      const name = (graph as { title?: string; id?: string } | null)?.title || (graph as { id?: string } | null)?.id || `#${i + 1}`
+      rejectedScenarios.push(`${name}: ${problems.join('; ')}`)
+    }
     world = await worldsApi.create({
       name: pack.world.name,
       description: pack.world.description,
@@ -207,8 +227,9 @@ export async function importCharacterPack(pack: CharacterPackV1): Promise<{ char
       gifts: pack.world.gifts,
       items: pack.world.items,
       customSceneFlags: pack.world.customSceneFlags,
-      // Rejected wholesale rather than loaded broken — see `dating/scenarios.ts`'s validator.
-      scenarios: (pack.world.scenarios ?? []).filter((graph) => validateScenarioSource(graph).length === 0),
+      // Rejected wholesale rather than loaded broken — see `dating/scenarios.ts`'s validator. What
+      // was rejected, and why, is returned above rather than swallowed here.
+      scenarios,
       relationshipThresholds: pack.world.relationshipThresholds,
     })
   }
@@ -243,5 +264,5 @@ export async function importCharacterPack(pack: CharacterPackV1): Promise<{ char
     dateModeOptOut: pack.character.dateModeOptOut,
     worldId: world?.id,
   })
-  return { character, world }
+  return { character, world, rejectedScenarios }
 }

@@ -571,8 +571,8 @@ export function ChatWindow({
   // Answering a branch the scene is blocked on: the stage moves in the hook, and an option that names a
   // catalog entry then goes through the ordinary clicked-action path so it lands in the composer for
   // review like any other deliberate move.
-  const onIntimacyChoice = async (characterId: string, edgeTo: string) => {
-    const entryId = await chooseIntimacyBranch(characterId, edgeTo)
+  const onIntimacyChoice = async (characterId: string, optionId: string) => {
+    const entryId = await chooseIntimacyBranch(characterId, optionId)
     const entry = entryId ? intimacyItemById(entryId, world) : undefined
     if (entry) await onIntimacyAction(entry)
   }
@@ -796,6 +796,7 @@ export function ChatWindow({
           onEndRelationship={endRelationship}
           onNavigateToWorld={onNavigateToWorld}
           charReplyCount={countCharReplies(messages)}
+          personaName={persona?.name || 'You'}
           onIntimacyAction={onIntimacyAction}
           onIntimacyChoice={onIntimacyChoice}
         />
@@ -858,7 +859,15 @@ export function ChatWindow({
       )}
 
       {showDirector && (
-        <DirectorPanel chat={chat} character={character} world={world} onClose={() => setShowDirector(false)} />
+        <DirectorPanel
+          chat={chat}
+          character={character}
+          participantCharacters={participantCharacters}
+          world={world}
+          charReplyCount={countCharReplies(messages)}
+          personaName={persona?.name || 'You'}
+          onClose={() => setShowDirector(false)}
+        />
       )}
 
       <TuningPanel

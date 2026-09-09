@@ -5,6 +5,8 @@ import {
   clothingOf,
   sceneArousalBand,
   sceneArousalFloorValue,
+  resolveIntimacyChoice,
+  resolvedSceneFlags,
   sceneResolveSnapshot,
   startOrShiftIntimacyScene,
   type IntimacyScene,
@@ -13,7 +15,8 @@ import {
 } from './intimacyScene'
 import { SCENE_PLAYER } from './sceneParticipants'
 import { BAND_FLOORS } from './arousal'
-import { DEFAULT_SCENARIO } from './intimacyStages'
+import { buildPendingChoice, defaultChoiceOption, DEFAULT_SCENARIO, RESOLVE_STAGE, type ScenarioGraph } from './intimacyStages'
+import { BRANCHING_SCENARIO } from './scenarios'
 
 // One scene shared by two characters, rather than two scenes that will eventually disagree. What
 // these cover is the part no single-character test can: that the engine runs every participant's own
@@ -209,5 +212,183 @@ describe('what a resolved shared scene hands aftercare', () => {
     const snapshot = sceneResolveSnapshot(next, 6)
     expect(snapshot.arousal).toBe(arousalOf(next, OTHER).value)
     expect(snapshot.arousal).toBeLessThan(arousalOf(next, OWNER).value)
+  })
+})
+
+describe('a branch whose options lead to the same place', () => {
+  // The closing branch of `BRANCHING_SCENARIO` offers "Finish together, inside" and "Pull out
+  // first". Both end the scene, so both edges point at `resolve` — which means the option's target
+  // cannot be what identifies it. These pin the two things that broke as a result.
+  const closing = () => {
+    const stage = BRANCHING_SCENARIO.stages.find((st) => st.id === 'finish')!
+    return buildPendingChoice(stage, { arousal: 100 }, 5)!
+  }
+
+  it('gives every option a distinct identity, so two of them are never the same button', () => {
+    const ids = closing().options.map((o) => o.id)
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  it('records which option was actually taken, rather than only where it led', () => {
+    const choice = closing()
+    const inside = choice.options.find((o) => o.label === 'Finish together, inside')!
+    const pullOut = choice.options.find((o) => o.label === 'Pull out first')!
+    // Both resolve the scene, so the flag is the only thing that survives to tell them apart.
+    expect(inside.setsFlag).toBeTruthy()
+    expect(pullOut.setsFlag).toBeTruthy()
+    expect(inside.setsFlag).not.toBe(pullOut.setsFlag)
+  })
+
+  it("writes the taken option's flag onto the scene, not just into the prose", () => {
+    const withChoice = { ...shared(), pendingChoice: closing() }
+    const pullOut = closing().options.find((o) => o.label === 'Pull out first')!
+    // Ending the scene returns null, so the flag has to be readable from the resolve itself.
+    expect(resolvedSceneFlags(withChoice, pullOut.id)).toContain(pullOut.setsFlag)
+  })
+
+  it('carries a flag set by a non-ending option forward on the live scene', () => {
+    const withChoice = { ...shared(), pendingChoice: closing() }
+    const notYet = closing().options.find((o) => o.label === 'Not yet, draw it out')!
+    const next = resolveIntimacyChoice(withChoice, notYet.id, 6, BRANCHING_SCENARIO)
+    expect(next).not.toBeNull()
+    expect(next!.stageId).toBe('together')
+  })
+})
+
+describe('what a branch flag survives as', () => {
+  const closing = () => {
+    const stage = BRANCHING_SCENARIO.stages.find((st) => st.id === 'finish')!
+    return buildPendingChoice(stage, { arousal: 100 }, 5)!
+  }
+
+  it('fires the default option when nobody answers, and records its flag on the way out', () => {
+    const choice = closing()
+    const withChoice: IntimacyScene = {
+      ...shared(),
+      stageId: 'finish',
+      stageSinceTurn: 0,
+      pendingChoice: choice,
+      arousal: { value: 100, regionExposure: {}, bandSinceTurn: 0 },
+      participantArousal: { [OTHER]: { value: 100, regionExposure: {}, bandSinceTurn: 0 } },
+    }
+    const dflt = defaultChoiceOption(choice)!
+    expect(dflt.setsFlag).toBe('finished_inside')
+    // The default ends this scene, so its flag has to be readable before the resolve discards it.
+    expect(resolvedSceneFlags(withChoice, dflt.id)).toContain('finished_inside')
+  })
+
+  it('never records a flag for an option that was not the one taken', () => {
+    const withChoice = { ...shared(), pendingChoice: closing() }
+    const pullOut = closing().options.find((o) => o.label === 'Pull out first')!
+    expect(resolvedSceneFlags(withChoice, pullOut.id)).not.toContain('finished_inside')
+  })
+
+  it('leaves the flag list alone for an option that sets none', () => {
+    const withChoice = { ...shared(), pendingChoice: closing() }
+    const notYet = closing().options.find((o) => o.label === 'Not yet, draw it out')!
+    expect(resolvedSceneFlags(withChoice, notYet.id)).toEqual([])
+  })
+
+  it('never double-records a flag the scene already carries', () => {
+    const already: IntimacyScene = { ...shared(), sceneFlags: ['pulled_out'], pendingChoice: closing() }
+    const pullOut = closing().options.find((o) => o.label === 'Pull out first')!
+    expect(resolvedSceneFlags(already, pullOut.id)).toEqual(['pulled_out'])
+  })
+
+  it('carries flags across a mid-scene re-centering, since it is still the same scene', () => {
+    const flagged: IntimacyScene = { ...shared(), sceneFlags: ['pulled_out'] }
+    const shifted = startOrShiftIntimacyScene('a different position', 'position', 4, flagged, 8, BRANCHING_SCENARIO)
+    expect(shifted.sceneFlags).toEqual(['pulled_out'])
+  })
+})
+
+describe('a branch whose options stop being eligible while it is open', () => {
+  // A branch is raised from the state at that moment, then sits there for turns. If the state moves
+  // under it — a gate closing as arousal falls — the stored options must not stay pickable.
+  const gated: ScenarioGraph = {
+    id: 'gated',
+    version: 1,
+    title: 'Gated',
+    entryStage: 'fork',
+    stages: [
+      {
+        id: 'fork',
+        kind: 'foreplay',
+        minArousal: 0,
+        minTurns: 0,
+        edges: [
+          { to: 'calm', mode: 'choice', label: 'Ease off' },
+          { to: 'hot', mode: 'choice', label: 'Push on', conditions: [{ kind: 'arousal_at_least', value: 60 }] },
+          { to: 'calm', mode: 'auto', conditions: [{ kind: 'arousal_at_least', value: 99 }] },
+        ],
+      },
+      { id: 'calm', kind: 'foreplay', minArousal: 0, minTurns: 0, edges: [{ to: RESOLVE_STAGE, mode: 'auto' }] },
+      { id: 'hot', kind: 'penetrative', minArousal: 0, minTurns: 0, edges: [{ to: RESOLVE_STAGE, mode: 'auto' }] },
+    ],
+  }
+
+  /** The branch as raised while hot enough for both options. */
+  const raisedHot = (): IntimacyScene => ({
+    ...startOrShiftIntimacyScene('something', 'position', 0, null, 6, gated),
+    stageId: 'fork',
+    stageSinceTurn: 0,
+    updatedAtTurn: 0,
+    arousal: { value: 70, regionExposure: {}, bandSinceTurn: 0 },
+    pendingChoice: buildPendingChoice(gated.stages[0], { arousal: 70 }, 0)!,
+  })
+
+  it('offers both options while the gate is open', () => {
+    expect(raisedHot().pendingChoice!.options.map((o) => o.label)).toEqual(['Ease off', 'Push on'])
+  })
+
+  it('stops offering the gated option once the meter falls back under it', () => {
+    // Two cooling turns: enough for arousal to drop under the gate, still short of the turns the
+    // branch's own default needs, so nothing here is the timeout doing the work.
+    const cooling: IntimacyTurnObservation = { ...turn(), engagement: 'stalled', intensityDelta: -1 }
+    let scene: IntimacyScene = raisedHot()
+    for (let i = 1; i <= 2; i += 1) scene = advanceIntimacyScene(scene, cooling, i, { graph: gated })!
+    expect(arousalOf(scene).value).toBeLessThan(60)
+    // With the gate shut only one option is left, and one option is not a decision — so the branch
+    // closes rather than sitting there offering a single button.
+    expect(scene.pendingChoice).toBeUndefined()
+  })
+
+  it('refuses an answer naming an option that is no longer eligible', () => {
+    const cooling: IntimacyTurnObservation = { ...turn(), engagement: 'stalled', intensityDelta: -1 }
+    let scene: IntimacyScene = raisedHot()
+    for (let i = 1; i <= 2; i += 1) scene = advanceIntimacyScene(scene, cooling, i, { graph: gated })!
+    // The id the gated option had when the branch went up. Answering with it must not move the scene.
+    const staleId = raisedHot().pendingChoice!.options.find((o) => o.label === 'Push on')!.id
+    const after = resolveIntimacyChoice(scene, staleId, 3, gated)
+    expect(after).not.toBeNull()
+    expect((after as IntimacyScene).stageId).toBe('fork')
+  })
+})
+
+describe('whose body a region read belongs to', () => {
+  // The judge is prompted with the *speaker's* name, so `regionsTouched` describes the speaker. In a
+  // shared scene the speaker is often not the owner, and the flat list cannot say whose body it
+  // means at all — which is exactly why `contact` exists. So a shared scene must attribute from the
+  // graph and never fold the flat list into one particular participant.
+  const flatOnly: IntimacyTurnObservation = { ...turn(), regionsTouched: ['genitals'] }
+
+  it('never credits the owner from a flat region list once the scene is shared', () => {
+    const next = play(shared(), 3, flatOnly)!
+    // Nobody is named as touched by the graph, so nobody should be gaining from touch at all.
+    expect(arousalOf(next, OWNER).regionExposure.genitals).toBeUndefined()
+    expect(arousalOf(next, OTHER).regionExposure.genitals).toBeUndefined()
+  })
+
+  it('still reads the flat list for a solo scene, where it is unambiguous', () => {
+    const solo = startOrShiftIntimacyScene('kissing her neck', 'kissing_spot', 0, null, 6, DEFAULT_SCENARIO)
+    const next = advanceIntimacyScene(solo, flatOnly, 1, { graph: DEFAULT_SCENARIO })!
+    expect(arousalOf(next).regionExposure.genitals).toBe(1)
+  })
+
+  it('attributes a shared scene entirely from the contact graph', () => {
+    const graphOnly = turn([{ actor: SCENE_PLAYER, target: OTHER, region: 'genitals' }])
+    const next = play(shared(), 2, graphOnly)!
+    expect(arousalOf(next, OTHER).regionExposure.genitals).toBe(2)
+    expect(arousalOf(next, OWNER).regionExposure.genitals).toBeUndefined()
   })
 })

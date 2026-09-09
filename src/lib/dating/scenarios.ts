@@ -95,9 +95,11 @@ export const BRANCHING_SCENARIO: ScenarioGraph = {
       minTurns: 1,
       softMaxTurns: 6,
       edges: [
-        { to: RESOLVE_STAGE, mode: 'choice', label: 'Finish together, inside', isDefault: true },
-        { to: RESOLVE_STAGE, mode: 'choice', label: 'Pull out first' },
-        { to: 'together', mode: 'choice', label: 'Not yet — draw it out' },
+        // Both of these end the scene, so the flag is the only thing that records which was chosen —
+        // and it is what lets a world rule react to it later (`world/triggers.ts`'s `flag_set`).
+        { to: RESOLVE_STAGE, mode: 'choice', label: 'Finish together, inside', isDefault: true, setsFlag: 'finished_inside' },
+        { to: RESOLVE_STAGE, mode: 'choice', label: 'Pull out first', setsFlag: 'pulled_out' },
+        { to: 'together', mode: 'choice', label: 'Not yet, draw it out' },
       ],
     },
   ],

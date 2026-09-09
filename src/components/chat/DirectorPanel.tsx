@@ -11,6 +11,7 @@ import {
   clampStat,
   combinedSceneFlags,
   computeWarmth,
+  findActiveIntimacyScene,
   formatCommitmentStatus,
   formatRelationshipStage,
   getRelationshipStats,
@@ -31,6 +32,9 @@ import { errorMessage, toastError, toastSuccess } from '@/lib/store/useToastStor
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { Section } from '@/components/ui/Section'
+import { SceneStateCard } from '@/components/chat/SceneStateCard'
+import { isIntimacySceneActive, type IntimacyScene } from '@/lib/dating/intimacyScene'
+import { getScenarioCatalog, scenarioById } from '@/lib/dating/scenarios'
 import { NumberField, SelectField } from '@/components/ui/Field'
 
 const DIMENSION_LABELS: Record<string, string> = {
@@ -52,7 +56,12 @@ const PLAN_KIND_LABELS: Record<string, string> = {
 interface DirectorPanelProps {
   chat: Chat
   character?: Character
+  /** Extra characters in the chat, so a shared scene's participant ids resolve to names. */
+  participantCharacters?: Character[]
   world?: WorldCard
+  /** `countCharReplies` — the scale scene turns and contact durations are measured on. */
+  charReplyCount?: number
+  personaName?: string
   onClose: () => void
 }
 
@@ -64,7 +73,19 @@ interface DirectorPanelProps {
  * deterministic `calendar.ts` reads that the ordinary chat UI already uses (see
  * `RelationshipPanel`/`ChatWindow`'s presence badge) — nothing new is stored.
  */
-export function DirectorPanel({ chat, character, world, onClose }: DirectorPanelProps) {
+export function DirectorPanel({
+  chat,
+  character,
+  participantCharacters = [],
+  world,
+  charReplyCount = 0,
+  personaName = 'You',
+  onClose,
+}: DirectorPanelProps) {
+  const cast = character ? [character, ...participantCharacters] : participantCharacters
+  const charRepliesNow = charReplyCount
+  // The inspector reads the scene the way the engine does: chat-wide, wherever it is stored.
+  const liveScene = findActiveIntimacyScene(chat, (sc: IntimacyScene) => isIntimacySceneActive(sc, charRepliesNow))
   const affection = clampAffection(chat.affection ?? 0)
   const stats = getRelationshipStats(chat)
   const warmth = computeWarmth(affection, stats)
@@ -314,18 +335,39 @@ export function DirectorPanel({ chat, character, world, onClose }: DirectorPanel
           title="Intimacy scene, pacing & rebuff"
           description="Read-only state from this session's newer relationship-depth systems."
           surface="sunken"
+          className="md:col-span-2"
         >
           <div className="space-y-1.5 text-xs text-text-muted">
-            <div>
-              Intimacy scene:{' '}
-              {chat.intimacyScene ? (
+            {/* The whole engine-tracked scene rather than just its derived phase: stage, scenario,
+                every participant's own meter, clothing and the contact graph. This is the inspector,
+                so it reads the scene chat-wide the way the engine does. */}
+            {liveScene ? (
+              <SceneStateCard
+                scene={liveScene.scene}
+                viewingId={liveScene.ownerId}
+                nameOf={(id) => cast.find((c) => c.id === id)?.card.name ?? id}
+                userName={personaName}
+                charReplyCount={charRepliesNow}
+                graph={scenarioById(getScenarioCatalog(world), liveScene.scene.scenarioId)}
+                wrap
+              />
+            ) : (
+              <div>Intimacy scene: none active</div>
+            )}
+            {liveScene?.scene.visitedStages?.length ? (
+              <div>
+                Stages visited: <span className="text-text">{liveScene.scene.visitedStages.join(' → ')}</span>
+              </div>
+            ) : null}
+            {liveScene?.scene.pendingChoice && (
+              <div>
+                Waiting on a choice from{' '}
+                <span className="text-text">{liveScene.scene.pendingChoice.fromStage}</span>:{' '}
                 <span className="text-text">
-                  {chat.intimacyScene.phase} · {chat.intimacyScene.activityLabel}
+                  {liveScene.scene.pendingChoice.options.map((o) => o.label).join(' / ')}
                 </span>
-              ) : (
-                'none active'
-              )}
-            </div>
+              </div>
+            )}
             <div>
               Initiative balance: <span className="text-text">{(chat.initiativeBalance ?? 0).toFixed(2)}</span>
               {' '}(positive = you've been carrying it, negative = they have)

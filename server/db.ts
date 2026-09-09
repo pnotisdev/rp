@@ -93,6 +93,17 @@ db.exec(`
     data TEXT NOT NULL
   );
 
+  -- Plain assistant conversations. Deliberately not the chats table, which requires a characterId
+  -- and carries the whole relationship track; an assistant thread has neither. Messages live in the
+  -- row's own JSON rather than in the messages table, since a thread is read front to back and is
+  -- never searched per-message or forked mid-way.
+  CREATE TABLE IF NOT EXISTS assistant_threads (
+    id TEXT PRIMARY KEY,
+    createdAt INTEGER NOT NULL,
+    updatedAt INTEGER NOT NULL,
+    data TEXT NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS worlds (
     id TEXT PRIMARY KEY,
     createdAt INTEGER NOT NULL,
@@ -233,6 +244,7 @@ export const worldInfoBookStore = createStore('world_info_books', [{ name: 'crea
 export const presetStore = createStore('presets', [{ name: 'createdAt' }])
 export const themeStore = createStore('themes', [{ name: 'createdAt' }])
 export const instructTemplateStore = createStore('instruct_templates', [{ name: 'createdAt' }])
+export const assistantThreadStore = createStore('assistant_threads', [{ name: 'createdAt' }, { name: 'updatedAt' }])
 export const worldStore = createStore('worlds', [{ name: 'createdAt' }, { name: 'updatedAt' }])
 export const objectiveStore = createStore('objectives', [
   { name: 'chatId' },

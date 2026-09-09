@@ -30,7 +30,8 @@ import {
   buildPendingChoice,
   choiceDefaultDue,
   DEFAULT_SCENARIO,
-  eligibleChoiceEdges,
+  defaultChoiceOption,
+  pendingChoiceOption,
   nextAutoEdge,
   phaseForStageKind,
   resolveEdge,
@@ -427,22 +428,26 @@ export function advanceIntimacyScene(
   // is still being played — but the stage does not, which is the whole point of gating a branch here
   // rather than asking the model nicely not to cross it.
   if (scene.pendingChoice) {
-    const stillOffered = eligibleChoiceEdges(stage, stageCtx).some((edge) =>
-      scene.pendingChoice!.options.some((option) => option.edgeTo === edge.to),
-    )
-    if (stillOffered && !choiceDefaultDue(scene.pendingChoice, charReplyCount)) {
-      return { ...heldScene(scene, arousal, obs, contact, charReplyCount), pendingChoice: scene.pendingChoice }
+    // Re-derived against the state as it stands now, keeping the branch's own timer. A branch is a
+    // snapshot of what was eligible when it went up, and it then sits there for turns while the meter
+    // moves under it — so without this an option whose gate has since closed stays on screen and
+    // `resolveIntimacyChoice`, which trusts the stored list, would happily take it.
+    const refreshed = buildPendingChoice(stage, stageCtx, scene.pendingChoice.sinceTurn)
+    const stillOffered = !!refreshed
+    if (refreshed && !choiceDefaultDue(refreshed, charReplyCount)) {
+      return { ...heldScene(scene, arousal, obs, contact, charReplyCount), pendingChoice: refreshed }
     }
     // Either the branch stopped being answerable (state moved under it) or nobody answered in time.
-    const fallback = stillOffered ? scene.pendingChoice.defaultEdgeTo : undefined
+    const fallback = refreshed ? defaultChoiceOption(refreshed) : undefined
+    // The flag lands even on a default: "nobody answered, so it went the usual way" is still a thing
+    // that happened, and a world rule reading the flag should not be able to tell the difference.
+    const held = withSceneFlag(heldScene(scene, arousal, obs, contact, charReplyCount), fallback?.setsFlag)
     // A default that ends the scene is the ordinary case at a closing branch, and `resolve` is not a
     // stage in the graph — without this it reads as a target that doesn't exist, the branch is merely
     // cleared, and the same decision is re-raised a few turns later forever.
-    if (fallback === RESOLVE_STAGE) return null
-    const taken = fallback ? stageById(graph, fallback) : undefined
-    return taken
-      ? enterStage(heldScene(scene, arousal, obs, contact, charReplyCount), stage, taken, charReplyCount)
-      : { ...heldScene(scene, arousal, obs, contact, charReplyCount), pendingChoice: undefined }
+    if (fallback?.edgeTo === RESOLVE_STAGE) return null
+    const taken = fallback ? stageById(graph, fallback.edgeTo) : undefined
+    return taken ? enterStage(held, stage, taken, charReplyCount) : { ...held, pendingChoice: undefined }
   }
   // Ending the scene needs both: floors clear, an edge the scenario actually has, and a reply the
   // judge saw finish. A resolve edge never fires on its own.
@@ -488,10 +493,16 @@ function advanceMeters(
 ): SceneMeters {
   const roster = sceneParticipants(scene)
   const ownerId = roster[0]
-  // The owner's own body: the two-party read, plus anything the contact graph says targets them.
-  const ownerRegions = ownerId
-    ? [...new Set([...obs.regionsTouched, ...contactRegionsFor(contact, ownerId)])]
-    : obs.regionsTouched
+  const shared = roster.length > 1
+  // `regionsTouched` is the two-party shorthand, and the judge is prompted with the *speaker's* name,
+  // so it describes whoever spoke. That is unambiguous with one character in the scene and meaningless
+  // with several — folding it into the owner would credit them for touches on somebody else's body.
+  // A shared scene is therefore attributed from the contact graph alone, which names both sides.
+  const ownerRegions = shared
+    ? contactRegionsFor(contact, ownerId)
+    : ownerId
+      ? [...new Set([...obs.regionsTouched, ...contactRegionsFor(contact, ownerId)])]
+      : obs.regionsTouched
   const owner = advanceArousal(
     arousalOf(scene),
     observationFor(obs, ownerRegions),
@@ -503,7 +514,7 @@ function advanceMeters(
     },
     charReplyCount,
   )
-  if (roster.length < 2) return { owner, floor: owner.value }
+  if (!shared) return { owner, floor: owner.value }
 
   const participants: Record<string, ArousalState> = {}
   for (const id of roster.slice(1)) {
@@ -599,23 +610,47 @@ function enterStage(scene: IntimacyScene, from: IntimacyStage, to: IntimacyStage
   }
 }
 
+/** Appends a scene flag, ignoring a blank one and never duplicating. */
+function withSceneFlag(scene: IntimacyScene, flag: string | undefined): IntimacyScene {
+  if (!flag || scene.sceneFlags?.includes(flag)) return scene
+  return { ...scene, sceneFlags: [...(scene.sceneFlags ?? []), flag] }
+}
+
 /**
- * The player answering a branch. Returns the scene on the chosen stage with the branch cleared, or
- * `null` when the choice was to end the scene. Unknown or no-longer-offered targets leave the scene
- * exactly where it is rather than jumping it somewhere the graph never offered.
+ * The player answering a branch, by the option's own id rather than by where it leads — two options
+ * can share a target ("finish inside" and "pull out" both end the scene), so the target alone cannot
+ * say which was chosen. Returns the scene on the chosen stage with the branch cleared, or `null` when
+ * the choice was to end it. An unknown option leaves the scene exactly where it is rather than
+ * jumping it somewhere the graph never offered.
+ *
+ * When the answer ends the scene the returned `null` carries nothing, so a caller that needs the
+ * flag reads `resolvedSceneFlags` first — see its own note.
  */
 export function resolveIntimacyChoice(
   scene: IntimacyScene,
-  edgeTo: string,
+  optionId: string,
   charReplyCount: number,
   graph: ScenarioGraph = DEFAULT_SCENARIO,
 ): IntimacyScene | null {
-  if (!scene.pendingChoice?.options.some((option) => option.edgeTo === edgeTo)) return scene
-  if (edgeTo === RESOLVE_STAGE) return null
+  const option = scene.pendingChoice ? pendingChoiceOption(scene.pendingChoice, optionId) : undefined
+  if (!option) return scene
+  if (option.edgeTo === RESOLVE_STAGE) return null
   const from = stageOf(scene, graph)
-  const to = stageById(graph, edgeTo)
-  if (!to) return { ...scene, pendingChoice: undefined }
-  return enterStage({ ...scene, updatedAtTurn: charReplyCount }, from, to, charReplyCount)
+  const to = stageById(graph, option.edgeTo)
+  const flagged = withSceneFlag({ ...scene, updatedAtTurn: charReplyCount }, option.setsFlag)
+  if (!to) return { ...flagged, pendingChoice: undefined }
+  return enterStage(flagged, from, to, charReplyCount)
+}
+
+/**
+ * The scene flags this scene would end with if `optionId` were taken now. Needed because a resolving
+ * answer returns `null` — the scene object is gone, and the flag it set is the one durable trace the
+ * player's decision leaves. Callers fold this into `Chat.sceneFlags`, where a `flag_set` trigger
+ * condition can read it turns or days later.
+ */
+export function resolvedSceneFlags(scene: IntimacyScene, optionId: string): string[] {
+  const option = scene.pendingChoice ? pendingChoiceOption(scene.pendingChoice, optionId) : undefined
+  return withSceneFlag(scene, option?.setsFlag).sceneFlags ?? []
 }
 
 /** `pace`-specific addition to the phase's own pacing line — empty for `neutral`. */

@@ -33,10 +33,16 @@ import {
   getRelationshipTrack,
   isLiveScene,
   relationshipMilestonesFor,
+  findActiveIntimacyScene,
   relationshipStageForWarmth,
 } from '@/lib/dating/stage'
 import { countCharReplies } from '@/lib/dating/aftercare'
 import { isIntimacySceneActive } from '@/lib/dating/intimacyScene'
+import type { IntimacyScene } from '@/lib/dating/intimacyScene'
+import { isSceneParticipant } from '@/lib/dating/sceneParticipants'
+import { getScenarioCatalog, scenarioById } from '@/lib/dating/scenarios'
+import { SceneStateCard } from '@/components/chat/SceneStateCard'
+import { StageLabel, StageMeter, StageRow } from '@/components/ui/Stage'
 import { triggeredCg } from '@/lib/vn/cgTrigger'
 import { pickVariant } from '@/lib/vn/pickVariant'
 import { MessageLog } from './MessageLog'
@@ -310,9 +316,15 @@ export function VNStage({
   // Item 10: a gallery CG whose author-set trigger condition is met right now, surfaced full-bleed
   // in place of the ordinary background+sprite composition below.
   const activeCgSource = cast.find((m) => m.id === activeSpeakerId)
-  const activeIntimacyScene = isIntimacySceneActive(activeTrack.intimacyScene, countCharReplies(messages))
-    ? activeTrack.intimacyScene
-    : undefined
+  // Chat-wide, not off the active speaker's own track: a shared scene lives on its owner's
+  // (`sceneParticipants.ts`), so reading `activeTrack` here would show nothing for anyone who joined
+  // one. The speaker still has to actually be *in* it, since standing in the room is not being in it.
+  const charRepliesNow = countCharReplies(messages)
+  const liveScene = findActiveIntimacyScene(chat, (sc: IntimacyScene) => isIntimacySceneActive(sc, charRepliesNow))
+  const activeIntimacyScene =
+    liveScene && activeSpeakerId && isSceneParticipant(liveScene.scene, activeSpeakerId, liveScene.ownerId)
+      ? liveScene.scene
+      : undefined
   const triggeredCgEntry = triggeredCg(activeCgSource?.gallery, {
     affection,
     sceneFlags: chat.sceneFlags ?? [],
@@ -447,7 +459,7 @@ export function VNStage({
   const vnTextSpeedMs = useSettingsStore((s) => s.vnTextSpeedMs)
   const vnChoiceStyle = useSettingsStore((s) => s.vnChoiceStyle)
 
-  // Per-line voice: "read this line aloud" via the same TTS stack Companion mode uses. Manual and
+  // Per-line voice: "read this line aloud" via the shared TTS stack (`lib/voice`). Manual and
   // one line at a time only — no auto-voice-on-every-reply, unlike Auto above; that's a
   // recurring-cost surface this pass intentionally doesn't take on.
   const koboldBaseUrl = useSettingsStore((s) => s.baseUrl)
@@ -642,20 +654,18 @@ export function VNStage({
               )}
             </div>
           )}
-          <div className={`px-3 py-2 text-xs ${personaName || chat.mode || parentChatLink ? 'border-t border-white/10' : ''}`}>
+          <StageRow variant="vn" first={!(personaName || chat.mode || parentChatLink)} className="!py-2">
             <div className="mb-1 flex min-w-0 items-center gap-1.5">
               <Heart size={11} strokeWidth={2.25} className="shrink-0 text-romance" fill="currentColor" fillOpacity={0.4} />
-              <span className="shrink-0 uppercase tracking-wide text-white/70">
+              <StageLabel variant="vn">
                 {/* Named only when there's more than one cast member to disambiguate. */}
                 Bond{isGroupScene ? ` · ${activeMember?.name ?? ''}` : ''}
-              </span>
+              </StageLabel>
               <span className="truncate font-semibold capitalize text-romance">{formatRelationshipStage(relationshipStage)}</span>
               <span className="shrink-0 text-white/90">{warmth}</span>
             </div>
-            <div className="h-1.5 w-28 max-w-full overflow-hidden rounded-full bg-white/20">
-              <div className="h-full rounded-full bg-romance transition-[width] duration-500" style={{ width: `${warmth}%` }} />
-            </div>
-          </div>
+            <StageMeter value={warmth} variant="vn" className="w-28 max-w-full" />
+          </StageRow>
           {chat.activeEvent?.title && (
             <div className="flex items-center gap-1.5 truncate border-t border-white/10 px-3 py-1.5 text-xs">
               <span className="shrink-0 uppercase tracking-wide text-white/60">
@@ -667,6 +677,23 @@ export function VNStage({
           {liveDateActive && chat.rapport && (
             <div className="border-t border-white/10 px-3 py-1.5 text-xs">
               <LiveRapport read={chat.rapport} variant="vn" label={isHangoutEvent ? 'Live hangout' : 'Live date'} />
+            </div>
+          )}
+          {activeIntimacyScene && activeSpeakerId && (
+            // Compact on purpose: the stage HUD says what's happening and roughly how far along,
+            // and the Relationship panel carries the full readout (meters, clothing, contact).
+            <div className="border-t border-white/10">
+              <SceneStateCard
+                scene={activeIntimacyScene}
+                viewingId={activeSpeakerId}
+                nameOf={(id) => cast.find((c) => c.id === id)?.card.name ?? 'Someone else'}
+                userName={persona?.name || 'You'}
+                charReplyCount={charRepliesNow}
+                graph={scenarioById(getScenarioCatalog(world), activeIntimacyScene.scenarioId)}
+                variant="vn"
+                compact
+                className="!rounded-none !bg-transparent !backdrop-blur-none"
+              />
             </div>
           )}
         </div>

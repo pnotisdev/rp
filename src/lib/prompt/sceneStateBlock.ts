@@ -1,5 +1,5 @@
 import { describeClothingSide, type ClothingState } from '@/lib/dating/clothing'
-import { regionLabel, type ArousalBand, type BodyRegion } from '@/lib/dating/arousal'
+import { AROUSAL_BAND_PHRASE, regionLabel, type ArousalBand, type BodyRegion } from '@/lib/dating/arousal'
 import { describeContact, SCENE_PLAYER, type ContactEdge } from '@/lib/dating/sceneParticipants'
 
 // A terse, engine-rendered ledger of what is physically true right now, injected late (it rides in
@@ -48,15 +48,6 @@ export interface SceneStateFacts {
   contact?: ContactEdge[]
 }
 
-/** How each band reads to the model — the band name alone is engine jargon. */
-const BAND_PHRASING: Record<ArousalBand, string> = {
-  baseline: 'not yet worked up',
-  warming: 'warming up',
-  engaged: 'well into it',
-  edge: 'close to the edge',
-  over: 'right at the edge',
-}
-
 /** Clothing for everyone the block knows about, on one line each, so no side is left for the model to guess. */
 function clothingLines(facts: SceneStateFacts): string {
   const own = facts.clothing
@@ -73,9 +64,9 @@ function clothingLines(facts: SceneStateFacts): string {
 /** Every tracked character's band on one line. Asymmetry is the point: one at the edge while another is warming is a scene beat. */
 function arousalLine(facts: SceneStateFacts): string {
   const reads: string[] = []
-  if (facts.arousalBand) reads.push(`${facts.charName} is ${BAND_PHRASING[facts.arousalBand]}`)
+  if (facts.arousalBand) reads.push(`${facts.charName} is ${AROUSAL_BAND_PHRASE[facts.arousalBand]}`)
   for (const participant of facts.participants ?? []) {
-    if (participant.arousalBand) reads.push(`${participant.name} is ${BAND_PHRASING[participant.arousalBand]}`)
+    if (participant.arousalBand) reads.push(`${participant.name} is ${AROUSAL_BAND_PHRASE[participant.arousalBand]}`)
   }
   return reads.join('. ')
 }

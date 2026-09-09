@@ -7,6 +7,7 @@ import {
   chatFactStore,
   chatStore,
   db,
+  assistantThreadStore,
   instructTemplateStore,
   messageStore,
   newId,
@@ -879,6 +880,45 @@ app.delete('/api/themes/:id', (req, res) => {
   res.status(204).end()
 })
 
+// ---- Assistant threads ----
+//
+// Plain model conversations, with no character and no relationship state. One row per thread with
+// its messages inside, so the whole feature is a single resource (see `db.ts` for why).
+
+app.get('/api/assistant-threads', (_req, res) => {
+  // Newest first: the list is a recency list, and a thread is picked up where it was left.
+  res.json(assistantThreadStore.list({ orderBy: 'updatedAt DESC' }))
+})
+
+app.get('/api/assistant-threads/:id', (req, res) => {
+  const found = assistantThreadStore.get(req.params.id)
+  if (!found) return notFound(res)
+  res.json(found)
+})
+
+app.post('/api/assistant-threads', (req, res) => {
+  const now = Date.now()
+  const created = assistantThreadStore.insert({
+    id: newId(),
+    title: req.body.title ?? 'New conversation',
+    messages: req.body.messages ?? [],
+    createdAt: now,
+    updatedAt: now,
+  })
+  res.status(201).json(created)
+})
+
+app.put('/api/assistant-threads/:id', (req, res) => {
+  const updated = assistantThreadStore.update(req.params.id, { ...req.body, updatedAt: Date.now() })
+  if (!updated) return notFound(res)
+  res.json(updated)
+})
+
+app.delete('/api/assistant-threads/:id', (req, res) => {
+  assistantThreadStore.remove(req.params.id)
+  res.status(204).end()
+})
+
 // ---- Custom instruct templates ----
 
 app.get('/api/instruct-templates', (_req, res) => {
@@ -1087,6 +1127,7 @@ const BACKUP_STORES = {
   presets: presetStore,
   themes: themeStore,
   instructTemplates: instructTemplateStore,
+  assistantThreads: assistantThreadStore,
   worlds: worldStore,
   objectives: objectiveStore,
   relationshipEvents: relationshipEventStore,

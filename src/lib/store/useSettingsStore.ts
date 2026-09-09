@@ -255,6 +255,13 @@ interface SettingsState {
   systemPrompt: string
   /** Global steering appended after any per-character post-history instructions. */
   postHistoryInstructions: string
+  /**
+   * The Assistant view's own instruction (`lib/assistant/prompt.ts`). Separate from `systemPrompt`
+   * on purpose: that one tells the model to be a character, which is exactly what the assistant must
+   * not do. Empty = the built-in `ASSISTANT_SYSTEM_PROMPT`.
+   */
+  assistantSystemPrompt: string
+  setAssistantSystemPrompt: (v: string) => void
   setSystemPrompt: (v: string) => void
   setPostHistoryInstructions: (v: string) => void
   /** User-saved {system prompt + post-history} pairs, shown as a picker in Settings → Generation. */
@@ -456,6 +463,8 @@ export const useSettingsStore = create<SettingsState>()(
 
       systemPrompt: '',
       postHistoryInstructions: '',
+      assistantSystemPrompt: '',
+      setAssistantSystemPrompt: (v) => set({ assistantSystemPrompt: v }),
       setSystemPrompt: (v) => set({ systemPrompt: v }),
       setPostHistoryInstructions: (v) => set({ postHistoryInstructions: v }),
       promptPresets: [],

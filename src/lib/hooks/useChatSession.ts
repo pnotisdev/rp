@@ -55,6 +55,7 @@ import {
   repeatedEscalationShapeGuidance,
   arousalOf,
   resolveIntimacyChoice,
+  resolvedSceneFlags,
   sceneResolveSnapshot,
   stanceOfScene,
   startOrShiftIntimacyScene,
@@ -85,6 +86,7 @@ import { vnProseNote } from '@/lib/prompt/vnProse'
 import { isVnReady } from '@/lib/vn/artHint'
 import { detectContinuityBreak, describeContinuityBreak } from '@/lib/dating/continuityGuard'
 import { getScenarioCatalog, scenarioById, selectScenario, successorScenario } from '@/lib/dating/scenarios'
+import { pendingChoiceOption } from '@/lib/dating/intimacyStages'
 import { newlyDiscoveredRegions, withDiscoveredRegions } from '@/lib/dating/touch'
 import { combinedValence, kinkValenceMap } from '@/lib/dating/kinks'
 import type { BodyRegion } from '@/lib/dating/arousal'
@@ -118,7 +120,7 @@ import {
   relationshipStageForWarmth,
   unlockedEndingIds,
 } from '@/lib/dating/stage'
-import { isSceneParticipant, sceneParticipants, withParticipant } from '@/lib/dating/sceneParticipants'
+import { advanceContact, contactRegionsFor, isSceneParticipant, sceneParticipants, withParticipant } from '@/lib/dating/sceneParticipants'
 import {
   appendGiftLog,
   birthdayGiftGuidance,
@@ -1433,8 +1435,16 @@ export function useChatSession(chatId: string | null) {
       const sceneJustResolved = sceneActive && !nextIntimacyScene
       // The discovery loop: learning that *this* character answers at the backs of her knees is real
       // play, and it falls out of data the turn already produced rather than needing authored content.
+      // Read from the same place the meter is: the flat list in a solo scene, and the contact graph
+      // once the scene is shared, where the flat list cannot say whose body it means. Without this
+      // the discovery loop silently stops the moment a second character joins.
+      const touchedThisTurn = intimacyObservation
+        ? sceneRoster.length > 1
+          ? contactRegionsFor(advanceContact(openScene?.contact, intimacyObservation.contact ?? [], charRepliesNow, sceneRoster), speaker.id)
+          : intimacyObservation.regionsTouched
+        : []
       const foundRegions = intimacyObservation
-        ? newlyDiscoveredRegions(speaker.touchProfile, intimacyObservation.regionsTouched, track.discoveredRegions as BodyRegion[] | undefined)
+        ? newlyDiscoveredRegions(speaker.touchProfile, touchedThisTurn, track.discoveredRegions as BodyRegion[] | undefined)
         : []
       const nextDiscoveredRegions = withDiscoveredRegions(track.discoveredRegions as BodyRegion[] | undefined, foundRegions)
       const noDiscoveryChange = foundRegions.length === 0
@@ -1472,6 +1482,9 @@ export function useChatSession(chatId: string | null) {
       // usually the same character, but not in a group scene. Split out and applied separately below,
       // because `patchRelationshipTrack` rewrites the whole participant map for a non-primary and two
       // independent calls would each erase the other's entry.
+      // Flags a branch recorded on the scene have to outlive it: the scene object is discarded on
+      // resolve, so they move to `Chat.sceneFlags` on the turn it ends.
+      if (sceneJustResolved) for (const flag of openScene!.sceneFlags ?? []) existingFlags.add(flag as SceneFlag)
       const sceneFields = {
         intimacyScene: nextIntimacyScene,
         // A scene that just resolved this turn gets its final category sequence snapshotted into the log; any other turn carries it forward unchanged.
@@ -1710,7 +1723,7 @@ export function useChatSession(chatId: string | null) {
    * player doing something rather than flipping a switch.
    */
   const chooseIntimacyBranch = useCallback(
-    async (characterId: string, edgeTo: string): Promise<string | undefined> => {
+    async (characterId: string, optionId: string): Promise<string | undefined> => {
       if (!chatId) return undefined
       const freshChat = await chatsApi.get(chatId)
       if (!freshChat) return undefined
@@ -1721,9 +1734,14 @@ export function useChatSession(chatId: string | null) {
       if (!active || !isSceneParticipant(active.scene, characterId, active.ownerId)) return undefined
       const { ownerId, scene } = active
       const ownerTrack = getRelationshipTrack(freshChat, ownerId)
-      const option = scene.pendingChoice?.options.find((o) => o.edgeTo === edgeTo)
+      const option = scene.pendingChoice ? pendingChoiceOption(scene.pendingChoice, optionId) : undefined
       if (!option) return undefined
-      const next = resolveIntimacyChoice(scene, edgeTo, charReplies, scenarioById(getScenarioCatalog(world), scene.scenarioId))
+      // Read before resolving: an answer that ends the scene returns `null`, and the flag it set is
+      // the one durable trace the decision leaves. Folded into `Chat.sceneFlags`, where a world
+      // rule's `flag_set` condition can react to it turns or days later.
+      const sceneFlagsAfter = resolvedSceneFlags(scene, optionId)
+      const next = resolveIntimacyChoice(scene, optionId, charReplies, scenarioById(getScenarioCatalog(world), scene.scenarioId))
+      const durableFlags = new Set([...((freshChat.sceneFlags ?? []) as SceneFlag[]), ...sceneFlagsAfter])
       await chatsApi.update(chatId, {
         ...patchRelationshipTrack(freshChat, ownerId, {
           intimacyScene: next,
@@ -1732,6 +1750,7 @@ export function useChatSession(chatId: string | null) {
             ? ownerTrack.intimacySceneShapeLog
             : appendSceneShapeLog(ownerTrack.intimacySceneShapeLog, scene.categoryHistory ?? [scene.category]),
         }),
+        sceneFlags: [...durableFlags],
       })
       return option.entryId
     },
