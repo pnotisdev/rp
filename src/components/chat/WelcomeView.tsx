@@ -13,6 +13,8 @@ import type { ViewId } from '@/components/layout/Sidebar'
 import { Button } from '@/components/ui/Button'
 import { Chip } from '@/components/ui/Chip'
 import { HostedConnectionStatus } from '@/components/settings/HostedConnectionStatus'
+import { OpenMayhemSetup } from '@/components/settings/OpenMayhemSetup'
+import { isOpenMayhem } from '@/lib/api/openMayhem'
 import { NewChatDialog } from './NewChatDialog'
 import { TrashPanel } from './TrashPanel'
 
@@ -96,7 +98,7 @@ export function WelcomeView({
   const localOpenAi = mode === 'local' && chatBackend === 'openai-compatible'
   const activeStatus = mode === 'cloud' || localOpenAi ? hostedStatus.status : koboldStatus
 
-  const { models: cloudModels } = useOpenAiModels(chatBackendBaseUrl, chatBackendApiKey, chatBackend === 'openai-compatible')
+  const { models: cloudModels, reload: reloadCloudModels } = useOpenAiModels(chatBackendBaseUrl, chatBackendApiKey, chatBackend === 'openai-compatible')
 
   // The Local tab's address field. Seeded from whichever local address we already have — a
   // detected local OpenAI server, else the KoboldCpp URL setting. Never the cloud provider URL.
@@ -171,8 +173,7 @@ export function WelcomeView({
     }
   }
 
-  // Switching panel never touches the other panel's entered settings — flipping back and forth is
-  // non-destructive. The local panel needs *a* local backend selected so its status line means
+  // The local panel needs *a* local backend selected so its status line means
   // something before detection; the cloud panel defaults to OpenRouter's free tier.
   const selectMode = (next: 'local' | 'cloud') => {
     setMode(next)
@@ -329,9 +330,7 @@ export function WelcomeView({
           {mode === 'cloud' && (
             <div className="space-y-3 text-xs text-text-muted">
               <p>
-                OpenRouter has a free tier, so there's nothing to pay to try this. Your key is stored
-                only in this browser and sent straight to the provider below, never through any other
-                server.
+                Choose a hosted provider to generate replies without running a model on your computer.
               </p>
               <div>
                 <label className="mb-1 block text-text-muted">Provider</label>
@@ -347,9 +346,10 @@ export function WelcomeView({
                   ))}
                 </select>
               </div>
+              {isOpenMayhem(chatBackendBaseUrl) && <OpenMayhemSetup />}
               <div>
                 <label className="mb-1 block text-text-muted">
-                  API key {chatBackend !== 'novelai' && <span className="text-text-muted/70">(some providers don't need one)</span>}
+                  API key {chatBackend !== 'novelai' && !isOpenMayhem(chatBackendBaseUrl) && <span className="text-text-muted/70">(some providers don't need one)</span>}
                 </label>
                 <input
                   type="password"
@@ -376,7 +376,7 @@ export function WelcomeView({
               ) : (
                 openAiModelField
               )}
-              <HostedConnectionStatus status={hostedStatus.status} detail={hostedStatus.detail} recheck={hostedStatus.recheck} />
+              <HostedConnectionStatus status={hostedStatus.status} detail={hostedStatus.detail} recheck={() => { reloadCloudModels(); hostedStatus.recheck() }} />
               <p>
                 Need more control (custom base URL, per-provider notes)?{' '}
                 <button className="text-accent transition-colors hover:underline" onClick={() => onNavigate('settings')}>

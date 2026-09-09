@@ -23,6 +23,7 @@ import {
 import { removeAvatar, resolveAvatar, resolveAvatarMap, resolveAvatarMapVariants, resolveWorldBackgroundsNightMap, resolveWorldMusicMap } from './avatars.ts'
 import { encodeTokens, tokenizerForModel } from './novelaiTokenizer.ts'
 import { originGuard } from './originCheck.ts'
+import { openMayhemRouter } from './openMayhem.ts'
 
 /**
  * Express app: REST routes for characters, personas, chats/messages, world info books, sampler
@@ -37,6 +38,7 @@ app.use(originGuard)
 
 // Raised generously (a bulk sprite upload easily clears 25MB) — local-only app, no untrusted-request concern.
 app.use(express.json({ limit: '150mb' }))
+app.use('/api/openmayhem', openMayhemRouter())
 app.use('/avatars', express.static(avatarsDir))
 
 function notFound(res: express.Response) {

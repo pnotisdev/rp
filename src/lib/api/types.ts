@@ -57,6 +57,8 @@ export const DEFAULT_CHAT_COMPLETION_SAMPLER: ChatCompletionSamplerParams = {
 }
 
 export interface GenerateRequest extends Partial<GenerationParams> {
+  /** Requested by structured assists; currently mapped only for OpenMayhem models whose contract supports it. */
+  jsonOutput?: boolean
   prompt: string
   max_length: number
   max_context_length: number

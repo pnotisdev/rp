@@ -12,7 +12,7 @@ The catch with letting a model score its own relationship is that it will happil
 
 The interface stays out of the way: one accent colour, a lot of empty space, and the dense settings hidden until you go looking for them.
 
-Nothing leaves your computer. Characters, chats, worlds and personas live in a SQLite file under `data/`, alongside the real image and audio files they reference. No account, no telemetry.
+Characters, chats, worlds and personas live in a SQLite file under `data/`, alongside the real image and audio files they reference. Local model inference can stay on your machine; choosing a hosted provider sends prompts to that provider. RP Suite itself requires no account and has no telemetry.
 
 ## Setup
 
@@ -52,6 +52,14 @@ environment variables and exposing it beyond localhost.
 KoboldCpp is the main target, with streaming, vision, abort handling and token counting written against its own API rather than a lowest common denominator. Any OpenAI-compatible endpoint also works: OpenRouter, Nano-GPT, LM Studio, llama.cpp, TabbyAPI, oobabooga. NovelAI is supported for both text and images, with its own tokenizer.
 
 Each backend reports its connection state in the header, and Settings has a Test connection button that hits a free metadata endpoint instead of burning a real generation on a paid provider.
+
+### OpenMayhem
+
+Choose **OpenAI-compatible → OpenMayhem** in Settings → Connection, or select OpenMayhem in the welcome screen's cloud provider list. The setup links take you to account creation, the current free-credit offer when available, and API key creation. Claim credits on OpenMayhem, create a key with Chat permission, paste it into RP Suite, and choose a model from the live catalog.
+
+OpenMayhem uses `https://api.openmayhem.ai/v1`. Requests pass through RP Suite's local server because the hosted API currently restricts browser origins. The server forwards your key without storing it. Replies and background scoring both use your credit. The free-credit amount and availability come from OpenMayhem, and eligibility/verification are handled there.
+
+The connection check reads the public catalog without spending credit; it does **not** validate your key or balance. Those are checked on your first inference request. See [OpenMayhem integration notes](OPENMAYHEM.md) for behavior, research, and validation limits.
 
 ### Characters
 

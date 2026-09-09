@@ -2,12 +2,14 @@ import type { GenerateRequest } from './types'
 import { KoboldApiError } from './types'
 import { estimateTokens } from '@/lib/tokenEstimate'
 import type { ChatBackend, ConnectionCheckResult } from './chatBackend'
+import { isOpenMayhem, loadOpenMayhemModels, OPENMAYHEM_PROXY, openMayhemRequestBody } from './openMayhem'
 
 // A single client for any provider that speaks the OpenAI Chat Completions wire format —
 // OpenAI, OpenRouter, Groq, Together, local servers (llama.cpp, LM Studio, Ollama's OpenAI shim),
 // and more. Does not attempt native Anthropic/Google wire formats; OpenRouter already re-exposes
 // both through this same shape.
 export class OpenAICompatibleClient implements ChatBackend {
+  get prefersJsonObject(): boolean { return isOpenMayhem(this.baseUrl) }
   constructor(
     public baseUrl: string,
     private apiKey: string,
@@ -22,6 +24,7 @@ export class OpenAICompatibleClient implements ChatBackend {
   }
 
   private url(): string {
+    if (isOpenMayhem(this.baseUrl)) return `${OPENMAYHEM_PROXY}/chat/completions`
     return this.baseUrl.replace(/\/+$/, '') + '/chat/completions'
   }
 
@@ -29,7 +32,7 @@ export class OpenAICompatibleClient implements ChatBackend {
   private body(params: GenerateRequest, stream: boolean): Record<string, unknown> {
     const messages = params.messages?.length ? params.messages : [{ role: 'user' as const, content: params.prompt }]
     const body: Record<string, unknown> = {
-      model: this.model || 'gpt-4o-mini',
+      model: this.model || (isOpenMayhem(this.baseUrl) ? '' : 'gpt-4o-mini'),
       messages,
       stream,
     }
@@ -45,14 +48,15 @@ export class OpenAICompatibleClient implements ChatBackend {
     // max_completion_tokens instead and reject this one — a known gap, not handled here.
     if (typeof params.max_length === 'number') body.max_tokens = params.max_length
     if (params.stop_sequence?.length) body.stop = params.stop_sequence
+    if (params.jsonOutput && this.prefersJsonObject) body.response_format = { type: 'json_object' }
     return body
   }
 
   private async parseErrorBody(res: Response): Promise<string> {
     const text = await res.text().catch(() => '')
     try {
-      const parsed = JSON.parse(text) as { error?: { message?: string } }
-      return parsed.error?.message || text
+      const parsed = JSON.parse(text) as { error?: { message?: string }; message?: string }
+      return parsed.error?.message || parsed.message || text
     } catch {
       return text
     }
@@ -69,12 +73,14 @@ export class OpenAICompatibleClient implements ChatBackend {
   }
 
   async generate(params: GenerateRequest, signal?: AbortSignal): Promise<string> {
+    const rawBody = this.body(params, false)
+    const body = isOpenMayhem(this.baseUrl) ? await openMayhemRequestBody(rawBody) : rawBody
     let res: Response
     try {
       res = await fetch(this.url(), {
         method: 'POST',
         headers: this.headers(),
-        body: JSON.stringify(this.body(params, false)),
+        body: JSON.stringify(body),
         signal,
       })
     } catch (e) {
@@ -86,17 +92,23 @@ export class OpenAICompatibleClient implements ChatBackend {
       throw new KoboldApiError(`Chat completion failed (${res.status}): ${(await this.parseErrorBody(res)).slice(0, 300)}${hint}`, res.status)
     }
     const data = (await res.json()) as { choices?: { message?: { content?: string } }[] }
-    return data.choices?.[0]?.message?.content ?? ''
+    const content = data.choices?.[0]?.message?.content ?? ''
+    if (isOpenMayhem(this.baseUrl) && !content.trim()) {
+      throw new KoboldApiError('OpenMayhem returned no reply text. Check the model and response token limit; generation may still have used credit.')
+    }
+    return content
   }
 
   /** SSE streaming: splits on blank lines, reads `data:` lines, each payload `choices[0].delta.content`, ending on the `data: [DONE]` sentinel. */
   async generateStream(params: GenerateRequest, onToken: (token: string, full: string) => void, signal?: AbortSignal): Promise<string> {
+    const rawBody = this.body(params, true)
+    const body = isOpenMayhem(this.baseUrl) ? await openMayhemRequestBody(rawBody) : rawBody
     let res: Response
     try {
       res = await fetch(this.url(), {
         method: 'POST',
         headers: this.headers(),
-        body: JSON.stringify(this.body(params, true)),
+        body: JSON.stringify(body),
         signal,
       })
     } catch (e) {
@@ -105,7 +117,7 @@ export class OpenAICompatibleClient implements ChatBackend {
     }
     if (!res.ok || !res.body) {
       const hint = res.status === 429 ? this.rateLimitHint(res) : ''
-      throw new KoboldApiError(`Chat completion stream failed (${res.status}): ${(await this.parseErrorBody(res)).slice(0, 300)}${hint}`)
+      throw new KoboldApiError(`Chat completion stream failed (${res.status}): ${(await this.parseErrorBody(res)).slice(0, 300)}${hint}`, res.status)
     }
 
     const reader = res.body.getReader()
@@ -117,7 +129,7 @@ export class OpenAICompatibleClient implements ChatBackend {
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
-        buffer += decoder.decode(value, { stream: true })
+        buffer = (buffer + decoder.decode(value, { stream: true })).replace(/\r\n/g, '\n')
 
         let sepIndex: number
         while ((sepIndex = buffer.indexOf('\n\n')) !== -1) {
@@ -131,15 +143,14 @@ export class OpenAICompatibleClient implements ChatBackend {
           if (dataLines.length === 0) continue
           const dataStr = dataLines.join('\n')
           if (dataStr === '[DONE]') continue
-          try {
-            const parsed = JSON.parse(dataStr) as { choices?: { delta?: { content?: string } }[] }
-            const token = parsed.choices?.[0]?.delta?.content
-            if (typeof token === 'string' && token) {
-              full += token
-              onToken(token, full)
-            }
-          } catch {
-            // ignore malformed/keepalive events
+          let parsed: { error?: { message?: string }; choices?: { delta?: { content?: string } }[] }
+          try { parsed = JSON.parse(dataStr) } catch { continue }
+          if (!parsed || typeof parsed !== 'object') continue
+          if (parsed.error) throw new KoboldApiError(parsed.error.message || 'The provider failed while streaming the reply.')
+          const token = parsed.choices?.[0]?.delta?.content
+          if (typeof token === 'string' && token) {
+            full += token
+            onToken(token, full)
           }
         }
       }
@@ -147,11 +158,20 @@ export class OpenAICompatibleClient implements ChatBackend {
       if (signal?.aborted) return full
       throw e
     }
+    if (isOpenMayhem(this.baseUrl) && !full.trim()) {
+      throw new KoboldApiError('OpenMayhem returned no reply text. Check the model and response token limit; generation may still have used credit.')
+    }
     return full
   }
 
-  /** No universal introspection endpoint across OpenAI-compatible providers — always the caller's own fallback. */
+  /** OpenMayhem publishes context metadata; other providers retain the caller's fallback. */
   async getEffectiveMaxContext(fallback = 4096): Promise<number> {
+    if (isOpenMayhem(this.baseUrl)) {
+      try {
+        const context = (await loadOpenMayhemModels()).find((m) => m.id === this.model)?.context_length
+        if (typeof context === 'number' && Number.isFinite(context) && context > 0) return Math.floor(context)
+      } catch { /* Keep generation's existing fallback when metadata is unavailable. */ }
+    }
     return fallback
   }
 
@@ -170,6 +190,18 @@ export class OpenAICompatibleClient implements ChatBackend {
 
   /** Settings → Connection's reachability+auth check, without a real (billed) chat completion. Uses `GET /models` (validates the key on most providers) except for OpenRouter and Nano-GPT, whose `/models` is public and returns 200 for any key — `/key` (OpenRouter) and the balance endpoint (Nano-GPT) are used there instead, and double as a usage/balance readout for the success detail. */
   async checkConnection(): Promise<ConnectionCheckResult> {
+    if (isOpenMayhem(this.baseUrl)) {
+      if (!this.apiKey.trim()) return { ok: false, detail: 'Enter your OpenMayhem API key.' }
+      try {
+        const models = await loadOpenMayhemModels()
+        const model = models.find((m) => m.id === this.model)
+        if (!model) return { ok: false, detail: 'Choose a model from the OpenMayhem chat catalog.' }
+        if (model.availability === 'offline') return { ok: false, detail: 'This model has no providers online. Choose another model or check again later.' }
+        return { ok: true, detail: 'Catalog reachable. Your key and credit are checked on your first reply; this check spends no credit.' }
+      } catch {
+        return { ok: false, detail: 'Could not load the OpenMayhem catalog through the RP Suite server.' }
+      }
+    }
     const trimmed = this.baseUrl.replace(/\/+$/, '')
     if (!trimmed) return { ok: false, detail: 'No base URL set.' }
     if (trimmed.includes('nano-gpt.com')) return this.checkNanoGptBalance(trimmed)

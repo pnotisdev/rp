@@ -2,6 +2,8 @@
 // OpenAI-compatible /v1 shape (LM Studio, llama.cpp, Ollama, TabbyAPI, oobabooga) — so onboarding
 // can take one address and wire the right backend without asking which protocol it is.
 
+import { isOpenMayhem, loadOpenMayhemModels } from './openMayhem'
+
 const PROBE_TIMEOUT_MS = 3500
 
 export interface DetectedBackend {
@@ -74,6 +76,9 @@ export async function detectLocalBackend(url: string, apiKey?: string): Promise<
 
 /** `GET {baseUrl}/models` → model ids, or null if it didn't answer usably. Empty array = answered, no models listed. */
 export async function listOpenAiModels(baseUrl: string, apiKey?: string): Promise<string[] | null> {
+  if (isOpenMayhem(baseUrl)) {
+    try { return (await loadOpenMayhemModels(true)).map((m) => m.id) } catch { return null }
+  }
   const root = strip(baseUrl)
   if (!root) return null
   return modelIdsFrom(await getJson(`${root}/models`, apiKey))
@@ -85,6 +90,9 @@ export async function listOpenAiModels(baseUrl: string, apiKey?: string): Promis
  * when `/models` didn't answer or carried no size for that id — the caller keeps its own default.
  */
 export async function fetchOpenAiModelContext(baseUrl: string, model: string, apiKey?: string): Promise<number | null> {
+  if (isOpenMayhem(baseUrl)) {
+    try { return (await loadOpenMayhemModels()).find((m) => m.id === model)?.context_length ?? null } catch { return null }
+  }
   const root = strip(baseUrl)
   if (!root || !model) return null
   const body = await getJson(`${root}/models`, apiKey)

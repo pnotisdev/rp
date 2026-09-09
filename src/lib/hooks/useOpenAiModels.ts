@@ -15,9 +15,11 @@ export function useOpenAiModels(baseUrl: string, apiKey: string, enabled: boolea
   useEffect(() => {
     if (!enabled || !baseUrl.trim()) {
       setModels(null)
+      setLoading(false)
       return
     }
     let cancelled = false
+    setModels(null)
     setLoading(true)
     listOpenAiModels(baseUrl, apiKey || undefined).then((ids) => {
       if (cancelled) return
