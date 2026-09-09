@@ -90,6 +90,8 @@ interface RelationshipPanelProps {
   onNavigateToWorld?: (worldId: string, tab?: string) => void
   /** Adapts the option's action text to the scene and drops it in the composer for review; resolves once populated. */
   onIntimacyAction: (option: IntimacyUnlockable) => Promise<void>
+  /** Answers a branch the scene is blocked on (`intimacyStages.ts`'s `PendingChoice`). */
+  onIntimacyChoice: (characterId: string, edgeTo: string) => Promise<void>
   /** How many replies the character has given — the unit the aftercare window is counted in. */
   charReplyCount: number
 }
@@ -143,6 +145,7 @@ export function RelationshipPanel({
   onEndRelationship,
   onNavigateToWorld,
   onIntimacyAction,
+  onIntimacyChoice,
   charReplyCount,
 }: RelationshipPanelProps) {
   // Everyone this chat tracks a relationship for; falls back to the primary if a picked participant leaves the roster.
@@ -178,9 +181,14 @@ export function RelationshipPanel({
   const [initiatingFirstTime, setInitiatingFirstTime] = useState(false)
   const [buyingToyId, setBuyingToyId] = useState<string | null>(null)
   const [pendingActionId, setPendingActionId] = useState<string | null>(null)
+  const [pendingChoiceEdge, setPendingChoiceEdge] = useState<string | null>(null)
 
   // Eligible toys regardless of ownership — the panel needs to render an unbought-but-eligible toy's "Buy" state.
-  const intimacyUnlocked = getUnlockedIntimacyOptions(warmth, commitmentStatus, world)
+  // Filtered by this character's own limits, so an entry they've ruled out is never rendered at all —
+  // the enforcement point for `touchProfile`/`kinkProfile` (`dating/kinks.ts` explains why it's here
+  // and not in a prompt instruction).
+  const intimacyProfiles = { touch: viewingCharacter?.touchProfile, kinks: viewingCharacter?.kinkProfile }
+  const intimacyUnlocked = getUnlockedIntimacyOptions(warmth, commitmentStatus, world, undefined, intimacyProfiles)
   // The full catalog (not just `intimacyUnlocked`), so a locked toy is still shown with its requirement rather than hidden.
   const toyCatalogAll = getIntimacyCatalog(world).filter((i) => i.category === 'toy')
   const unlockedToyIds = new Set(intimacyUnlocked.filter((i) => i.category === 'toy').map((i) => i.id))
@@ -202,6 +210,24 @@ export function RelationshipPanel({
       onClose()
     } finally {
       setPendingActionId(null)
+    }
+  }
+
+  // A branch the scene has reached and will not cross on its own — the player's to answer. Shown
+  // whether or not the option carries a catalog entry: taking one that does routes through the same
+  // clicked-action path as the Unlocks tab, and one that doesn't simply moves the stage.
+  const pendingChoice = isIntimacySceneActive(track.intimacyScene, charReplyCount)
+    ? track.intimacyScene!.pendingChoice
+    : undefined
+
+  const handleChoice = async (edgeTo: string) => {
+    if (pendingChoiceEdge) return
+    setPendingChoiceEdge(edgeTo)
+    try {
+      await onIntimacyChoice(viewingId, edgeTo)
+      onClose()
+    } finally {
+      setPendingChoiceEdge(null)
     }
   }
 
@@ -386,6 +412,13 @@ export function RelationshipPanel({
             {afterglowRemaining === 1 ? 'reply' : 'replies'} before it settles into how it felt.
           </p>
         )}
+        {!!track.discoveredRegions?.length && (
+          // The discovery loop (`dating/touch.ts`): what the player has learned this character
+          // actually responds to. Says what was found, not what to do with it.
+          <p className="mt-2 border-t border-bg-elevated pt-2 text-xs italic text-romance">
+            You've learned they respond to: {track.discoveredRegions.map((r) => r.replace(/_/g, ' ')).join(', ')}.
+          </p>
+        )}
         {isRebuffActive(track.recentRebuff, charReplyCount) && (
           // Same restraint as the afterglow line above: says what's true, not what to do about it.
           <p className="mt-2 border-t border-bg-elevated pt-2 text-xs italic text-text-muted">
@@ -394,6 +427,27 @@ export function RelationshipPanel({
           </p>
         )}
       </div>
+
+      {pendingChoice && (
+        <div className="mb-4 rounded-xl border border-romance/40 bg-romance/10 p-4">
+          <div className="text-sm font-semibold text-romance">The scene is waiting on you</div>
+          <p className="mt-1 text-xs text-text-muted">
+            It won't move past this on its own. Pick where it goes.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {pendingChoice.options.map((option) => (
+              <button
+                key={option.edgeTo}
+                onClick={() => handleChoice(option.edgeTo)}
+                disabled={!!pendingChoiceEdge}
+                className="rounded-lg border border-romance/40 bg-bg-elevated px-3 py-1.5 text-xs font-medium text-romance transition-colors hover:bg-romance/15 disabled:opacity-50"
+              >
+                {pendingChoiceEdge === option.edgeTo ? 'Working…' : option.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {track.relationshipWarning && (
         <div className="mb-4 rounded-xl border border-danger/40 bg-danger/10 p-4">

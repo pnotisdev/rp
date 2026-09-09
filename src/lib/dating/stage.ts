@@ -202,6 +202,7 @@ type TrackHost = Pick<
   | 'intimacyScene'
   | 'giftLog'
   | 'intimacySceneShapeLog'
+  | 'discoveredRegions'
   | 'beliefsAboutUser'
   | 'expectationsOfUser'
   | 'currentFear'
@@ -235,6 +236,7 @@ export function getRelationshipTrack(chat: TrackHost, characterId: string): Rela
       intimacyScene: chat.intimacyScene,
       giftLog: chat.giftLog,
       intimacySceneShapeLog: chat.intimacySceneShapeLog,
+      discoveredRegions: chat.discoveredRegions,
       beliefsAboutUser: chat.beliefsAboutUser,
       expectationsOfUser: chat.expectationsOfUser,
       currentFear: chat.currentFear,

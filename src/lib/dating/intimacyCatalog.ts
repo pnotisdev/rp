@@ -1,3 +1,6 @@
+import type { BodyRegion } from '@/lib/dating/arousal'
+import { isAnyHardLimit, type KinkId, type KinkProfile } from '@/lib/dating/kinks'
+import { isRegionAvailable, type TouchProfile } from '@/lib/dating/touch'
 import type { CommitmentStatus } from '@/lib/types'
 import type { IntimacyDetailLevel } from '@/lib/store/useSettingsStore'
 import { COMMITMENT_ORDER } from '@/lib/dating/stage'
@@ -49,6 +52,108 @@ export interface IntimacyUnlockable {
    * those aren't physical objects to own.
    */
   price?: number
+  /**
+   * How much arousal (`dating/arousal.ts`) this activity can deliver per turn while it's the active
+   * one — the intensity axis, where `minWarmth` is the difficulty axis. A forehead kiss is 1; a
+   * position is 8. Unset falls back to `intimacyArousalWeight`'s per-category default, so a world's
+   * own entries need not set one; author it only where that default reads wrong (a winding-down
+   * activity, say).
+   */
+  arousalWeight?: number
+  /**
+   * Body regions this entry actually involves (`arousal.ts`). Feeds the meter straight from a click
+   * with no model call, and lets a character's `TouchProfile` filter out an entry that would touch
+   * somewhere they've ruled out. Built-in entries are tagged in `BUILT_IN_ENTRY_REGIONS` below.
+   */
+  regions?: BodyRegion[]
+  /** Kinks this entry involves (`kinks.ts`). One hard limit here and the entry is never offered or described. */
+  kinks?: KinkId[]
+}
+
+/**
+ * Regions and kinks for the built-in entries, kept beside the catalog rather than inline so the
+ * hand-written `actionText`/`promptNote` lines above stay readable. A world's own entries carry
+ * their own `regions`/`kinks` on the entry itself.
+ */
+const BUILT_IN_ENTRY_REGIONS: Record<string, BodyRegion[]> = {
+  'kiss-forehead': ['face'],
+  'kiss-cheek': ['face'],
+  'kiss-hand': ['hands'],
+  'kiss-temple': ['face', 'hair'],
+  'kiss-neck': ['neck'],
+  'kiss-jaw': ['face', 'neck'],
+  'kiss-collarbone': ['chest', 'shoulders'],
+  'kiss-wrist': ['hands'],
+  'kiss-ear': ['ears'],
+  'kiss-shoulder': ['back', 'shoulders', 'waist'],
+  'kiss-thigh': ['inner_thigh', 'thighs'],
+  'pos-missionary': ['genitals', 'hips', 'back'],
+  'pos-face-to-face': ['genitals', 'hips', 'chest'],
+  'pos-cowgirl': ['genitals', 'hips', 'chest'],
+  'pos-doggy': ['genitals', 'hips', 'back'],
+  'pos-spooning': ['genitals', 'hips', 'back', 'neck'],
+  'pos-against-wall': ['genitals', 'hips', 'thighs'],
+  'pos-reverse-cowgirl': ['genitals', 'hips', 'back'],
+  'pos-legs-over-shoulders': ['genitals', 'thighs', 'inner_thigh'],
+  'pos-sixty-nine': ['genitals', 'inner_thigh', 'lips'],
+  'toy-massage-oil': ['back', 'shoulders', 'waist'],
+  'toy-feather': ['waist', 'chest', 'inner_thigh'],
+  'toy-blindfold': ['face', 'hair'],
+  'toy-ice': ['chest', 'waist'],
+  'toy-body-paint': ['waist', 'chest', 'lips'],
+  'toy-vibrator': ['genitals', 'hips'],
+  'toy-silk-ties': ['hands'],
+  'toy-handcuffs': ['hands'],
+  'act-dirty-talk': ['ears'],
+  'act-massage': ['back', 'shoulders', 'thighs'],
+  'act-aftercare': ['back', 'hair', 'face'],
+  'act-shower': ['back', 'waist', 'chest'],
+  'act-morning-after': ['genitals', 'hips', 'back'],
+  'act-praise': ['face'],
+  'act-edging': ['genitals'],
+  'act-exhibitionism': ['genitals', 'hips'],
+}
+
+const BUILT_IN_ENTRY_KINKS: Record<string, KinkId[]> = {
+  'pos-sixty-nine': ['oral'],
+  'toy-feather': ['sensory_play'],
+  'toy-blindfold': ['sensory_play', 'bondage'],
+  'toy-ice': ['sensory_play'],
+  'toy-vibrator': ['toys'],
+  'toy-silk-ties': ['bondage'],
+  'toy-handcuffs': ['bondage'],
+  'act-dirty-talk': ['dirty_talk'],
+  'act-roleplay': ['roleplay'],
+  'act-praise': ['praise'],
+  'act-edging': ['edging'],
+  'act-exhibitionism': ['exhibitionism'],
+  'act-massage': ['gentle'],
+  'act-aftercare': ['gentle'],
+  'pos-against-wall': ['rough'],
+}
+
+/** The regions an entry involves — its own tag, or the built-in map, or nothing. */
+export function intimacyEntryRegions(option: IntimacyUnlockable): BodyRegion[] {
+  return option.regions ?? BUILT_IN_ENTRY_REGIONS[option.id] ?? []
+}
+
+/** The kinks an entry involves — its own tag, or the built-in map, or nothing. */
+export function intimacyEntryKinks(option: IntimacyUnlockable): KinkId[] {
+  return option.kinks ?? BUILT_IN_ENTRY_KINKS[option.id] ?? []
+}
+
+/** Per-category baseline for an entry with no authored `arousalWeight`. */
+const CATEGORY_AROUSAL_WEIGHT: Record<IntimacyCategory, number> = { kissing_spot: 1, position: 7, toy: 4, activity: 3 }
+
+/**
+ * The active entry's per-turn arousal weight. The default leans on `minWarmth` as a proxy for
+ * intensity — the entries a relationship earns last are the ones that escalate hardest — which
+ * holds across the built-in catalog and degrades sensibly for a world's own additions.
+ */
+export function intimacyArousalWeight(option: IntimacyUnlockable): number {
+  if (option.arousalWeight !== undefined) return option.arousalWeight
+  const tierBump = option.minWarmth >= 90 ? 2 : option.minWarmth >= 75 ? 1 : 0
+  return CATEGORY_AROUSAL_WEIGHT[option.category] + tierBump
 }
 
 /**
@@ -97,7 +202,7 @@ export const DEFAULT_INTIMACY_CATALOG: IntimacyUnlockable[] = [
   // --- activity: explicit-only (kinks, aftercare, and other non-position/toy intimate beats) ---
   { id: 'act-dirty-talk', category: 'activity', label: 'dirty talk', minWarmth: 55, actionText: "*I bring my mouth to {char}'s ear and tell them, low and specific, exactly what I want to do to them.*", promptNote: "murmuring filthy, specific things in {char}'s ear, close enough to feel {char}'s breath catch or their hands still against you" },
   { id: 'act-massage', category: 'activity', label: 'a slow, sensual massage', minWarmth: 55, actionText: "*I have {char} lie down and start working slow, deliberate pressure up either side of their spine.*", promptNote: "giving {char} a slow, sensual full-body massage" },
-  { id: 'act-aftercare', category: 'activity', label: 'quiet aftercare', minWarmth: 55, actionText: "*I pull {char} in against my chest and just hold them, one hand moving slow circles on their back, in no rush to move or talk.*", promptNote: "quiet aftercare: holding {char} close, one hand moving slow over damp skin or tangled hair, reassuring them, letting them come down at their own pace" },
+  { id: 'act-aftercare', category: 'activity', label: 'quiet aftercare', minWarmth: 55, arousalWeight: 1, actionText: "*I pull {char} in against my chest and just hold them, one hand moving slow circles on their back, in no rush to move or talk.*", promptNote: "quiet aftercare: holding {char} close, one hand moving slow over damp skin or tangled hair, reassuring them, letting them come down at their own pace" },
   { id: 'act-shower', category: 'activity', label: 'showering together', minWarmth: 75, minCommitment: 'dating', actionText: "*I take {char}'s hand and pull them toward the bathroom, reaching in to start the water.*", promptNote: "moving things into the shower together" },
   { id: 'act-roleplay', category: 'activity', label: 'acting out a fantasy', minWarmth: 75, minCommitment: 'dating', actionText: "*I catch {char}'s eye and slip into the role from the fantasy we talked about, waiting to see if they'll play along.*", promptNote: "acting out a shared fantasy the two of you talked about earlier" },
   { id: 'act-morning-after', category: 'activity', label: 'slow morning-after', minWarmth: 75, minCommitment: 'dating', actionText: "*I pull {char} back down under the covers, half-asleep, hands already wandering, in no hurry for the day to start.*", promptNote: "slow, unhurried morning-after sex, both of you still half-asleep" },
@@ -139,16 +244,35 @@ export function getIntimacyCatalog(world?: { customIntimacyOptions?: IntimacyUnl
  * panel's own call) returns every eligible toy regardless of ownership, since the panel needs to
  * render a "Buy" affordance for the ones not owned yet, not just hide them.
  */
+/** A character's own limits, applied to the action set rather than described to the model. */
+export interface IntimacyProfiles {
+  touch?: TouchProfile
+  kinks?: KinkProfile
+}
+
+/**
+ * Whether this specific character will engage with an entry at all. A hard-limited kink or a region
+ * they've ruled out (or not yet opened up at this warmth) removes the entry from the set entirely —
+ * from the panel, from the prompt, and from anywhere a stage edge could route into it.
+ */
+export function isEntryAllowed(option: IntimacyUnlockable, warmth: number, profiles?: IntimacyProfiles): boolean {
+  if (!profiles) return true
+  if (isAnyHardLimit(profiles.kinks, intimacyEntryKinks(option))) return false
+  return intimacyEntryRegions(option).every((region) => isRegionAvailable(profiles.touch, region, warmth))
+}
+
 export function getUnlockedIntimacyOptions(
   warmth: number,
   commitmentStatus: CommitmentStatus,
   world?: { customIntimacyOptions?: IntimacyUnlockable[]; replaceIntimacyCatalog?: boolean },
   ownedToyIds?: Set<string>,
+  profiles?: IntimacyProfiles,
 ): IntimacyUnlockable[] {
   return getIntimacyCatalog(world).filter((item) => {
     if (!(warmth >= item.minWarmth && commitmentMet(item.minCommitment, commitmentStatus))) return false
     if (item.category === 'toy' && ownedToyIds && !ownedToyIds.has(item.id)) return false
-    return true
+    // Last, so an entry ruled out by this character never reaches the panel or the prompt.
+    return isEntryAllowed(item, warmth, profiles)
   })
 }
 

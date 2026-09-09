@@ -514,7 +514,7 @@ describe('assessRelationshipMoment: aftercare pace context', () => {
   const baseParams = { history: TRANSCRIPT, latestReply: 'Thanks for helping me pack up.', charName: 'Sumire', userName: 'Kai', current: currentStats }
   const AFTERCARE_TURNS = [{ id: 'a1', role: 'user' as const, name: 'Kai', text: 'Hey, you okay?' }]
 
-  it('mentions a sudden spike as context only when aftercare is actually due', async () => {
+  it('names a fast arrival as context only when aftercare is actually due', async () => {
     let prompt = ''
     await assessRelationshipMoment(
       stubClient('{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[]}', (p) => {
@@ -522,10 +522,10 @@ describe('assessRelationshipMoment: aftercare pace context', () => {
       }),
       { ...baseParams, aftercareTurns: AFTERCARE_TURNS, aftercarePaceContext: 'rushed' },
     )
-    expect(prompt).toMatch(/built up very suddenly/)
+    expect(prompt).toMatch(/this arrived fast/)
   })
 
-  it('mentions a gradual build differently', async () => {
+  it('names an earned one differently', async () => {
     let prompt = ''
     await assessRelationshipMoment(
       stubClient('{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[]}', (p) => {
@@ -533,7 +533,7 @@ describe('assessRelationshipMoment: aftercare pace context', () => {
       }),
       { ...baseParams, aftercareTurns: AFTERCARE_TURNS, aftercarePaceContext: 'earned' },
     )
-    expect(prompt).toMatch(/built up gradually/)
+    expect(prompt).toMatch(/this was earned/)
   })
 
   it('says nothing about pace when there is no snapshot to read, even with aftercare due', async () => {
@@ -929,54 +929,81 @@ describe('assessRelationshipMoment — intimacy scene phase (item 1)', () => {
     current: deltas({}),
   }
 
-  it('never asks for a phase read on an ordinary turn', async () => {
+  const OBSERVATION =
+    '{"engagement":"engaged","intensityDelta":2,"hesitationSignalled":false,"stageCompleteSignalled":false,"regionsTouched":["neck","hips"]}'
+
+  it('never asks for a turn observation on an ordinary turn', async () => {
     let sent = ''
     const moment = await assessRelationshipMoment(
-      stubClient('{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"intimacyPhase":"peak"}', (p) => { sent = p.prompt as string }),
+      stubClient(`{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"intimacyObservation":${OBSERVATION}}`, (p) => { sent = p.prompt as string }),
       base,
     )
-    expect(sent).not.toContain('intimacyPhase')
-    // ...and a phase volunteered anyway is ignored, since no scene is tracked as active.
-    expect(moment.intimacyPhase).toBeUndefined()
+    expect(sent).not.toContain('intimacyObservation')
+    // ...and an observation volunteered anyway is ignored, since no scene is tracked as active.
+    expect(moment.intimacyObservation).toBeUndefined()
   })
 
-  it('asks for a phase read, with its rubric, only while a scene is active', async () => {
+  it('asks for a turn observation, with its rubric, only while a scene is active', async () => {
     let sent = ''
     const moment = await assessRelationshipMoment(
-      stubClient('{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"intimacyPhase":"peak"}', (p) => { sent = p.prompt as string }),
+      stubClient(`{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"intimacyObservation":${OBSERVATION}}`, (p) => { sent = p.prompt as string }),
       { ...base, currentIntimacyPhase: 'building' },
     )
-    expect(sent).toContain('intimacyPhase')
-    expect(sent).toContain('building, peak, resolved')
-    expect(moment.intimacyPhase).toBe('peak')
+    expect(sent).toContain('intimacyObservation')
+    expect(sent).toContain('engaged, stalled, drifted')
+    expect(moment.intimacyObservation).toEqual({
+      engagement: 'engaged',
+      intensityDelta: 2,
+      hesitationSignalled: false,
+      stageCompleteSignalled: false,
+      regionsTouched: ['neck', 'hips'],
+      clothingRemoved: [],
+    })
   })
 
-  it('accepts a "resolved" read, meaning the scene has concluded', async () => {
-    const moment = await assessRelationshipMoment(
-      stubClient('{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"intimacyPhase":"resolved"}'),
+  it('never offers the judge a phase or a "resolved" verdict to pick — only observations', async () => {
+    let sent = ''
+    await assessRelationshipMoment(
+      stubClient('{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[]}', (p) => { sent = p.prompt as string }),
       { ...base, currentIntimacyPhase: 'peak' },
     )
-    expect(moment.intimacyPhase).toBe('resolved')
+    expect(sent).not.toContain('"intimacyPhase"')
+    expect(sent).not.toContain('building, peak, resolved')
   })
 
-  it('rejects a phase outside the vocabulary', async () => {
+  it('drops an observation with no readable engagement, rather than inventing one', async () => {
     const moment = await assessRelationshipMoment(
-      stubClient('{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"intimacyPhase":"climax"}'),
+      stubClient('{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"intimacyObservation":{"engagement":"climaxing","intensityDelta":2}}'),
       { ...base, currentIntimacyPhase: 'building' },
     )
-    expect(moment.intimacyPhase).toBeUndefined()
+    expect(moment.intimacyObservation).toBeUndefined()
+  })
+
+  it('drops out-of-vocabulary regions and an out-of-range delta while keeping the rest', async () => {
+    const moment = await assessRelationshipMoment(
+      stubClient('{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"intimacyObservation":{"engagement":"stalled","intensityDelta":9,"hesitationSignalled":true,"stageCompleteSignalled":false,"regionsTouched":["neck","elbow"]}}'),
+      { ...base, currentIntimacyPhase: 'building' },
+    )
+    expect(moment.intimacyObservation).toEqual({
+      engagement: 'stalled',
+      intensityDelta: 0,
+      hesitationSignalled: true,
+      stageCompleteSignalled: false,
+      regionsTouched: ['neck'],
+      clothingRemoved: [],
+    })
   })
 
   it('rides along with aftercare scoring in the same call rather than replacing it', async () => {
     let sent = ''
     const moment = await assessRelationshipMoment(
-      stubClient('{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"aftercareVerdict":"tender","intimacyPhase":"resolved"}', (p) => { sent = p.prompt as string }),
+      stubClient(`{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"aftercareVerdict":"tender","intimacyObservation":${OBSERVATION}}`, (p) => { sent = p.prompt as string }),
       { ...base, aftercareTurns: HISTORY, currentIntimacyPhase: 'peak' },
     )
     expect(sent).toContain('aftercareVerdict')
-    expect(sent).toContain('intimacyPhase')
+    expect(sent).toContain('intimacyObservation')
     expect(moment.aftercareVerdict).toBe('tender')
-    expect(moment.intimacyPhase).toBe('resolved')
+    expect(moment.intimacyObservation?.engagement).toBe('engaged')
   })
 })
 

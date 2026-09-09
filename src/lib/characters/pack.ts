@@ -1,4 +1,5 @@
 import { charactersApi, worldsApi } from '@/lib/api/client'
+import { validateScenarioSource } from '@/lib/dating/scenarios'
 import { fileToDataUrl } from './importExport'
 import type { Character, CharacterCardData, GalleryEntry, Lorebook, RelationshipStarter, SocialConnection } from './cardSpec'
 import type { CustomSceneFlag, GiftItem, ItemDef, WorldCard } from '@/lib/types'
@@ -39,6 +40,9 @@ export interface CharacterPackV1 {
     likes?: string[]
     goals?: string[]
     boundaries?: string[]
+    /** Structured limits and responses (`dating/touch.ts`, `dating/kinks.ts`) — enforced by filtering, so they have to travel with the character. */
+    touchProfile?: Character['touchProfile']
+    kinkProfile?: Character['kinkProfile']
     socialConnections?: SocialConnection[]
     dateModeOptOut?: boolean
   }
@@ -56,6 +60,8 @@ export interface CharacterPackV1 {
     gifts?: GiftItem[]
     items?: ItemDef[]
     customSceneFlags?: CustomSceneFlag[]
+    /** Scene shapes the world ships (`dating/scenarios.ts`). Validated on import; a malformed one is dropped, not loaded. */
+    scenarios?: WorldCard['scenarios']
     relationshipThresholds?: WorldCard['relationshipThresholds']
   }
 }
@@ -119,6 +125,8 @@ export async function buildCharacterPack(character: Character, world?: WorldCard
       likes: character.likes,
       goals: character.goals,
       boundaries: character.boundaries,
+      touchProfile: character.touchProfile,
+      kinkProfile: character.kinkProfile,
       socialConnections: character.socialConnections,
       dateModeOptOut: character.dateModeOptOut,
     },
@@ -144,6 +152,7 @@ export async function buildCharacterPack(character: Character, world?: WorldCard
       gifts: world.gifts,
       items: world.items,
       customSceneFlags: world.customSceneFlags,
+      scenarios: world.scenarios,
       relationshipThresholds: world.relationshipThresholds,
     }
   }
@@ -198,6 +207,8 @@ export async function importCharacterPack(pack: CharacterPackV1): Promise<{ char
       gifts: pack.world.gifts,
       items: pack.world.items,
       customSceneFlags: pack.world.customSceneFlags,
+      // Rejected wholesale rather than loaded broken — see `dating/scenarios.ts`'s validator.
+      scenarios: (pack.world.scenarios ?? []).filter((graph) => validateScenarioSource(graph).length === 0),
       relationshipThresholds: pack.world.relationshipThresholds,
     })
   }
@@ -226,6 +237,8 @@ export async function importCharacterPack(pack: CharacterPackV1): Promise<{ char
     likes: pack.character.likes,
     goals: pack.character.goals,
     boundaries: pack.character.boundaries,
+    touchProfile: pack.character.touchProfile,
+    kinkProfile: pack.character.kinkProfile,
     socialConnections: pack.character.socialConnections,
     dateModeOptOut: pack.character.dateModeOptOut,
     worldId: world?.id,

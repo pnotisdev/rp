@@ -171,4 +171,35 @@ describe('aftercarePaceContext', () => {
   it('is undefined with no snapshot to read (a window opened before this field existed)', () => {
     expect(aftercarePaceContext(undefined)).toBeUndefined()
   })
+
+  // The scene record describes the thing the aftermath is actually the aftermath of, so it outranks
+  // the run-up wherever the two disagree.
+  const longScene = { turns: 10, arousal: 90, stages: 2 }
+
+  it('reads a scene that was over before it began as rushed, however patient the run-up was', () => {
+    expect(aftercarePaceContext(0, { turns: 2, arousal: 90, stages: 2 })).toBe('rushed')
+  })
+
+  it('reads a scene that never really arrived as rushed, however long it ran', () => {
+    expect(aftercarePaceContext(0, { turns: 20, arousal: 30, stages: 2 })).toBe('rushed')
+  })
+
+  it('reads an unhurried scene that got somewhere as earned, even off a spiking run-up', () => {
+    expect(aftercarePaceContext(3, longScene)).toBe('earned')
+  })
+
+  it('reads a scene that moved through more than one stage as earned at a moderate length', () => {
+    expect(aftercarePaceContext(3, { turns: 5, arousal: 85, stages: 2 })).toBe('earned')
+  })
+
+  it('falls back to the run-up for a scene the record leaves genuinely ambiguous', () => {
+    const ambiguous = { turns: 5, arousal: 85, stages: 1 }
+    expect(aftercarePaceContext(3, ambiguous)).toBe('rushed')
+    expect(aftercarePaceContext(0, ambiguous)).toBe('earned')
+  })
+
+  it('still answers from the scene alone when the window predates the momentum snapshot', () => {
+    expect(aftercarePaceContext(undefined, longScene)).toBe('earned')
+    expect(aftercarePaceContext(undefined, { turns: 1, arousal: 90, stages: 1 })).toBe('rushed')
+  })
 })

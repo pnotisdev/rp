@@ -9,6 +9,7 @@ import type { ChatMessage } from '@/lib/prompt/builder'
 import type { InstructTemplate } from '@/lib/prompt/instructTemplates'
 import type { SceneTag } from '@/lib/vn/sceneTag'
 import type { WorldTemplateId } from '@/lib/world/worldTemplates'
+import type { ScenarioGraph } from '@/lib/dating/intimacyStages'
 import type { CustomBackground } from '@/lib/vn/backgrounds'
 import type { CharacterMood, CharacterNeed } from '@/lib/prompt/mindGuidance'
 import type { IntimacyUnlockable } from '@/lib/dating/intimacyCatalog'
@@ -153,6 +154,8 @@ export interface RelationshipTrack {
   giftLog?: GiftLogEntry[]
   /** FIXES_TODO #12's escalation-shape memory (`dating/intimacyScene.ts`) — recent resolved scenes' catalog-category sequences, e.g. `['kissing_spot', 'position', 'toy']`. Bare `string[][]`, not `IntimacyCategory[][]`, to avoid a circular import back through `intimacyCatalog.ts`. */
   intimacySceneShapeLog?: string[][]
+  /** Body regions the player has found this character genuinely responds to (`dating/touch.ts`) — the discovery loop, kept across scenes. Bare `string[]` to avoid a circular import back through `arousal.ts`. */
+  discoveredRegions?: string[]
   /** See `CharacterBelief`. Capped/aged out the same way `plans` is (`dating/beliefs.ts`). */
   beliefsAboutUser?: CharacterBelief[]
   /** See `UserExpectation`. Capped/aged out the same way `plans` is (`dating/expectations.ts`). */
@@ -320,6 +323,8 @@ export interface StoredMessage extends ChatMessage {
   povFlag?: string | null
   /** FIXES_TODO #11: `dating/intimacyScene.ts` flagged this reply for using one of `EXPLICIT_ANTI_PATTERNS`. Own field since it's a prose-quality miss, not a boundary/POV violation. `null` clears it. */
   explicitQualityFlag?: string | null
+  /** `dating/continuityGuard.ts` flagged this reply for contradicting the tracked scene state (clothing already off, a location or time that isn't the current one). Unlike the flags above it also earns the one automatic retry, since the engine — not a lexical guess about authored text — is the authority on what it contradicted. `null` clears it. */
+  continuityFlag?: string | null
   /** Snapshot of this message right before its most recent "Continue" appended a segment — lets the player undo it (restore this) or regenerate just that segment (re-continue from here). Cleared on a fresh generation/swipe/edit; `null` clears it. */
   continueUndo?: { text: string; rawText?: string; scene?: SceneTag } | null
 }
@@ -397,6 +402,7 @@ export interface Chat {
   intimacyScene?: IntimacyScene | null
   giftLog?: GiftLogEntry[]
   intimacySceneShapeLog?: string[][]
+  discoveredRegions?: string[]
   beliefsAboutUser?: CharacterBelief[]
   expectationsOfUser?: UserExpectation[]
   currentFear?: string
@@ -496,6 +502,8 @@ export interface WorldCard {
   customIntimacyOptions?: IntimacyUnlockable[]
   /** When true, `customIntimacyOptions` REPLACES the built-in catalog instead of adding to it — for non-humanoid or otherwise very different settings. Ignored when `customIntimacyOptions` is empty. */
   replaceIntimacyCatalog?: boolean
+  /** Scene shapes this world adds to the built-ins (`dating/scenarios.ts`). Additive, and validated on import — a malformed graph is rejected rather than loaded. */
+  scenarios?: ScenarioGraph[]
   /** This world's own content rating, overriding global Settings. Unset = inherit global, distinct from explicit `'default'`. `null` on the wire clears back to inherit. See `resolveIntimacyLevel`. */
   intimacyLevel?: IntimacyDetailLevel | null
   /** Author-defined "when X, then Y" rules (`world/triggers.ts`). */

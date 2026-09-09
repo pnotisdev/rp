@@ -489,6 +489,7 @@ describe('getRelationshipTrack / patchRelationshipTrack', () => {
       intimacyScene: { phase: 'building', activityLabel: 'spooning', category: 'position', updatedAtTurn: 4 },
       giftLog: [{ giftId: 'rose', turn: 2 }],
       intimacySceneShapeLog: [['kissing_spot', 'position']],
+      discoveredRegions: ['neck'],
       beliefsAboutUser: [{ id: 'belief-1', text: 'He is unusually patient with me.', formedTurn: 6 }],
       expectationsOfUser: [{ id: 'expect-1', text: 'expects a check-in most Sundays', formedTurn: 10 }],
       currentFear: 'being seen as too much',

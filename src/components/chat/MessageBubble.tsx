@@ -1,5 +1,5 @@
 import { memo, useState } from 'react'
-import { AlertCircle, ChevronLeft, ChevronRight, Compass, GitFork, Heart, History, MessageSquareWarning, RotateCcw, Star, TriangleAlert, X } from 'lucide-react'
+import { AlertCircle, ChevronLeft, ChevronRight, Compass, GitFork, Heart, History, MessageSquareWarning, RotateCcw, Star, TriangleAlert, Unlink, X } from 'lucide-react'
 import type { StoredMessage } from '@/lib/types'
 import { useSettingsStore, type AvatarShape } from '@/lib/store/useSettingsStore'
 import { messageAnchorId } from '@/lib/scrollToMessage'
@@ -103,6 +103,10 @@ export const MessageBubble = memo(function MessageBubble({
   // Item 11: same durable, player-reviewed pattern again — see `types.ts`'s `explicitQualityFlag`
   // doc comment and `dating/intimacyScene.ts`'s `detectExplicitAntiPatternUsed`.
   const showExplicitQualityFlag = !isUser && !!message.explicitQualityFlag && !isStreaming
+  // Same durable pattern once more, for a reply that contradicted the tracked scene state — see
+  // `dating/continuityGuard.ts`. This one has usually already earned an automatic retry; the badge
+  // is what's left when the retry was spent or the second attempt broke continuity too.
+  const showContinuityFlag = !isUser && !!message.continuityFlag && !isStreaming
 
   const startEdit = () => {
     if (!clickToEdit || isStreaming) return
@@ -342,6 +346,13 @@ export const MessageBubble = memo(function MessageBubble({
       <MessageSquareWarning size={12} strokeWidth={2} />
     </span>
   ) : null
+  // A fourth distinct icon — a break in what the scene already established, rather than a limit, a
+  // POV slip, or a prose tell.
+  const continuityBadge = showContinuityFlag ? (
+    <span className="inline-flex text-warning" title={`This reply contradicted the scene: ${message.continuityFlag}. Worth a regenerate if it reads wrong.`}>
+      <Unlink size={12} strokeWidth={2} />
+    </span>
+  ) : null
   // 10b: how the player tagged this line's intent. Shown at rest (not hover-only) — it's real
   // context for how the exchange should read.
   const intentBadge = (() => {
@@ -375,7 +386,7 @@ export const MessageBubble = memo(function MessageBubble({
     return (
       <div id={anchorId} className={`group rounded-lg py-2 transition-colors duration-1000 ${highlightClass}`}>
         <span className={`font-display ${isUser ? 'text-accent' : 'text-text'}`}>{message.name}: </span>
-        {pinBadge} {boundaryBadge} {povBadge} {explicitQualityBadge} {intentBadge} {intimacyActionBadge}{' '}
+        {pinBadge} {boundaryBadge} {povBadge} {explicitQualityBadge} {continuityBadge} {intentBadge} {intimacyActionBadge}{' '}
         {imageStrip}
         <span className="prose-rp whitespace-pre-wrap break-words text-sm leading-relaxed">
           {editing ? (
@@ -422,6 +433,7 @@ export const MessageBubble = memo(function MessageBubble({
             {boundaryBadge}
             {povBadge}
             {explicitQualityBadge}
+            {continuityBadge}
             {intentBadge}
             {intimacyActionBadge}
             {metaHoverable}
@@ -442,6 +454,7 @@ export const MessageBubble = memo(function MessageBubble({
           {boundaryBadge}
           {povBadge}
           {explicitQualityBadge}
+          {continuityBadge}
           {intentBadge}
           {intimacyActionBadge}
         </div>

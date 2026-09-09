@@ -73,7 +73,7 @@ import { isVnReady } from '@/lib/vn/artHint'
 import { countCharReplies } from '@/lib/dating/aftercare'
 import { getGiftCatalog } from '@/lib/dating/gifts'
 import { getItemCatalog } from '@/lib/dating/items'
-import { composeIntimacyActionText, type IntimacyUnlockable } from '@/lib/dating/intimacyCatalog'
+import { composeIntimacyActionText, intimacyItemById, type IntimacyUnlockable } from '@/lib/dating/intimacyCatalog'
 
 /**
  * The main chat screen: header, toolbar, and either the default message-log layout or VNStage's
@@ -143,6 +143,7 @@ export function ChatWindow({
     buyGift,
     buyItem,
     buyToy,
+    chooseIntimacyBranch,
     useItem,
     askForCommitment,
     initiateFirstTime,
@@ -567,6 +568,15 @@ export function ChatWindow({
     setShowRelationship(false)
   }
 
+  // Answering a branch the scene is blocked on: the stage moves in the hook, and an option that names a
+  // catalog entry then goes through the ordinary clicked-action path so it lands in the composer for
+  // review like any other deliberate move.
+  const onIntimacyChoice = async (characterId: string, edgeTo: string) => {
+    const entryId = await chooseIntimacyBranch(characterId, edgeTo)
+    const entry = entryId ? intimacyItemById(entryId, world) : undefined
+    if (entry) await onIntimacyAction(entry)
+  }
+
   // Once a non-'manual' policy is active, the composer's "reply as" picker gives way to a read-only hint.
   const turnPolicy = chat.scene?.turnPolicy ?? 'manual'
   const turnPolicyHint =
@@ -787,6 +797,7 @@ export function ChatWindow({
           onNavigateToWorld={onNavigateToWorld}
           charReplyCount={countCharReplies(messages)}
           onIntimacyAction={onIntimacyAction}
+          onIntimacyChoice={onIntimacyChoice}
         />
       )}
       {showAuthorNote && (

@@ -1,3 +1,6 @@
+import { BODY_REGIONS } from '@/lib/dating/arousal'
+import { BUILT_IN_KINKS, type KinkProfile } from '@/lib/dating/kinks'
+import type { TouchProfile } from '@/lib/dating/touch'
 import { useEffect, useState, type ReactNode } from 'react'
 import { ImagePlus, Plus, Sparkles, X } from 'lucide-react'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
@@ -84,6 +87,90 @@ const TABS: EditorTab[] = [
   { id: 'advanced', label: 'Advanced' },
 ]
 
+/** The regions an authored sensitivity map scores at exactly this value. */
+function regionsAt(sensitivity: Partial<Record<string, number>> | undefined, value: number): string {
+  return Object.entries(sensitivity ?? {})
+    .filter(([, v]) => v === value)
+    .map(([region]) => region)
+    .join(', ')
+}
+
+function kinksAt(valence: Partial<Record<string, number>> | undefined, value: number): string {
+  return Object.entries(valence ?? {})
+    .filter(([, v]) => v === value)
+    .map(([kink]) => kink)
+    .join(', ')
+}
+
+function parseList(raw: string): string[] {
+  return raw
+    .split(',')
+    .map((v) => v.trim().toLowerCase().replace(/\s+/g, '_'))
+    .filter(Boolean)
+}
+
+/**
+ * Only real regions. Applied when the profile is composed rather than as the author types, since
+ * validating a half-typed word would eat every keystroke before it could become one.
+ */
+function parseRegions(raw: string): string[] {
+  return parseList(raw).filter((v) => (BODY_REGIONS as readonly string[]).includes(v))
+}
+
+/** Kink ids stay open, so a world's own vocabulary survives being typed in here. */
+function parseKinks(raw: string): string[] {
+  return parseList(raw)
+}
+
+/**
+ * Rebuilds a profile from the fields above, preserving anything they don't own — a per-region score
+ * of 1 or 2, or a warmth gate, set on an imported card stays exactly as authored.
+ */
+function composeTouchProfile(
+  existing: TouchProfile | undefined,
+  sensitiveRaw: string,
+  unresponsiveRaw: string,
+  offLimitsRaw: string,
+): TouchProfile | null {
+  const sensitive = parseRegions(sensitiveRaw)
+  const unresponsive = parseRegions(unresponsiveRaw)
+  const offLimits = parseRegions(offLimitsRaw)
+  const sensitivity: Record<string, number> = {}
+  for (const [region, value] of Object.entries(existing?.sensitivity ?? {})) {
+    if (value !== 3 && value !== 0 && value !== undefined) sensitivity[region] = value
+  }
+  for (const region of sensitive) sensitivity[region] = 3
+  for (const region of unresponsive) sensitivity[region] = 0
+  const profile: TouchProfile = {
+    ...(Object.keys(sensitivity).length ? { sensitivity: sensitivity as TouchProfile['sensitivity'] } : {}),
+    ...(offLimits.length ? { offLimits: offLimits as NonNullable<TouchProfile['offLimits']> } : {}),
+    ...(existing?.gated ? { gated: existing.gated } : {}),
+  }
+  return Object.keys(profile).length ? profile : null
+}
+
+function composeKinkProfile(
+  existing: KinkProfile | undefined,
+  likedRaw: string,
+  dislikedRaw: string,
+  hardLimitsRaw: string,
+): KinkProfile | null {
+  const liked = parseKinks(likedRaw)
+  const disliked = parseKinks(dislikedRaw)
+  const hardLimits = parseKinks(hardLimitsRaw)
+  const valence: Record<string, number> = {}
+  for (const [kink, value] of Object.entries(existing?.valence ?? {})) {
+    if (value !== 2 && value !== -1 && value !== undefined) valence[kink] = value
+  }
+  for (const kink of liked) valence[kink] = 2
+  for (const kink of disliked) valence[kink] = -1
+  const profile: KinkProfile = {
+    ...(Object.keys(valence).length ? { valence: valence as KinkProfile['valence'] } : {}),
+    ...(hardLimits.length ? { hardLimits } : {}),
+  }
+  return Object.keys(profile).length ? profile : null
+}
+
 export function CharacterEditor({
   character,
   onSaved,
@@ -139,6 +226,16 @@ export function CharacterEditor({
   const [socialConnections, setSocialConnections] = useState<SocialConnection[]>(character?.socialConnections ?? [])
   const [behavioralRules, setBehavioralRules] = useState<BehavioralRule[]>(character?.behavioralRules ?? [])
   const [dateModeOptOut, setDateModeOptOut] = useState(character?.dateModeOptOut ?? false)
+  // `touchProfile`/`kinkProfile` are richer than these fields can express (a per-region 0-3 scale, and
+  // warmth gates). The editor covers the parts that carry weight — what they love, what does nothing
+  // for them, and what is off the table — and leaves the rest to an imported card, which round-trips
+  // untouched because composing below only overwrites the keys these fields own.
+  const [sensitiveRegions, setSensitiveRegions] = useState(regionsAt(character?.touchProfile?.sensitivity, 3))
+  const [unresponsiveRegions, setUnresponsiveRegions] = useState(regionsAt(character?.touchProfile?.sensitivity, 0))
+  const [offLimitRegions, setOffLimitRegions] = useState((character?.touchProfile?.offLimits ?? []).join(', '))
+  const [likedKinks, setLikedKinks] = useState(kinksAt(character?.kinkProfile?.valence, 2))
+  const [dislikedKinks, setDislikedKinks] = useState(kinksAt(character?.kinkProfile?.valence, -1))
+  const [hardLimitKinks, setHardLimitKinks] = useState((character?.kinkProfile?.hardLimits ?? []).join(', '))
   const [outreachFrequency, setOutreachFrequency] = useState<OutreachFrequency>(character?.outreach?.frequency ?? 'never')
   const [showGenerate, setShowGenerate] = useState(false)
   const [showTemplates, setShowTemplates] = useState(false)
@@ -189,6 +286,12 @@ export function CharacterEditor({
     setSocialConnections(character?.socialConnections ?? [])
     setBehavioralRules(character?.behavioralRules ?? [])
     setDateModeOptOut(character?.dateModeOptOut ?? false)
+    setSensitiveRegions(regionsAt(character?.touchProfile?.sensitivity, 3))
+    setUnresponsiveRegions(regionsAt(character?.touchProfile?.sensitivity, 0))
+    setOffLimitRegions((character?.touchProfile?.offLimits ?? []).join(', '))
+    setLikedKinks(kinksAt(character?.kinkProfile?.valence, 2))
+    setDislikedKinks(kinksAt(character?.kinkProfile?.valence, -1))
+    setHardLimitKinks((character?.kinkProfile?.hardLimits ?? []).join(', '))
     setOutreachFrequency(character?.outreach?.frequency ?? 'never')
   }, [character?.id])
 
@@ -336,6 +439,8 @@ export function CharacterEditor({
       socialConnections: socialConnections.length ? socialConnections : null,
       behavioralRules: behavioralRules.length ? behavioralRules : null,
       dateModeOptOut,
+      touchProfile: composeTouchProfile(character?.touchProfile, sensitiveRegions, unresponsiveRegions, offLimitRegions),
+      kinkProfile: composeKinkProfile(character?.kinkProfile, likedKinks, dislikedKinks, hardLimitKinks),
       outreach: outreachFrequency !== 'never' ? { frequency: outreachFrequency } : null,
     }
     try {
@@ -1403,6 +1508,57 @@ export function CharacterEditor({
                 </div>
               )}
             />
+          </Section>
+
+          <Section
+            title="Touch & limits"
+            description="Where this character responds, and what is off the table. The limits here are enforced by removing content from the action set — never offered, never described, never routed to — unlike free-text boundaries, which only reach the model as prose."
+            surface="bare"
+          >
+            <div className="grid gap-3 sm:grid-cols-2">
+              <TextField
+                label="Especially sensitive"
+                value={sensitiveRegions}
+                onChange={(e) => setSensitiveRegions(e.target.value)}
+                placeholder="neck, ears, inner_thigh"
+                hint={`Where this character responds most. Anything not listed sits at the default. Regions: ${BODY_REGIONS.join(', ')}.`}
+              />
+              <TextField
+                label="Does nothing for them"
+                value={unresponsiveRegions}
+                onChange={(e) => setUnresponsiveRegions(e.target.value)}
+                placeholder="feet"
+                hint="Touched there, nothing happens — arousal simply doesn't move."
+              />
+              <TextField
+                label="Off-limits (regions)"
+                value={offLimitRegions}
+                onChange={(e) => setOffLimitRegions(e.target.value)}
+                placeholder="feet"
+                hint="Enforced, not suggested: any action involving these is removed from the panel and never reaches the prompt."
+              />
+              <TextField
+                label="Into (kinks)"
+                value={likedKinks}
+                onChange={(e) => setLikedKinks(e.target.value)}
+                placeholder="praise, gentle"
+                hint={`Speeds a scene involving these up. Built-ins: ${BUILT_IN_KINKS.join(', ')}. Your own names work too.`}
+              />
+              <TextField
+                label="Not into (kinks)"
+                value={dislikedKinks}
+                onChange={(e) => setDislikedKinks(e.target.value)}
+                placeholder="rough"
+                hint="Still available, but it slows the scene and reads as reluctance rather than enthusiasm."
+              />
+              <TextField
+                label="Hard limits (kinks)"
+                value={hardLimitKinks}
+                onChange={(e) => setHardLimitKinks(e.target.value)}
+                placeholder="bondage"
+                hint="Enforced the same way as off-limits regions — the content is never offered, never described, never routed to."
+              />
+            </div>
           </Section>
 
           <Section title="Content & features" description="An authorial opt-out. Unlike every warmth gate elsewhere, this doesn't unlock with progress." surface="bare">

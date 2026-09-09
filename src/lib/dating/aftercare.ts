@@ -22,6 +22,18 @@ export interface Afterglow {
   sourceLabel?: string
   /** Snapshot of `RelationshipTrack.momentum` at the moment the window opened (not recomputed at close, when momentum has already moved on). See `aftercarePaceContext`. */
   momentumAtStart?: number
+  /** How the scene itself actually went, written when it resolves — the other half of `aftercarePaceContext`'s read. Absent when the window was opened by a milestone with no tracked scene behind it. */
+  sceneAtResolve?: SceneResolveSnapshot
+}
+
+/** What the scene machine knew about a scene at the moment it ended (`intimacyScene.ts`'s `sceneResolveSnapshot`). */
+export interface SceneResolveSnapshot {
+  /** Character replies the whole scene ran for, start to resolve. */
+  turns: number
+  /** The arousal meter's value as it resolved. */
+  arousal: number
+  /** How many stages of its scenario the scene actually moved through. */
+  stages: number
 }
 
 /** Turns into the window, or `null` for no live window — including a stale one whose start is now ahead of the conversation (a rewind/fork). */
@@ -97,12 +109,39 @@ export function isAftercareVerdict(value: unknown): value is AftercareVerdict {
   return typeof value === 'string' && (AFTERCARE_VERDICTS as readonly string[]).includes(value)
 }
 
-/** Whether the warmth driving toward this milestone built up gradually or spiked right beforehand — reuses `momentum.ts`'s own "deepening fast" bar. `undefined` when there's no snapshot to read (never treated as a silent "earned"). Extra context for the judge only, not part of `AftercareVerdict`'s vocabulary. */
+/** Whether this milestone was earned or arrived too fast. `undefined` when there's nothing to read it from (never treated as a silent "earned"). Extra context for the judge only, not part of `AftercareVerdict`'s vocabulary. */
 export type AftercarePace = 'earned' | 'rushed'
 
 const RUSHED_MOMENTUM_THRESHOLD = 2
 
-export function aftercarePaceContext(momentumAtStart: number | undefined): AftercarePace | undefined {
-  if (momentumAtStart === undefined) return undefined
+/** A scene shorter than this was over before it began, whatever the run-up looked like. */
+const RUSHED_SCENE_TURNS = 4
+
+/** From here up, a scene that also actually got somewhere reads as earned on its own. */
+const EARNED_SCENE_TURNS = 8
+
+/** Arousal at resolve below this means the scene ended without ever really arriving. */
+const EARNED_RESOLVE_AROUSAL = 60
+
+/**
+ * Two things feed this, in order of how directly they bear on it.
+ *
+ * The scene itself comes first, when there's a record of one: how many turns it ran, how far the
+ * meter actually got, and whether it moved through more than one stage of its scenario. That's a far
+ * better read than the run-up, because it describes the thing the aftermath is the aftermath *of* —
+ * a three-turn scene that resolved at the first opportunity leaves something different behind than a
+ * dozen unhurried turns, regardless of how the warmth that led there accumulated.
+ *
+ * The run-up (`momentum.ts`'s own "deepening fast" bar) decides the cases the scene record leaves
+ * genuinely ambiguous, and remains the whole answer for a window opened by a milestone with no
+ * tracked scene behind it.
+ */
+export function aftercarePaceContext(momentumAtStart: number | undefined, scene?: SceneResolveSnapshot): AftercarePace | undefined {
+  if (scene) {
+    if (scene.turns < RUSHED_SCENE_TURNS) return 'rushed'
+    if (scene.arousal < EARNED_RESOLVE_AROUSAL) return 'rushed'
+    if (scene.turns >= EARNED_SCENE_TURNS || scene.stages > 1) return 'earned'
+  }
+  if (momentumAtStart === undefined) return scene ? 'earned' : undefined
   return momentumAtStart >= RUSHED_MOMENTUM_THRESHOLD ? 'rushed' : 'earned'
 }

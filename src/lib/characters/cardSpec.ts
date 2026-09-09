@@ -8,6 +8,8 @@ import type { ScheduleEntry, WeatherPreferences } from '@/lib/world/calendar'
 import { DEFAULT_EXPRESSION_IDS, type CustomExpression } from '@/lib/vn/expressions'
 import type { Outfit } from '@/lib/vn/outfits'
 import type { IntimacyPhase } from '@/lib/dating/intimacyScene'
+import type { TouchProfile } from '@/lib/dating/touch'
+import type { KinkProfile } from '@/lib/dating/kinks'
 import type { RelationshipStage } from '@/lib/types'
 
 export type WorldInfoActivationMode = 'always' | 'keyword' | 'manual'
@@ -181,6 +183,10 @@ export interface Character {
   goals?: string[]
   /** Hard limits, in character. Informational only — see `dateModeOptOut` for the one boundary this app enforces mechanically. */
   boundaries?: string[]
+  /** Where this character responds, doesn't, and won't yet (`dating/touch.ts`). Feeds the arousal meter and filters the action set. */
+  touchProfile?: TouchProfile
+  /** Structured kink stances (`dating/kinks.ts`). Unlike `boundaries` above, a hard limit here is enforced by filtering, not described. */
+  kinkProfile?: KinkProfile
   /** Who this character knows and how; reaches the prompt as a compact roster line. */
   socialConnections?: SocialConnection[]
   /** Structured `when X → Y` / `never: Z` behavioral contracts, e.g. for desire, hesitation, aftercare — more precise than free-text personality. */

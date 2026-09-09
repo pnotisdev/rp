@@ -50,7 +50,12 @@ import {
   intimacyPaceFor,
   intimacySceneGuidance,
   isIntimacySceneActive,
+  sceneArousalBand,
   repeatedEscalationShapeGuidance,
+  arousalOf,
+  resolveIntimacyChoice,
+  sceneResolveSnapshot,
+  stanceOfScene,
   startOrShiftIntimacyScene,
 } from '@/lib/dating/intimacyScene'
 import { detectAnyBoundaryCrossing } from '@/lib/dating/boundaryGuard'
@@ -73,6 +78,12 @@ import {
 } from '@/lib/world/calendar'
 import { dateEventCardForActivity, type DayPlannerActivity } from '@/lib/world/dayPlanner'
 import { sceneContinuityNote } from '@/lib/prompt/sceneContinuity'
+import { sceneStateBlock } from '@/lib/prompt/sceneStateBlock'
+import { detectContinuityBreak, describeContinuityBreak } from '@/lib/dating/continuityGuard'
+import { getScenarioCatalog, scenarioById, selectScenario, successorScenario } from '@/lib/dating/scenarios'
+import { newlyDiscoveredRegions, withDiscoveredRegions } from '@/lib/dating/touch'
+import { combinedValence, kinkValenceMap } from '@/lib/dating/kinks'
+import type { BodyRegion } from '@/lib/dating/arousal'
 import { evaluateTriggers } from '@/lib/world/triggers'
 import {
   ambientEventGuidance,
@@ -166,6 +177,8 @@ import {
   composeIntimacyActionText,
   getUnlockedIntimacyOptions,
   intimacyActionDirective,
+  intimacyArousalWeight,
+  intimacyEntryKinks,
   intimacyItemById,
   intimacyOptionsGuidance,
   isExplicitCategory,
@@ -689,7 +702,10 @@ export function useChatSession(chatId: string | null) {
       // A world's own content rating wins over the global Settings dial.
       const intimacyLevel = resolveIntimacyLevel(world?.intimacyLevel, globalIntimacyLevel)
       const intimacyOptions = intimacyOptionsGuidance(
-        getUnlockedIntimacyOptions(speakerWarmth, speakerTrack.commitmentStatus ?? 'none', world, ownedToyIds),
+        getUnlockedIntimacyOptions(speakerWarmth, speakerTrack.commitmentStatus ?? 'none', world, ownedToyIds, {
+          touch: speaker.touchProfile,
+          kinks: speaker.kinkProfile,
+        }),
         intimacyLevel,
       )
 
@@ -762,12 +778,42 @@ export function useChatSession(chatId: string | null) {
       // The one canonical POV guard — fires on any romantic/intimate moment, catalog-driven scene or freeform.
       const agencyGuardLine = agencyGuardNote(isRomanticOrIntimateMoment, speaker.card.name, persona?.name || 'You')
 
-      // Compact, always-computed ledger of concrete scene facts, consolidated into one block instead of scattered across separate lines.
+      // Where and when, resolved once: the state block asserts these as fact and `continuityGuard.ts`
+      // checks the reply against them afterwards, so both halves have to be reading the same values.
+      const promptLocation = freshChat.scene?.location ?? scheduleLocation
+      const promptTimePhase = world
+        ? `${getCalendarInfo(world.currentDay ?? 0).weekday} ${PHASES[promptPhaseIndex]}`
+        : freshChat.scene?.timePhase || undefined
+
+      // The engine-rendered ledger of a live intimate scene — clothing, contact, and arousal the app
+      // tracks itself, stated as fact rather than left to the model's memory of scrollback.
+      const sceneStateLine = speakerSceneActive
+        ? sceneStateBlock({
+            charName: speaker.card.name,
+            userName: persona?.name || 'You',
+            location: promptLocation,
+            timePhase: promptTimePhase,
+            day: world?.currentDay,
+            activity: speakerTrack.intimacyScene!.activityLabel,
+            sceneTurns:
+              speakerTrack.intimacyScene!.startedAtTurn === undefined
+                ? undefined
+                : charReplyCount - speakerTrack.intimacyScene!.startedAtTurn,
+            clothing: speakerTrack.intimacyScene!.clothing,
+            contactRegions: speakerTrack.intimacyScene!.contactRegions,
+            // Reads through `arousalOf`, so a scene persisted before the meter existed still states a band.
+            arousalBand: sceneArousalBand(speakerTrack.intimacyScene!),
+          })
+        : ''
+
+      // Compact, always-computed ledger of concrete scene facts, consolidated into one block instead
+      // of scattered across separate lines. Whatever the state block above is already asserting is
+      // withheld here: the same fact stated twice in one prompt is noise, and two copies can drift.
       const sceneContinuityLine = sceneContinuityNote({
-        location: freshChat.scene?.location ?? scheduleLocation,
-        timePhase: world ? `${getCalendarInfo(world.currentDay ?? 0).weekday} ${PHASES[promptPhaseIndex]}` : freshChat.scene?.timePhase || undefined,
+        location: sceneStateLine ? undefined : promptLocation,
+        timePhase: sceneStateLine ? undefined : promptTimePhase,
         presentNames: roster.map((c) => c.card.name),
-        currentActivity: speakerSceneActive ? speakerTrack.intimacyScene!.activityLabel : freshChat.activeEvent?.title,
+        currentActivity: sceneStateLine ? undefined : freshChat.activeEvent?.title,
         openThreads: activeFacts.filter((f) => f.unresolved).map((f) => f.text),
       })
 
@@ -895,6 +941,7 @@ export function useChatSession(chatId: string | null) {
             replyLengthInstruction,
             styleGuidanceNote.trim(),
             slopAvoidance ?? '',
+            sceneStateLine,
             opts?.extraStyleGuidance ?? '',
           ]
             .filter(Boolean)
@@ -1086,7 +1133,7 @@ export function useChatSession(chatId: string | null) {
         currentNeed,
         characterIntent,
         planUpdates,
-        intimacyPhase,
+        intimacyObservation,
         beliefUpdates,
         expectationUpdates,
         currentFear,
@@ -1109,8 +1156,11 @@ export function useChatSession(chatId: string | null) {
         currentFear: track.currentFear,
         currentDesire: track.currentDesire,
         aftercareTurns: aftercareWindow,
-        aftercarePaceContext: aftercareDue ? aftercarePaceContext(openAfterglow?.momentumAtStart) : undefined,
+        aftercarePaceContext: aftercareDue
+          ? aftercarePaceContext(openAfterglow?.momentumAtStart, openAfterglow?.sceneAtResolve)
+          : undefined,
         currentIntimacyPhase: sceneActive ? openScene!.phase : undefined,
+        intimacyStance: sceneActive ? stanceOfScene(openScene!) : undefined,
         activeBeliefs: beliefLinesForJudge(activeBeliefs),
         activeExpectations: expectationLinesForJudge(activeExpectations),
         // Everyone else actually in the scene besides whoever's speaking — present for a jealousy beat to land in front of, not just be discussed.
@@ -1263,8 +1313,40 @@ export function useChatSession(chatId: string | null) {
 
       // Only recomputed while a scene is active; a stale one is carried forward unchanged. Same pace computation `buildCurrentPrompt` uses.
       const pace = intimacyPaceFor(mood ?? track.mood, activePlans.some((p) => p.kind === 'distance'), speaker.boundaries?.length ?? 0)
-      const nextIntimacyScene = sceneActive ? advanceIntimacyScene(openScene!, intimacyPhase, charRepliesNow, pace) : (openScene ?? null)
+      // The meter reads the stats as they stand going into this turn — arousal is modulated by the
+      // relationship, never the reverse (`arousal.ts`).
+      const sceneGraph = scenarioById(getScenarioCatalog(world), openScene?.scenarioId)
+      const nextIntimacyScene = sceneActive
+        ? advanceIntimacyScene(openScene!, intimacyObservation, charRepliesNow, {
+            graph: sceneGraph,
+            pace,
+            comfort: currentStats.comfort,
+            chemistry: currentStats.chemistry,
+            sensitivity: speaker.touchProfile?.sensitivity,
+            kinks: kinkValenceMap(speaker.kinkProfile),
+            // The same state a world's own trigger rules read, so a scenario's shared condition kinds
+            // (`intimacyStages.ts`) evaluate identically to a `TriggerCondition` over the same turn.
+            relationship: {
+              affection,
+              warmth,
+              stats: nextStats,
+              flags: existingFlags,
+              commitmentStatus: risk.commitmentStatus,
+              day: world?.currentDay,
+            },
+            // `toyInventory` is id -> count; an entry at zero is not owned.
+            ownedItemIds: new Set(Object.entries(freshChat.toyInventory ?? {}).filter(([, n]) => n > 0).map(([id]) => id)),
+          })
+        : (openScene ?? null)
       const noSceneChange = JSON.stringify(nextIntimacyScene ?? null) === JSON.stringify(openScene ?? null)
+      const sceneJustResolved = sceneActive && !nextIntimacyScene
+      // The discovery loop: learning that *this* character answers at the backs of her knees is real
+      // play, and it falls out of data the turn already produced rather than needing authored content.
+      const foundRegions = intimacyObservation
+        ? newlyDiscoveredRegions(speaker.touchProfile, intimacyObservation.regionsTouched, track.discoveredRegions as BodyRegion[] | undefined)
+        : []
+      const nextDiscoveredRegions = withDiscoveredRegions(track.discoveredRegions as BodyRegion[] | undefined, foundRegions)
+      const noDiscoveryChange = foundRegions.length === 0
 
       const noStatChange = Object.values(deltas).every((d) => d === 0)
       const noRiskChange = !risk.warnedJustNow && !risk.brokeUpJustNow && !risk.clearedJustNow
@@ -1283,6 +1365,7 @@ export function useChatSession(chatId: string | null) {
         noInitiativeChange &&
         noPlanChange &&
         noSceneChange &&
+        noDiscoveryChange &&
         noBeliefChange &&
         noExpectationChange &&
         // A resolved window must always be written even on a flat verdict, or `afterglow` stays open forever.
@@ -1315,16 +1398,52 @@ export function useChatSession(chatId: string | null) {
           plans: nextPlans,
           beliefsAboutUser: nextBeliefs,
           expectationsOfUser: nextExpectations,
-          afterglow: resolvedAftercare ? null : (track.afterglow ?? null),
+          // A scene that just resolved writes what it looked like onto the still-open window, so the
+          // judge's earned-vs-rushed context can read the scene itself and not only its run-up.
+          afterglow: resolvedAftercare
+            ? null
+            : sceneJustResolved && track.afterglow
+              ? { ...track.afterglow, sceneAtResolve: sceneResolveSnapshot(openScene!, charRepliesNow) }
+              : (track.afterglow ?? null),
           intimacyScene: nextIntimacyScene,
+          discoveredRegions: nextDiscoveredRegions,
           // A scene that just resolved this turn gets its final category sequence snapshotted into the log; any other turn carries it forward unchanged.
           intimacySceneShapeLog:
-            sceneActive && !nextIntimacyScene
+            sceneJustResolved
               ? appendSceneShapeLog(track.intimacySceneShapeLog, openScene!.categoryHistory ?? [openScene!.category])
               : track.intimacySceneShapeLog,
         }),
         sceneFlags: [...existingFlags],
       })
+      // Scene handoff (the review's §10): a scenario that names a follow-on hands off through the same
+      // machinery a world's own `start_scene` trigger action uses, rather than a prose nudge and a
+      // hope. Fired once, on the turn the scene actually resolved.
+      if (sceneJustResolved) {
+        const successor = successorScenario(sceneGraph, getScenarioCatalog(world), {
+          arousal: arousalOf(openScene!).value,
+          intimacyLevel: resolveIntimacyLevel(world?.intimacyLevel, globalIntimacyLevel),
+          visitedStages: openScene!.visitedStages,
+          relationship: {
+            affection,
+            warmth,
+            stats: nextStats,
+            flags: existingFlags,
+            commitmentStatus: risk.commitmentStatus,
+            day: world?.currentDay,
+          },
+        })
+        if (successor) {
+          startDateEventRef.current({
+            id: `scenario-${successor.id}-${Date.now()}`,
+            title: successor.title,
+            description: '',
+            objectiveTitle: successor.title,
+            kind: 'hangout',
+            free: true,
+          })
+        }
+      }
+
       // A broken expectation earns a durable fact, negative valence baked in.
       for (const text of violatedTexts) {
         chatFactsApi
@@ -1462,6 +1581,38 @@ export function useChatSession(chatId: string | null) {
       })
     },
     [chatId, world],
+  )
+
+  /**
+   * Answers a branch the scene is blocked on. The stage moves here, in plain code — the model never
+   * gets a say in which way it went. Returns the chosen option's catalog entry id, if it has one, so
+   * the caller can route it through the existing clicked-action path and have the choice read as the
+   * player doing something rather than flipping a switch.
+   */
+  const chooseIntimacyBranch = useCallback(
+    async (characterId: string, edgeTo: string): Promise<string | undefined> => {
+      if (!chatId) return undefined
+      const freshChat = await chatsApi.get(chatId)
+      if (!freshChat) return undefined
+      const track = getRelationshipTrack(freshChat, characterId)
+      const scene = track.intimacyScene
+      const charReplies = countCharReplies(messages)
+      if (!isIntimacySceneActive(scene, charReplies)) return undefined
+      const option = scene!.pendingChoice?.options.find((o) => o.edgeTo === edgeTo)
+      if (!option) return undefined
+      const next = resolveIntimacyChoice(scene!, edgeTo, charReplies, scenarioById(getScenarioCatalog(world), scene!.scenarioId))
+      await chatsApi.update(chatId, {
+        ...patchRelationshipTrack(freshChat, characterId, {
+          intimacyScene: next,
+          // Choosing to end the scene closes it exactly as an observed finish would.
+          intimacySceneShapeLog: next
+            ? track.intimacySceneShapeLog
+            : appendSceneShapeLog(track.intimacySceneShapeLog, scene!.categoryHistory ?? [scene!.category]),
+        }),
+      })
+      return option.entryId
+    },
+    [chatId, messages, world],
   )
 
   /** Applies an owned item's authored effect immediately and deterministically — no judge call, unlike a gift's in-scene reaction. */
@@ -2291,19 +2442,58 @@ export function useChatSession(chatId: string | null) {
           if (antiPatternUsed) {
             toastInfo(`This reply used the stock phrase "${antiPatternUsed}" it was told to avoid. Worth a regenerate if it reads wrong.`)
           }
+          // The second half of the state block: check what the model actually wrote against the state
+          // it was handed. Scene-scoped, since that block is the only place these facts are asserted.
+          // A declared background move is the app's own supported way to relocate a scene (see the
+          // `scene.background` handling above), so location is only checked when nothing declared one.
+          const sceneForContinuity =
+            flagCheckTrack.intimacyScene && isIntimacySceneActive(flagCheckTrack.intimacyScene, countCharReplies(messages))
+              ? flagCheckTrack.intimacyScene
+              : undefined
+          const declaredMove = !!scene?.background && backgroundLabel(scene.background, world) !== (chat.scene?.location ?? undefined)
+          const continuityBreak = sceneForContinuity
+            ? detectContinuityBreak(
+                combined,
+                {
+                  clothing: sceneForContinuity.clothing,
+                  // Only the persisted scene location, which is also what the state block asserted
+                  // whenever one is set; a schedule-derived fallback isn't authoritative enough to
+                  // call a contradiction on, so no location is checked in that case.
+                  location: declaredMove ? undefined : (chat.scene?.location ?? undefined),
+                  knownLocations: declaredMove
+                    ? undefined
+                    : getUnlockedBackgroundIds(world, chat.affection ?? 0).map((id) => backgroundLabel(id, world)),
+                  // Same per-chat override the prompt honours (see `promptPhaseIndex`), not the bare world clock.
+                  timePhase: chat.scene?.timePhase || (world ? PHASES[world.currentPhaseIndex ?? 0] : undefined),
+                  knownTimePhases: world ? [...PHASES] : undefined,
+                },
+                speaker.card.name,
+                persona?.name || 'You',
+              )
+            : undefined
+          if (continuityBreak) {
+            toastInfo(`This reply contradicted the scene: ${describeContinuityBreak(continuityBreak)}.`)
+          }
           // `?? null`, not omitted — clears a stale flag from a previous attempt once this one reads clean.
           messagesApi
             .update(targetMessageId, {
               boundaryFlag: crossed ?? null,
               povFlag: agencyViolation ?? null,
               explicitQualityFlag: antiPatternUsed ?? null,
+              continuityFlag: continuityBreak ? describeContinuityBreak(continuityBreak) : null,
             })
             .catch(() => {})
           // A genuine hard fail (boundary/agency, not the lower-stakes anti-pattern wording) earns one
           // automatic retry with a short correction, rather than leaving a bad reply standing on the
           // strength of a toast alone. Never more than one — a second bad attempt is just accepted.
           if ((opts?.hardFailRetriesLeft ?? 1) > 0) {
-            hardFailCorrection = hardFailCorrectionDirective(speaker.card.name, persona?.name || 'You', crossed, agencyViolation)
+            hardFailCorrection = hardFailCorrectionDirective(
+              speaker.card.name,
+              persona?.name || 'You',
+              crossed,
+              agencyViolation,
+              continuityBreak ? describeContinuityBreak(continuityBreak) : undefined,
+            )
           }
         }
 
@@ -2563,11 +2753,32 @@ export function useChatSession(chatId: string | null) {
                 momentumAtStart: priorTargetTrack.momentum ?? 0,
               },
               // Starts (or re-centers) the intimacy scene at `building`, tracking what's now physically happening.
+              // A scene continuing from a live one keeps its shape; a fresh one picks the most specific
+              // scenario this relationship and content dial actually allow (`dating/scenarios.ts`).
               intimacyScene: startOrShiftIntimacyScene(
                 resolveIntimacyPromptNote(usedIntimacyOption!, giftTarget.card.name),
                 usedIntimacyOption!.category,
                 countCharReplies(messages),
                 priorSceneForShape,
+                intimacyArousalWeight(usedIntimacyOption!),
+                priorSceneForShape
+                  ? scenarioById(getScenarioCatalog(world), priorSceneForShape.scenarioId)
+                  : selectScenario(getScenarioCatalog(world), {
+                      arousal: 0,
+                      intimacyLevel: resolveIntimacyLevel(world?.intimacyLevel, globalIntimacyLevel),
+                      ownedItemIds: new Set(Object.entries(freshChat.toyInventory ?? {}).filter(([, n]) => n > 0).map(([id]) => id)),
+                      relationship: {
+                        affection: priorTargetTrack.affection ?? 0,
+                        warmth: computeWarmth(priorTargetTrack.affection ?? 0, getRelationshipStats(priorTargetTrack)),
+                        stats: getRelationshipStats(priorTargetTrack),
+                        flags: new Set((freshChat.sceneFlags ?? []) as SceneFlag[]),
+                        commitmentStatus: priorTargetTrack.commitmentStatus ?? 'none',
+                        day: world?.currentDay,
+                      },
+                    }),
+                // How this character feels about what was just chosen, frozen onto the scene: an
+                // eager kink speeds every gain that follows, a disliked one slows them.
+                combinedValence(giftTarget.kinkProfile, intimacyEntryKinks(usedIntimacyOption!)),
               ),
             }),
           })
@@ -2688,7 +2899,7 @@ export function useChatSession(chatId: string | null) {
           name: m.name,
           text: m.text,
         }))
-        await messagesApi.update(messageId, { text: '', failed: false, boundaryFlag: null, povFlag: null, explicitQualityFlag: null })
+        await messagesApi.update(messageId, { text: '', failed: false, boundaryFlag: null, povFlag: null, explicitQualityFlag: null, continuityFlag: null })
         // Keeps whoever originally spoke — switching speaker is a distinct, explicit edit action.
         await runGeneration(historyForPrompt, messageId, latestImages(priorMessages), { speakerId: messages[idx].speakerId })
       } finally {
@@ -2722,7 +2933,7 @@ export function useChatSession(chatId: string | null) {
           name: m.name,
           text: m.text,
         }))
-        await messagesApi.update(messageId, { text: '', failed: false, boundaryFlag: null, povFlag: null, explicitQualityFlag: null })
+        await messagesApi.update(messageId, { text: '', failed: false, boundaryFlag: null, povFlag: null, explicitQualityFlag: null, continuityFlag: null })
         const speakerId = messages[idx].speakerId
         const charName = (speakerId ? participantCharacters.find((c) => c.id === speakerId) : character)?.card.name ?? character?.card.name ?? 'the character'
         await runGeneration(historyForPrompt, messageId, latestImages(priorMessages), {
@@ -2762,6 +2973,7 @@ export function useChatSession(chatId: string | null) {
             boundaryFlag: null,
             povFlag: null,
             explicitQualityFlag: null,
+            continuityFlag: null,
           })
           await runGeneration(historyForPrompt, messageId, latestImages(priorMessages), { speakerId: msg.speakerId })
         } finally {
@@ -2779,6 +2991,7 @@ export function useChatSession(chatId: string | null) {
         boundaryFlag: null,
         povFlag: null,
         explicitQualityFlag: null,
+        continuityFlag: null,
       })
     },
     [beginGeneration, endGeneration, messages, runGeneration],
@@ -3312,7 +3525,7 @@ export function useChatSession(chatId: string | null) {
       swipes[msg.activeSwipe] = text
     }
     // A hand-edit is the player's own words now — the old flag no longer describes what's there.
-    await messagesApi.update(messageId, { text, swipes, boundaryFlag: null, povFlag: null, explicitQualityFlag: null })
+    await messagesApi.update(messageId, { text, swipes, boundaryFlag: null, povFlag: null, explicitQualityFlag: null, continuityFlag: null })
   }, [])
 
   const deleteMessage = useCallback(async (messageId: string) => {
@@ -3397,6 +3610,7 @@ export function useChatSession(chatId: string | null) {
     buyGift,
     buyItem,
     buyToy,
+    chooseIntimacyBranch,
     useItem,
     askForCommitment,
     initiateFirstTime,

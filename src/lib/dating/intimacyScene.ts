@@ -1,5 +1,38 @@
+import {
+  advanceArousal,
+  arousalBandFor,
+  BAND_FLOORS,
+  BODY_REGIONS,
+  emptyArousalState,
+  habituatedRegion,
+  isConsentTension,
+  regionLabel,
+} from '@/lib/dating/arousal'
+import type { ArousalContext, ArousalState, BodyRegion } from '@/lib/dating/arousal'
+import type { KinkValence } from '@/lib/dating/kinks'
+import { applyClothingRemovals, parseClothingRemovals } from '@/lib/dating/clothing'
+import type { SceneResolveSnapshot } from '@/lib/dating/aftercare'
+import type { ClothingRemoval, ClothingState } from '@/lib/dating/clothing'
 import type { IntimacyCategory } from '@/lib/dating/intimacyCatalog'
+import {
+  buildPendingChoice,
+  choiceDefaultDue,
+  DEFAULT_SCENARIO,
+  eligibleChoiceEdges,
+  nextAutoEdge,
+  phaseForStageKind,
+  resolveEdge,
+  RESOLVE_STAGE,
+  stageById,
+  stageFloorsMet,
+  stageOverstayed,
+} from '@/lib/dating/intimacyStages'
+import type { IntimacyStage, PendingChoice, ScenarioGraph, StageContext } from '@/lib/dating/intimacyStages'
 import type { CharacterMood } from '@/lib/prompt/mindGuidance'
+
+export { BODY_REGIONS }
+export type { BodyRegion }
+export { RESOLVE_STAGE }
 
 // Persisted state machine for where an active intimate scene stands (building/peak) and what's
 // physically happening, so the model is told rather than left to infer it from scrollback. Sits
@@ -7,6 +40,49 @@ import type { CharacterMood } from '@/lib/prompt/mindGuidance'
 // already-open aftercare window carries the emotional aftermath.
 
 export type IntimacyPhase = 'building' | 'peak'
+
+/**
+ * What the judge reports about the turn that just happened — bounded observations, never a phase
+ * choice. The model is a sensor here; `advanceIntimacyScene` below is the only thing that decides
+ * what state the scene moves to, so a judge that wants to leap to the end can't.
+ */
+export interface IntimacyTurnObservation {
+  /** Did the reply engage the current activity at all, or drift/stall? */
+  engagement: 'engaged' | 'stalled' | 'drifted'
+  /** Direction of physical intensity this turn, not an absolute level. */
+  intensityDelta: -1 | 0 | 1 | 2
+  /** Did either party explicitly signal hesitation, a pause, or a check-in? */
+  hesitationSignalled: boolean
+  /** Did the reply narrate the scene reaching its natural completion? A vote, weighed below — not a decision. */
+  stageCompleteSignalled: boolean
+  /** Body regions the reply actually described contact with. */
+  regionsTouched: BodyRegion[]
+  /** Clothing the reply actually described coming off, per side — the engine keeps the running total. */
+  clothingRemoved: ClothingRemoval[]
+}
+
+/** Validates a raw judge object into an observation. `undefined` when nothing usable came back — the caller then holds the scene. */
+export function parseIntimacyObservation(raw: unknown): IntimacyTurnObservation | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const obj = raw as Record<string, unknown>
+  const engagement =
+    obj.engagement === 'stalled' || obj.engagement === 'drifted' || obj.engagement === 'engaged' ? obj.engagement : undefined
+  const rawDelta = Number(obj.intensityDelta)
+  const intensityDelta = ([-1, 0, 1, 2] as const).find((d) => d === rawDelta)
+  // A reply with no readable engagement read is not an observation at all; the rest have safe defaults.
+  if (!engagement) return undefined
+  const regionsTouched = Array.isArray(obj.regionsTouched)
+    ? [...new Set(obj.regionsTouched.filter((r): r is BodyRegion => BODY_REGIONS.includes(r as BodyRegion)))]
+    : []
+  return {
+    engagement,
+    intensityDelta: intensityDelta ?? 0,
+    hesitationSignalled: obj.hesitationSignalled === true,
+    stageCompleteSignalled: obj.stageCompleteSignalled === true,
+    regionsTouched,
+    clothingRemoved: parseClothingRemovals(obj.clothingRemoved),
+  }
+}
 
 /** Stored per relationship (`RelationshipTrack.intimacyScene`). `undefined`/`null` = no active scene. */
 export interface IntimacyScene {
@@ -21,6 +97,86 @@ export interface IntimacyScene {
   phaseSinceTurn?: number
   /** Ordered catalog categories this scene has moved through so far, e.g. `['kissing_spot', 'position', 'toy']`. */
   categoryHistory?: IntimacyCategory[]
+  /**
+   * The scene's arousal meter (`arousal.ts`) — engine-computed from each turn's observation, and the
+   * sole input to the derived `phase`. Absent on scenes persisted before it existed; `arousalOf`
+   * seeds those from whatever phase they were already in.
+   */
+  arousal?: ArousalState
+  /** `arousalWeight` of the catalog entry currently driving the scene — how much this activity can deliver per turn. */
+  activityWeight?: number
+  /** This character's stance on the active entry's kinks (`kinks.ts`), frozen at the click — a per-character multiplier on every gain. */
+  activityValence?: KinkValence
+  /** Turn this scene first started, surviving a mid-scene re-centering — the state block's "turn N of this scene". */
+  startedAtTurn?: number
+  /** The scenario this scene is running on (`scenarios.ts`). Absent on scenes persisted before scenarios existed — those fall back to the open scene. */
+  scenarioId?: string
+  /** Node of the scenario graph the scene is standing on (`intimacyStages.ts`). Absent on scenes persisted before stages existed. */
+  stageId?: string
+  /** Turn the scene entered its current stage — what `minTurns`/`softMaxTurns` are measured from. */
+  stageSinceTurn?: number
+  /** Stages this scene has been through, in order — the `stage_visited` condition reads this. */
+  visitedStages?: string[]
+  /** A branch the scene has reached and is waiting on the player for. While set, the stage cannot advance. */
+  pendingChoice?: PendingChoice
+  /** Layers removed so far this scene, per side (`clothing.ts`) — engine-tracked so the model never has to remember it. */
+  clothing?: ClothingState
+  /** Regions in contact as of the last turn — the state block's continuity anchor against hands silently relocating. */
+  contactRegions?: BodyRegion[]
+}
+
+/**
+ * The stage the scene is on, seeding a scene persisted before stages existed from the phase it was
+ * already in: the first stage of the graph whose structural kind reads as that phase, and the entry
+ * stage failing that. Never returns undefined, so a scene can't be stranded off the graph.
+ */
+export function stageOf(scene: IntimacyScene, graph: ScenarioGraph = DEFAULT_SCENARIO): IntimacyStage {
+  const known = stageById(graph, scene.stageId)
+  if (known) return known
+  const byPhase = graph.stages.find((stage) => phaseForStageKind(stage.kind) === scene.phase)
+  return byPhase ?? stageById(graph, graph.entryStage) ?? graph.stages[0]
+}
+
+/** How this character feels about the active content, for the judge's own hesitation read. `undefined` when they're neutral about it. */
+export function stanceOfScene(scene: IntimacyScene): 'reluctant' | 'eager' | undefined {
+  const valence = scene.activityValence ?? 0
+  if (valence <= -1) return 'reluctant'
+  return valence >= 2 ? 'eager' : undefined
+}
+
+/** Turns the scene has spent on its current stage. */
+export function turnsInStage(scene: IntimacyScene, charReplyCount: number): number {
+  return charReplyCount - (scene.stageSinceTurn ?? scene.startedAtTurn ?? scene.updatedAtTurn)
+}
+
+/**
+ * What a scene looked like as it ended, for `aftercare.ts`'s earned-vs-rushed read. Taken from the
+ * scene the caller still holds on the turn `advanceIntimacyScene` returns `null`, since the scene
+ * state itself is discarded at that point.
+ */
+export function sceneResolveSnapshot(scene: IntimacyScene, charReplyCount: number): SceneResolveSnapshot {
+  return {
+    turns: Math.max(0, charReplyCount - (scene.startedAtTurn ?? scene.updatedAtTurn)),
+    arousal: arousalOf(scene).value,
+    stages: new Set(scene.visitedStages ?? [scene.stageId ?? 'building']).size,
+  }
+}
+
+/** The scene's meter, seeding a scene persisted before arousal existed from the phase it was already in. */
+export function arousalOf(scene: IntimacyScene): ArousalState {
+  if (scene.arousal) return scene.arousal
+  const seeded = scene.phase === 'peak' ? BAND_FLOORS.edge : 0
+  return { value: seeded, regionExposure: {}, bandSinceTurn: scene.phaseSinceTurn ?? scene.updatedAtTurn }
+}
+
+/** The band the scene is in right now — what `intimacySceneGuidance` and the phase read off. */
+export function sceneArousalBand(scene: IntimacyScene) {
+  return arousalBandFor(arousalOf(scene).value)
+}
+
+/** `peak` from the top two bands, `building` below. The only place a phase is ever decided. */
+export function phaseForArousal(value: number): IntimacyPhase {
+  return value >= BAND_FLOORS.edge ? 'peak' : 'building'
 }
 
 /** True when the scene's turn marker is ahead of the conversation — a rewind/fork artifact. */
@@ -43,9 +199,37 @@ export function startOrShiftIntimacyScene(
   category: IntimacyCategory,
   charReplyCount: number,
   priorScene?: IntimacyScene | null,
+  activityWeight?: number,
+  graph: ScenarioGraph = DEFAULT_SCENARIO,
+  activityValence?: KinkValence,
 ): IntimacyScene {
   const categoryHistory = priorScene ? [...(priorScene.categoryHistory ?? [priorScene.category]), category] : [category]
-  return { phase: 'building', activityLabel, category, updatedAtTurn: charReplyCount, phaseSinceTurn: charReplyCount, categoryHistory }
+  const prior = priorScene ? arousalOf(priorScene) : undefined
+  return {
+    phase: 'building',
+    activityLabel,
+    category,
+    updatedAtTurn: charReplyCount,
+    phaseSinceTurn: charReplyCount,
+    categoryHistory,
+    activityWeight,
+    activityValence,
+    // A click mid-scene continues the same scene, so its start turn is kept rather than restarted.
+    startedAtTurn: priorScene?.startedAtTurn ?? charReplyCount,
+    // ...but it re-enters the graph at the top, the same renegotiation checkpoint the phase reset was.
+    scenarioId: graph.id,
+    stageId: graph.entryStage,
+    stageSinceTurn: charReplyCount,
+    visitedStages: [...(priorScene?.visitedStages ?? []), graph.entryStage],
+    clothing: priorScene?.clothing,
+    contactRegions: priorScene?.contactRegions,
+    // A meter that reset to zero on every click would make a mid-scene choice read as amnesia, so it
+    // carries — but capped back under the peak floor, since re-centering is the consent checkpoint
+    // and the new activity has to earn its own way up again. Exposure carries whole: same bodies.
+    arousal: prior
+      ? { ...prior, value: Math.min(prior.value, BAND_FLOORS.edge - 1), bandSinceTurn: charReplyCount }
+      : emptyArousalState(charReplyCount),
+  }
 }
 
 /** Whether a character should escalate faster/slower than the generic curve, derived from mood/plans/boundaries. */
@@ -64,24 +248,145 @@ export function intimacyPaceFor(mood: CharacterMood | undefined, isHoldingBackBy
   return 'neutral'
 }
 
-/** Turns a `reserved` pace holds the scene at `building` past a same-turn judge jump to `peak`. */
-const RESERVED_MIN_BUILDING_TURNS = 2
+/** Everything the engine knows about this character and scene going into a turn. */
+export interface IntimacySceneContext extends ArousalContext {
+  /** The scenario the scene is running on. Defaults to the built-in open-scene graph. */
+  graph?: ScenarioGraph
+  /** Relationship state for the condition kinds shared with `world/triggers.ts`. */
+  relationship?: StageContext['relationship']
+  ownedItemIds?: StageContext['ownedItemIds']
+  kinks?: StageContext['kinks']
+}
 
-/** Applies the judge's per-turn phase read. `null` once the judge reads the scene as resolved (aftercare takes over). `undefined`/hold keeps the current phase. */
+function stageContextFor(scene: IntimacyScene, arousalValue: number, ctx: IntimacySceneContext): StageContext {
+  return {
+    arousal: arousalValue,
+    visitedStages: scene.visitedStages,
+    ownedItemIds: ctx.ownedItemIds,
+    kinks: ctx.kinks,
+    relationship: ctx.relationship,
+  }
+}
+
+/**
+ * Runs the scene's transition from one turn's observation. The engine owns every decision: arousal
+ * accumulates from what the reply actually did (`arousal.ts`), the stage moves only along an edge the
+ * scenario graph actually has, and `phase` is derived from whichever stage the scene ends up on. A
+ * stage's `minTurns`/`minArousal` floors are checked *before* `stageCompleteSignalled` is honoured, so
+ * the judge's vote can never override them — it can neither jump a scene to its climax nor conclude
+ * one that never got there. `null` = resolved, and `aftercare.ts`'s already-open window takes over.
+ * A missing or unreadable observation holds the scene where it is.
+ *
+ * `choice`-mode edges are never traversed here: they wait to be offered to the player, and until that
+ * surface exists the scene simply holds its stage rather than deadlocking.
+ */
 export function advanceIntimacyScene(
   scene: IntimacyScene,
-  judged: IntimacyPhase | 'resolved' | undefined,
+  obs: IntimacyTurnObservation | undefined,
   charReplyCount: number,
-  pace: IntimacyPace = 'neutral',
+  ctx: IntimacySceneContext = {},
 ): IntimacyScene | null {
-  if (judged === 'resolved') return null
   const phaseSinceTurn = scene.phaseSinceTurn ?? scene.updatedAtTurn
-  if (!judged || judged === scene.phase) return { ...scene, updatedAtTurn: charReplyCount, phaseSinceTurn }
-  // A reserved character holds at `building` one extra beat before honoring a same-turn jump to `peak`.
-  if (pace === 'reserved' && judged === 'peak' && scene.phase === 'building' && charReplyCount - phaseSinceTurn < RESERVED_MIN_BUILDING_TURNS) {
-    return { ...scene, updatedAtTurn: charReplyCount, phaseSinceTurn }
+  if (!obs) return { ...scene, updatedAtTurn: charReplyCount, phaseSinceTurn }
+
+  const graph = ctx.graph ?? DEFAULT_SCENARIO
+  const stage = stageOf(scene, graph)
+  const arousal = advanceArousal(
+    arousalOf(scene),
+    obs,
+    {
+      ...ctx,
+      activityWeight: ctx.activityWeight ?? scene.activityWeight,
+      kinkValence: ctx.kinkValence ?? scene.activityValence,
+      passiveGain: stage.passiveGain ?? ctx.passiveGain,
+    },
+    charReplyCount,
+  )
+
+  const stageCtx = stageContextFor(scene, arousal.value, ctx)
+  const floorsMet = stageFloorsMet(stage, turnsInStage(scene, charReplyCount), arousal.value)
+
+  // A branch already raised holds everything until it's answered. The meter still moves — the scene
+  // is still being played — but the stage does not, which is the whole point of gating a branch here
+  // rather than asking the model nicely not to cross it.
+  if (scene.pendingChoice) {
+    const stillOffered = eligibleChoiceEdges(stage, stageCtx).some((edge) =>
+      scene.pendingChoice!.options.some((option) => option.edgeTo === edge.to),
+    )
+    if (stillOffered && !choiceDefaultDue(scene.pendingChoice, charReplyCount)) {
+      return { ...heldScene(scene, arousal, obs, charReplyCount), pendingChoice: scene.pendingChoice }
+    }
+    // Either the branch stopped being answerable (state moved under it) or nobody answered in time.
+    const fallback = stillOffered ? scene.pendingChoice.defaultEdgeTo : undefined
+    const taken = fallback ? stageById(graph, fallback) : undefined
+    return taken
+      ? enterStage(heldScene(scene, arousal, obs, charReplyCount), stage, taken, charReplyCount)
+      : { ...heldScene(scene, arousal, obs, charReplyCount), pendingChoice: undefined }
   }
-  return { ...scene, phase: judged, updatedAtTurn: charReplyCount, phaseSinceTurn: charReplyCount }
+  // Ending the scene needs both: floors clear, an edge the scenario actually has, and a reply the
+  // judge saw finish. A resolve edge never fires on its own.
+  if (floorsMet && obs.stageCompleteSignalled && resolveEdge(stage, stageCtx)) return null
+
+  // A real branch outranks any auto edge out of the same stage: the whole reason to gate one is that
+  // the scene must not cross it on its own.
+  const raised = floorsMet ? buildPendingChoice(stage, stageCtx, charReplyCount) : undefined
+  if (raised) return { ...heldScene(scene, arousal, obs, charReplyCount), pendingChoice: raised }
+
+  const edge = floorsMet ? nextAutoEdge(stage, stageCtx) : undefined
+  const nextStage = edge ? (stageById(graph, edge.to) ?? stage) : stage
+  return enterStage(heldScene(scene, arousal, obs, charReplyCount), stage, nextStage, charReplyCount)
+}
+
+/** Everything a turn updates that has nothing to do with which stage the scene is on. */
+function heldScene(
+  scene: IntimacyScene,
+  arousal: ArousalState,
+  obs: IntimacyTurnObservation,
+  charReplyCount: number,
+): IntimacyScene {
+  return {
+    ...scene,
+    arousal,
+    clothing: applyClothingRemovals(scene.clothing, obs.clothingRemoved),
+    // A turn that described no contact leaves the previous anchor standing rather than blanking it.
+    contactRegions: obs.regionsTouched.length ? obs.regionsTouched : scene.contactRegions,
+    updatedAtTurn: charReplyCount,
+  }
+}
+
+/** Lands a scene on a stage, stamping the move (and deriving the phase) only when it actually moved. */
+function enterStage(scene: IntimacyScene, from: IntimacyStage, to: IntimacyStage, charReplyCount: number): IntimacyScene {
+  const moved = to.id !== from.id
+  const phase = phaseForStageKind(to.kind)
+  const phaseSinceTurn = scene.phaseSinceTurn ?? scene.updatedAtTurn
+  return {
+    ...scene,
+    phase,
+    stageId: to.id,
+    stageSinceTurn: moved ? charReplyCount : (scene.stageSinceTurn ?? scene.startedAtTurn ?? scene.updatedAtTurn),
+    visitedStages: moved ? [...(scene.visitedStages ?? [from.id]), to.id] : (scene.visitedStages ?? [from.id]),
+    pendingChoice: undefined,
+    phaseSinceTurn: phase !== scene.phase ? charReplyCount : phaseSinceTurn,
+  }
+}
+
+/**
+ * The player answering a branch. Returns the scene on the chosen stage with the branch cleared, or
+ * `null` when the choice was to end the scene. Unknown or no-longer-offered targets leave the scene
+ * exactly where it is rather than jumping it somewhere the graph never offered.
+ */
+export function resolveIntimacyChoice(
+  scene: IntimacyScene,
+  edgeTo: string,
+  charReplyCount: number,
+  graph: ScenarioGraph = DEFAULT_SCENARIO,
+): IntimacyScene | null {
+  if (!scene.pendingChoice?.options.some((option) => option.edgeTo === edgeTo)) return scene
+  if (edgeTo === RESOLVE_STAGE) return null
+  const from = stageOf(scene, graph)
+  const to = stageById(graph, edgeTo)
+  if (!to) return { ...scene, pendingChoice: undefined }
+  return enterStage({ ...scene, updatedAtTurn: charReplyCount }, from, to, charReplyCount)
 }
 
 /** `pace`-specific addition to the phase's own pacing line — empty for `neutral`. */
@@ -99,33 +404,80 @@ function paceClauseFor(pace: IntimacyPace, phase: IntimacyPhase): string {
   return ''
 }
 
-/** How many turns the peak phase needs to hold before nudging for variety. */
-const PROLONGED_PHASE_TURNS = 3
+/** How many turns in one arousal band before the scene reads as going nowhere. */
+const PROLONGED_BAND_TURNS = 3
 
-function prolongedPhaseClause(scene: IntimacyScene): string {
-  if (scene.phase !== 'peak') return ''
-  const turnsSincePhaseChange = scene.updatedAtTurn - (scene.phaseSinceTurn ?? scene.updatedAtTurn)
-  if (turnsSincePhaseChange < PROLONGED_PHASE_TURNS) return ''
-  return ` This has held at its peak for a few turns running now — let something actually shift (pace, depth, a brief pause, a change of angle) rather than repeating the same beat over again.`
+/**
+ * The variety nudge, now driven by what the scene actually did rather than a bare turn counter: a
+ * region the scene has worn out is named specifically, and a meter that has sat in one band for a
+ * few turns running is the general case underneath it.
+ */
+function repetitionClause(scene: IntimacyScene): string {
+  const arousal = arousalOf(scene)
+  const worn = habituatedRegion(arousal)
+  if (worn) {
+    return ` ${regionLabel(worn)} has been the focus for several turns running now and isn't producing much of a response any more — move somewhere else, or change what's being done, rather than repeating the same beat.`
+  }
+  if (scene.updatedAtTurn - arousal.bandSinceTurn < PROLONGED_BAND_TURNS) return ''
+  return ` This has held at the same level for a few turns running now — let something actually shift (pace, depth, a brief pause, a change of angle) rather than repeating the same beat over again.`
 }
 
-/** Physical continuity + phase-scaled pacing for the active scene. */
-export function intimacySceneGuidance(charName: string, scene: IntimacyScene, pace: IntimacyPace = 'neutral'): string {
-  const continuity = `Right now, physically, ${charName} is in the middle of: ${scene.activityLabel}. Stay continuous with this until something in the scene actually changes it — don't quietly drift to a different position or act, and don't re-describe getting into it as if it just started.`
+/**
+ * How this character feels about what's currently happening (`kinks.ts`). The arousal meter already
+ * carries the mechanical half; this is the half that has to reach the writing, because a reluctance
+ * that never shows in the prose is one the judge can't observe either — and `hesitationSignalled` is
+ * an observation, never something the engine invents on a character's behalf.
+ */
+function stanceClause(scene: IntimacyScene): string {
+  const valence = scene.activityValence ?? 0
+  if (valence <= -1) {
+    return ` This is not something they're actually into. That doesn't mean refusing outright, but it does mean it reads on them — going along with it rather than wanting it, a beat of hesitation, or saying so out loud are all more in character here than enthusiasm would be.`
+  }
+  if (valence >= 2) {
+    return ` This is something they're genuinely eager for, and that can show — more forward, less hesitation, more willing to ask for what they want than they might usually be.`
+  }
+  return ''
+}
+
+/** A branch waiting on the player. The state machine already refuses to cross it; this stops the prose
+ *  running ahead of a decision that hasn't been made yet. */
+function pendingChoiceClause(scene: IntimacyScene): string {
+  if (!scene.pendingChoice) return ''
+  return ` The scene has reached a point where what happens next isn't yours to decide — stay in this moment, draw it out, and don't move things on to whatever might come after it yet.`
+}
+
+/** A stage past its authored soft cap — a nudge toward moving on, never a block on staying. */
+function overstayClause(scene: IntimacyScene, graph: ScenarioGraph): string {
+  return stageOverstayed(stageOf(scene, graph), turnsInStage(scene, scene.updatedAtTurn))
+    ? ` This part of the scene has run longer than it usually would — it's a natural point for things to move on to what comes next, if the moment supports it.`
+    : ''
+}
+
+/**
+ * Physical continuity + phase-scaled pacing for the active scene. What is physically happening is
+ * stated once, by `prompt/sceneStateBlock.ts`, which renders on exactly the same condition as this
+ * line; the instruction about it lives here. Two copies of the same fact in one prompt is noise, and
+ * the copies can drift apart.
+ */
+export function intimacySceneGuidance(
+  charName: string,
+  scene: IntimacyScene,
+  pace: IntimacyPace = 'neutral',
+  graph: ScenarioGraph = DEFAULT_SCENARIO,
+): string {
+  const continuity = `Stay continuous with what the scene state says ${charName} is physically in the middle of, until something in the scene actually changes it — don't quietly drift to a different position or act, and don't re-describe getting into it as if it just started.`
   const pacing =
     scene.phase === 'building'
       ? "This is still building, not at its peak yet. Let anticipation, teasing, and the slow accumulation of touch and reaction carry the scene rather than jumping straight to full intensity."
       : "This has built to its peak. Let the intensity actually read as that — more urgency, less restraint, reactions less composed than a moment ago."
-  return `${continuity} ${pacing}${paceClauseFor(pace, scene.phase)}${prolongedPhaseClause(scene)}`
+  return `${continuity} ${pacing}${paceClauseFor(pace, scene.phase)}${stanceClause(scene)}${repetitionClause(scene)}${overstayClause(scene, graph)}${pendingChoiceClause(scene)}`
 }
 
-const CONSENT_TENSION_GAP = 20
-const CONSENT_TENSION_COMFORT_FLOOR = 45
-
-/** Nudges toward hesitation/checking-in when comfort trails well behind chemistry mid-scene. */
+/** Nudges toward hesitation/checking-in when comfort trails well behind chemistry mid-scene. The same
+ *  condition mechanically slows arousal and deepens a hesitation's cost (`arousal.ts`), so the nudge
+ *  and the meter can never disagree about whether the gap is real. */
 export function intimacyConsentTensionGuidance(charName: string, comfort: number, chemistry: number): string | undefined {
-  if (comfort >= CONSENT_TENSION_COMFORT_FLOOR) return undefined
-  if (chemistry - comfort < CONSENT_TENSION_GAP) return undefined
+  if (!isConsentTension(comfort, chemistry)) return undefined
   return `Right now ${charName}'s comfort is trailing well behind the physical chemistry in this scene — the spark is real, but ease and readiness aren't fully there yet. That's worth letting show: a beat of hesitation, an unprompted check-in, or ${charName} naming the mismatch out loud is the right call here, not something to override just because the moment has its own momentum.`
 }
 

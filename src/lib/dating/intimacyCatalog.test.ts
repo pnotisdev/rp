@@ -5,6 +5,8 @@ import {
   isExplicitCategory,
   DEFAULT_INTIMACY_CATALOG,
   getIntimacyCatalog,
+  intimacyEntryKinks,
+  intimacyEntryRegions,
   getUnlockedIntimacyOptions,
   intimacyActionDirective,
   intimacyOptionsGuidance,
@@ -306,5 +308,63 @@ describe('allowedIntimacyCategories / isExplicitCategory', () => {
       expect(text.includes('Positions this relationship has earned')).toBe(allowed.includes('position'))
       expect(text.includes('Toys or props')).toBe(allowed.includes('toy'))
     }
+  })
+})
+
+describe('per-character limits on the action set', () => {
+  it('drops an entry that touches a region this character has ruled out', () => {
+    const withFeet = { touch: { offLimits: ['feet' as const] } }
+    // `kiss-thigh` involves inner_thigh/thighs, so it survives a feet limit.
+    expect(getUnlockedIntimacyOptions(100, 'exclusive', undefined, undefined, withFeet).some((i) => i.id === 'kiss-thigh')).toBe(true)
+    const noThighs = { touch: { offLimits: ['inner_thigh' as const] } }
+    expect(getUnlockedIntimacyOptions(100, 'exclusive', undefined, undefined, noThighs).some((i) => i.id === 'kiss-thigh')).toBe(false)
+  })
+
+  it('drops an entry whose region is gated above the current warmth, and restores it above the gate', () => {
+    const gated = { touch: { gated: { genitals: 95 } } }
+    expect(getUnlockedIntimacyOptions(90, 'exclusive', undefined, undefined, gated).some((i) => i.id === 'pos-missionary')).toBe(false)
+    expect(getUnlockedIntimacyOptions(100, 'exclusive', undefined, undefined, gated).some((i) => i.id === 'pos-missionary')).toBe(true)
+  })
+
+  it('drops an entry involving a hard-limited kink entirely — never rendered, never prompted', () => {
+    const noBondage = { kinks: { hardLimits: ['bondage'] } }
+    const options = getUnlockedIntimacyOptions(100, 'exclusive', undefined, undefined, noBondage)
+    expect(options.some((i) => i.id === 'toy-handcuffs')).toBe(false)
+    expect(options.some((i) => i.id === 'toy-silk-ties')).toBe(false)
+    // A merely disliked kink still appears — only a hard limit filters.
+    const dislikes = { kinks: { valence: { bondage: -1 as const } } }
+    expect(getUnlockedIntimacyOptions(100, 'exclusive', undefined, undefined, dislikes).some((i) => i.id === 'toy-handcuffs')).toBe(true)
+  })
+
+  it('leaves the action set alone for a character with no profile at all', () => {
+    const all = getUnlockedIntimacyOptions(100, 'exclusive')
+    expect(getUnlockedIntimacyOptions(100, 'exclusive', undefined, undefined, {})).toHaveLength(all.length)
+  })
+})
+
+describe('entry tagging', () => {
+  it('leaves no built-in entry untagged on both axes — a limit has to be able to reach it', () => {
+    for (const entry of DEFAULT_INTIMACY_CATALOG) {
+      const tagged = intimacyEntryRegions(entry).length + intimacyEntryKinks(entry).length
+      expect(tagged, entry.id).toBeGreaterThan(0)
+    }
+  })
+
+  it('tags every entry that involves physical contact with the regions it touches', () => {
+    // `act-roleplay` is the one built-in with no inherent region — acting out a fantasy is a frame
+    // around the scene rather than a place on a body — so it carries a kink tag instead.
+    for (const entry of DEFAULT_INTIMACY_CATALOG.filter((e) => e.id !== 'act-roleplay')) {
+      expect(intimacyEntryRegions(entry).length, entry.id).toBeGreaterThan(0)
+    }
+  })
+
+  it("prefers an entry's own tags over the built-in map, so a world can author its own", () => {
+    const custom = { ...DEFAULT_INTIMACY_CATALOG[0], regions: ['feet' as const], kinks: ['rough'] }
+    expect(intimacyEntryRegions(custom)).toEqual(['feet'])
+    expect(intimacyEntryKinks(custom)).toEqual(['rough'])
+  })
+
+  it('reads an untagged entry as involving no kinks rather than guessing', () => {
+    expect(intimacyEntryKinks({ id: 'unknown', category: 'activity', label: 'x', minWarmth: 0 })).toEqual([])
   })
 })

@@ -11,7 +11,9 @@ import { AFTERCARE_VERDICTS, isAftercareVerdict, type AftercareVerdict } from '@
 import { MOOD_VOCAB, NEED_VOCAB, type CharacterMood, type CharacterNeed } from '@/lib/prompt/mindGuidance'
 import type { AftercarePace } from '@/lib/dating/aftercare'
 import { parsePlanUpdates, type PlanUpdate } from '@/lib/dating/plans'
-import type { IntimacyPhase } from '@/lib/dating/intimacyScene'
+import { CLOTHING_LAYERS } from '@/lib/dating/clothing'
+import { BODY_REGIONS, parseIntimacyObservation } from '@/lib/dating/intimacyScene'
+import type { IntimacyPhase, IntimacyTurnObservation } from '@/lib/dating/intimacyScene'
 import { parseBeliefUpdates, type BeliefUpdate } from '@/lib/dating/beliefs'
 import { parseExpectationUpdates, type ExpectationUpdate } from '@/lib/dating/expectations'
 
@@ -198,8 +200,8 @@ export interface RelationshipMoment {
   characterIntent?: string
   /** Changes to the character's persistent agency layer (`dating/plans.ts`). `[]` on most turns. `note`/`resolve` indices point into `activePlans`. */
   planUpdates: PlanUpdate[]
-  /** Intimacy-scene phase read (`dating/intimacyScene.ts`), only present when the caller passed `currentIntimacyPhase`. `'resolved'` = wound down; `undefined` (scene active) = no change. */
-  intimacyPhase?: IntimacyPhase | 'resolved'
+  /** Bounded per-turn read of an active intimacy scene (`dating/intimacyScene.ts`), only present when the caller passed `currentIntimacyPhase`. The engine, not this, decides what the scene does with it; `undefined` = nothing usable came back. */
+  intimacyObservation?: IntimacyTurnObservation
   /** Changes to standing impressions of {{user}} (`dating/beliefs.ts`). `[]` on most turns. `revise`/`drop` indices point into `activeBeliefs`. */
   beliefUpdates: BeliefUpdate[]
   /** Changes to standing expectations of {{user}} (`dating/expectations.ts`). `[]` on most turns. `note`/`resolve` indices point into `activeExpectations`. */
@@ -243,8 +245,10 @@ export async function assessRelationshipMoment(
     currentMood?: CharacterMood
     currentNeed?: CharacterNeed
     currentIntent?: string
-    /** Intimacy scene state (`dating/intimacyScene.ts`), passed only while a scene is active — asks the judge to read building/peak/resolved. */
+    /** Intimacy scene state (`dating/intimacyScene.ts`), passed only while a scene is active — context for the turn observation the judge is asked for, never a value it gets to set. */
     currentIntimacyPhase?: IntimacyPhase
+    /** How the character feels about the active content (`dating/kinks.ts`), passed alongside the scene. Context for the hesitation read only — the engine never sets that field itself. */
+    intimacyStance?: 'reluctant' | 'eager'
     /** Standing impressions of {{user}} (`dating/beliefs.ts`), pre-formatted one per line, in index order — the judge revises/drops one by index, and can add new ones. */
     activeBeliefs?: string[]
     /** Standing expectations of {{user}} (`dating/expectations.ts`), pre-formatted one per line, in index order — the judge annotates/resolves one by index. */
@@ -288,11 +292,17 @@ export async function assessRelationshipMoment(
       : '',
     hasAftercare && params.aftercarePaceContext
       ? params.aftercarePaceContext === 'rushed'
-        ? `Context for the aftercare verdict only: the warmth that led here built up very suddenly right beforehand (one big spike, not a gradual accumulation over many turns). A milestone that arrived this fast is more plausibly followed by second-guessing, self-consciousness, or a colder reaction than one that was clearly earned — weigh that honestly, though the actual behaviour in the turns since should still be what decides the verdict.`
-        : `Context for the aftercare verdict only: the warmth that led here built up gradually, over many small moments, not a sudden spike. That's the more solid foundation for a genuinely tender aftermath, though it's still the actual behaviour in the turns since that should decide the verdict.`
+        ? `Context for the aftercare verdict only: this arrived fast — either the scene itself was over almost as soon as it started, or the warmth that led there spiked right beforehand rather than accumulating over many turns. A milestone that arrived this fast is more plausibly followed by second-guessing, self-consciousness, or a colder reaction than one that was clearly earned — weigh that honestly, though the actual behaviour in the turns since should still be what decides the verdict.`
+        : `Context for the aftercare verdict only: this was earned — the scene took its time, and the warmth that led there built up over many small moments rather than spiking. That's the more solid foundation for a genuinely tender aftermath, though it's still the actual behaviour in the turns since that should decide the verdict.`
       : '',
     hasIntimacyScene
-      ? `Separately: an explicit intimate scene is currently in progress (currently read as "${params.currentIntimacyPhase}"). Judge whether the latest reply is still building, has reached its physical peak, or has now wound down/concluded (moving into its aftermath).`
+      ? `Separately: an explicit intimate scene is currently in progress (the app currently has it at "${params.currentIntimacyPhase}"). Report what the latest reply actually did, in the "intimacyObservation" fields below — you are describing the turn, not deciding where the scene goes next.${
+          params.intimacyStance === 'reluctant'
+            ? ` Worth knowing while you read it: this is something ${params.charName} is not actually into, so a hesitation, a pause, or going along with it rather than wanting it is likely to be genuinely present in the reply — look for it rather than assuming enthusiasm.`
+            : params.intimacyStance === 'eager'
+              ? ` Worth knowing while you read it: this is something ${params.charName} is genuinely eager for, so hesitation is less likely to be what's actually on the page — read what's there rather than assuming reluctance.`
+              : ''
+        }`
       : '',
     `${params.charName}'s mood going into this exchange: ${params.currentMood ?? 'not yet read'}. Their underlying need lately: ${params.currentNeed ?? 'not yet read'}. Their private intention going in: ${params.currentIntent ?? 'none noted'}. Their deeper underlying desire going in: ${params.currentDesire ?? 'not yet read'}. Their private fear going in: ${params.currentFear ?? 'none noted'}.`,
     hasPlans
@@ -304,7 +314,7 @@ export async function assessRelationshipMoment(
     hasExpectations
       ? `${params.charName}'s standing expectations of ${params.userName} — things ${params.charName} has started counting on, whether or not ${params.userName} knows it:\n${params.activeExpectations!.map((e, i) => `${i}: ${e}`).join('\n')}`
       : `${params.charName} has no standing expectations of ${params.userName} on record yet.`,
-    `Return ONLY a minified JSON object: {"deltas":{ one integer -2..2 per dimension key },"newFlags":[ any newly-established flags from the known set, or [] ],"reason":"...","newFacts":[ any new durable facts, or [] ]${hasOpenThreads ? ',"resolvedFactIndices":[ open-thread index numbers this exchange clearly closed, or [] ]' : ''}${hasTasks ? ',"completedTaskIndices":[ pending task index numbers this exchange clearly and unambiguously accomplished, or [] ]' : ''}${hasAftercare ? `,"aftercareVerdict":"exactly one of [${AFTERCARE_VERDICTS.join(', ')}]"` : ''}${hasIntimacyScene ? ',"intimacyPhase":"exactly one of [building, peak, resolved]"' : ''},"mood":"one of [${MOOD_VOCAB.join(', ')}], only if this exchange gives a clear enough read to state one — omit entirely otherwise","currentNeed":"one of [${NEED_VOCAB.join(', ')}], only if this stretch of the story clearly shows this need going unmet — omit entirely otherwise, and don't change it lightly","characterIntent":"a short (under 12 words) private thing ${params.charName} now wants, only if something concrete and new became clear this exchange — omit entirely otherwise","currentDesire":"a short (under 12 words) deeper, steadier underlying drive of ${params.charName}'s, only if this exchange makes one genuinely clear — omit entirely otherwise, and don't change it lightly","currentFear":"a short (under 12 words) private fear ${params.charName} has right now, only if this exchange makes one genuinely clear — omit entirely otherwise, and don't change it lightly","planUpdates":[ usually [] — see the plan rules below ],"beliefUpdates":[ usually [] — see the belief rules below ],"expectationUpdates":[ usually [] — see the expectation rules below ]}.`,
+    `Return ONLY a minified JSON object: {"deltas":{ one integer -2..2 per dimension key },"newFlags":[ any newly-established flags from the known set, or [] ],"reason":"...","newFacts":[ any new durable facts, or [] ]${hasOpenThreads ? ',"resolvedFactIndices":[ open-thread index numbers this exchange clearly closed, or [] ]' : ''}${hasTasks ? ',"completedTaskIndices":[ pending task index numbers this exchange clearly and unambiguously accomplished, or [] ]' : ''}${hasAftercare ? `,"aftercareVerdict":"exactly one of [${AFTERCARE_VERDICTS.join(', ')}]"` : ''}${hasIntimacyScene ? ',"intimacyObservation":{"engagement":"one of [engaged, stalled, drifted]","intensityDelta":-1|0|1|2,"hesitationSignalled":true/false,"stageCompleteSignalled":true/false,"regionsTouched":[ zero or more of the region names listed below ],"clothingRemoved":[ zero or more {"who":"char"|"user","layer":"one of the layer names listed below"} ]}' : ''},"mood":"one of [${MOOD_VOCAB.join(', ')}], only if this exchange gives a clear enough read to state one — omit entirely otherwise","currentNeed":"one of [${NEED_VOCAB.join(', ')}], only if this stretch of the story clearly shows this need going unmet — omit entirely otherwise, and don't change it lightly","characterIntent":"a short (under 12 words) private thing ${params.charName} now wants, only if something concrete and new became clear this exchange — omit entirely otherwise","currentDesire":"a short (under 12 words) deeper, steadier underlying drive of ${params.charName}'s, only if this exchange makes one genuinely clear — omit entirely otherwise, and don't change it lightly","currentFear":"a short (under 12 words) private fear ${params.charName} has right now, only if this exchange makes one genuinely clear — omit entirely otherwise, and don't change it lightly","planUpdates":[ usually [] — see the plan rules below ],"beliefUpdates":[ usually [] — see the belief rules below ],"expectationUpdates":[ usually [] — see the expectation rules below ]}.`,
     'Only move a dimension if this specific exchange clearly affected it. Leave the rest at 0. Most turns should move only one or two dimensions and add no new flags.',
     '"reason" is a short (under 12 words) in-world one-liner naming what just happened, e.g. "Complimented their cooking unprompted". Give one only if at least one dimension moved or a flag was added, otherwise "".',
     `"newFacts" is for concrete, durable things worth recalling much later: a name, a stated preference, a piece of backstory, a promise made, a moment that landed hard. Not every line of dialogue. Most turns add none. Each fact is an object {"text": one short standalone sentence, "importance": 0-1, "valence": -1 to 1, "unresolved": true/false}. "importance": ~0.2 for a small detail, 0.8+ for something that reshapes how ${params.charName} sees ${params.userName}. "valence": how it felt to ${params.charName} — negative if it hurt or disappointed, positive if it meant a lot, 0 for neutral information. "unresolved": true only for an open wound or open question the story has NOT closed (a slight not addressed, a promise not yet kept, a question dodged) — most facts are false.`,
@@ -325,7 +335,7 @@ export async function assessRelationshipMoment(
       ? 'Be conservative about "completedTaskIndices": only include a task index if this exchange plainly and unambiguously accomplished it, not if it merely became more likely. Use [] if none did.'
       : '',
     hasIntimacyScene
-      ? '"intimacyPhase": "building" if the scene is still escalating (anticipation, teasing, not yet at full intensity); "peak" once it has clearly reached full intensity; "resolved" once it has visibly wound down or concluded this reply (moving into its aftermath). Judge only this specific reply, not the scene in the abstract.'
+      ? `"intimacyObservation" describes only what this one reply did — every field is an observation about the text in front of you, never a judgement about where the scene should go. "engagement": "engaged" if the reply actually carried the current physical activity forward; "stalled" if it went nowhere (talk, hesitation, repeating the previous beat); "drifted" if it moved to something else entirely. "intensityDelta": -1 if this reply pulled back from the previous one, 0 if it held level, 1 for a normal step up, 2 only for a large, unmistakable escalation. "hesitationSignalled": true if either of them paused, checked in, or visibly held back. "stageCompleteSignalled": true only if this reply narrated the scene actually finishing — not merely nearing it. "regionsTouched": the regions this reply described contact with, drawn only from [${BODY_REGIONS.join(', ')}], or [] if none were described. "clothingRemoved": anything this reply described actually coming off, as {"who":"char" for ${params.charName} or "user" for ${params.userName}, "layer": one of [${CLOTHING_LAYERS.join(', ')}]} — only garments removed in THIS reply, not ones already off, and [] on most turns.`
       : '',
     `Example (nothing much happened): {"deltas":{"affection":1,"trust":0,"chemistry":0,"comfort":1,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"Stayed to help clean up without being asked","newFacts":[]${hasOpenThreads ? ',"resolvedFactIndices":[]' : ''}${hasTasks ? ',"completedTaskIndices":[]' : ''},"planUpdates":[],"beliefUpdates":[],"expectationUpdates":[]}`,
     `Example (a fact landed hard): {"deltas":{"affection":-2,"trust":-1,"chemistry":0,"comfort":-1,"respect":0,"curiosity":0,"tension":2},"newFlags":[],"reason":"Forgot their birthday entirely","newFacts":[{"text":"Forgot ${params.charName}'s birthday","importance":0.75,"valence":-0.7,"unresolved":true}]${hasOpenThreads ? ',"resolvedFactIndices":[]' : ''}${hasTasks ? ',"completedTaskIndices":[]' : ''},"planUpdates":[],"beliefUpdates":[],"expectationUpdates":[]}`,
@@ -392,11 +402,8 @@ export async function assessRelationshipMoment(
   const expectationUpdates = parseExpectationUpdates(obj.expectationUpdates).filter(
     (u) => u.action === 'add' || u.index < expectationCount,
   )
-  // Same guard as `aftercareVerdict` above.
-  const intimacyPhase =
-    hasIntimacyScene && (obj.intimacyPhase === 'building' || obj.intimacyPhase === 'peak' || obj.intimacyPhase === 'resolved')
-      ? (obj.intimacyPhase as IntimacyPhase | 'resolved')
-      : undefined
+  // Same guard as `aftercareVerdict` above — a volunteered read of a scene that isn't open is guessing.
+  const intimacyObservation = hasIntimacyScene ? parseIntimacyObservation(obj.intimacyObservation) : undefined
   return {
     deltas,
     newFlags,
@@ -409,7 +416,7 @@ export async function assessRelationshipMoment(
     currentNeed,
     characterIntent,
     planUpdates,
-    intimacyPhase,
+    intimacyObservation,
     beliefUpdates,
     expectationUpdates,
     currentFear,

@@ -335,6 +335,46 @@ function normalizeBehavioralRules(raw: unknown): { id: string; kind: 'when_then'
   return entries.length > 0 ? entries : undefined
 }
 
+/** `Character.touchProfile`: a per-region 0-3 score map plus limit lists. Unknown regions are the client's
+ *  problem to filter; this only enforces shape, so an imported card can't corrupt the record. */
+function normalizeTouchProfile(raw: unknown): Record<string, unknown> | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const src = raw as Record<string, unknown>
+  const numberMap = (value: unknown): Record<string, number> | undefined => {
+    if (!value || typeof value !== 'object') return undefined
+    const out: Record<string, number> = {}
+    for (const [key, v] of Object.entries(value as Record<string, unknown>)) {
+      if (typeof v === 'number' && Number.isFinite(v)) out[key] = v
+    }
+    return Object.keys(out).length ? out : undefined
+  }
+  const profile: Record<string, unknown> = {}
+  const sensitivity = numberMap(src.sensitivity)
+  if (sensitivity) profile.sensitivity = sensitivity
+  const offLimits = normalizeStringArray(src.offLimits)
+  if (offLimits) profile.offLimits = offLimits
+  const gated = numberMap(src.gated)
+  if (gated) profile.gated = gated
+  return Object.keys(profile).length ? profile : undefined
+}
+
+/** `Character.kinkProfile`: valence scores plus hard limits. Same shape-only contract as above. */
+function normalizeKinkProfile(raw: unknown): Record<string, unknown> | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const src = raw as Record<string, unknown>
+  const profile: Record<string, unknown> = {}
+  if (src.valence && typeof src.valence === 'object') {
+    const valence: Record<string, number> = {}
+    for (const [kink, v] of Object.entries(src.valence as Record<string, unknown>)) {
+      if (typeof v === 'number' && v >= -2 && v <= 2) valence[kink] = Math.round(v)
+    }
+    if (Object.keys(valence).length) profile.valence = valence
+  }
+  const hardLimits = normalizeStringArray(src.hardLimits)
+  if (hardLimits) profile.hardLimits = hardLimits
+  return Object.keys(profile).length ? profile : undefined
+}
+
 /** `Character.voiceFingerprint`: trims free-typed speech-pattern fields, dropping empties. */
 function normalizeVoiceFingerprint(
   raw: unknown,
@@ -431,6 +471,8 @@ app.post('/api/characters', (req, res) => {
     boundaries: normalizeStringArray(req.body.boundaries),
     socialConnections: normalizeSocialConnections(req.body.socialConnections),
     behavioralRules: normalizeBehavioralRules(req.body.behavioralRules),
+    touchProfile: normalizeTouchProfile(req.body.touchProfile),
+    kinkProfile: normalizeKinkProfile(req.body.kinkProfile),
     occupation: typeof req.body.occupation === 'string' ? req.body.occupation : undefined,
     workplace: typeof req.body.workplace === 'string' ? req.body.workplace : undefined,
     homeLocation: typeof req.body.homeLocation === 'string' ? req.body.homeLocation : undefined,
@@ -475,6 +517,8 @@ app.put('/api/characters/:id', (req, res) => {
   if ('boundaries' in req.body) patch.boundaries = normalizeStringArray(req.body.boundaries)
   if ('socialConnections' in req.body) patch.socialConnections = normalizeSocialConnections(req.body.socialConnections)
   if ('behavioralRules' in req.body) patch.behavioralRules = normalizeBehavioralRules(req.body.behavioralRules)
+  if ('touchProfile' in req.body) patch.touchProfile = normalizeTouchProfile(req.body.touchProfile)
+  if ('kinkProfile' in req.body) patch.kinkProfile = normalizeKinkProfile(req.body.kinkProfile)
   if ('occupation' in req.body) patch.occupation = typeof req.body.occupation === 'string' ? req.body.occupation : undefined
   if ('workplace' in req.body) patch.workplace = typeof req.body.workplace === 'string' ? req.body.workplace : undefined
   if ('homeLocation' in req.body) patch.homeLocation = typeof req.body.homeLocation === 'string' ? req.body.homeLocation : undefined
