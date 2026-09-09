@@ -502,7 +502,12 @@ export const useSettingsStore = create<SettingsState>()(
       chatBackendBaseUrl: '',
       chatBackendApiKey: '',
       chatBackendModel: '',
-      setChatBackendConfig: (patch) => set(patch),
+      setChatBackendConfig: (patch) => set((s) => {
+        // A provider change must not send the previous provider's secret to its replacement.
+        const changesProvider = (patch.chatBackendBaseUrl !== undefined && patch.chatBackendBaseUrl !== s.chatBackendBaseUrl)
+          || (patch.chatBackend !== undefined && patch.chatBackend !== s.chatBackend)
+        return changesProvider ? { chatBackendApiKey: '', chatBackendModel: '', ...patch } : patch
+      }),
 
       chatCompletionSampler: DEFAULT_CHAT_COMPLETION_SAMPLER,
       setChatCompletionSampler: (patch) => set((s) => ({ chatCompletionSampler: { ...s.chatCompletionSampler, ...patch } })),

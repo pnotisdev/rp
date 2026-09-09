@@ -11,6 +11,9 @@ import { SettingsPage } from '@/components/ui/SettingsPage'
 import { Button } from '@/components/ui/Button'
 import { toastSuccess } from '@/lib/store/useToastStore'
 import { HostedConnectionStatus, STATUS_DOT, STATUS_LABEL } from './HostedConnectionStatus'
+import { OpenMayhemSetup } from './OpenMayhemSetup'
+import { OpenMayhemModelSelect } from './OpenMayhemModelSelect'
+import { isOpenMayhem } from '@/lib/api/openMayhem'
 
 const CHAT_BACKENDS = Object.keys(CHAT_BACKEND_LABELS) as ChatBackendId[]
 const BUILTIN_IDS = new Set(BUILTIN_INSTRUCT_TEMPLATES.map((t) => t.id))
@@ -82,12 +85,7 @@ export function ConnectionSettings() {
         {chatBackend === 'openai-compatible' && (
           <>
             <p className="mb-2 text-xs text-text-muted">
-              Any server that speaks the OpenAI Chat Completions format. Live-verified against a real
-              account: three real turns against OpenRouter's free <code className="font-mono">minimax/minimax-m3:free</code>{' '}
-              came back in character with working streaming, relationship scoring, and choice
-              suggestions (ROADMAP.md #121). The rest of the list below is each vendor's own
-              documented endpoint, not independently re-checked here. Worth a quick sanity check on
-              your first real reply with a new one.
+              Choose a provider, enter its API key, then select a model for replies and background scoring.
             </p>
             <SelectField
               label="Provider"
@@ -104,6 +102,7 @@ export function ConnectionSettings() {
                 </option>
               ))}
             </SelectField>
+            {isOpenMayhem(chatBackendBaseUrl) && <OpenMayhemSetup />}
             <TextField
               label="Base URL"
               value={chatBackendBaseUrl}
@@ -116,7 +115,10 @@ export function ConnectionSettings() {
               value={chatBackendApiKey}
               onChange={(e) => setChatBackendConfig({ chatBackendApiKey: e.target.value })}
             />
-            {useModelList ? (
+            {isOpenMayhem(chatBackendBaseUrl) ? (
+              <OpenMayhemModelSelect models={openAiModels} loading={modelsLoading} value={chatBackendModel}
+                onChange={(model) => setChatBackendConfig({ chatBackendModel: model })} />
+            ) : useModelList ? (
               <SelectField
                 label="Model"
                 value={openAiModels.includes(chatBackendModel) ? chatBackendModel : ''}
@@ -149,7 +151,7 @@ export function ConnectionSettings() {
                 }
               />
             )}
-            {openAiModels && openAiModels.length > 0 && typeModel && (
+            {!isOpenMayhem(chatBackendBaseUrl) && openAiModels && openAiModels.length > 0 && typeModel && (
               <button
                 className="mb-3 -mt-1 block text-xs text-accent transition-colors hover:underline"
                 onClick={() => setTypeModel(false)}
@@ -159,8 +161,9 @@ export function ConnectionSettings() {
             )}
             <HostedConnectionStatus status={hostedStatus.status} detail={hostedStatus.detail} recheck={() => { reloadModels(); hostedStatus.recheck() }} />
             <p className="mt-2 text-xs text-text-muted">
-              Keys are stored only in this browser and sent directly to the base URL above, never
-              through any other server. Token counts fall back to an estimate for this backend (no
+              Keys are stored in this browser. {isOpenMayhem(chatBackendBaseUrl)
+                ? 'OpenMayhem requests pass through your RP Suite server, which forwards the key without saving it.'
+                : 'Requests are sent directly to the base URL above.'} Token counts fall back to an estimate for this backend (no
               shared tokenizer endpoint); context size is read from the provider's model list when
               it publishes one, otherwise it falls back too. Temperature, top P, penalties and
               reasoning effort for this backend live in Settings → Generation, separate from the

@@ -4,6 +4,8 @@ import type { GenerateRequest } from './types'
 // provider metadata (ids, labels, known OpenAI-compatible providers) used to pick between them.
 
 export interface ChatBackend {
+  /** Opt JSON-producing assists into an object envelope and a validated JSON-mode request. */
+  readonly prefersJsonObject?: boolean
   generate(params: GenerateRequest, signal?: AbortSignal): Promise<string>
   generateStream(params: GenerateRequest, onToken: (token: string, full: string) => void, signal?: AbortSignal): Promise<string>
   /** The model's actual max context, cached — or a sane fallback for a backend with no introspection endpoint. */
@@ -54,6 +56,7 @@ export interface KnownChatProvider {
 
 /** SillyTavern-style provider picker: picking one pre-fills Settings → Connection's base URL. */
 export const KNOWN_CHAT_PROVIDERS: KnownChatProvider[] = [
+  { id: 'openmayhem', label: 'OpenMayhem', baseUrl: 'https://api.openmayhem.ai/v1', modelExample: 'hauhaucs/qwen3.6-35b-a3b-uncensored' },
   { id: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', modelExample: 'gpt-4o-mini' },
   {
     id: 'openrouter',

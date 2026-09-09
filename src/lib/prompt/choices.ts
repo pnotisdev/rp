@@ -46,6 +46,7 @@ export async function generateChoices(
   },
 ): Promise<ChoiceOption[]> {
   const count = params.count ?? 3
+  const jsonObject = client.prefersJsonObject === true
   const context = renderContext(params.history, params.charName, params.userName, 8)
   const prompt = [
     'You are brainstorming what a roleplay participant could say or do next, to help them pick a direction.',
@@ -54,7 +55,7 @@ export async function generateChoices(
       ? `Available gifts the user can actually give now: ${params.availableGifts.map((g) => `${g.id} (${g.name}) x${g.quantity}`).join(', ')}`
       : 'No gifts are currently available to give.',
     `Propose ${count} short, distinct options for what ${params.userName} could say or do next. Each should take a different tone or approach from the others.`,
-    `Output ONLY a minified JSON array of ${count} objects with this exact shape: {"kind":"line|action|gift","label":"short button text","text":"the actual line or action to send as the user's turn","giftId":"required for kind=gift","giftName":"optional"}.`,
+    `Output ONLY ${jsonObject ? 'a minified JSON object with a "choices" array containing' : 'a minified JSON array of'} ${count} objects with this exact shape: {"kind":"line|action|gift","label":"short button text","text":"the actual line or action to send as the user's turn","giftId":"required for kind=gift","giftName":"optional"}. All text, including actions, must be inside valid JSON strings.`,
     `At most one option may have kind="gift", and only when a gift exists in the available list above. No markdown fences, no commentary.`,
     'JSON:',
   ].join('\n\n')
@@ -64,10 +65,12 @@ export async function generateChoices(
   // the caller's own catch-everything wrapper clears the indicator same as any other failure.
   const text = await generateWithTimeout(
     client,
-    { ...GENERATE_PARAMS, max_context_length: await client.getEffectiveMaxContext(), prompt },
+    { ...GENERATE_PARAMS, ...(jsonObject ? { jsonOutput: true } : {}), max_context_length: await client.getEffectiveMaxContext(), prompt },
     'Suggest choices',
   )
-  const parsed = parseLenientJson(text)
+  const result = parseLenientJson(text)
+  const parsed = jsonObject && result && typeof result === 'object' && !Array.isArray(result)
+    ? (result as { choices?: unknown }).choices : result
   if (!Array.isArray(parsed)) return []
   const options: ChoiceOption[] = []
   let giftCount = 0
