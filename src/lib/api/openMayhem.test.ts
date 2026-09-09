@@ -4,7 +4,7 @@ import { fetchOpenAiModelContext, listOpenAiModels } from './detectBackend'
 import { isOpenMayhem, loadOpenMayhemModels, OPENMAYHEM_BASE_URL, type OpenMayhemModel } from './openMayhem'
 
 const model: OpenMayhemModel = {
-  id: 'example/chat', endpoints: ['CHAT'], context_length: 32768, availability: 'available',
+  id: 'example/chat', endpoints: ['CHAT'], context_length: 32768, availability: 'available', providers_available: 1,
   request_contracts: [
     { endpoint: 'CHAT', required: ['model', 'messages'], attributes: {
       max_tokens: { minimum: 1, maximum: 4096 }, temperature: { minimum: 0, maximum: 2 },
@@ -59,6 +59,26 @@ describe('OpenMayhem integration', () => {
       model: model.id, messages: [{ role: 'user', content: 'Hello' }], stream: false,
       temperature: 0.7, max_tokens: 20, thinking_mode: 'disabled',
     })
+  })
+
+  it('excludes offline, busy, stale and unknown provider availability from the dropdown', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ data: [
+      model,
+      { ...model, id: 'offline', availability: 'offline', providers_available: 0 },
+      { ...model, id: 'busy', availability: 'busy', providers_available: 0 },
+      { ...model, id: 'stale', availability_stale: true },
+      { ...model, id: 'unknown', providers_available: undefined },
+    ] })))
+    expect(await listOpenAiModels(OPENMAYHEM_BASE_URL)).toEqual([model.id])
+    // Keep metadata for a saved selection even if its providers temporarily become busy.
+    expect((await loadOpenMayhemModels()).map((m) => m.id)).toContain('busy')
+  })
+
+  it('returns an empty list when all providers are unavailable and includes a model when it returns', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ ...model, providers_available: 0 }] })))
+    expect(await listOpenAiModels(OPENMAYHEM_BASE_URL)).toEqual([])
+    fetchMock.mockResolvedValueOnce(catalog())
+    expect(await listOpenAiModels(OPENMAYHEM_BASE_URL)).toEqual([model.id])
   })
 
   it('rejects missing models and invalid budgets before spending credit', async () => {

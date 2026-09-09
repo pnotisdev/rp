@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/Button'
 import { toastSuccess } from '@/lib/store/useToastStore'
 import { HostedConnectionStatus, STATUS_DOT, STATUS_LABEL } from './HostedConnectionStatus'
 import { OpenMayhemSetup } from './OpenMayhemSetup'
+import { OpenMayhemModelSelect } from './OpenMayhemModelSelect'
 import { isOpenMayhem } from '@/lib/api/openMayhem'
 
 const CHAT_BACKENDS = Object.keys(CHAT_BACKEND_LABELS) as ChatBackendId[]
@@ -114,7 +115,10 @@ export function ConnectionSettings() {
               value={chatBackendApiKey}
               onChange={(e) => setChatBackendConfig({ chatBackendApiKey: e.target.value })}
             />
-            {useModelList ? (
+            {isOpenMayhem(chatBackendBaseUrl) ? (
+              <OpenMayhemModelSelect models={openAiModels} loading={modelsLoading} value={chatBackendModel}
+                onChange={(model) => setChatBackendConfig({ chatBackendModel: model })} />
+            ) : useModelList ? (
               <SelectField
                 label="Model"
                 value={openAiModels.includes(chatBackendModel) ? chatBackendModel : ''}
@@ -122,9 +126,7 @@ export function ConnectionSettings() {
                   if (e.target.value === '__type__') return setTypeModel(true)
                   setChatBackendConfig({ chatBackendModel: e.target.value })
                 }}
-                hint={isOpenMayhem(chatBackendBaseUrl)
-                  ? `${openAiModels.length} chat models. Use the link above to check current prices and provider availability.`
-                  : `${openAiModels.length} models from /models. For one that isn't listed, pick "Type it in".`}
+                hint={`${openAiModels.length} models from /models. For one that isn't listed, pick "Type it in".`}
               >
                 {!openAiModels.includes(chatBackendModel) && <option value="">Choose a model…</option>}
                 {openAiModels.map((m) => (
@@ -149,7 +151,7 @@ export function ConnectionSettings() {
                 }
               />
             )}
-            {openAiModels && openAiModels.length > 0 && typeModel && (
+            {!isOpenMayhem(chatBackendBaseUrl) && openAiModels && openAiModels.length > 0 && typeModel && (
               <button
                 className="mb-3 -mt-1 block text-xs text-accent transition-colors hover:underline"
                 onClick={() => setTypeModel(false)}

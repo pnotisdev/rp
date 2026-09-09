@@ -14,6 +14,8 @@ export interface OpenMayhemModel {
   endpoints: string[]
   context_length?: number
   availability?: string
+  providers_available?: number
+  availability_stale?: boolean
   request_contracts?: Contract[]
 }
 
@@ -23,6 +25,14 @@ export function isOpenMayhemChatModel(model: OpenMayhemModel): boolean {
   return !!model.endpoints?.includes('CHAT') && !!contracts?.length && contracts.every(
     (c) => !!c.attributes?.max_tokens && c.required?.every((key) => key === 'model' || key === 'messages'),
   )
+}
+
+/** Match the catalog's live filter: online-but-busy providers cannot accept a new request. */
+export function hasAvailableOpenMayhemProvider(model: OpenMayhemModel): boolean {
+  return model.availability_stale !== true
+    && typeof model.providers_available === 'number'
+    && Number.isFinite(model.providers_available)
+    && model.providers_available > 0
 }
 
 let catalog: { until: number; promise: Promise<OpenMayhemModel[]> } | undefined

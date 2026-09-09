@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/Button'
 import { Chip } from '@/components/ui/Chip'
 import { HostedConnectionStatus } from '@/components/settings/HostedConnectionStatus'
 import { OpenMayhemSetup } from '@/components/settings/OpenMayhemSetup'
+import { OpenMayhemModelSelect } from '@/components/settings/OpenMayhemModelSelect'
 import { isOpenMayhem } from '@/lib/api/openMayhem'
 import { NewChatDialog } from './NewChatDialog'
 import { TrashPanel } from './TrashPanel'
@@ -98,7 +99,7 @@ export function WelcomeView({
   const localOpenAi = mode === 'local' && chatBackend === 'openai-compatible'
   const activeStatus = mode === 'cloud' || localOpenAi ? hostedStatus.status : koboldStatus
 
-  const { models: cloudModels, reload: reloadCloudModels } = useOpenAiModels(chatBackendBaseUrl, chatBackendApiKey, chatBackend === 'openai-compatible')
+  const { models: cloudModels, loading: cloudModelsLoading, reload: reloadCloudModels } = useOpenAiModels(chatBackendBaseUrl, chatBackendApiKey, chatBackend === 'openai-compatible')
 
   // The Local tab's address field. Seeded from whichever local address we already have — a
   // detected local OpenAI server, else the KoboldCpp URL setting. Never the cloud provider URL.
@@ -206,7 +207,10 @@ export function WelcomeView({
   // Shared by the local and cloud panels for any OpenAI-compatible backend: a real dropdown of the
   // ids `/models` returned, with a "type it in" escape hatch, falling back to a plain field when
   // the provider doesn't expose `/models`.
-  const openAiModelField = (
+  const openAiModelField = isOpenMayhem(chatBackendBaseUrl) ? (
+    <OpenMayhemModelSelect models={cloudModels} loading={cloudModelsLoading} value={chatBackendModel}
+      onChange={(model) => setChatBackendConfig({ chatBackendModel: model })} />
+  ) : (
     <div>
       <label className="mb-1 block text-text-muted">Model</label>
       {cloudModels && cloudModels.length > 0 && !customModel ? (
