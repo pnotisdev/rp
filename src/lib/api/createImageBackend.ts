@@ -2,9 +2,11 @@ import { A1111Client } from './a1111Image'
 import { ComfyUIClient } from './comfyuiImage'
 import { SwarmUIClient } from './swarmuiImage'
 import { NovelAIImageClient } from './novelaiImage'
+import { OpenMayhemImageClient } from './openMayhemMedia'
 import type { ImageBackend, ImageBackendId } from './imageBackend'
 
 export interface ImageBackendSettings {
+  openMayhemApiKey?: string
   imageBackend: ImageBackendId
   /** a1111 / comfyui / swarmui only. */
   imageBackendBaseUrl: string
@@ -18,6 +20,8 @@ export interface ImageBackendSettings {
 /** Section 11's image-backend factory — the `createChatBackend` pattern applied to image generation. */
 export function createImageBackend(settings: ImageBackendSettings): ImageBackend {
   switch (settings.imageBackend) {
+    case 'openmayhem':
+      return new OpenMayhemImageClient(settings.openMayhemApiKey || '', settings.imageBackendModel)
     case 'comfyui':
       return new ComfyUIClient(settings.imageBackendBaseUrl)
     case 'swarmui':

@@ -467,10 +467,17 @@ export function VNStage({
   const ttsApiKey = useSettingsStore((s) => s.ttsApiKey)
   const ttsBaseUrl = useSettingsStore((s) => s.ttsBaseUrl)
   const ttsRegion = useSettingsStore((s) => s.ttsRegion)
+  const ttsModel = useSettingsStore((s) => s.ttsModel)
+  const openMayhemApiKey = useSettingsStore((s) => s.openMayhemApiKey)
   const ttsVoice = useSettingsStore((s) => s.ttsVoice)
   const [speakState, setSpeakState] = useState<'idle' | 'loading' | 'playing'>('idle')
   const speakAudioRef = useRef<HTMLAudioElement | null>(null)
+  const speakControllerRef = useRef<AbortController | null>(null)
+  const speakUrlRef = useRef<string | null>(null)
   const stopSpeaking = () => {
+    speakControllerRef.current?.abort()
+    speakControllerRef.current = null
+    if (speakUrlRef.current) { URL.revokeObjectURL(speakUrlRef.current); speakUrlRef.current = null }
     speakAudioRef.current?.pause()
     speakAudioRef.current = null
     setSpeakState('idle')
@@ -483,20 +490,29 @@ export function VNStage({
     const text = toSpeakableText(rawText)
     if (!text) return
     setSpeakState('loading')
+    const controller = new AbortController()
+    speakControllerRef.current = controller
     try {
+      if (character?.voice?.provider && character.voice.provider !== ttsProvider) {
+        throw new Error('This character overrides the voice provider. Select that provider in Settings → Voice first, or use the global default for this character.')
+      }
       const blob = await synthesizeSpeech(
         {
           provider: character?.voice?.provider ?? ttsProvider,
-          apiKey: ttsApiKey,
+          apiKey: ttsProvider === 'openmayhem' ? openMayhemApiKey : ttsApiKey,
+          model: ttsModel,
           baseUrl: ttsBaseUrl,
           region: ttsRegion,
           voice: character?.voice?.voiceId || ttsVoice,
         },
         text,
         koboldBaseUrl,
+        controller.signal,
       )
+      controller.signal.throwIfAborted()
       const url = URL.createObjectURL(blob)
       const audio = new Audio(url)
+      speakUrlRef.current = url
       speakAudioRef.current = audio
       setSpeakState('playing')
       const finish = () => {
@@ -508,8 +524,12 @@ export function VNStage({
       }
       audio.onended = finish
       audio.onerror = finish
-      await audio.play().catch(finish)
+      try { await audio.play() } catch (error) { finish(); throw error }
     } catch (e) {
+      if (controller.signal.aborted) {
+        if (!(e instanceof DOMException && e.name === 'AbortError')) toastError(errorMessage(e))
+        return
+      }
       setSpeakState('idle')
       toastError(errorMessage(e))
     }
@@ -524,7 +544,7 @@ export function VNStage({
   }
   // Swiping to a different line, or leaving the message entirely, cuts off whatever was playing —
   // it no longer matches what's on screen.
-  useEffect(() => stopSpeaking, [lastCharMsg?.id, activeSwipe])
+  useEffect(() => stopSpeaking, [lastCharMsg?.id, activeSwipe, ttsProvider, ttsModel, ttsVoice, openMayhemApiKey, ttsApiKey, ttsBaseUrl, ttsRegion, character?.voice?.provider, character?.voice?.voiceId])
   const [autoVoice, setAutoVoice] = useState(false)
 
   // Every message id this component instance has watched stream in live — its text already

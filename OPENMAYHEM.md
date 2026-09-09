@@ -2,7 +2,7 @@
 
 ## Recommended first release
 
-Use the existing OpenAI-compatible chat backend with a named OpenMayhem preset. Keep signup, email/card verification, credit claims, key issuance, and payments on OpenMayhem. The user returns to RP Suite with an API key and chooses a model. This avoids introducing a second account system or embedding payment handling in a local roleplay client.
+Use the existing OpenAI-compatible chat backend with a named OpenMayhem preset, plus dedicated async image and speech adapters in the existing media workflows. Keep signup, email/card verification, credit claims, key issuance, and payments on OpenMayhem. The user returns to RP Suite with an API key and chooses a model. This avoids introducing a second account system or embedding payment handling in a local roleplay client.
 
 ```text
 RP Suite → OpenMayhem signup → claim eligible credit → create Chat API key
@@ -16,7 +16,7 @@ RP Suite browser → RP Suite local server → api.openmayhem.ai → provider ne
 | Topic | Evidence and integration decision |
 | --- | --- |
 | API | The [quickstart](https://openmayhem.ai/docs/quickstart) documents `https://api.openmayhem.ai/v1`, bearer keys, and Chat Completions. Reuse RP Suite's client for replies and background judges. |
-| Account and keys | Link to [signup](https://openmayhem.ai/signup), [credits](https://openmayhem.ai/dashboard/credits), and [API keys](https://openmayhem.ai/dashboard/keys). A Chat-scoped key is sufficient for this integration. |
+| Account and keys | Link to [signup](https://openmayhem.ai/signup), [credits](https://openmayhem.ai/dashboard/credits), and [API keys](https://openmayhem.ai/dashboard/keys). Enable Chat for conversation, Images for image generation, and Audio Speech for TTS. |
 | $5 offer | A direct read of the [featured campaign endpoint](https://api.openmayhem.ai/campaigns/featured) returned the `welcome` campaign with `credit_usd: "5.000000"` and `ends_at: "2026-09-14T14:22:00.000Z"`. This is a temporary offer, not a permanent signup entitlement. Fetch it dynamically and link to its offer page; otherwise link to credits. Claims require email/card verification and remain subject to eligibility. |
 | Browser access | A live OPTIONS request to `/v1/chat/completions` from `Origin: http://localhost:5173` returned 204 but no `Access-Control-Allow-Origin`. A preset alone would fail in RP Suite's browser. Forward through the existing local Express server. |
 | Model catalog | The public [catalog](https://api.openmayhem.ai/v1/models) returned 33 models across modalities, six with CHAT endpoints. One required tools and was unsuitable for normal conversation. Filter using endpoint and request-contract metadata; five conversational choices remained. Three had providers online at inspection time. Availability and prices change. |
@@ -30,12 +30,12 @@ RP Suite browser → RP Suite local server → api.openmayhem.ai → provider ne
 
 ## Implementation boundaries
 
-- The local router has three fixed upstream destinations: public chat catalog, public featured campaign, and authenticated Chat Completions. It does not accept arbitrary upstream URLs, forward cookies, follow redirects, persist credentials, or retry requests. RP Suite's origin guard applies before it.
+- The local router exposes fixed paths for the public catalog/campaign, authenticated Chat Completions, Images, Audio Speech, job status/cancellation, and owned artifacts. It validates modality/cursor queries and resource IDs, does not accept caller-provided upstream URLs, forward cookies, persist credentials, or retry inference. Artifact redirects are accepted only from the fixed API, require HTTPS, and receive no bearer credentials. Other redirects are rejected. RP Suite's origin guard applies before it.
 - Keys stay in the existing browser settings storage and pass transiently through the RP Suite server for inference. Changing providers clears the previous key and model, preventing automatic probes from sending another provider's credentials to OpenMayhem or vice versa.
-- Both onboarding surfaces share the same instructions. Public catalog queries do not send the API key. Model metadata is briefly cached and refreshed by Test connection.
-- Both model dropdowns require a positive `providers_available` count and exclude stale availability. Busy-only, offline, and unknown availability are not selectable. The public list refreshes every 30 seconds while mounted and when the window regains focus. If no providers are available, show an empty disabled dropdown instead of falling back to manual entry. Keep metadata for saved selections separately so temporary provider load does not discard the chosen model's contract. Availability can still change between selection and dispatch; the provider's response remains authoritative.
+- Both onboarding surfaces share the same instructions. Public catalog queries do not send the API key. Every catalog page is fetched using next_cursor; endpoint caches are separate. Metadata is briefly cached and can be refreshed manually.
+- All chat, image, and speech model dropdowns require a positive `providers_available` count and exclude stale availability. Busy-only, offline, and unknown availability are not selectable. The public list refreshes every 30 seconds while mounted and when the window regains focus. If no providers are available, show an empty disabled dropdown instead of falling back to manual entry. Keep metadata for saved selections separately so temporary provider load does not discard the chosen model's contract. Availability can still change between selection and dispatch; the provider's response remains authoritative.
 - Account credit is spent by visible replies and by relationship scoring, suggestions, and other background AI calls. The integration does not grant credits or assert that every account is eligible.
-- Images, speech, receipt-based cost displays, routing/trust controls, and an account-linking protocol are outside this initial chat PR.
+- Receipt-based cost displays, routing/trust controls, voice cloning, and an account-linking protocol remain outside this PR.
 
 ## Follow-up recommendation for OpenMayhem
 
@@ -67,3 +67,26 @@ A separate four-turn Sumire conversation was exercised through the actual browse
 - Suggested choices rendered, but one set included accepting a pastry gift that had never been offered. JSON mode solves output structure, not grounding in the conversation.
 
 The integration is usable for exploratory play. Before recommending a default roleplay model, compare conversation quality across models and improve ownership checks for remembered facts and transcript grounding for suggested actions. These observations do not establish whether the remaining quality issues originate in the model, prompt construction, or memory/choice processing. This UI session is additional to the four-call cost measurement above.
+
+
+## Images and speech
+
+The [media documentation](https://openmayhem.ai/docs/media) describes asynchronous jobs for both `/v1/images/generations` and `/v1/audio/speech`. These endpoints do not return the inline image/audio responses used by many other OpenAI-compatible services. The [routing documentation](https://openmayhem.ai/docs/routing) documents cursor pagination and live availability. Both were cross-checked against the local OpenMayhem API source and the production catalog.
+
+- Settings > Images and Settings > Voice each offer OpenMayhem and an independent live model selection. One dedicated OpenMayhem media key is shared by those two features; a button can explicitly copy the chat key. This lets images and speech work even when chat uses a different provider. The media key is never passed to another provider.
+- New compatible models appear automatically from all catalog pages. Models need a positive available-provider count and non-stale availability. Required inputs must be supported by RP Suite; reference-media-only and non-playable speech contracts are excluded. Catalog errors and all-offline states show no selectable models. A saved selection is retained but is not added back as an available option. Availability can change before dispatch; media requests recheck it immediately before submission.
+- Image generation uses the model's advertised steps/guidance defaults, one image per job, and dimensions fitted to the slot's aspect ratio and the model's size constraints. For Z-Image Turbo this avoids RP Suite's local default of 28 steps exceeding its 7-9 step contract. A fresh random seed is sent when no seed is specified. PNG/JPEG/WebP MIME types are preserved through avatar, sprite, background, and gallery paths.
+- Jobs are submitted once, polled, and downloaded by validated resource IDs. Generation has a five-minute overall deadline. Stop/unmount requests DELETE for an unfinished job, including when Stop arrives before submission returns its ID. Failed cancellation is reported honestly, and a lost submission response directs the user to check their dashboard before retrying. Work already performed may still be billed.
+- Speech uses the selected model's published voices and a browser-playable format. The same model/key serves the settings preview and Visual Novel manual/automatic voice. Character voice IDs are selected from that contract; a different provider override requires configuring that provider globally first so credentials cannot go to the wrong service. Unsupported voices and overlong text fail before a billed submission. Changing lines/settings or stopping aborts pending OpenMayhem speech and releases audio URLs.
+- Saved generated images are downloaded into RP Suite's existing local asset storage; they do not depend on expiring OpenMayhem artifact URLs. Audio is fetched for playback on demand, without a persistent speech cache.
+
+Production catalog inspection on September 9 found `tongyi/z-image-turbo` (image generation) and `resembleai/chatterbox` (speech), with Chatterbox exposing only the `default` voice. These IDs and voices are observations, not hardcoded options.
+
+Live browser verification used the supplied key to generate and display a 768x768 watercolor lighthouse through Settings > Images, and to synthesize/play the voice settings test phrase. Visual Novel read-aloud was exercised with the existing isolated Qwen test conversation. Automated coverage includes paginated model discovery, offline/stale/incompatible filtering, contract adaptation, voice validation, async polling/downloads, cancellation before the job ID arrives, failed cancellation, terminal/provider errors, incorrect artifacts, and credential isolation. Real insufficient-credit exhaustion and every possible future model remain untested.
+
+
+Final media validation: **2,027 tests across 109 files**, full TypeScript checks, and production build passed. A later live cancellation fix was rechecked with the 23 focused media/router tests. The browser tests also generated an 832x1216 lighthouse-keeper portrait, saved/reopened it from `/avatars/characters/.../avatar.png`, selected/saved the supported character voice override, and generated/saved one Neutral expression through the batch workflow. A separate media-test character was retained locally.
+
+During the final live catalog comparison, `qwen/qwen3.8-27b` changed to zero available providers and correctly disappeared from the chat dropdown. Images and speech retained their separate saved model choices across navigation/reloads.
+
+The browser Stop test exposed a production-specific rejection of a bodyless DELETE carrying JSON Content-Type. The relay now sends Content-Type only for POST bodies; regression tests cover this. A fresh live speech job returned 202/running, its cancellation request returned 200/running, and the browser Stop retest returned to idle without the earlier error. This confirms cancellation acceptance, not instantaneous provider termination or a refund. The earlier failed-cancellation job had already completed when inspected and cost $0.000181; this is not the total test spend.
