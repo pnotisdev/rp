@@ -54,3 +54,15 @@ Using a user-provided API key and `hauhaucs/qwen3.6-35b-a3b-uncensored`, live ca
 The final four-call verification passed together. Authenticated reads of the corresponding request records showed all four SETTLED, totaling **$0.000178** ($0.000023 reply, $0.000107 relationship check, $0.000004 director, $0.000044 choices). Earlier diagnostic calls are additional. The full automated suite passed **2,000 tests in 106 files**, alongside TypeScript checks and the production build.
 
 No real account was created, credit claimed, or payment submitted. Signup and verification completion, real insufficient-credit/key-budget exhaustion, and every advertised model remain untested. No key is included in source, test fixtures, or this document. Error cases are covered with mocked upstream responses. Live model availability and per-model behavior can change.
+
+## Interactive roleplay check
+
+A separate four-turn Sumire conversation was exercised through the actual browser UI with the same Qwen 3.6 model, starting with the Library regulars relationship preset. This covered both visual novel and transcript views, automatic relationship scoring, generated choices, a direct correction, and recall of details from earlier turns.
+
+- All four replies arrived without an API error. The UI reported approximately 1.7–2.0 seconds to first token and 2.4–2.9 tokens/second; these are the app's displayed metrics, not an independent throughput benchmark.
+- The character kept her reserved voice and ultimately recalled both the user's preference for mysteries with maps and the green train ticket used as a bookmark.
+- Bond warmth changed from 20 to 21. The relationship panel showed bounded stat changes and two explanatory events, including appreciation of the user's reading habits.
+- Quality was uneven: one reply missed a direct question and confused ownership of the bookmark. An explicit correction recovered the question, but the memory system still saved an incorrect fact attributing the user's ticket to Sumire.
+- Suggested choices rendered, but one set included accepting a pastry gift that had never been offered. JSON mode solves output structure, not grounding in the conversation.
+
+The integration is usable for exploratory play. Before recommending a default roleplay model, compare conversation quality across models and improve ownership checks for remembered facts and transcript grounding for suggested actions. These observations do not establish whether the remaining quality issues originate in the model, prompt construction, or memory/choice processing. This UI session is additional to the four-call cost measurement above.
