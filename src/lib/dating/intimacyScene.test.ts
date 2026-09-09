@@ -261,6 +261,8 @@ describe('parseIntimacyObservation', () => {
       stageCompleteSignalled: false,
       regionsTouched: ['lips'],
       clothingRemoved: [],
+      contact: [],
+      participantClothingRemoved: [],
     })
   })
 
@@ -279,6 +281,8 @@ describe('parseIntimacyObservation', () => {
       stageCompleteSignalled: false,
       regionsTouched: [],
       clothingRemoved: [],
+      contact: [],
+      participantClothingRemoved: [],
     })
   })
 

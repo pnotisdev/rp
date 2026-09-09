@@ -958,7 +958,45 @@ describe('assessRelationshipMoment — intimacy scene phase (item 1)', () => {
       stageCompleteSignalled: false,
       regionsTouched: ['neck', 'hips'],
       clothingRemoved: [],
+      contact: [],
+      participantClothingRemoved: [],
     })
+  })
+
+  it('asks for the contact graph only once more than one character is in the scene', async () => {
+    let solo = ''
+    await assessRelationshipMoment(
+      stubClient('{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[]}', (p) => { solo = p.prompt as string }),
+      { ...base, currentIntimacyPhase: 'building', sceneParticipants: [{ id: 'sumire', name: 'Sumire' }] },
+    )
+    // With one participant the two-party fields already say whose body they mean, so the extra
+    // fields would be cost with no information.
+    expect(solo).not.toContain('"contact"')
+
+    let shared = ''
+    await assessRelationshipMoment(
+      stubClient('{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[]}', (p) => { shared = p.prompt as string }),
+      {
+        ...base,
+        currentIntimacyPhase: 'building',
+        sceneParticipants: [{ id: 'sumire', name: 'Sumire' }, { id: 'aoi', name: 'Aoi' }],
+      },
+    )
+    expect(shared).toContain('"contact"')
+    expect(shared).toContain('"participantClothingRemoved"')
+    // Named by the ids the engine will filter against, plus the reserved player token.
+    expect(shared).toContain('"sumire" for Sumire')
+    expect(shared).toContain('"aoi" for Aoi')
+    expect(shared).toContain('"player" for')
+  })
+
+  it('reads a contact graph back off the judge, dropping anything not in the vocabulary', async () => {
+    const moment = await assessRelationshipMoment(
+      stubClient('{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[],"intimacyObservation":{"engagement":"engaged","contact":[{"actor":"player","target":"aoi","region":"hips"},{"actor":"player","target":"aoi","region":"elbow"}],"participantClothingRemoved":[{"who":"aoi","layer":"top"},{"who":"aoi","layer":"cape"}]}}'),
+      { ...base, currentIntimacyPhase: 'building' },
+    )
+    expect(moment.intimacyObservation?.contact).toEqual([{ actor: 'player', target: 'aoi', region: 'hips' }])
+    expect(moment.intimacyObservation?.participantClothingRemoved).toEqual([{ who: 'aoi', layer: 'top' }])
   })
 
   it('never offers the judge a phase or a "resolved" verdict to pick — only observations', async () => {
@@ -991,6 +1029,8 @@ describe('assessRelationshipMoment — intimacy scene phase (item 1)', () => {
       stageCompleteSignalled: false,
       regionsTouched: ['neck'],
       clothingRemoved: [],
+      contact: [],
+      participantClothingRemoved: [],
     })
   })
 

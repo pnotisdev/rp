@@ -12,6 +12,7 @@ import {
   commitmentLockReason,
   commitmentTierThreshold,
   computeWarmth,
+  findActiveIntimacyScene,
   formatCommitmentStatus,
   formatRelationshipStage,
   combinedSceneFlags,
@@ -36,6 +37,7 @@ import { AFTERGLOW_TURNS, afterglowTurnsSince } from '@/lib/dating/aftercare'
 import { describeInitiativeBalance, describeMomentum } from '@/lib/dating/momentum'
 import { isRebuffActive } from '@/lib/dating/rebuff'
 import { isIntimacySceneActive } from '@/lib/dating/intimacyScene'
+import { isSceneParticipant, sceneParticipants } from '@/lib/dating/sceneParticipants'
 import { WORLD_TEMPLATES, normalizeWorldTemplateId, type WorldTemplateId } from '@/lib/world/worldTemplates'
 import { daysUntilAnnualDate } from '@/lib/world/calendar'
 import type { CommitmentStatus } from '@/lib/types'
@@ -213,12 +215,17 @@ export function RelationshipPanel({
     }
   }
 
+  // The one shared scene, resolved chat-wide rather than off this character's own track: a scene is
+  // shared by everyone in it and stored on its owner's (`sceneParticipants.ts`), so a character who
+  // joined one would otherwise show no scene here and, worse, no way to answer its open branch.
+  const activeScene = findActiveIntimacyScene(chat, (sc) => isIntimacySceneActive(sc, charReplyCount))
+  const viewingScene =
+    activeScene && isSceneParticipant(activeScene.scene, viewingId, activeScene.ownerId) ? activeScene.scene : undefined
+
   // A branch the scene has reached and will not cross on its own — the player's to answer. Shown
   // whether or not the option carries a catalog entry: taking one that does routes through the same
   // clicked-action path as the Unlocks tab, and one that doesn't simply moves the stage.
-  const pendingChoice = isIntimacySceneActive(track.intimacyScene, charReplyCount)
-    ? track.intimacyScene!.pendingChoice
-    : undefined
+  const pendingChoice = viewingScene?.pendingChoice
 
   const handleChoice = async (edgeTo: string) => {
     if (pendingChoiceEdge) return
@@ -400,9 +407,15 @@ export function RelationshipPanel({
             {'. '}A passing read, separate from the bond above.
           </p>
         )}
-        {isIntimacySceneActive(track.intimacyScene, charReplyCount) && (
+        {viewingScene && (
           <p className="mt-2 border-t border-bg-elevated pt-2 text-xs italic text-romance">
-            Currently {track.intimacyScene!.phase === 'peak' ? 'at its peak' : 'building'}: {track.intimacyScene!.activityLabel}
+            Currently {viewingScene.phase === 'peak' ? 'at its peak' : 'building'}: {viewingScene.activityLabel}
+            {/* Who else is in it — otherwise a shared scene reads here exactly like a private one. */}
+            {sceneParticipants(viewingScene).length > 1 &&
+              `. With ${sceneParticipants(viewingScene)
+                .filter((id) => id !== viewingId)
+                .map((id) => trackedCharacters.find((c) => c.id === id)?.card.name ?? 'someone else')
+                .join(', ')}`}
           </p>
         )}
         {afterglowRemaining !== null && (

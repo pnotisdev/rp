@@ -118,7 +118,7 @@ export async function regenerateCardField(
 
   const prompt = [
     `You are rewriting one field of a character card for a roleplay app because the current version reads like generic AI writing.`,
-    `The rest of the character — stay consistent with all of it, do not change any of it:\n${context}`,
+    `The rest of the character. Stay consistent with all of it, and do not change any of it:\n${context}`,
     current
       ? `Current ${label}, which needs work:\n${current}`
       : `The ${label} field is empty. Write it from scratch, grounded in everything above.`,
@@ -129,7 +129,7 @@ export async function regenerateCardField(
       ? `The current version leans on these tells. Do not reuse any of them; find a different way to say it: ${namedSlop.join('; ')}.`
       : '',
     hint?.trim() ? `What the writer specifically wants changed: ${hint.trim()}` : '',
-    `Output only the replacement ${label} text — no label, no surrounding quotes, no commentary, no markdown headings.`,
+    `Output only the replacement ${label} text. No label, no surrounding quotes, no commentary, no markdown headings.`,
   ]
     .filter(Boolean)
     .join('\n\n')
@@ -159,10 +159,10 @@ export async function regenerateCardField(
 
 /** The card fields every draft path fills, and how each should read. Portrait mode prepends its own
  *  image-fidelity note; the JSON shape and formatting rules below are identical for both. */
-const CARD_FIELD_SPEC = `Output ONLY a single JSON object — no markdown fences, no commentary before or after — with exactly these keys:
+const CARD_FIELD_SPEC = `Output ONLY a single JSON object. No markdown fences, no commentary before or after — with exactly these keys:
 - "name": string.
 - "description": string. Appearance and background, in concrete detail rather than a general impression.
-- "personality": string. How they talk, move, and treat people — traits with edges, not a list of good qualities.
+- "personality": string. How they talk, move, and treat people: traits with edges, not a list of good qualities.
 - "scenario": string. The situation the chat opens in, written in the present tense.
 - "first_mes": string. The character's opening message, 2 to 4 short paragraphs. Wrap every physical action and line of narration in *single asterisks*, and every word spoken aloud in "double quotes". Put \\n\\n between paragraphs. End on something {{user}} can clearly respond to.
 - "mes_example": string, NOT an array. Two or three sample exchanges. Begin each one with <START> on its own line, then a "{{user}}:" line, then a "{{char}}:" line in the character's voice using the same *asterisks* / "quotes" convention. Separate every line with \\n.
@@ -298,7 +298,7 @@ export async function generateTraitOptions(
     '- occupation: a specific job with a concrete flavor, not just a bare title (e.g. "night-shift ER nurse", not "nurse")',
     '- quirk: one vivid, specific behavioral detail as a short clause, not a generic trait',
     '- relationshipStarter: how this character and the player already know each other, as a short clause',
-    'Make every option specific and varied — avoid bland defaults like "mysterious stranger" or "kind and caring" unless given a genuinely fresh angle.',
+    'Make every option specific and varied. Avoid bland defaults like "mysterious stranger" or "kind and caring" unless given a genuinely fresh angle.',
     `Output ONLY a minified JSON object shaped exactly {"archetype": [${count} strings], "occupation": [${count} strings], "quirk": [${count} strings], "relationshipStarter": [${count} strings]}. No markdown fences, no commentary.`,
     'JSON:',
   ]

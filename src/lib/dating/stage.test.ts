@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { IntimacyScene } from './intimacyScene'
 import {
   applyBreakupScar,
   canActuallyAskForCommitment,
@@ -9,6 +10,7 @@ import {
   commitmentTierThreshold,
   crossedMilestone,
   evaluateRelationshipRisk,
+  findActiveIntimacyScene,
   formatCommitmentStatus,
   getRelationshipTrack,
   isLiveScene,
@@ -567,5 +569,56 @@ describe('getRelationshipTrack / patchRelationshipTrack', () => {
     expect(patchRelationshipTrack(chat, 'rival', { mood: 'proud' })).toEqual({
       participantRelationships: { rival: { mood: 'proud', currentNeed: 'recognition', characterIntent: 'wants to be noticed' } },
     })
+  })
+})
+
+describe('findActiveIntimacyScene', () => {
+  const scene = (label: string): IntimacyScene => ({
+    phase: 'building',
+    activityLabel: label,
+    category: 'kissing_spot',
+    updatedAtTurn: 3,
+  })
+  const live = () => true
+
+  it('finds a scene on the primary without touching the participant map', () => {
+    const found = findActiveIntimacyScene(
+      { characterId: 'sumire', intimacyScene: scene('hers') } as never,
+      live,
+    )
+    expect(found).toEqual({ ownerId: 'sumire', scene: scene('hers') })
+  })
+
+  it("finds a scene owned by another participant — what lets them share one state machine", () => {
+    const found = findActiveIntimacyScene(
+      { characterId: 'sumire', participantRelationships: { aoi: { intimacyScene: scene('theirs') } } } as never,
+      live,
+    )
+    expect(found?.ownerId).toBe('aoi')
+    expect(found?.scene.activityLabel).toBe('theirs')
+  })
+
+  it('is undefined when nothing is running anywhere', () => {
+    expect(findActiveIntimacyScene({ characterId: 'sumire' } as never, live)).toBeUndefined()
+  })
+
+  it('skips a scene the caller judges stale rather than reviving it', () => {
+    const found = findActiveIntimacyScene(
+      { characterId: 'sumire', intimacyScene: scene('stale') } as never,
+      () => false,
+    )
+    expect(found).toBeUndefined()
+  })
+
+  it('prefers the primary when both hold one, so a chat has a single answer', () => {
+    const found = findActiveIntimacyScene(
+      {
+        characterId: 'sumire',
+        intimacyScene: scene('primary'),
+        participantRelationships: { aoi: { intimacyScene: scene('other') } },
+      } as never,
+      live,
+    )
+    expect(found?.ownerId).toBe('sumire')
   })
 })

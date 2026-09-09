@@ -60,7 +60,9 @@ describe('needGuidance', () => {
   })
 
   it('reads as steadier than mood, not an urgent crisis', () => {
-    expect(needGuidance('Sumire', 'belonging')).toContain('not a crisis')
+    const line = needGuidance('Sumire', 'belonging')
+    expect(line).toContain('Not a crisis')
+    expect(line).toContain('undercurrent')
   })
 })
 
@@ -90,7 +92,8 @@ describe('fearGuidance', () => {
     const line = fearGuidance('Sumire', 'being seen as too much')
     expect(line).toContain('Sumire')
     expect(line).toContain('being seen as too much')
-    expect(line).toMatch(/without.*naming it outright/)
+    // Shown through behaviour, never stated by the character themselves.
+    expect(line).toMatch(/never as Sumire explaining/)
   })
 
   it('never emits a {{char}}/{{user}} macro', () => {
@@ -199,7 +202,9 @@ describe('agencyGuardNote', () => {
 
   it("guards against writing the user's own actions/words/feelings", () => {
     const line = agencyGuardNote(true, 'Sumire', 'Kai').toLowerCase()
-    expect(line).toMatch(/only kai's own actions, words, and choices belong to kai/)
+    expect(line).toMatch(/kai's actions, words, thoughts, and choices are kai's alone/)
+    // The half-sentence aside is the case worth naming outright — it's the one that slips through.
+    expect(line).toContain('you shiver')
   })
 })
 

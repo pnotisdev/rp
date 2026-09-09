@@ -56,3 +56,64 @@ describe('sceneStateBlock', () => {
     expect(block).not.toContain('{{')
   })
 })
+
+describe('sceneStateBlock — a shared scene', () => {
+  const base = { charName: 'Sumire', userName: 'You', activity: 'kissing her neck', turnNow: 9 }
+
+  it('names who is actually in the room, so the per-person lines below mean something', () => {
+    const block = sceneStateBlock({
+      ...base,
+      participants: [{ id: 'aoi', name: 'Aoi' }],
+    })
+    expect(block).toContain('Present: Sumire, Aoi, You')
+  })
+
+  it("states every participant's own clothing, so no side is left to guess at", () => {
+    const block = sceneStateBlock({
+      ...base,
+      clothing: { char: ['top'] },
+      participants: [{ id: 'aoi', name: 'Aoi', clothing: { char: ['bottoms'] } }],
+    })
+    expect(block).toContain('Sumire: top off')
+    expect(block).toContain('Aoi: bottoms off')
+  })
+
+  it("states every participant's own band — asymmetry is a scene beat, not a rounding error", () => {
+    const block = sceneStateBlock({
+      ...base,
+      arousalBand: 'edge',
+      participants: [{ id: 'aoi', name: 'Aoi', arousalBand: 'warming' }],
+    })
+    expect(block).toContain('Sumire is close to the edge')
+    expect(block).toContain('Aoi is warming up')
+  })
+
+  it('renders the contact graph, naming whose body each contact is on', () => {
+    const block = sceneStateBlock({
+      ...base,
+      participants: [{ id: 'aoi', name: 'Aoi' }],
+      contact: [
+        { actor: 'player', target: 'aoi', region: 'hips', sinceTurn: 6 },
+        { actor: 'aoi', target: 'sumire', region: 'chest', sinceTurn: 9 },
+      ],
+    })
+    expect(block).toContain("In contact: You touching Aoi's hips (3 turns), Aoi touching Sumire's chest")
+  })
+
+  it('prefers the graph over the flat region list, which cannot say whose body it means', () => {
+    const block = sceneStateBlock({
+      ...base,
+      contactRegions: ['neck'],
+      contact: [{ actor: 'player', target: 'sumire', region: 'hips', sinceTurn: 9 }],
+    })
+    expect(block).toContain("You touching Sumire's hips")
+    expect(block).not.toContain('In contact: neck')
+  })
+
+  it('still renders the two-party form with no participants, unchanged', () => {
+    const block = sceneStateBlock({ ...base, clothing: { char: ['top'] }, contactRegions: ['neck'], arousalBand: 'warming' })
+    expect(block).not.toContain('Present:')
+    expect(block).toContain('In contact: neck')
+    expect(block).toContain('Sumire is warming up')
+  })
+})

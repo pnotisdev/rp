@@ -13,6 +13,18 @@ import type { KinkValence } from '@/lib/dating/kinks'
 import { applyClothingRemovals, parseClothingRemovals } from '@/lib/dating/clothing'
 import type { SceneResolveSnapshot } from '@/lib/dating/aftercare'
 import type { ClothingRemoval, ClothingState } from '@/lib/dating/clothing'
+import {
+  advanceContact,
+  contactRegionsFor,
+  isSceneOwner,
+  parseObservedContact,
+  participantArousal,
+  participantClothing,
+  sceneParticipants,
+  withParticipantArousal,
+  withParticipantClothing,
+} from '@/lib/dating/sceneParticipants'
+import type { ContactEdge, ObservedContact } from '@/lib/dating/sceneParticipants'
 import type { IntimacyCategory } from '@/lib/dating/intimacyCatalog'
 import {
   buildPendingChoice,
@@ -55,10 +67,18 @@ export interface IntimacyTurnObservation {
   hesitationSignalled: boolean
   /** Did the reply narrate the scene reaching its natural completion? A vote, weighed below — not a decision. */
   stageCompleteSignalled: boolean
-  /** Body regions the reply actually described contact with. */
+  /** Body regions the reply actually described contact with. The two-party shorthand: regions of the speaking character's own body. */
   regionsTouched: BodyRegion[]
   /** Clothing the reply actually described coming off, per side — the engine keeps the running total. */
   clothingRemoved: ClothingRemoval[]
+  /**
+   * Who touched whom, where, when more than two people are in the scene and `regionsTouched` can no
+   * longer say whose body it means. Only asked for in a multi-participant scene; empty everywhere
+   * else, where the two-party fields above carry the same information more cheaply.
+   */
+  contact?: ObservedContact[]
+  /** Clothing coming off, keyed by character id, for participants `clothingRemoved`'s `char`/`user` sides cannot name. */
+  participantClothingRemoved?: { who: string; layer: ClothingRemoval['layer'] }[]
 }
 
 /** Validates a raw judge object into an observation. `undefined` when nothing usable came back — the caller then holds the scene. */
@@ -81,7 +101,33 @@ export function parseIntimacyObservation(raw: unknown): IntimacyTurnObservation 
     stageCompleteSignalled: obj.stageCompleteSignalled === true,
     regionsTouched,
     clothingRemoved: parseClothingRemovals(obj.clothingRemoved),
+    contact: parseObservedContact(obj.contact),
+    participantClothingRemoved: parseParticipantClothingRemovals(obj.participantClothingRemoved),
   }
+}
+
+/**
+ * The per-character half of the clothing read. Same validation as `parseClothingRemovals`, except
+ * `who` is a character id rather than one of the two fixed sides, so it can only be checked for
+ * being a non-empty string here and is filtered against the actual roster at advance time.
+ */
+function parseParticipantClothingRemovals(raw: unknown): IntimacyTurnObservation['participantClothingRemoved'] {
+  if (!Array.isArray(raw)) return []
+  const seen = new Set<string>()
+  const removals: IntimacyTurnObservation['participantClothingRemoved'] = []
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue
+    const { who, layer } = entry as Record<string, unknown>
+    if (typeof who !== 'string' || !who.trim()) continue
+    // Reuse the layer vocabulary check rather than restating it — one parser owns what a layer is.
+    const [validated] = parseClothingRemovals([{ who: 'char', layer }])
+    if (!validated) continue
+    const key = `${who}:${validated.layer}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    removals.push({ who, layer: validated.layer })
+  }
+  return removals
 }
 
 /** Stored per relationship (`RelationshipTrack.intimacyScene`). `undefined`/`null` = no active scene. */
@@ -105,8 +151,14 @@ export interface IntimacyScene {
   arousal?: ArousalState
   /** `arousalWeight` of the catalog entry currently driving the scene — how much this activity can deliver per turn. */
   activityWeight?: number
-  /** This character's stance on the active entry's kinks (`kinks.ts`), frozen at the click — a per-character multiplier on every gain. */
+  /** The scene owner's stance on the active entry's kinks (`kinks.ts`), frozen at the click — a per-character multiplier on every gain. */
   activityValence?: KinkValence
+  /**
+   * The active entry's own kink ids. Stored because `activityValence` is one character's feelings
+   * about the content, and in a shared scene every other participant has their own — the caller
+   * scores these against each of their profiles rather than applying the owner's stance to everyone.
+   */
+  activityKinks?: string[]
   /** Turn this scene first started, surviving a mid-scene re-centering — the state block's "turn N of this scene". */
   startedAtTurn?: number
   /** The scenario this scene is running on (`scenarios.ts`). Absent on scenes persisted before scenarios existed — those fall back to the open scene. */
@@ -123,6 +175,21 @@ export interface IntimacyScene {
   clothing?: ClothingState
   /** Regions in contact as of the last turn — the state block's continuity anchor against hands silently relocating. */
   contactRegions?: BodyRegion[]
+  /**
+   * Every character in this scene, its owner first (`sceneParticipants.ts`). One scene is shared by
+   * all of them rather than each keeping their own, so they can never disagree about what is
+   * happening. Absent, or one entry, is the single-character scene: the owner's own arousal and
+   * clothing stay in the fields above and the maps below are untouched.
+   */
+  participants?: string[]
+  /** Every non-owner participant's own meter. Asymmetry is a feature here — one at the edge while another is warming is a scene beat. */
+  participantArousal?: Record<string, ArousalState>
+  /** Every non-owner participant's own clothing ledger. */
+  participantClothing?: Record<string, ClothingState>
+  /** Who is touching whom, where — the N-participant generalisation of `contactRegions`. */
+  contact?: ContactEdge[]
+  /** Scene-scoped flags a branch can set and a later condition can read, e.g. how a scene finished. */
+  sceneFlags?: string[]
 }
 
 /**
@@ -157,21 +224,48 @@ export function turnsInStage(scene: IntimacyScene, charReplyCount: number): numb
 export function sceneResolveSnapshot(scene: IntimacyScene, charReplyCount: number): SceneResolveSnapshot {
   return {
     turns: Math.max(0, charReplyCount - (scene.startedAtTurn ?? scene.updatedAtTurn)),
-    arousal: arousalOf(scene).value,
+    // The floor, not the owner's own: "did this scene actually get there" has to mean everyone in it.
+    arousal: sceneArousalFloorValue(scene),
     stages: new Set(scene.visitedStages ?? [scene.stageId ?? 'building']).size,
   }
 }
 
-/** The scene's meter, seeding a scene persisted before arousal existed from the phase it was already in. */
-export function arousalOf(scene: IntimacyScene): ArousalState {
+/**
+ * A meter from the scene, seeding a scene persisted before arousal existed from the phase it was
+ * already in. With no `charId` — or with the owner's — this is the scene's original single-character
+ * meter, unchanged. With another participant's it is their own slot in the map, since two people in
+ * one scene are not at the same place in it.
+ */
+export function arousalOf(scene: IntimacyScene, charId?: string): ArousalState {
+  if (charId && !isSceneOwner(scene, charId)) {
+    return participantArousal(scene, charId) ?? emptyArousalState(scene.startedAtTurn ?? scene.updatedAtTurn)
+  }
   if (scene.arousal) return scene.arousal
   const seeded = scene.phase === 'peak' ? BAND_FLOORS.edge : 0
   return { value: seeded, regionExposure: {}, bandSinceTurn: scene.phaseSinceTurn ?? scene.updatedAtTurn }
 }
 
-/** The band the scene is in right now — what `intimacySceneGuidance` and the phase read off. */
-export function sceneArousalBand(scene: IntimacyScene) {
-  return arousalBandFor(arousalOf(scene).value)
+/** A participant's clothing ledger — the owner's own lives in the scene's original field. */
+export function clothingOf(scene: IntimacyScene, charId?: string): ClothingState | undefined {
+  if (charId && !isSceneOwner(scene, charId)) return participantClothing(scene, charId)
+  return scene.clothing
+}
+
+/**
+ * The reading the engine gates on: the *least* aroused participant. Escalation is held to whoever in
+ * the scene is furthest from ready, so nobody is carried past their own pace by someone else's — the
+ * multi-participant form of the same principle that makes consent load-bearing for one. Identical to
+ * the single meter when there is only one participant, so nothing about a solo scene changes.
+ */
+export function sceneArousalFloorValue(scene: IntimacyScene): number {
+  const roster = sceneParticipants(scene)
+  if (roster.length < 2) return arousalOf(scene).value
+  return Math.min(...roster.map((id) => arousalOf(scene, id).value))
+}
+
+/** The band a participant is in right now — what the state block and the phase read off. Defaults to the scene owner's. */
+export function sceneArousalBand(scene: IntimacyScene, charId?: string) {
+  return arousalBandFor(arousalOf(scene, charId).value)
 }
 
 /** `peak` from the top two bands, `building` below. The only place a phase is ever decided. */
@@ -202,9 +296,16 @@ export function startOrShiftIntimacyScene(
   activityWeight?: number,
   graph: ScenarioGraph = DEFAULT_SCENARIO,
   activityValence?: KinkValence,
+  /** The active entry's kink ids, so every participant's own stance on it can be scored (`activityKinks`). */
+  activityKinks?: string[],
+  /** Everyone in the scene, its owner first (`sceneParticipants.ts`). Omitted or one entry is the single-character scene. */
+  participants?: string[],
 ): IntimacyScene {
   const categoryHistory = priorScene ? [...(priorScene.categoryHistory ?? [priorScene.category]), category] : [category]
   const prior = priorScene ? arousalOf(priorScene) : undefined
+  // A mid-scene click keeps whoever is already in the scene unless the caller names a new roster —
+  // adding a third person is a deliberate act, never a side effect of choosing a different activity.
+  const roster = participants?.length ? participants : priorScene?.participants
   return {
     phase: 'building',
     activityLabel,
@@ -214,6 +315,7 @@ export function startOrShiftIntimacyScene(
     categoryHistory,
     activityWeight,
     activityValence,
+    activityKinks,
     // A click mid-scene continues the same scene, so its start turn is kept rather than restarted.
     startedAtTurn: priorScene?.startedAtTurn ?? charReplyCount,
     // ...but it re-enters the graph at the top, the same renegotiation checkpoint the phase reset was.
@@ -223,12 +325,30 @@ export function startOrShiftIntimacyScene(
     visitedStages: [...(priorScene?.visitedStages ?? []), graph.entryStage],
     clothing: priorScene?.clothing,
     contactRegions: priorScene?.contactRegions,
+    ...(roster ? { participants: roster } : {}),
+    // The contact graph and everyone else's clothing carry across a re-centering for the same reason
+    // the owner's do: it is one scene, and the same bodies are still in the same room.
+    contact: priorScene?.contact,
+    participantClothing: priorScene?.participantClothing,
+    sceneFlags: priorScene?.sceneFlags,
     // A meter that reset to zero on every click would make a mid-scene choice read as amnesia, so it
     // carries — but capped back under the peak floor, since re-centering is the consent checkpoint
     // and the new activity has to earn its own way up again. Exposure carries whole: same bodies.
     arousal: prior
       ? { ...prior, value: Math.min(prior.value, BAND_FLOORS.edge - 1), bandSinceTurn: charReplyCount }
       : emptyArousalState(charReplyCount),
+    // Every other participant's meter is capped back the same way the owner's is — the consent
+    // checkpoint applies to all of them, not only to whoever's track happens to hold the scene.
+    ...(priorScene?.participantArousal
+      ? {
+          participantArousal: Object.fromEntries(
+            Object.entries(priorScene.participantArousal).map(([id, state]) => [
+              id,
+              { ...state, value: Math.min(state.value, BAND_FLOORS.edge - 1), bandSinceTurn: charReplyCount },
+            ]),
+          ),
+        }
+      : {}),
   }
 }
 
@@ -248,7 +368,11 @@ export function intimacyPaceFor(mood: CharacterMood | undefined, isHoldingBackBy
   return 'neutral'
 }
 
-/** Everything the engine knows about this character and scene going into a turn. */
+/**
+ * Everything the engine knows about this character and scene going into a turn. The top-level
+ * arousal fields are the scene owner's; `participants` carries the same per-turn inputs for everyone
+ * else, since sensitivity, pace, and how each of them feels about the content are all per-character.
+ */
 export interface IntimacySceneContext extends ArousalContext {
   /** The scenario the scene is running on. Defaults to the built-in open-scene graph. */
   graph?: ScenarioGraph
@@ -256,6 +380,8 @@ export interface IntimacySceneContext extends ArousalContext {
   relationship?: StageContext['relationship']
   ownedItemIds?: StageContext['ownedItemIds']
   kinks?: StageContext['kinks']
+  /** Per-participant arousal inputs, keyed by character id. Only read for non-owner participants. */
+  participants?: Record<string, ArousalContext>
 }
 
 function stageContextFor(scene: IntimacyScene, arousalValue: number, ctx: IntimacySceneContext): StageContext {
@@ -291,20 +417,11 @@ export function advanceIntimacyScene(
 
   const graph = ctx.graph ?? DEFAULT_SCENARIO
   const stage = stageOf(scene, graph)
-  const arousal = advanceArousal(
-    arousalOf(scene),
-    obs,
-    {
-      ...ctx,
-      activityWeight: ctx.activityWeight ?? scene.activityWeight,
-      kinkValence: ctx.kinkValence ?? scene.activityValence,
-      passiveGain: stage.passiveGain ?? ctx.passiveGain,
-    },
-    charReplyCount,
-  )
+  const contact = advanceContact(scene.contact, obs.contact ?? [], charReplyCount, sceneParticipants(scene))
+  const arousal = advanceMeters(scene, obs, ctx, stage, contact, charReplyCount)
 
-  const stageCtx = stageContextFor(scene, arousal.value, ctx)
-  const floorsMet = stageFloorsMet(stage, turnsInStage(scene, charReplyCount), arousal.value)
+  const stageCtx = stageContextFor(scene, arousal.floor, ctx)
+  const floorsMet = stageFloorsMet(stage, turnsInStage(scene, charReplyCount), arousal.floor)
 
   // A branch already raised holds everything until it's answered. The meter still moves — the scene
   // is still being played — but the stage does not, which is the whole point of gating a branch here
@@ -314,14 +431,18 @@ export function advanceIntimacyScene(
       scene.pendingChoice!.options.some((option) => option.edgeTo === edge.to),
     )
     if (stillOffered && !choiceDefaultDue(scene.pendingChoice, charReplyCount)) {
-      return { ...heldScene(scene, arousal, obs, charReplyCount), pendingChoice: scene.pendingChoice }
+      return { ...heldScene(scene, arousal, obs, contact, charReplyCount), pendingChoice: scene.pendingChoice }
     }
     // Either the branch stopped being answerable (state moved under it) or nobody answered in time.
     const fallback = stillOffered ? scene.pendingChoice.defaultEdgeTo : undefined
+    // A default that ends the scene is the ordinary case at a closing branch, and `resolve` is not a
+    // stage in the graph — without this it reads as a target that doesn't exist, the branch is merely
+    // cleared, and the same decision is re-raised a few turns later forever.
+    if (fallback === RESOLVE_STAGE) return null
     const taken = fallback ? stageById(graph, fallback) : undefined
     return taken
-      ? enterStage(heldScene(scene, arousal, obs, charReplyCount), stage, taken, charReplyCount)
-      : { ...heldScene(scene, arousal, obs, charReplyCount), pendingChoice: undefined }
+      ? enterStage(heldScene(scene, arousal, obs, contact, charReplyCount), stage, taken, charReplyCount)
+      : { ...heldScene(scene, arousal, obs, contact, charReplyCount), pendingChoice: undefined }
   }
   // Ending the scene needs both: floors clear, an edge the scenario actually has, and a reply the
   // judge saw finish. A resolve edge never fires on its own.
@@ -330,26 +451,134 @@ export function advanceIntimacyScene(
   // A real branch outranks any auto edge out of the same stage: the whole reason to gate one is that
   // the scene must not cross it on its own.
   const raised = floorsMet ? buildPendingChoice(stage, stageCtx, charReplyCount) : undefined
-  if (raised) return { ...heldScene(scene, arousal, obs, charReplyCount), pendingChoice: raised }
+  if (raised) return { ...heldScene(scene, arousal, obs, contact, charReplyCount), pendingChoice: raised }
 
   const edge = floorsMet ? nextAutoEdge(stage, stageCtx) : undefined
   const nextStage = edge ? (stageById(graph, edge.to) ?? stage) : stage
-  return enterStage(heldScene(scene, arousal, obs, charReplyCount), stage, nextStage, charReplyCount)
+  return enterStage(heldScene(scene, arousal, obs, contact, charReplyCount), stage, nextStage, charReplyCount)
+}
+
+/** Every participant's meter after a turn, plus the single reading the stage gates on. */
+interface SceneMeters {
+  /** The scene owner's own — the scene's original single-character field. */
+  owner: ArousalState
+  /** Every other participant's, keyed by character id. Absent for a single-participant scene. */
+  participants?: Record<string, ArousalState>
+  /** What `stageFloorsMet` and the stage conditions read: the least aroused participant (`sceneArousalFloorValue`). */
+  floor: number
+}
+
+/** One participant's own view of the turn: their body's regions, not the scene's as a whole. */
+function observationFor(obs: IntimacyTurnObservation, regions: BodyRegion[]): IntimacyTurnObservation {
+  return { ...obs, regionsTouched: regions }
+}
+
+/**
+ * Runs every participant's meter over the same turn. Each gets their own inputs — sensitivity, pace,
+ * how they feel about the content — and their own body's share of the contact graph, so the same turn
+ * is worth genuinely different amounts to each of them and the scene develops asymmetrically.
+ */
+function advanceMeters(
+  scene: IntimacyScene,
+  obs: IntimacyTurnObservation,
+  ctx: IntimacySceneContext,
+  stage: IntimacyStage,
+  contact: ContactEdge[],
+  charReplyCount: number,
+): SceneMeters {
+  const roster = sceneParticipants(scene)
+  const ownerId = roster[0]
+  // The owner's own body: the two-party read, plus anything the contact graph says targets them.
+  const ownerRegions = ownerId
+    ? [...new Set([...obs.regionsTouched, ...contactRegionsFor(contact, ownerId)])]
+    : obs.regionsTouched
+  const owner = advanceArousal(
+    arousalOf(scene),
+    observationFor(obs, ownerRegions),
+    {
+      ...ctx,
+      activityWeight: ctx.activityWeight ?? scene.activityWeight,
+      kinkValence: ctx.kinkValence ?? scene.activityValence,
+      passiveGain: stage.passiveGain ?? ctx.passiveGain,
+    },
+    charReplyCount,
+  )
+  if (roster.length < 2) return { owner, floor: owner.value }
+
+  const participants: Record<string, ArousalState> = {}
+  for (const id of roster.slice(1)) {
+    const own = ctx.participants?.[id] ?? {}
+    participants[id] = advanceArousal(
+      arousalOf(scene, id),
+      // Only what the graph says is happening to *them* — a participant nobody is touching this turn
+      // gains nothing from contact, which is what lets one of them lag behind on purpose.
+      observationFor(obs, contactRegionsFor(contact, id)),
+      {
+        ...own,
+        activityWeight: own.activityWeight ?? scene.activityWeight,
+        // Deliberately no fallback to `scene.activityValence`: that is the *owner's* stance on the
+        // content, and applying it to someone else would make one character's enthusiasm speed up a
+        // participant who does not share it. Unsupplied means neutral, not "feels the same".
+        passiveGain: stage.passiveGain ?? own.passiveGain,
+      },
+      charReplyCount,
+    )
+  }
+  return { owner, participants, floor: Math.min(owner.value, ...Object.values(participants).map((s) => s.value)) }
+}
+
+/** A turn's removals split by whose ledger they belong in — the owner's own field, or a participant map. */
+function nextClothing(
+  scene: IntimacyScene,
+  obs: IntimacyTurnObservation,
+): { own: ClothingState; participants: Record<string, ClothingState> | undefined } {
+  const roster = sceneParticipants(scene)
+  // The two-party channel is always the owner's and the player's.
+  let own = applyClothingRemovals(scene.clothing, obs.clothingRemoved)
+  if (roster.length < 2) return { own, participants: scene.participantClothing }
+  let participants = scene.participantClothing
+  for (const { who, layer } of obs.participantClothingRemoved ?? []) {
+    // A character who isn't in the scene has no ledger to write to at all.
+    if (!roster.includes(who)) continue
+    // The owner has exactly one place their layers live. A judge that named them by id rather than
+    // using the `char` side still gets the removal recorded — dropping it would lose real state and
+    // then let `continuityGuard.ts` wave through a reply undressing them a second time.
+    if (isSceneOwner(scene, who)) {
+      own = applyClothingRemovals(own, [{ who: 'char', layer }])
+      continue
+    }
+    participants = withParticipantClothing(
+      { participantClothing: participants },
+      who,
+      applyClothingRemovals(participantClothing({ participantClothing: participants }, who), [{ who: 'char', layer }]),
+    )
+  }
+  return { own, participants }
 }
 
 /** Everything a turn updates that has nothing to do with which stage the scene is on. */
 function heldScene(
   scene: IntimacyScene,
-  arousal: ArousalState,
+  arousal: SceneMeters,
   obs: IntimacyTurnObservation,
+  contact: ContactEdge[],
   charReplyCount: number,
 ): IntimacyScene {
+  const clothing = nextClothing(scene, obs)
   return {
     ...scene,
-    arousal,
-    clothing: applyClothingRemovals(scene.clothing, obs.clothingRemoved),
+    arousal: arousal.owner,
+    ...(arousal.participants
+      ? { participantArousal: Object.entries(arousal.participants).reduce<Record<string, ArousalState>>(
+          (acc, [id, state]) => withParticipantArousal({ participantArousal: acc }, id, state),
+          scene.participantArousal ?? {},
+        ) }
+      : {}),
+    clothing: clothing.own,
+    participantClothing: clothing.participants,
     // A turn that described no contact leaves the previous anchor standing rather than blanking it.
     contactRegions: obs.regionsTouched.length ? obs.regionsTouched : scene.contactRegions,
+    contact,
     updatedAtTurn: charReplyCount,
   }
 }

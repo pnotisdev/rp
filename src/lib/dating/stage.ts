@@ -11,6 +11,7 @@ import type {
   WorldCard,
 } from '@/lib/types'
 import type { GalleryEntry } from '@/lib/characters/cardSpec'
+import type { IntimacyScene } from '@/lib/dating/intimacyScene'
 
 // Relationship stage/warmth/commitment ladder logic, risk/breakup evaluation, and the
 // multi-character relationship-track resolution (`getRelationshipTrack`/`patchRelationshipTrack`).
@@ -260,6 +261,30 @@ export function patchRelationshipTrack(
       [characterId]: { ...chat.participantRelationships?.[characterId], ...patch },
     },
   }
+}
+
+/**
+ * The chat's one live intimate scene and whose track holds it, or `undefined` when none is running.
+ *
+ * A scene is shared by everyone in it (`sceneParticipants.ts`), but it is *stored* on the track of
+ * the character whose click started it, so any other participant's turn has to find it here rather
+ * than reading its own track and finding nothing. Without this, a second character in the scene would
+ * start a second state machine and the two would immediately disagree about what is happening — the
+ * exact failure promoting the scene to a shared entity exists to prevent.
+ *
+ * The primary is checked first, so a single-character chat resolves without touching the map at all.
+ */
+export function findActiveIntimacyScene(
+  chat: TrackHost,
+  isActive: (scene: IntimacyScene) => boolean,
+): { ownerId: string; scene: IntimacyScene } | undefined {
+  if (chat.intimacyScene && isActive(chat.intimacyScene)) {
+    return { ownerId: chat.characterId, scene: chat.intimacyScene }
+  }
+  for (const [ownerId, track] of Object.entries(chat.participantRelationships ?? {})) {
+    if (track.intimacyScene && isActive(track.intimacyScene)) return { ownerId, scene: track.intimacyScene }
+  }
+  return undefined
 }
 
 /** Derived overall-closeness score: affection plus trust/chemistry/comfort/respect, excluding curiosity and tension. Never stored. */

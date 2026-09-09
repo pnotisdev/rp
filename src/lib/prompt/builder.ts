@@ -201,7 +201,7 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
   // Frame example dialogue explicitly, so a weak model doesn't read it as something already said and echo it back.
   const exampleBlock =
     sections.examples && character.mes_example?.trim()
-      ? `Example lines showing ${macroCtx.charName}'s voice, style, and typical phrasing — a reference only, not something that already happened in this scene. Do not repeat or continue these lines; write a new reply instead.\n${sub(character.mes_example)}`
+      ? `Example lines showing ${macroCtx.charName}'s voice, style, and typical phrasing. A reference only, not something that already happened in this scene. Do not repeat or continue these lines; write a new reply instead.\n${sub(character.mes_example)}`
       : ''
 
   const worldBefore = before.map((e) => sub(e.content)).join('\n')

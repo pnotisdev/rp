@@ -158,9 +158,18 @@ export function nextAutoEdge(stage: IntimacyStage, ctx: StageContext): StageEdge
   return edgesOfMode(stage, 'auto', ctx).find((edge) => edge.to !== RESOLVE_STAGE)
 }
 
-/** The resolve edge, if this stage has one whose conditions currently hold. */
+/**
+ * The resolve edge an observed finish is allowed to take, if this stage has one whose conditions
+ * currently hold. Deliberately `auto`-only: a `choice`-mode resolve edge is a decision the player
+ * owns (how a scene ends, with consequences attached), so it is offered through `buildPendingChoice`
+ * and traversed only by an actual answer. Without the mode filter here, a judge reporting
+ * `stageCompleteSignalled` on a closing stage would end the scene before the branch was ever raised
+ * — the model drifting past a gate, which is the one thing gating it was for.
+ */
 export function resolveEdge(stage: IntimacyStage, ctx: StageContext): StageEdge | undefined {
-  return stage.edges.find((edge) => edge.to === RESOLVE_STAGE && stageConditionsMet(edge.conditions, ctx))
+  return stage.edges.find(
+    (edge) => edge.to === RESOLVE_STAGE && edge.mode === 'auto' && stageConditionsMet(edge.conditions, ctx),
+  )
 }
 
 /** Choice edges whose conditions hold — what the blocking-choice UI will offer. Nothing traverses these automatically. */
@@ -235,6 +244,12 @@ export function validateScenarioGraph(graph: ScenarioGraph): string[] {
 
   for (const stage of graph.stages) {
     if (!stage.edges.length) problems.push(`stage "${stage.id}" is a dead end — it has no exit edges`)
+    // One option is not a decision, so `buildPendingChoice` never raises a lone choice edge. A stage
+    // with no auto edge and exactly one choice edge therefore has no way out at all at runtime, which
+    // reads as a valid graph on paper and traps a live scene.
+    if (!stage.edges.some((edge) => edge.mode === 'auto') && stage.edges.filter((edge) => edge.mode === 'choice').length === 1) {
+      problems.push(`stage "${stage.id}" can never be left — a single choice edge is not a decision, so it is never offered`)
+    }
     for (const edge of stage.edges) {
       if (edge.to !== RESOLVE_STAGE && !ids.has(edge.to)) problems.push(`stage "${stage.id}" has an edge to unknown stage "${edge.to}"`)
       if (edge.mode === 'choice' && !edge.label?.trim()) problems.push(`a choice edge out of "${stage.id}" has no player-facing label`)

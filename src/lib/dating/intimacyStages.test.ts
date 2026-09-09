@@ -146,6 +146,19 @@ describe('edge selection', () => {
     expect(resolveEdge(gatedResolve, ctx({ arousal: 10 }))).toBeUndefined()
     expect(resolveEdge(gatedResolve, ctx({ arousal: 90 }))).toBeDefined()
   })
+
+  it('never treats a choice-mode resolve edge as one an observed finish can take on its own', () => {
+    // How a scene ends is the player's decision when the author marked it one, so this has to stay
+    // out of the automatic path and go through `buildPendingChoice` instead.
+    const chosenEnding = stage({
+      edges: [
+        { to: RESOLVE_STAGE, mode: 'choice', label: 'End it here' },
+        { to: RESOLVE_STAGE, mode: 'choice', label: 'End it differently' },
+      ],
+    })
+    expect(resolveEdge(chosenEnding, ctx({ arousal: 90 }))).toBeUndefined()
+    expect(eligibleChoiceEdges(chosenEnding, ctx({ arousal: 90 }))).toHaveLength(2)
+  })
 })
 
 describe('buildPendingChoice', () => {
@@ -250,6 +263,27 @@ describe('validateScenarioGraph', () => {
       stage({ id: 'b', edges: [] }),
     ])
     expect(validateScenarioGraph(graph).some((p) => p.includes('dead end'))).toBe(true)
+  })
+
+  it('rejects a stage whose only way out is a lone choice edge — never offered, so never taken', () => {
+    const graph = valid([
+      stage({ id: 'a', edges: [{ to: 'b', mode: 'auto' }, { to: RESOLVE_STAGE, mode: 'auto' }] }),
+      stage({ id: 'b', edges: [{ to: 'a', mode: 'choice', label: 'Back' }] }),
+    ])
+    expect(validateScenarioGraph(graph).some((p) => p.includes('can never be left'))).toBe(true)
+  })
+
+  it('accepts a stage whose choice edges are a real decision, or which also has an auto way out', () => {
+    const twoOptions = valid([
+      stage({ id: 'a', edges: [{ to: 'b', mode: 'auto' }, { to: RESOLVE_STAGE, mode: 'auto' }] }),
+      stage({ id: 'b', edges: [{ to: 'a', mode: 'choice', label: 'Back' }, { to: RESOLVE_STAGE, mode: 'choice', label: 'Stop' }] }),
+    ])
+    expect(validateScenarioGraph(twoOptions)).toEqual([])
+    const alsoAuto = valid([
+      stage({ id: 'a', edges: [{ to: 'b', mode: 'auto' }, { to: RESOLVE_STAGE, mode: 'auto' }] }),
+      stage({ id: 'b', edges: [{ to: 'a', mode: 'choice', label: 'Back' }, { to: RESOLVE_STAGE, mode: 'auto' }] }),
+    ])
+    expect(validateScenarioGraph(alsoAuto)).toEqual([])
   })
 
   it('rejects a stage nothing can reach', () => {
