@@ -51,7 +51,7 @@ environment variables and exposing it beyond localhost.
 
 KoboldCpp is the main target, with streaming, vision, abort handling and token counting written against its own API rather than a lowest common denominator. Any OpenAI-compatible endpoint also works: OpenRouter, Nano-GPT, LM Studio, llama.cpp, TabbyAPI, oobabooga. NovelAI is supported for both text and images, with its own tokenizer.
 
-Each backend reports its connection state in the header, and Settings has a Test connection button that hits a free metadata endpoint instead of burning a real generation on a paid provider.
+Each chat backend reports its connection state in the header. The chat connection test reads free metadata; image and voice tests perform real generation.
 
 ### OpenMayhem
 
@@ -60,6 +60,10 @@ Choose **OpenAI-compatible → OpenMayhem** in Settings → Connection, or selec
 OpenMayhem uses `https://api.openmayhem.ai/v1`. Requests pass through RP Suite's local server because the hosted API currently restricts browser origins. The server forwards your key without storing it. Replies and background scoring both use your credit. The free-credit amount and availability come from OpenMayhem, and eligibility/verification are handled there.
 
 The connection check reads the public catalog without spending credit; it does **not** validate your key or balance. Those are checked on your first inference request. See [OpenMayhem integration notes](OPENMAYHEM.md) for behavior, research, and validation limits.
+
+For images and speech, choose **OpenMayhem** in **Settings > Images** and **Settings > Voice**. Enter a media key with Images and Audio Speech permissions (or use the button to copy your OpenMayhem chat key), then choose each model. Voice options also come from the selected model. The image preview and voice test perform real, billed generation.
+
+All three model lists load every catalog page and refresh every 30 seconds and on window focus. Only compatible models with available, non-stale providers are selectable, so newly added live models appear automatically. Images use model sampling defaults and slot dimensions adapted to its limits. Stop requests media-job cancellation; completed work may still cost credit. Generated assets saved to a character or world remain stored locally.
 
 ### Characters
 

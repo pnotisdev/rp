@@ -7,7 +7,8 @@ export function isOpenMayhem(baseUrl: string): boolean {
   return baseUrl.trim().replace(/\/+$/, '') === OPENMAYHEM_BASE_URL
 }
 
-type Attribute = { enumValues?: unknown[]; minimum?: number; maximum?: number }
+export type Attribute = { enumValues?: unknown[]; minimum?: number; maximum?: number; default?: unknown; multipleOf?: number; maxLength?: number; minLength?: number }
+export type OpenMayhemEndpoint = 'CHAT' | 'IMAGES' | 'AUDIO_SPEECH'
 type Contract = { endpoint: string; required?: string[]; attributes: Record<string, Attribute> }
 export interface OpenMayhemModel {
   id: string
@@ -35,19 +36,69 @@ export function hasAvailableOpenMayhemProvider(model: OpenMayhemModel): boolean 
     && model.providers_available > 0
 }
 
-let catalog: { until: number; promise: Promise<OpenMayhemModel[]> } | undefined
-export function loadOpenMayhemModels(refresh = false): Promise<OpenMayhemModel[]> {
+const catalogs = new Map<OpenMayhemEndpoint, { until: number; promise: Promise<OpenMayhemModel[]> }>()
+export function loadOpenMayhemModels(refresh = false, endpoint: OpenMayhemEndpoint = 'CHAT'): Promise<OpenMayhemModel[]> {
+  const catalog = catalogs.get(endpoint)
   if (!refresh && catalog && catalog.until > Date.now()) return catalog.promise
-  const promise = fetch(`${OPENMAYHEM_PROXY}/models`, { signal: AbortSignal.timeout(10000) })
-    .then(async (res) => {
+  const promise = (async () => {
+    const models = new Map<string, OpenMayhemModel>()
+    const seen = new Set<string>()
+    let cursor: string | undefined
+    do {
+      const query = new URLSearchParams({ endpoint_family: endpoint })
+      if (cursor) query.set('cursor', cursor)
+      const res = await fetch(`${OPENMAYHEM_PROXY}/models?${query}`, { signal: AbortSignal.timeout(10000) })
       if (!res.ok) throw new Error('OpenMayhem model catalog is unavailable. Try again shortly.')
-      const body = await res.json() as { data?: OpenMayhemModel[] }
+      const body = await res.json() as { data?: OpenMayhemModel[]; next_cursor?: string | null }
       if (!Array.isArray(body.data)) throw new Error('OpenMayhem returned an invalid model catalog.')
-      return body.data.filter(isOpenMayhemChatModel)
-    })
-  catalog = { until: Date.now() + 60000, promise }
-  void promise.catch(() => { if (catalog?.promise === promise) catalog = undefined })
+      for (const model of body.data) if (isCompatibleOpenMayhemModel(model, endpoint)) models.set(model.id, model)
+      cursor = body.next_cursor || undefined
+      if (cursor && (typeof cursor !== 'string' || seen.has(cursor))) throw new Error('OpenMayhem returned an invalid catalog cursor.')
+      if (cursor) seen.add(cursor)
+    } while (cursor)
+    return [...models.values()]
+  })()
+  catalogs.set(endpoint, { until: Date.now() + 60000, promise })
+  void promise.catch(() => { if (catalogs.get(endpoint)?.promise === promise) catalogs.delete(endpoint) })
   return promise
+}
+
+export function isCompatibleOpenMayhemModel(model: OpenMayhemModel, endpoint: OpenMayhemEndpoint): boolean {
+  if (endpoint === 'CHAT') return isOpenMayhemChatModel(model)
+  const supplied = endpoint === 'IMAGES'
+    ? ['model', 'prompt', 'size', 'width', 'height', 'n', 'steps', 'cfg_scale', 'seed', 'negative_prompt']
+    : ['model', 'input', 'voice', 'response_format']
+  const contracts = model.request_contracts?.filter((c) => c.endpoint === endpoint)
+  const compatible = !!model.endpoints?.includes(endpoint) && !!contracts?.length && contracts.every((c) =>
+    !!c.attributes && (c.required ?? []).every((key) => supplied.includes(key)),
+  )
+  if (!compatible) return false
+  if (endpoint === 'AUDIO_SPEECH') {
+    const voices = openMayhemAttribute(model, endpoint, 'voice')?.enumValues
+    const formats = openMayhemAttribute(model, endpoint, 'response_format')?.enumValues
+    return (!voices || voices.length > 0) && (!formats || formats.some((f) => f === 'wav' || f === 'mp3'))
+  }
+  return true
+}
+
+/** Intersect runtime contracts: a request may route to any available implementation. */
+export function openMayhemAttribute(model: OpenMayhemModel, endpoint: OpenMayhemEndpoint, key: string): Attribute | undefined {
+  const attrs = model.request_contracts?.filter((c) => c.endpoint === endpoint).map((c) => c.attributes[key])
+  if (!attrs?.length || attrs.some((a) => !a)) return undefined
+  const enums = attrs.filter((a) => a.enumValues).map((a) => a.enumValues!)
+  const values = enums.length ? enums[0].filter((value) => enums.every((e) => e.includes(value))) : undefined
+  return {
+    enumValues: values,
+    default: attrs.every((a) => a.default === attrs[0].default) ? attrs[0].default : undefined,
+    minimum: Math.max(...attrs.map((a) => a.minimum ?? -Infinity)),
+    maximum: Math.min(...attrs.map((a) => a.maximum ?? Infinity)),
+    maxLength: Math.min(...attrs.map((a) => a.maxLength ?? Infinity)),
+    minLength: Math.max(...attrs.map((a) => a.minLength ?? 0)),
+    multipleOf: attrs.some((a) => a.multipleOf !== undefined) ? attrs.filter((a) => a.multipleOf !== undefined).map((a) => a.multipleOf!).reduce((multiple, next) => {
+      const gcd = (x: number, y: number): number => y ? gcd(y, x % y) : x
+      return multiple * next / gcd(multiple, next)
+    }) : undefined,
+  }
 }
 
 /** Keep short judge calls useful: disable thinking when the model explicitly supports it.

@@ -1,3 +1,9 @@
+import { useState } from 'react'
+import { useOpenMayhemModels } from '@/lib/hooks/useOpenMayhemModels'
+import { OpenMayhemModelSelect } from './OpenMayhemModelSelect'
+import { OpenMayhemMediaKey } from './OpenMayhemMediaKey'
+import { Button } from '@/components/ui/Button'
+import { GenerateImageButton } from '@/components/ui/GenerateImageButton'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import { IMAGE_BACKEND_LABELS, type ImageBackendId } from '@/lib/api/imageBackend'
 import { NOVELAI_IMAGE_MODELS } from '@/lib/api/novelaiImage'
@@ -13,15 +19,6 @@ const LOCAL_BACKEND_DEFAULTS: Record<'a1111' | 'comfyui' | 'swarmui', string> = 
   swarmui: 'http://127.0.0.1:7801',
 }
 
-/**
- * Section 11's "image/asset generation backends" — none of these four has been run against a real
- * server this session (no local install, and NovelAI needs the same paid subscription its text
- * backend does). Built to each project's own documented API, same honesty bar as every other
- * unverified backend in this app: sanity-check the first real generation before trusting it. This
- * settings page only configures a shared connection; where a generation actually happens (a
- * character portrait, a VN sprite, a background) is a separate, much smaller follow-up — see
- * ROADMAP.md section 11's own remaining "generate directly into a slot" item.
- */
 export function ImageGenSettings() {
   const imageBackend = useSettingsStore((s) => s.imageBackend)
   const imageBackendBaseUrl = useSettingsStore((s) => s.imageBackendBaseUrl)
@@ -30,13 +27,16 @@ export function ImageGenSettings() {
   const imageBackendModel = useSettingsStore((s) => s.imageBackendModel)
   const setImageBackendConfig = useSettingsStore((s) => s.setImageBackendConfig)
 
+  const { models, loading, reload } = useOpenMayhemModels('IMAGES', imageBackend === 'openmayhem')
+  const [preview, setPreview] = useState('')
+
   const isLocal = imageBackend === 'a1111' || imageBackend === 'comfyui' || imageBackend === 'swarmui'
 
   return (
     <SettingsPage>
       <Section
         title="Image generation"
-        description="Generates portraits, sprites, gallery CGs, and backgrounds. None of these four have been run against a real server yet (see ROADMAP.md section 11); each is built to that project's own documented API."
+        description="Generates portraits, sprites, gallery CGs, and backgrounds using the backend selected here."
         surface="bare"
       >
         <SelectField
@@ -47,7 +47,7 @@ export function ImageGenSettings() {
             const patch: Parameters<typeof setImageBackendConfig>[0] = { imageBackend: backend }
             // A fresh local-backend pick with no URL yet gets a sane default instead of a blank
             // field — the same convenience the chat-backend provider picker already gives.
-            if (backend !== 'novelai-image' && !imageBackendBaseUrl) {
+            if ((backend === 'a1111' || backend === 'comfyui' || backend === 'swarmui') && !imageBackendBaseUrl) {
               patch.imageBackendBaseUrl = LOCAL_BACKEND_DEFAULTS[backend]
             }
             setImageBackendConfig(patch)
@@ -59,6 +59,19 @@ export function ImageGenSettings() {
             </option>
           ))}
         </SelectField>
+
+        {imageBackend === 'openmayhem' && <>
+          <OpenMayhemMediaKey />
+          <OpenMayhemModelSelect kind="image" models={models?.map((m) => m.id) ?? null} loading={loading} value={imageBackendModel}
+            onChange={(model) => { setImageBackendConfig({ imageBackendModel: model }); setPreview('') }} />
+          <Button onClick={reload} disabled={loading}>Refresh models</Button>
+          <p className="my-3 text-xs text-text-muted">Uses the selected model's default steps and guidance. Image dimensions fit the slot and the model's limits. Each image is a billed job; stopping requests cancellation, but work already done may still be billed.</p>
+          <div className="relative flex items-center gap-2">
+            <span className="text-sm">Test image generation</span>
+            <GenerateImageButton label="Test image generation" width={768} height={768} initialPrompt="A small lighthouse on a quiet green island, watercolor illustration, no text" onGenerated={setPreview} />
+          </div>
+          {preview && <img src={preview} alt="OpenMayhem test generation" className="mt-3 max-h-72 rounded-xl" />}
+        </>}
 
         {isLocal && (
           <TextField
@@ -133,7 +146,7 @@ export function ImageGenSettings() {
         )}
 
         <p className="mt-2 text-xs text-text-muted">
-          {imageBackend === 'novelai-image'
+          {imageBackend === 'openmayhem' ? 'Images are downloaded into RP Suite, so saved assets remain available after OpenMayhem artifacts expire.' : imageBackend === 'novelai-image'
             ? 'Keys are stored only in this browser and sent directly to NovelAI. Never through any other server.'
             : 'Requests go straight from this browser to the server URL above. Never through any other server.'}
         </p>

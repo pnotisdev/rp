@@ -1,7 +1,9 @@
 // Multi-provider text-to-speech. Every provider returns a playable audio Blob from
 // plain text — a caller doesn't need to know which provider is behind it.
 
-export type TtsProviderId = 'koboldcpp' | 'openai-compatible' | 'elevenlabs' | 'azure' | 'alibaba'
+import { speakOpenMayhem } from '../api/openMayhemMedia'
+
+export type TtsProviderId = 'koboldcpp' | 'openai-compatible' | 'elevenlabs' | 'azure' | 'alibaba' | 'openmayhem'
 
 export interface TtsConfig {
   provider: TtsProviderId
@@ -11,9 +13,11 @@ export interface TtsConfig {
   /** Azure region, e.g. "eastus". */
   region?: string
   voice: string
+  model?: string
 }
 
 export const TTS_PROVIDER_LABELS: Record<TtsProviderId, string> = {
+  openmayhem: 'OpenMayhem (hosted)',
   koboldcpp: 'KoboldCpp (local)',
   'openai-compatible': 'OpenAI-compatible (incl. local Kokoro)',
   elevenlabs: 'ElevenLabs',
@@ -72,7 +76,7 @@ async function speakAzure(apiKey: string, region: string, voiceName: string, tex
  * koboldcpp exposes an OpenAI-compatible /v1/audio/speech endpoint, so the local
  * provider is just the same call pointed at that URL with no API key.
  */
-export async function synthesizeSpeech(config: TtsConfig, text: string, koboldBaseUrl: string): Promise<Blob> {
+export async function synthesizeSpeech(config: TtsConfig, text: string, koboldBaseUrl: string, signal?: AbortSignal): Promise<Blob> {
   const trimmed = text.trim()
   if (!trimmed) throw new Error('Nothing to speak')
   // A pasted key/id/region with a trailing space or newline is a common, silent cause of a 401 —
@@ -84,6 +88,8 @@ export async function synthesizeSpeech(config: TtsConfig, text: string, koboldBa
   const region = config.region?.trim()
 
   switch (config.provider) {
+    case 'openmayhem':
+      return speakOpenMayhem(apiKey || '', config.model || '', trimmed, voice, signal)
     case 'koboldcpp':
       return speakOpenAiCompatible(koboldBaseUrl, undefined, trimmed, voice)
     case 'openai-compatible':

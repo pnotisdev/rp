@@ -287,12 +287,17 @@ interface SettingsState {
   ttsBaseUrl: string
   ttsRegion: string
   ttsVoice: string
+  ttsModel: string
+  /** Shared only by OpenMayhem image generation and speech; never used for another provider. */
+  openMayhemApiKey: string
+  setOpenMayhemApiKey: (key: string) => void
   setVoiceConfig: (patch: Partial<{
     ttsProvider: TtsProviderId
     ttsApiKey: string
     ttsBaseUrl: string
     ttsRegion: string
     ttsVoice: string
+    ttsModel: string
   }>) => void
 
   /** Defaults to `'koboldcpp'`; the other three fields only matter for `'openai-compatible'`. */
@@ -496,7 +501,14 @@ export const useSettingsStore = create<SettingsState>()(
       ttsBaseUrl: '',
       ttsRegion: '',
       ttsVoice: '',
-      setVoiceConfig: (patch) => set(patch),
+      ttsModel: '',
+      openMayhemApiKey: '',
+      setOpenMayhemApiKey: (key) => set({ openMayhemApiKey: key }),
+      setVoiceConfig: (patch) => set((s) => {
+        const changesProvider = patch.ttsProvider !== undefined && patch.ttsProvider !== s.ttsProvider
+          || patch.ttsBaseUrl !== undefined && patch.ttsBaseUrl !== s.ttsBaseUrl
+        return changesProvider ? { ttsApiKey: '', ttsVoice: '', ttsModel: '', ...patch } : patch
+      }),
 
       chatBackend: 'koboldcpp',
       chatBackendBaseUrl: '',
@@ -517,7 +529,11 @@ export const useSettingsStore = create<SettingsState>()(
       imageBackendUsername: '',
       imageBackendPassword: '',
       imageBackendModel: '',
-      setImageBackendConfig: (patch) => set(patch),
+      setImageBackendConfig: (patch) => set((s) => {
+        const changesProvider = patch.imageBackend !== undefined && patch.imageBackend !== s.imageBackend
+          || patch.imageBackendBaseUrl !== undefined && patch.imageBackendBaseUrl !== s.imageBackendBaseUrl
+        return changesProvider ? { imageBackendUsername: '', imageBackendPassword: '', imageBackendModel: '', ...patch } : patch
+      }),
     }),
     {
       name: 'rp-settings',

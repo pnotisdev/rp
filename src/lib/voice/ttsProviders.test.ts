@@ -122,7 +122,7 @@ describe('synthesizeSpeech', () => {
 
   it('every provider has a label, including the unimplemented one', () => {
     expect(Object.keys(TTS_PROVIDER_LABELS).sort()).toEqual(
-      ['alibaba', 'azure', 'elevenlabs', 'koboldcpp', 'openai-compatible'].sort(),
+      ['alibaba', 'azure', 'elevenlabs', 'koboldcpp', 'openai-compatible', 'openmayhem'].sort(),
     )
   })
 

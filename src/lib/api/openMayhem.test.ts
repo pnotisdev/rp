@@ -43,7 +43,7 @@ describe('OpenMayhem integration', () => {
       { ...model, id: 'tool-only', request_contracts: [{ ...model.request_contracts![0], required: ['model', 'messages', 'tools'] }] },
     ] })))
     expect(await listOpenAiModels(OPENMAYHEM_BASE_URL, 'private-key')).toEqual(['example/chat'])
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/openmayhem/models')
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/openmayhem/models?endpoint_family=CHAT')
     expect(fetchMock.mock.calls[0][1].headers).toBeUndefined()
     expect(await fetchOpenAiModelContext(OPENMAYHEM_BASE_URL, model.id)).toBe(32768)
   })
