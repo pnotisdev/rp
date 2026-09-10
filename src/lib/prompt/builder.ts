@@ -68,8 +68,22 @@ export interface PromptBuildInput {
   history: ChatMessage[]
   /** Running long-term memory log for everything older than what's in `history`. */
   chatSummary?: string
-  /** The world the character lives in, if any. Always included, not keyword-triggered like a lorebook. */
+  /** The world the character lives in, if any. Always included, not keyword-triggered like a lorebook.
+   *  Stable identity only — the setting and its rules. Anything that changes as the story moves
+   *  belongs in `worldMoment` instead; see the note there for why the split matters. */
   worldDescription?: string
+  /**
+   * The volatile half of the world block: what time it is, the weather, what the character is doing
+   * right now, the active event, the scene's location and atmosphere.
+   *
+   * Kept out of the fixed region and injected after the history for two reasons. The practical one
+   * is KV cache reuse: a backend reuses the cache for the longest common *prefix*, so a line as
+   * changeable as "it is now raining" sitting ahead of the history means advancing the clock or
+   * moving the scene re-ingests every history token behind it. The second is that recency helps —
+   * where and when a scene is set steers the next reply harder next to the generation cue than it
+   * does several thousand tokens earlier. Shares the `world` section toggle with `worldDescription`.
+   */
+  worldMoment?: string
   lorebooks: Lorebook[]
   template: InstructTemplate
   /** Tokens available for the ENTIRE prompt (max_context_length - max_length, minus caller's safety margin). */
@@ -193,6 +207,7 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
 
   const summaryBlock = input.chatSummary?.trim() ? `Story so far: ${sub(input.chatSummary)}` : ''
   const worldBlock = input.worldDescription?.trim() ? sub(input.worldDescription) : ''
+  const worldMomentBlock = sections.world && input.worldMoment?.trim() ? sub(input.worldMoment) : ''
 
   const personaBlock = input.personaDescription?.trim()
     ? `About ${macroCtx.userName}: ${sub(input.personaDescription)}`
@@ -245,6 +260,8 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
   // suppresses the character-reply steers, since the card's post-history note and scene tag assume {{char}} is speaking.
   const imp = !!input.impersonateAsUser
   const postHistoryBlock = [
+    // Scene framing first: where and when, before anything about how to behave.
+    worldMomentBlock,
     imp || !character.post_history_instructions?.trim() ? '' : sub(character.post_history_instructions),
     imp || !input.globalPostHistory?.trim() ? '' : sub(input.globalPostHistory),
     buildObjectiveBlock(input.activeObjective, sub),
@@ -276,17 +293,25 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
   const includedTurns: { text: string; tokens: number }[] = []
   let excludedCount = 0
 
-  // Walk newest -> oldest, keep what fits; always keep at least the latest turn.
+  // Walk newest -> oldest, keeping turns until one doesn't fit; always keep at least the latest.
+  //
+  // Stopping at the first turn that doesn't fit — rather than skipping it and carrying on down the
+  // history looking for smaller ones that still would — is what makes the kept window *contiguous*.
+  // The old "keep whatever fits" walk left holes: one long turn gets dropped for being over budget
+  // while the shorter turns either side of it survive, so the model is handed a transcript with a
+  // beat silently missing from the middle and no indication anything was removed. It also meant a
+  // full-length history walk every build, one tokenizer round-trip per turn (an HTTP POST on
+  // KoboldCpp), to count hundreds of turns that were never going to be included.
   for (let i = historyForTrimming.length - 1; i >= 0; i--) {
     const msg = historyForTrimming[i]
     const rendered = renderTurn(msg, template, macroCtx, input.regexScripts)
     const tokens = await countTokens(rendered)
-    if (tokens <= remaining || includedTurns.length === 0) {
-      includedTurns.push({ text: rendered, tokens })
-      remaining -= tokens
-    } else {
-      excludedCount++
+    if (tokens > remaining && includedTurns.length > 0) {
+      excludedCount += i + 1
+      break
     }
+    includedTurns.push({ text: rendered, tokens })
+    remaining -= tokens
   }
   includedTurns.reverse()
 
@@ -315,6 +340,7 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
       { id: 'system', label: 'System prompt', text: sections.system ? systemBlock : '' },
       { id: 'summary', label: 'Long-term memory summary', text: sections.summary ? summaryBlock : '' },
       { id: 'world', label: 'World / setting description', text: sections.world ? worldBlock : '' },
+      { id: 'worldMoment', label: 'World right now (time, weather, scene)', text: worldMomentBlock },
       { id: 'worldInfo', label: 'World info (activated lore)', text: worldInfoBlock },
       { id: 'description', label: 'Character description', text: sections.description ? descriptionBlock : '' },
       { id: 'participants', label: 'Other participants roster', text: sections.participants ? participantsBlock : '' },

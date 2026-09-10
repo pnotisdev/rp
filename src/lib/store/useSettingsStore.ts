@@ -161,6 +161,11 @@ interface SettingsState {
    *  VN mode only; the ordinary chat layout's choices/quick-replies are unaffected either way. */
   vnChoiceStyle: 'docked' | 'centered'
   setVnChoiceStyle: (v: 'docked' | 'centered') => void
+  /** Where the player writes in VN mode. `'inline'` hands the dialogue box itself over — same
+   *  frame, same height, nameplate and accent rail switched to the persona — so the scene isn't
+   *  paying for a permanently docked composer bar. `'docked'` keeps that bar under the box. */
+  vnInputMode: 'inline' | 'docked'
+  setVnInputMode: (v: 'inline' | 'docked') => void
   /** With a vision-capable model loaded, runs a post-reply pass to correct the model's `<<scene:>>` tag. Off by default. */
   visionSceneDetection: boolean
   setChatStyle: (s: ChatStyle) => void
@@ -401,8 +406,10 @@ export const useSettingsStore = create<SettingsState>()(
       clickToEdit: true,
       visualNovelMode: false,
       setVisualNovelMode: (v) => set({ visualNovelMode: v }),
-      vnChoiceStyle: 'docked',
+      vnChoiceStyle: 'centered',
       setVnChoiceStyle: (v) => set({ vnChoiceStyle: v }),
+      vnInputMode: 'inline',
+      setVnInputMode: (v) => set({ vnInputMode: v }),
       visionSceneDetection: false,
       setChatStyle: (s) => set({ chatStyle: s }),
       setAvatarShape: (s) => set({ avatarShape: s }),

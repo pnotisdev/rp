@@ -43,10 +43,12 @@ import {
 import { ChatToolbar, type ChatToolbarAction } from './ChatToolbar'
 import { MessageLog } from './MessageLog'
 import { VNStage } from './VNStage'
+import { useVnChromeStore } from '@/lib/store/useVnChromeStore'
 import { ChoiceList } from './ChoiceList'
 import { QuickReplyBar } from './QuickReplyBar'
 import { IntentChips } from './IntentChips'
 import { LiveRapport } from './LiveRapport'
+import { StageMeter } from '@/components/ui/Stage'
 import type { MessageIntent } from '@/lib/dating/intent'
 import { GenerationHud } from './GenerationHud'
 import { Composer } from './Composer'
@@ -152,6 +154,7 @@ export function ChatWindow({
   } = useChatSession(chatId)
 
   const globalVisualNovelMode = useSettingsStore((s) => s.visualNovelMode)
+  const vnInputMode = useSettingsStore((s) => s.vnInputMode)
   const autoTrackRelationship = useSettingsStore((s) => s.autoTrackRelationship)
   const quickReplies = useSettingsStore((s) => s.quickReplies)
   const showGenerationHud = useSettingsStore((s) => s.showGenerationHud)
@@ -291,6 +294,20 @@ export function ChatWindow({
     }
   }
 
+  // Chat-level override wins over the global Settings → Appearance default. Either can be `'auto'`
+  // — resolved to a real boolean via `isVnReady` (character has sprites, world has scene art) so
+  // 'auto' never shows a blank void, and everything past this point reads the resolved boolean.
+  // Computed here, above the early return below, because the effect that publishes it is a hook.
+  const vnModeSetting = chat?.assistOverrides?.visualNovelMode ?? globalVisualNovelMode
+  const resolvedVisualNovelMode = !!chat && (vnModeSetting === 'auto' ? isVnReady(character, world) : vnModeSetting)
+  // Panels opened over the stage wear its glass rather than the app's own surface — see
+  // `useVnChromeStore`. Cleared on unmount so leaving the chat can't strand a dialog in VN dress.
+  const setVnChrome = useVnChromeStore((s) => s.setActive)
+  useEffect(() => {
+    setVnChrome(resolvedVisualNovelMode)
+    return () => setVnChrome(false)
+  }, [resolvedVisualNovelMode, setVnChrome])
+
   if (!chatId || !chat) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3">
@@ -301,11 +318,6 @@ export function ChatWindow({
     )
   }
 
-  // Chat-level override wins over the global Settings → Appearance default. Either can be `'auto'`
-  // — resolved to a real boolean via `isVnReady` (character has sprites, world has scene art) so
-  // 'auto' never shows a blank void, and everything past this point reads the resolved boolean.
-  const visualNovelMode = chat.assistOverrides?.visualNovelMode ?? globalVisualNovelMode
-  const resolvedVisualNovelMode = visualNovelMode === 'auto' ? isVnReady(character, world) : visualNovelMode
   // In-chat VN toggle: writes an explicit per-chat override (never 'auto' — that's only reachable
   // from Settings/RelationshipPanel), clearing back to "inherit" when the new value would just
   // match the global default. Same precedence contract as RelationshipPanel's own override selects.
@@ -592,9 +604,12 @@ export function ChatWindow({
           ? 'AI director picks who replies'
           : 'Type @Name to address them'
 
+  // `fillHeight` only in VN's inline input mode, where the composer *is* the dialogue box's body
+  // and has to hold its fixed height rather than hug its content.
   const composerNode = (variant: 'default' | 'vn') => (
     <Composer
       variant={variant}
+      fillHeight={variant === 'vn' && vnInputMode === 'inline'}
       value={draft}
       onChangeValue={(v) => {
         setDraft(v)
@@ -670,48 +685,51 @@ export function ChatWindow({
             {character?.avatarDataUrl && (
               <img src={character.avatarDataUrl} className="h-10 w-10 shrink-0 rounded-xl object-cover" />
             )}
+            {/* Three tiers, deliberately unequal: who you're talking to, then the one stat that
+                moves while you play, then the standing context. The third is the first to
+                truncate — and the first to disappear entirely on a phone. */}
             <div className="min-w-0">
-              <div className="flex items-center gap-2 text-base font-display text-text">
+              <div className="flex min-w-0 items-center gap-2 text-base font-display text-text">
                 <span className="truncate">{character?.card.name ?? '…'}</span>
-                {parentChatLink && <span className="text-xs font-normal text-text-muted">{parentChatLink}</span>}
+                {parentChatLink && <span className="shrink-0 text-xs font-normal text-text-muted">{parentChatLink}</span>}
               </div>
-              <div className="flex items-center gap-2 text-xs text-text-muted">
-                <span>as {persona?.name ?? 'You'}</span>
-                {chat.mode && (
-                  <span className="flex items-center gap-2 truncate">
-                    <span className="text-border">·</span>
-                    {getWorldTemplate(chat.mode).label}
-                  </span>
-                )}
-                {presence && (
-                  <span
-                    className="flex items-center gap-1.5 truncate"
-                    title={presence.activity ? `${presence.activity}${presence.location ? ` @ ${presence.location}` : ''}` : undefined}
-                  >
-                    <span className="text-border">·</span>
-                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${presence.status === 'available' ? 'bg-accent' : 'bg-text-muted'}`} />
-                    <span className="truncate capitalize">
-                      {presenceLabel(presence.status)}
-                      {presence.activity && `. ${presence.activity}`}
-                    </span>
-                  </span>
-                )}
-              </div>
-              <div className="mt-1 flex min-w-0 items-center gap-2 text-[11px] uppercase tracking-wide text-text-muted">
+              <div className="flex min-w-0 items-center gap-2 text-xs text-text-muted">
                 {liveDateActive && chat.rapport ? (
                   // Warmth is frozen during a live scene, so show the qualitative rapport read instead.
                   <LiveRapport read={chat.rapport} label={chat?.activeEvent?.kind === 'hangout' ? 'Live hangout' : 'Live date'} />
                 ) : (
                   <>
-                    <div className="h-1.5 w-24 shrink-0 overflow-hidden rounded-full bg-bg-sunken">
-                      <div
-                        className="h-full rounded-full bg-romance transition-[width] duration-500"
-                        style={{ width: `${warmth}%` }}
-                      />
-                    </div>
+                    <StageMeter value={warmth} className="w-16 shrink-0" />
                     {/* Stage label truncates first on a narrow header; the warmth number never does. */}
-                    <span className="truncate">{formatRelationshipStage(relationshipStage)}</span>
+                    <span className="truncate first-letter:uppercase">{formatRelationshipStage(relationshipStage)}</span>
                     <span className="shrink-0 tabular-nums text-text">{warmth}</span>
+                  </>
+                )}
+              </div>
+              <div className="hidden min-w-0 items-center gap-1.5 text-[11px] text-text-muted/80 sm:flex">
+                <span className="shrink-0">as {persona?.name ?? 'You'}</span>
+                {chat.mode && (
+                  <>
+                    <span className="shrink-0 text-border">·</span>
+                    <span className="shrink-0">{getWorldTemplate(chat.mode).label}</span>
+                  </>
+                )}
+                {presence && (
+                  <>
+                    <span className="shrink-0 text-border">·</span>
+                    <span
+                      className="flex min-w-0 items-center gap-1.5"
+                      title={presence.activity ? `${presence.activity}${presence.location ? ` @ ${presence.location}` : ''}` : undefined}
+                    >
+                      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${presence.status === 'available' ? 'bg-accent' : 'bg-text-muted'}`} />
+                      {/* `first-letter:uppercase`, not `capitalize`: the activity is a whole clause
+                          ("at her table on the library's second floor"), and CSS `capitalize` was
+                          Title Casing every word of it — including the "S" after an apostrophe. */}
+                      <span className="truncate first-letter:uppercase">
+                        {presenceLabel(presence.status)}
+                        {presence.activity && `. ${presence.activity}`}
+                      </span>
+                    </span>
                   </>
                 )}
               </div>
@@ -930,6 +948,7 @@ export function ChatWindow({
             </>
           }
           composerSlot={composerNode('vn')}
+          composerHasDraft={!!draft.trim()}
           autoAdvance={autoAdvance}
           onToggleAutoAdvance={() => setAutoAdvance((v) => !v)}
           onAutoAdvanceFire={handleAutoAdvanceFire}

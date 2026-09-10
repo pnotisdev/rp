@@ -3,13 +3,13 @@ import type { QuickReply } from '@/lib/types'
 interface QuickReplyBarProps {
   replies: QuickReply[]
   onPick: (reply: QuickReply) => void
-  /** 'vn' drops the chip's own surface/border so it reads as part of the glass dialogue box it's nested in, matching ChoiceList's own variant. */
+  /** 'vn' wears the stage's glass, matching ChoiceList's own variant — these float on the scene art now, not inside the dialogue box, so a bare 10%-white fill left them unreadable over a bright background. */
   variant?: 'default' | 'vn'
 }
 
 const CHIP_CLASSES = {
   default: 'bg-bg-elevated text-text-muted hover:bg-accent/10 hover:text-accent',
-  vn: 'bg-white/10 text-white/80 hover:bg-white/20 hover:text-white',
+  vn: 'vn-glass text-white/80 hover:bg-white/20 hover:text-white',
 }
 
 /**

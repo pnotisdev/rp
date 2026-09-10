@@ -1,6 +1,7 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import { Button } from '@/components/ui/Button'
 import { useFocusTrap } from '@/lib/hooks/useFocusTrap'
+import { useVnChromeClass } from '@/lib/store/useVnChromeStore'
 
 type ModalSize = 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl'
 
@@ -59,6 +60,12 @@ export function Modal({
   const panelRef = useRef<HTMLDivElement>(null)
   useFocusTrap(panelRef, true)
 
+  // Over a VN stage, a panel wears the stage's glass instead of the app's own surface — otherwise
+  // the light theme drops a white slab on top of a night scene. See `.vn-chrome` in globals.css:
+  // it re-points the theme tokens within this subtree, so the panel's whole contents follow
+  // without any of the dozen panels built on this shell knowing about it.
+  const vnChrome = useVnChromeClass()
+
   return (
     <div
       className="animate-overlay-in fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3 backdrop-blur-sm sm:p-4"
@@ -71,7 +78,7 @@ export function Modal({
         aria-label={title}
         tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
-        className={`animate-panel-in flex w-full flex-col rounded-2xl border border-border bg-bg-elevated p-5 themed-shadow sm:p-7 ${SIZE_CLASSES[size]} ${scrollable ? 'max-h-[90vh] sm:max-h-[85vh]' : ''}`}
+        className={`animate-panel-in flex w-full flex-col rounded-2xl border border-border bg-bg-elevated p-5 themed-shadow sm:p-7 ${vnChrome} ${SIZE_CLASSES[size]} ${scrollable ? 'max-h-[90vh] sm:max-h-[85vh]' : ''}`}
       >
         <div className={`flex shrink-0 items-center justify-between gap-4 ${description ? 'mb-2' : 'mb-4'}`}>
           <h2 className="text-sm font-semibold text-text">{title}</h2>

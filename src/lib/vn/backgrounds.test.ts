@@ -54,4 +54,20 @@ describe('matchBackgroundKeyword', () => {
   it('is case-insensitive', () => {
     expect(matchBackgroundKeyword('THE BEACH IS EMPTY AT THIS HOUR.', candidates)).toBe('beach')
   })
+
+  it('matches an alias the prose would actually use instead of the formal label', () => {
+    expect(matchBackgroundKeyword('Rows of bookshelves, and her somewhere behind them.', candidates)).toBe('library')
+    expect(matchBackgroundKeyword('You find her by the lockers.', candidates)).toBe('school-hallway')
+    expect(matchBackgroundKeyword('The konbini is bright enough to hurt at this hour.', candidates)).toBe('convenience-store')
+  })
+
+  // Whole-phrase matching, not bare containment: before this, "cafeteria" also scored a `cafe` hit
+  // (it only lost on length) and "parking lot" scored a `park`.
+  it('does not fire a short id inside a longer unrelated word', () => {
+    expect(matchBackgroundKeyword('He waits in the parking lot.', candidates)).toBeUndefined()
+  })
+
+  it('still resolves cafeteria to itself rather than to the café it contains', () => {
+    expect(matchBackgroundKeyword('The cafeteria empties out fast.', candidates)).toBe('cafeteria')
+  })
 })

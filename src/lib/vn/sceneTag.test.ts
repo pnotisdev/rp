@@ -141,3 +141,50 @@ describe('scene tag — outfits', () => {
     expect(out).toContain('currently wearing "swimsuit"')
   })
 })
+
+describe('buildSceneInstruction — asks only for the fields something will render', () => {
+  const MOODS = ['calm', 'tense', 'warm']
+
+  it('a mood-only request names mood alone in the format line', () => {
+    // Outside Visual Novel mode with no live scene, mood is the only field still read (it picks
+    // the background music), so the ~245-token expression/background/outfit instruction is skipped.
+    const out = buildSceneInstruction({ expressionIds: [], backgroundIds: [], moodIds: MOODS })
+    expect(out).toContain('<<scene:mood=ID>>')
+    expect(out).not.toContain('expression=ID')
+    expect(out).not.toContain('background=ID')
+    expect(out).not.toContain('Valid expression IDs')
+    expect(out).toContain('Valid mood IDs: calm, tense, warm')
+  })
+
+  it('a mood-only request is far cheaper than the full one', () => {
+    const full = buildSceneInstruction({
+      expressionIds: ['neutral', 'happy', 'sad', 'blush', 'angry'],
+      backgroundIds: ['cafe', 'library', 'park'],
+      moodIds: MOODS,
+      outfitIds: ['base', 'swimsuit'],
+      currentOutfitId: 'base',
+    })
+    const moodOnly = buildSceneInstruction({ expressionIds: [], backgroundIds: [], moodIds: MOODS })
+    expect(moodOnly.length).toBeLessThan(full.length / 2)
+  })
+
+  it('still returns nothing at all when there is no field worth asking for', () => {
+    expect(buildSceneInstruction({ expressionIds: [], backgroundIds: [] })).toBe('')
+    expect(buildSceneInstruction({ expressionIds: [], backgroundIds: [], moodIds: [] })).toBe('')
+    expect(buildSceneInstruction()).toBe('')
+  })
+
+  it('the full request is unchanged — every field still named and listed', () => {
+    const out = buildSceneInstruction({
+      expressionIds: ['neutral', 'happy'],
+      backgroundIds: ['cafe'],
+      moodIds: MOODS,
+      outfitIds: ['base', 'swimsuit'],
+      currentOutfitId: 'base',
+    })
+    expect(out).toContain('<<scene:expression=ID,background=ID,mood=ID,outfit=ID>>')
+    expect(out).toContain('Valid expression IDs: neutral, happy')
+    expect(out).toContain('Valid background IDs: cafe')
+    expect(out).toContain('Valid outfit IDs: base, swimsuit')
+  })
+})

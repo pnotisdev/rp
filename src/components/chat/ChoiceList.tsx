@@ -6,7 +6,7 @@ interface ChoiceListProps {
   onPick: (choice: ChoiceOption) => void
   onRefresh: () => void
   refreshing: boolean
-  /** 'vn' drops the chip's own surface/border so it reads as part of the glass dialogue box it's nested in, instead of a separate app-chrome card floating over the scene. */
+  /** 'vn' wears the stage's glass — a docked choice row floats on the scene art rather than sitting inside the dialogue box, so it needs its own backdrop to stay readable. */
   variant?: 'default' | 'vn'
 }
 
@@ -16,12 +16,12 @@ const KIND_ICON: Record<ChoiceOption['kind'], LucideIcon> = { gift: Gift, action
 
 const CHIP_CLASSES = {
   default: 'bg-bg-elevated text-text hover:bg-accent/10 hover:text-accent',
-  vn: 'bg-white/10 text-white hover:bg-white/20',
+  vn: 'vn-glass text-white/90 hover:bg-white/20 hover:text-white',
 }
 const KIND_ICON_CLASSES = { default: 'text-accent', vn: 'text-accent' }
 const REFRESH_CLASSES = {
   default: 'text-text-muted hover:bg-bg-sunken hover:text-text',
-  vn: 'text-white/60 hover:bg-white/10 hover:text-white',
+  vn: 'vn-glass text-white/60 hover:bg-white/20 hover:text-white',
 }
 const GIFT_NAME_CLASSES = { default: 'text-text-muted', vn: 'text-white/60' }
 

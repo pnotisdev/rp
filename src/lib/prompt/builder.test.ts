@@ -538,3 +538,129 @@ describe('buildPrompt — promptSections (section 13 instruct-template-manager p
     expect(result.prompt).not.toContain('Also present in this scene')
   })
 })
+
+describe('buildPrompt — history trimming stops once the budget is spent', () => {
+  /** 40 turns of ~25 tokens each against a budget only a couple of them can fit into. */
+  function longHistory(count: number): ChatMessage[] {
+    return Array.from({ length: count }, (_, i) => ({
+      id: String(i),
+      role: (i % 2 === 0 ? 'user' : 'char') as ChatMessage['role'],
+      name: i % 2 === 0 ? 'You' : 'Aria',
+      text: `Turn number ${i} with enough text to cost a real number of tokens.`,
+    }))
+  }
+
+  it('keeps a contiguous window — never drops a long turn but keeps shorter ones behind it', async () => {
+    // The failure this guards: turn 5 is far too big to fit, but turns 0-4 are tiny. Skipping 5
+    // and keeping 0-4 would hand the model a transcript with a beat missing from the middle.
+    const msgs: ChatMessage[] = [
+      { id: '0', role: 'user', name: 'You', text: 'a' },
+      { id: '1', role: 'char', name: 'Aria', text: 'b' },
+      { id: '2', role: 'user', name: 'You', text: 'c' },
+      { id: '3', role: 'char', name: 'Aria', text: 'd' },
+      { id: '4', role: 'user', name: 'You', text: 'HUGE '.repeat(400) },
+      { id: '5', role: 'char', name: 'Aria', text: 'the latest reply' },
+    ]
+    const result = await buildPrompt(baseInput({ history: msgs, contextBudget: 200 }))
+    expect(result.prompt).toContain('the latest reply')
+    // The oversized turn is out, and so is everything older than it — no hole in the middle.
+    expect(result.prompt).not.toContain('HUGE')
+    expect(result.prompt).not.toContain('You: a')
+    expect(result.includedMessageCount).toBe(1)
+    expect(result.excludedMessageCount).toBe(5)
+  })
+
+  it('does not count turns it already knows cannot fit', async () => {
+    const counted: string[] = []
+    const result = await buildPrompt(
+      baseInput({
+        history: longHistory(40),
+        contextBudget: 60,
+        countTokens: async (text: string) => {
+          counted.push(text)
+          return Math.ceil(text.length / 4)
+        },
+      }),
+    )
+    // Every turn is either kept or dropped — the accounting stays exact despite the early exit.
+    expect(result.includedMessageCount + result.excludedMessageCount).toBe(40)
+    expect(result.includedMessageCount).toBeGreaterThan(0)
+    // The whole point: the 30-odd turns past the budget never reached the tokenizer. Counting is
+    // one HTTP round-trip per call against a real backend, so this is the cost being avoided.
+    const historyCalls = counted.filter((t) => t.includes('Turn number'))
+    expect(historyCalls.length).toBeLessThan(10)
+  })
+
+  it('keeps the newest turns, not the oldest', async () => {
+    const result = await buildPrompt(baseInput({ history: longHistory(40), contextBudget: 60 }))
+    expect(result.prompt).toContain('Turn number 39')
+    expect(result.prompt).not.toContain('Turn number 0 ')
+  })
+
+  it('still keeps the latest turn when it alone blows the whole budget', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        history: longHistory(5),
+        // Smaller than a single rendered turn, so the "always keep one" guard is what decides.
+        contextBudget: 1,
+      }),
+    )
+    expect(result.includedMessageCount).toBe(1)
+    expect(result.excludedMessageCount).toBe(4)
+    expect(result.prompt).toContain('Turn number 4')
+  })
+})
+
+describe('buildPrompt — worldMoment sits after the history, not in the cacheable prefix', () => {
+  const history: ChatMessage[] = [
+    { id: '1', role: 'user', name: 'You', text: 'HISTORY_MARKER' },
+  ]
+
+  it('places stable world text before the history and the moment after it', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        history,
+        worldDescription: 'STABLE_WORLD',
+        worldMoment: 'VOLATILE_MOMENT',
+      }),
+    )
+    const stable = result.prompt.indexOf('STABLE_WORLD')
+    const hist = result.prompt.indexOf('HISTORY_MARKER')
+    const moment = result.prompt.indexOf('VOLATILE_MOMENT')
+    expect(stable).toBeGreaterThanOrEqual(0)
+    expect(moment).toBeGreaterThanOrEqual(0)
+    // The whole point of the split: changing the moment must not disturb any token before it.
+    expect(stable).toBeLessThan(hist)
+    expect(hist).toBeLessThan(moment)
+  })
+
+  it('leaves the cacheable prefix byte-identical when only the moment changes', async () => {
+    const morning = await buildPrompt(
+      baseInput({ history, worldDescription: 'STABLE_WORLD', worldMoment: 'It is a clear morning.' }),
+    )
+    const storm = await buildPrompt(
+      baseInput({ history, worldDescription: 'STABLE_WORLD', worldMoment: 'It is a stormy night.' }),
+    )
+    expect(morning.systemText).toBe(storm.systemText)
+    expect(morning.conversationText).not.toBe(storm.conversationText)
+  })
+
+  it('the world section toggle governs the moment too', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        history,
+        worldDescription: 'STABLE_WORLD',
+        worldMoment: 'VOLATILE_MOMENT',
+        promptSections: { world: false },
+      }),
+    )
+    expect(result.prompt).not.toContain('STABLE_WORLD')
+    expect(result.prompt).not.toContain('VOLATILE_MOMENT')
+  })
+
+  it('omitting worldMoment leaves the prompt exactly as it was before the split', async () => {
+    const result = await buildPrompt(baseInput({ history, worldDescription: 'STABLE_WORLD' }))
+    expect(result.prompt).toContain('STABLE_WORLD')
+    expect(result.prompt).not.toContain('undefined')
+  })
+})

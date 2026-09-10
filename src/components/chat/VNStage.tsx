@@ -21,7 +21,10 @@ import type { Character } from '@/lib/characters/cardSpec'
 import type { ChoiceOption, Chat, Persona, StoredMessage, WorldCard } from '@/lib/types'
 import { ChoiceList } from './ChoiceList'
 import { VNCenteredChoices } from './VNCenteredChoices'
-import { placeholderGradient } from '@/lib/vn/placeholder'
+import { VNDialogueBox } from './VNDialogueBox'
+import { sceneGradient } from '@/lib/vn/placeholder'
+import { resolveSceneBackground } from '@/lib/vn/resolveBackground'
+import { backgroundLabel } from '@/lib/vn/backgrounds'
 import { scrollToMessage } from '@/lib/scrollToMessage'
 import { renderMessageText } from '@/lib/text/messageText'
 import { useSpriteCrossfade } from '@/lib/hooks/useSpriteCrossfade'
@@ -61,9 +64,16 @@ import { getWorldTemplate } from '@/lib/world/worldTemplates'
 import { isNightPhase } from '@/lib/world/calendar'
 
 /**
- * Visual-novel presentation of a chat: full-bleed scene background, each cast member's sprite,
- * and one glass panel docked to the bottom edge carrying the dialogue, choices, and composer
- * together like a real VN's ADV box. The ordinary transcript is available as a collapsible log.
+ * Visual-novel presentation of a chat: full-bleed scene background, each cast member's sprite
+ * standing at full height, and one floating glass dialogue box of fixed height over their feet.
+ * The ordinary transcript is available as a collapsible log.
+ *
+ * The composition rule everything here follows: **the art is the subject, the UI is furniture.**
+ * Only the dialogue lives inside the box; choices, quick replies, the assist strip and the
+ * per-line utilities all float outside it, so the box's height is a constant and the scene behind
+ * it never resizes turn to turn. Under `vnInputMode: 'inline'` the box is also where the player
+ * writes — the same frame, in the same place, with the nameplate and the accent rail switched over
+ * to their persona so it is never ambiguous whose line is being composed.
  */
 
 // Petals only make sense outdoors.
@@ -72,11 +82,17 @@ const OUTDOOR_BACKGROUNDS = new Set([
   'school-rooftop', 'school-gate', 'school-courtyard', 'shrine', 'festival', 'fireworks-viewing', 'onsen',
 ])
 
-/** Horizontal width per cast slot; height is set separately so sprites of any source resolution normalize to the same on-screen height. */
+/**
+ * Horizontal width per cast slot; height is set separately so sprites of any source resolution
+ * normalize to the same on-screen height. The cap matters more than it looks: `object-contain`
+ * takes whichever of width/height binds first, so a narrow cap on a bust-cropped sprite (the common
+ * case — most cards ship a portrait, not a full-body VN sprite) shrinks it vertically too and
+ * leaves the head sitting low with dead scene above it.
+ */
 function slotWidthClass(castSize: number): string {
-  if (castSize <= 1) return 'basis-[62%] max-w-[460px]'
-  if (castSize === 2) return 'basis-[47%] max-w-[370px]'
-  return 'basis-[32%] max-w-[290px]'
+  if (castSize <= 1) return 'basis-[72%] max-w-[620px]'
+  if (castSize === 2) return 'basis-[52%] max-w-[470px]'
+  return 'basis-[35%] max-w-[350px]'
 }
 
 /** Stable muted identity hue per speaker, used for group-scene nameplates/accents. Solo chats keep the usual relationship-pink instead. */
@@ -152,12 +168,12 @@ function VNCharacterSprite({
     <div
       className={`relative flex shrink items-end justify-center transition-[transform,filter,opacity,height] duration-500 ease-out ${slotClass} ${
         isActive
-          ? 'z-10 h-[93%]'
+          ? 'z-10 h-[96%]'
           : !dim
-            ? 'z-0 h-[88%]'
+            ? 'z-0 h-[90%]'
             : showingPlaceholder
-              ? 'z-0 h-[82%] scale-[0.96] opacity-75 [filter:brightness(0.78)_saturate(0.8)]'
-              : 'z-0 h-[80%] scale-[0.95] [filter:brightness(0.5)_saturate(0.72)]'
+              ? 'z-0 h-[84%] scale-[0.96] opacity-75 [filter:brightness(0.78)_saturate(0.8)]'
+              : 'z-0 h-[82%] scale-[0.95] [filter:brightness(0.5)_saturate(0.72)]'
       } ${phase === 'entering' ? 'vn-sprite-enter-anim' : phase === 'exiting' ? 'vn-sprite-exit-anim pointer-events-none' : ''}`}
     >
       {isActive && dim && (
@@ -221,8 +237,13 @@ interface VNStageProps {
   }
   /** "Background assists running" strip, omitted when nothing is running. */
   assistSlot?: ReactNode
-  /** Message composer (variant="vn"), docked at the bottom of the glass panel. */
+  /** Message composer (variant="vn"). Under `vnInputMode: 'inline'` this is rendered *inside* the
+   *  dialogue box while the player is writing; under 'docked' it sits in its own bar below it. */
   composerSlot: ReactNode
+  /** Whether the composer currently holds text. Keeps the inline box open for a draft the player
+   *  didn't type themselves (an impersonation suggestion, a prefilled intimacy action), which would
+   *  otherwise be composed somewhere they can't see. */
+  composerHasDraft?: boolean
   /** Off by default; the quick menu's Auto toggle. Once a reply finishes typing, waits a beat scaled
    *  to its length and calls `onAutoAdvanceFire` — real VN autoplay, so `ChatWindow` owns the actual
    *  "what to send" + safety-cap decision (never picks an AI-suggested choice, stops on a live date,
@@ -258,6 +279,7 @@ export function VNStage({
   activeChoiceData,
   assistSlot,
   composerSlot,
+  composerHasDraft = false,
   autoAdvance = false,
   onToggleAutoAdvance,
   onAutoAdvanceFire,
@@ -415,37 +437,42 @@ export function VNStage({
   const speakerAvatarUrl = showUserAsCurrent ? persona?.avatarDataUrl : activeMember?.avatarUrl
   // Group scenes get a per-speaker identity hue; solo chats keep the usual relationship-pink.
   const plateHue = activeMember?.hue ?? 320
+  // The name is set *on* the box's dark glass now, not on a filled romance-coloured tab, so it
+  // takes the accent colour itself — `--c-romance-text` is the colour authored to contrast against
+  // that fill, which in the dark theme is near-black and disappeared here.
   const plate = isGroupScene
-    ? {
-        bg: `hsl(${plateHue} 36% 24% / 0.94)`,
-        name: `hsl(${plateHue} 82% 84%)`,
-        edge: `hsl(${plateHue} 60% 56% / 0.55)`,
-        chip: `hsl(${plateHue} 44% 44%)`,
-      }
-    : {
-        bg: 'rgb(var(--c-romance) / 0.94)',
-        name: 'rgb(var(--c-romance-text))',
-        edge: 'rgb(var(--c-romance) / 0.45)',
-        chip: 'rgb(var(--c-romance))',
-      }
-  // The tagged scene background wins whenever it's actually valid and unlocked; otherwise fall
-  // back to the world's author-picked opening shot, which covers a missing tag (no model, or the
-  // model omitted `<<scene:>>`) and a still-locked one alike — VN mode is never a bare placeholder
-  // gradient just because the tag ahead of it happens to be gated.
-  const taggedBackground = scene?.background ?? chat.activeEvent?.backgroundId
-  const taggedUnlocked = !!taggedBackground && affection >= Number(world?.backgroundUnlocks?.[taggedBackground] ?? 0)
-  const sceneBackground = taggedUnlocked ? taggedBackground : (world?.defaultBackgroundId ?? taggedBackground)
-  const bgUnlocked = sceneBackground
-    ? affection >= Number(world?.backgroundUnlocks?.[sceneBackground] ?? 0)
-    : false
-  const nightBackground = sceneBackground ? world?.backgroundsNight?.[sceneBackground] : undefined
-  const backgroundUrl =
-    sceneBackground && bgUnlocked
-      ? (isNightPhase(world?.currentPhaseIndex) && nightBackground) || world?.backgrounds?.[sceneBackground]
-      : undefined
+    ? { name: `hsl(${plateHue} 82% 82%)`, chip: `hsl(${plateHue} 44% 44%)` }
+    : { name: 'rgb(var(--c-romance))', chip: 'rgb(var(--c-romance))' }
+  // Every fallback for "where is this scene" lives in `resolveSceneBackground` — including reading
+  // the narration itself, which is what stops a chat's opening messages (a static greeting carries
+  // no `<<scene:>>` tag at all) from landing on an unplaced void.
+  const night = isNightPhase(world?.currentPhaseIndex)
+  const narration = [lastCharMsg?.text, lastUserMsg?.text].filter(Boolean).join(' ')
+  const resolvedBackground = resolveSceneBackground({
+    taggedBackground: scene?.background,
+    chat,
+    world,
+    affection,
+    narration,
+    night,
+  })
+  const sceneBackground = resolvedBackground.id
+  const backgroundUrl = resolvedBackground.url
   const bgStyle = backgroundUrl
     ? { backgroundImage: `url(${backgroundUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-    : { background: placeholderGradient(sceneBackground) }
+    : { background: sceneGradient(sceneBackground, { night }) }
+  // Keyed on what's actually painted, so the cross-dissolve replays when the scene moves somewhere
+  // else and stays put through an ordinary re-render.
+  const bgKey = backgroundUrl || sceneBackground || 'nowhere'
+  const prevBgRef = useRef<{ key: string; style: typeof bgStyle }>({ key: bgKey, style: bgStyle })
+  const outgoingBgStyle = prevBgRef.current.key === bgKey ? undefined : prevBgRef.current.style
+  useEffect(() => {
+    prevBgRef.current = { key: bgKey, style: bgStyle }
+  })
+
+  // Only worth naming when there's no photo to say it for you — on authored art the location is
+  // self-evident, and a caption over it is just chrome.
+  const locationCaption = !backgroundUrl && sceneBackground ? backgroundLabel(sceneBackground, world) : undefined
 
   const swipes = lastCharMsg?.swipes ?? []
   const canSwipe = !!lastCharMsg && swipes.length > 0 && !isStreamingThis
@@ -458,6 +485,33 @@ export function VNStage({
   const reducedMotion = useSettingsStore((s) => s.reducedMotion)
   const vnTextSpeedMs = useSettingsStore((s) => s.vnTextSpeedMs)
   const vnChoiceStyle = useSettingsStore((s) => s.vnChoiceStyle)
+  const vnInputMode = useSettingsStore((s) => s.vnInputMode)
+
+  // Inline input: the dialogue box is handed over to the player rather than a composer bar living
+  // permanently under it. `composerHasDraft` forces it open for text that arrived some other way,
+  // so a suggestion or a prefilled action is never composed off-screen.
+  const inlineInput = vnInputMode === 'inline'
+  const [writing, setWriting] = useState(false)
+  const isWriting = inlineInput && (writing || composerHasDraft)
+  // A landed reply is the scene's turn again — hand the box back, unless there's still a draft in it.
+  useEffect(() => {
+    setWriting(false)
+  }, [lastCharMsg?.id])
+  // Enter takes the box, the way Enter sends from it. Ignored while a dialog is open, while the
+  // caret is already in a field, and while the backlog/hide-UI have the screen.
+  useEffect(() => {
+    if (!inlineInput || isWriting || showLog || hideUI) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Enter' || e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return
+      const t = e.target as HTMLElement | null
+      if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)) return
+      if (document.querySelector('[role="dialog"]')) return
+      e.preventDefault()
+      setWriting(true)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [inlineInput, isWriting, showLog, hideUI])
 
   // Per-line voice: "read this line aloud" via the shared TTS stack (`lib/voice`). Manual and
   // one line at a time only — no auto-voice-on-every-reply, unlike Auto above; that's a
@@ -617,6 +671,114 @@ export function VNStage({
     : undefined
   const showPetals = !reducedMotion && !!sceneBackground && OUTDOOR_BACKGROUNDS.has(sceneBackground)
 
+  // Per-line controls, floated above the box's top-right corner and faded until hover — they act on
+  // the line being shown, but they aren't part of reading it, so they don't get a row inside the frame.
+  const utilities =
+    !isWriting && (canSwipe || (lastCharMsg && !isStreamingThis && !showUserAsCurrent)) ? (
+      <>
+        {canSwipe && (
+          <>
+            <span className="flex items-center gap-0.5 text-xs text-white/70">
+              <button
+                onClick={() => onSwipe(lastCharMsg!.id, 'left')}
+                disabled={(lastCharMsg!.activeSwipe ?? 0) === 0}
+                aria-label="Previous swipe"
+                className="flex h-7 w-7 items-center justify-center rounded-full transition-colors hover:bg-white/10 disabled:opacity-30"
+              >
+                <ChevronLeft size={15} strokeWidth={2} />
+              </button>
+              <span className="px-0.5 tabular-nums">
+                {(lastCharMsg!.activeSwipe ?? 0) + 1}/{swipes.length}
+              </span>
+              <button
+                onClick={() => onSwipe(lastCharMsg!.id, 'right')}
+                aria-label="Next swipe"
+                className="flex h-7 w-7 items-center justify-center rounded-full transition-colors hover:bg-white/10"
+              >
+                <ChevronRight size={15} strokeWidth={2} />
+              </button>
+            </span>
+            <span className="mx-1 h-4 w-px bg-white/15" />
+            <button
+              onClick={() => onRegenerate(lastCharMsg!.id)}
+              title="Regenerate"
+              aria-label="Regenerate"
+              className="flex h-7 w-7 items-center justify-center rounded-full text-white/70 transition-colors hover:bg-white/10"
+            >
+              <RotateCcw size={14} strokeWidth={2} />
+            </button>
+            <button
+              onClick={() => onFork(lastCharMsg!.id)}
+              title="Fork chat from here"
+              aria-label="Fork chat from here"
+              className="flex h-7 w-7 items-center justify-center rounded-full text-white/70 transition-colors hover:bg-white/10"
+            >
+              <GitFork size={14} strokeWidth={2} />
+            </button>
+          </>
+        )}
+        {lastCharMsg && !isStreamingThis && !showUserAsCurrent && (
+          <>
+            {canSwipe && <span className="mx-1 h-4 w-px bg-white/15" />}
+            <button
+              onClick={speakLine}
+              title={speakState === 'idle' ? 'Read this line aloud' : speakState === 'loading' ? 'Loading…' : 'Stop'}
+              aria-label={speakState === 'idle' ? 'Read this line aloud' : 'Stop reading aloud'}
+              className={`flex h-7 w-7 items-center justify-center rounded-full transition-colors hover:bg-white/10 ${speakState !== 'idle' ? 'text-accent' : 'text-white/70'}`}
+            >
+              {speakState === 'loading' ? (
+                <Loader2 size={14} strokeWidth={2} className="animate-spin" />
+              ) : speakState === 'playing' ? (
+                <Volume2 size={14} strokeWidth={2} />
+              ) : (
+                <Volume1 size={14} strokeWidth={2} />
+              )}
+            </button>
+            <button
+              onClick={() => setAutoVoice((v) => !v)}
+              title={autoVoice ? 'Auto-voice: on. Reads each new reply aloud' : 'Auto-voice: read each new reply aloud automatically'}
+              aria-label={autoVoice ? 'Auto-voice: on' : 'Auto-voice: off'}
+              aria-pressed={autoVoice}
+              className={`relative flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-bold transition-colors hover:bg-white/10 ${
+                autoVoice ? 'text-accent' : 'text-white/70'
+              }`}
+            >
+              A
+              {autoVoice && <span className="vn-auto-pulse absolute right-0.5 top-1 h-1.5 w-1.5 rounded-full bg-accent" />}
+            </button>
+            <button
+              onClick={() => onTogglePin(lastCharMsg!.id)}
+              title={lastCharMsg.pinned ? 'Unpin' : 'Pin this moment'}
+              aria-label={lastCharMsg.pinned ? 'Unpin message' : 'Pin message'}
+              className={`flex h-7 w-7 items-center justify-center rounded-full text-xs transition-colors hover:bg-white/10 ${lastCharMsg.pinned ? 'text-accent' : 'text-white/70'}`}
+            >
+              <Star size={14} strokeWidth={2} fill={lastCharMsg.pinned ? 'currentColor' : 'none'} />
+            </button>
+          </>
+        )}
+      </>
+    ) : undefined
+
+  // Both captions only ever apply to a failed generation being shown as the player's own last line.
+  const dialogueCaption = showUserAsCurrent ? (
+    <>
+      {lastUserMsg!.intimacyAction && (
+        <span
+          className="mt-2.5 flex w-fit items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-medium text-white/70"
+          title={`Sent from the Relationship panel's Unlocks tab (${lastUserMsg!.intimacyAction.category.replace('_', ' ')}): "${lastUserMsg!.intimacyAction.label}"`}
+        >
+          <Heart size={9} strokeWidth={2.25} className="shrink-0" />
+          {lastUserMsg!.intimacyAction.label}
+        </span>
+      )}
+      {/* The failure as a small caption rather than the main line — the player's actual words stay
+          the primary content; this just explains the silence. */}
+      <p className="mt-2 text-[12px] text-danger/90">
+        ⚠ {activeMember?.name ?? character?.card.name ?? 'Their'}'s reply failed. Try regenerating (⟲) from the log.
+      </p>
+    </>
+  ) : undefined
+
   return (
     <div
       className="relative flex flex-1 flex-col overflow-hidden"
@@ -632,7 +794,10 @@ export function VNStage({
         if (!showLog && typewriterActive && !dialogueRevealDone) skipTypewriter()
       }}
     >
-      <div className="absolute inset-0 transition-[background] duration-500" style={bgStyle} />
+      {/* The outgoing scene stays painted underneath while the incoming one fades in over it — a
+          `background` property can't be transitioned, so a change used to be a hard cut. */}
+      {outgoingBgStyle && <div className="absolute inset-0" style={outgoingBgStyle} />}
+      <div key={bgKey} className="vn-backdrop-in absolute inset-0" style={bgStyle} />
       {triggeredCgEntry && triggeredCgImageUrl && (
         // Full-bleed CG in place of the ordinary background — sprites are skipped below while one's
         // showing. `key` remounts per distinct CG, which is what replays `.vn-cg-reveal` each time.
@@ -643,20 +808,24 @@ export function VNStage({
           className="vn-cg-reveal absolute inset-0 h-full w-full object-cover"
         />
       )}
-      <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/10 to-black/35" />
+      {/* Lighter than it used to be: the dialogue box now carries its own glass backdrop, so the
+          page-wide scrim only has to keep the top HUD legible and give the box's blur something to
+          sit on. Any more and the art stops being the subject. */}
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/55 via-black/[0.04] to-black/25" />
       {/* Cinematic vignette rather than a flat scrim. */}
       <div
         className="pointer-events-none absolute inset-0"
-        style={{ background: 'radial-gradient(ellipse 80% 65% at 50% 40%, transparent 55%, rgb(0 0 0 / 0.32) 100%)' }}
+        style={{ background: 'radial-gradient(ellipse 82% 68% at 50% 40%, transparent 58%, rgb(0 0 0 / 0.30) 100%)' }}
       />
       {showPetals && <SakuraPetals />}
 
       {/* Hidden along with the rest of the chrome under Hide-UI — click the scene to bring it back. */}
       {!hideUI && (
       <>
-      {/* One flex row (not two absolute overlays) so the HUD card and toolbar don't collide on phones. */}
-      <div className="absolute inset-x-4 top-4 z-20 flex items-start justify-between gap-3">
-        <div className="min-w-0 overflow-hidden rounded-xl bg-black/40 text-white backdrop-blur-sm sm:max-w-[65%]">
+      {/* One flex container (not two absolute overlays) so the HUD card and toolbar can't collide.
+          Stacked on a phone — side by side there left the card crushed to an unreadable stub. */}
+      <div className="absolute inset-x-3 top-3 z-20 flex flex-col-reverse items-end gap-2 sm:inset-x-4 sm:top-4 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+        <div className="vn-glass min-w-0 self-start overflow-hidden rounded-2xl text-white sm:max-w-[58%] sm:self-auto">
           {(personaName || chat.mode || parentChatLink) && (
             <div className="flex items-center gap-1.5 px-3 pb-1.5 pt-2 text-[11px] text-white/70">
               {personaName && <span className="truncate">as {personaName}</span>}
@@ -718,7 +887,7 @@ export function VNStage({
           )}
         </div>
 
-        <div className="flex h-9 shrink-0 items-center gap-1 rounded-full bg-black/40 px-1 backdrop-blur-sm">
+        <div className="vn-glass flex h-9 shrink-0 items-center gap-1 rounded-full px-1">
           {onBack && (
             <>
               <button
@@ -786,7 +955,10 @@ export function VNStage({
       )}
 
       {showLog ? (
-        <div ref={logRef} className="relative z-10 flex-1 overflow-y-auto bg-bg/95 px-6 py-6 backdrop-blur">
+        // Top padding clears the floating HUD card, which stays up over the backlog; the width cap
+        // keeps a long transcript readable on a wide monitor instead of running the full stage.
+        <div ref={logRef} className="relative z-10 flex-1 overflow-y-auto bg-bg/95 px-6 pb-6 pt-24 backdrop-blur">
+          <div className="mx-auto w-full max-w-3xl">
           <MessageLog
             messages={messages}
             character={character}
@@ -804,14 +976,20 @@ export function VNStage({
             onFork={onFork}
             onTogglePin={onTogglePin}
           />
+          </div>
         </div>
       ) : (
         <>
-          {/* min-h floor keeps the sprite area from being squeezed to nothing on a short viewport. */}
+          {/* The cast fills the whole stage and the dialogue box floats over their feet, the way a
+              real VN composes a shot — rather than the two splitting the available height between
+              them, which is what kept the character small. */}
           <div
-            className={`relative z-0 flex min-h-[190px] flex-1 items-end justify-center px-4 sm:px-6 ${
+            // On a phone the sprite is width-bound long before it is height-bound, so standing it on
+            // the stage floor left almost all of it behind the dialogue box. There it stands on the
+            // box's top edge instead; from `sm` up it goes back to the floor (and a little below it).
+            className={`absolute inset-x-0 bottom-0 top-0 z-0 flex items-end justify-center px-4 pb-[24vh] sm:-bottom-[4%] sm:px-6 sm:pb-0 ${
               // Extra top padding for group scenes so the outer figure clears the HUD card.
-              isGroupScene ? 'pt-8 sm:pt-14 md:pt-20' : 'pt-3 sm:pt-6 md:pt-10'
+              isGroupScene ? 'pt-10 sm:pt-16 md:pt-20' : 'pt-2 sm:pt-4 md:pt-6'
             }`}
           >
             {!triggeredCgEntry && artHint && character && (
@@ -864,181 +1042,59 @@ export function VNStage({
           {/* Hidden under Hide-UI too — only the background/sprites/CG stay up, full-scene. */}
           {!hideUI && (
           <>
-          {/* Docked flush to the bottom edge, full width, like a real VN textbox. Both the player's
-              last line and the reply to it live in this one panel — a real VN's textbox shows
-              whoever's talking, not a chat-bubble floating over the art for one side only. */}
-          <div
-            className="group/vnpanel relative z-10 flex flex-col border-t border-white/15 bg-black/75 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.08),0_-18px_36px_-22px_rgb(0_0_0_/_0.85)] backdrop-blur-md"
-            style={{ borderTopColor: plate.edge }}
-          >
-            {/* Speaker nameplate tab, overlapping the panel's top edge. */}
-            <div
-              className="absolute -top-9 left-3 z-20 flex items-center gap-2.5 rounded-t-xl rounded-br-xl py-2 pl-2 pr-4 backdrop-blur-md sm:left-5"
-              style={{ backgroundColor: plate.bg, boxShadow: `inset 0 1px 0 ${plate.edge}, 0 10px 22px -10px rgb(0 0 0 / 0.6)` }}
-            >
-              {speakerAvatarUrl ? (
-                <img src={speakerAvatarUrl} alt="" className="h-7 w-7 rounded-full object-cover ring-1 ring-white/25" />
-              ) : (
-                <span
-                  className="flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-display text-white shadow-inner ring-1 ring-white/15"
-                  style={{ backgroundColor: plate.chip }}
-                >
-                  {initialsOf(speakerName)}
-                </span>
+          {/* Everything that isn't dialogue floats above the box instead of stacking inside it.
+              That separation is what lets the box hold one fixed height while choices, quick
+              replies and the assist strip come and go underneath the scene's own composition. */}
+          <div className="vn-stack relative z-10 mt-auto pb-2">
+            <div className="flex flex-col gap-2">
+              {locationCaption && (
+                // Only ever shown over a placeholder gradient — real art says where it is by itself.
+                <span className="px-1 text-[10px] uppercase tracking-[0.18em] text-white/35">{locationCaption}</span>
               )}
-              <span className="font-display text-[15px] font-semibold leading-none" style={{ color: plate.name }}>
-                {speakerName}
-              </span>
-            </div>
-            {showUserAsCurrent && lastUserMsg!.intimacyAction && (
-              <div className="px-4 pt-4 sm:px-6">
-                <span
-                  className="mx-auto flex w-fit max-w-3xl items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-medium text-white/70"
-                  title={`Sent from the Relationship panel's Unlocks tab (${lastUserMsg!.intimacyAction.category.replace('_', ' ')}): "${lastUserMsg!.intimacyAction.label}"`}
-                >
-                  <Heart size={9} strokeWidth={2.25} className="shrink-0" />
-                  {lastUserMsg!.intimacyAction.label}
-                </span>
-              </div>
-            )}
-            {/* Utility controls recede to near-invisible at rest, appear on hover/focus. */}
-            <div className="flex items-center justify-end gap-1 px-3 pt-3 opacity-30 transition-opacity duration-200 focus-within:opacity-100 group-hover/vnpanel:opacity-100 sm:px-5">
-              {canSwipe && (
-                <>
-                  <span className="flex items-center gap-0.5 text-xs text-white/70">
-                    <button
-                      onClick={() => onSwipe(lastCharMsg!.id, 'left')}
-                      disabled={(lastCharMsg!.activeSwipe ?? 0) === 0}
-                      aria-label="Previous swipe"
-                      className="flex h-7 w-7 items-center justify-center rounded-full transition-colors hover:bg-white/10 disabled:opacity-30"
-                    >
-                      <ChevronLeft size={15} strokeWidth={2} />
-                    </button>
-                    <span className="px-0.5 tabular-nums">
-                      {(lastCharMsg!.activeSwipe ?? 0) + 1}/{swipes.length}
-                    </span>
-                    <button
-                      onClick={() => onSwipe(lastCharMsg!.id, 'right')}
-                      aria-label="Next swipe"
-                      className="flex h-7 w-7 items-center justify-center rounded-full transition-colors hover:bg-white/10"
-                    >
-                      <ChevronRight size={15} strokeWidth={2} />
-                    </button>
-                  </span>
-                  <span className="mx-1 h-4 w-px bg-white/15" />
-                  <span className="flex items-center gap-0.5 text-xs text-white/70">
-                    <button
-                      onClick={() => onRegenerate(lastCharMsg!.id)}
-                      title="Regenerate"
-                      aria-label="Regenerate"
-                      className="flex h-7 w-7 items-center justify-center rounded-full transition-colors hover:bg-white/10"
-                    >
-                      <RotateCcw size={14} strokeWidth={2} />
-                    </button>
-                    <button
-                      onClick={() => onFork(lastCharMsg!.id)}
-                      title="Fork chat from here"
-                      aria-label="Fork chat from here"
-                      className="flex h-7 w-7 items-center justify-center rounded-full transition-colors hover:bg-white/10"
-                    >
-                      <GitFork size={14} strokeWidth={2} />
-                    </button>
-                  </span>
-                </>
-              )}
-              {lastCharMsg && !isStreamingThis && !showUserAsCurrent && (
-                <>
-                  {canSwipe && <span className="mx-1 h-4 w-px bg-white/15" />}
-                  <button
-                    onClick={speakLine}
-                    title={speakState === 'idle' ? 'Read this line aloud' : speakState === 'loading' ? 'Loading…' : 'Stop'}
-                    aria-label={speakState === 'idle' ? 'Read this line aloud' : 'Stop reading aloud'}
-                    className={`flex h-7 w-7 items-center justify-center rounded-full transition-colors hover:bg-white/10 ${speakState !== 'idle' ? 'text-accent' : 'text-white/70'}`}
-                  >
-                    {speakState === 'loading' ? (
-                      <Loader2 size={14} strokeWidth={2} className="animate-spin" />
-                    ) : speakState === 'playing' ? (
-                      <Volume2 size={14} strokeWidth={2} />
-                    ) : (
-                      <Volume1 size={14} strokeWidth={2} />
-                    )}
-                  </button>
-                  <button
-                    onClick={() => setAutoVoice((v) => !v)}
-                    title={autoVoice ? 'Auto-voice: on. Reads each new reply aloud' : 'Auto-voice: read each new reply aloud automatically'}
-                    aria-label={autoVoice ? 'Auto-voice: on' : 'Auto-voice: off'}
-                    aria-pressed={autoVoice}
-                    className={`relative flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-bold transition-colors hover:bg-white/10 ${
-                      autoVoice ? 'text-accent' : 'text-white/70'
-                    }`}
-                  >
-                    A
-                    {autoVoice && <span className="vn-auto-pulse absolute right-0.5 top-1 h-1.5 w-1.5 rounded-full bg-accent" />}
-                  </button>
-                  <button
-                    onClick={() => onTogglePin(lastCharMsg!.id)}
-                    title={lastCharMsg.pinned ? 'Unpin' : 'Pin this moment'}
-                    aria-label={lastCharMsg.pinned ? 'Unpin message' : 'Pin message'}
-                    className={`flex h-7 w-7 items-center justify-center rounded-full text-xs transition-colors hover:bg-white/10 ${lastCharMsg.pinned ? 'text-accent' : 'text-white/70'}`}
-                  >
-                    <Star size={14} strokeWidth={2} fill={lastCharMsg.pinned ? 'currentColor' : 'none'} />
-                  </button>
-                </>
-              )}
-            </div>
-            {/* Grows with the reply up to a cap, then scrolls in place — a fixed height regardless of
-                content left a short reply (or an error message) floating in a mostly-empty box, the
-                opposite of "see more of the character/background." A floor keeps a one-line reply
-                from looking clipped-thin. Same phone-gets-more-headroom split as before. */}
-            <div ref={dialogueBoxRef} className="max-h-[40vh] min-h-[64px] overflow-y-auto px-4 pb-3 pt-1.5 sm:max-h-[22vh] sm:min-h-[52px] sm:px-6 md:max-h-[26vh]">
-              <p
-                // Capped, centered line-width — full viewport width reads as a teleprompter on an
-                // ultra-wide monitor, not a VN textbox.
-                className="vn-dialogue mx-auto max-w-3xl whitespace-pre-wrap text-[15px] leading-relaxed text-white/95"
-                style={{ textShadow: '0 1px 3px rgb(0 0 0 / 0.5)' }}
-              >
-                {renderMessageText(shownDialogueText, regexScripts, dialogueSfx)}
-                {isStreamingThis && <span className="cursor-blink font-mono">▋</span>}
-                {dialogueComplete && (
-                  // Classic ADV "done typing" glyph, right after the last line — click the scene
-                  // to skip ahead while a reply is still typing out.
-                  <ChevronDown
-                    size={13}
-                    strokeWidth={2.5}
-                    className="vn-next-glyph ml-1 inline-block align-[-1px] text-white/70"
-                    aria-hidden
+              {assistSlot}
+              {activeChoiceData && vnChoiceStyle === 'docked' && (
+                <div className="max-h-[16vh] overflow-y-auto">
+                  <ChoiceList
+                    variant="vn"
+                    choices={activeChoiceData.choices}
+                    onPick={activeChoiceData.onPick}
+                    onRefresh={activeChoiceData.onRefresh}
+                    refreshing={activeChoiceData.refreshing}
                   />
-                )}
-              </p>
-              {showUserAsCurrent && (
-                // The failure itself, as a small caption rather than the main line — the player's
-                // actual words stay the primary content; this just explains the silence.
-                <p className="mx-auto mt-2 max-w-3xl text-[12px] text-danger/90">
-                  ⚠ {activeMember?.name ?? character?.card.name ?? "Their"}'s reply failed. Try regenerating (⟲) from the log.
-                </p>
+                </div>
               )}
+              {choiceListSlot}
             </div>
-            {/* AI-suggested choices: docked pills here (same treatment as the dialogue box above),
-                or nothing at all when `vnChoiceStyle` is 'centered' — that style renders as a
-                full-stage overlay instead, below. Quick replies (`choiceListSlot`) always stay
-                docked either way; they're not a real decision point. */}
-            {activeChoiceData && vnChoiceStyle === 'docked' && (
-              <div className="max-h-[15vh] overflow-y-auto border-t border-white/10 px-3 pb-2.5 pt-2.5 sm:px-5">
-                <ChoiceList
-                  variant="vn"
-                  choices={activeChoiceData.choices}
-                  onPick={activeChoiceData.onPick}
-                  onRefresh={activeChoiceData.onRefresh}
-                  refreshing={activeChoiceData.refreshing}
-                />
-              </div>
-            )}
-            {choiceListSlot && (
-              <div className="max-h-[15vh] overflow-y-auto border-t border-white/10 px-3 pb-2.5 pt-2.5 sm:px-5">{choiceListSlot}</div>
-            )}
-            {assistSlot}
-            <div className="border-t border-white/10 p-2.5 sm:px-4">{composerSlot}</div>
           </div>
+
+          <div className="relative z-10">
+            <VNDialogueBox
+              ref={dialogueBoxRef}
+              speakerName={speakerName}
+              speakerAvatarUrl={speakerAvatarUrl}
+              initials={initialsOf(speakerName)}
+              plate={plate}
+              personaLabel={persona?.name || 'You'}
+              writing={isWriting}
+              onStartWriting={inlineInput ? () => setWriting(true) : undefined}
+              onStopWriting={() => setWriting(false)}
+              composer={composerSlot}
+              streaming={isStreamingThis}
+              complete={dialogueComplete}
+              utilities={utilities}
+              caption={dialogueCaption}
+            >
+              {renderMessageText(shownDialogueText, regexScripts, dialogueSfx)}
+            </VNDialogueBox>
+          </div>
+
+          {/* 'docked' input mode keeps the composer as its own bar under the box — for anyone who'd
+              rather always see it than have the box change hands. */}
+          {!inlineInput && (
+            <div className="vn-stack relative z-10 pb-3 sm:pb-5">
+              <div className="vn-glass rounded-2xl px-3 py-1.5">{composerSlot}</div>
+            </div>
+          )}
           </>
           )}
 

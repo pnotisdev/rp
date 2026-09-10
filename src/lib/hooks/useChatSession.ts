@@ -13,6 +13,7 @@ import { makeGenKey } from '@/lib/api/kobold'
 import { generateWithTimeout } from '@/lib/api/generateWithTimeout'
 import { useChatBackendClient } from '@/lib/hooks/useChatBackendClient'
 import { BUILTIN_SYSTEM_PROMPTS, buildPrompt, estimateTokens, type ChatMessage } from '@/lib/prompt/builder'
+import { countTokensCached } from '@/lib/tokenCache'
 import { SUMMARY_MAX_LENGTH, summarizeMessages } from '@/lib/prompt/summarize'
 import { generateChoices } from '@/lib/prompt/choices'
 import { detectCompletedTasks, generateTasks, suggestObjective } from '@/lib/objectives/objectiveAssist'
@@ -540,16 +541,18 @@ export function useChatSession(chatId: string | null) {
     [character, participantCharacters],
   )
 
+  // Cached: `buildPrompt` counts every history turn to decide what fits, and a single generation
+  // builds the prompt more than once. See `tokenCache.ts` for how the cache is invalidated.
   const countTokens = useCallback(
-    async (text: string) => {
-      if (!text) return 0
-      try {
-        const r = await client.tokenCount(text)
-        return r.count
-      } catch {
-        return estimateTokens(text)
-      }
-    },
+    async (text: string) =>
+      countTokensCached(text, async (t) => {
+        try {
+          const r = await client.tokenCount(t)
+          return r.count
+        } catch {
+          return estimateTokens(t)
+        }
+      }),
     [client],
   )
 
@@ -596,11 +599,16 @@ export function useChatSession(chatId: string | null) {
       // comes from the world clock — only the phase is per-chat.
       const scenePhaseIndex = freshChat.scene?.timePhase ? PHASES.indexOf(freshChat.scene.timePhase) : -1
       const promptPhaseIndex = scenePhaseIndex >= 0 ? scenePhaseIndex : (world?.currentPhaseIndex ?? 0)
-      const worldDescriptionLines = [
+      // Split in two on purpose (see `PromptBuildInput.worldMoment`): what the world *is* is stable
+      // and belongs in the cacheable prefix, while what the world is *doing right now* changes as
+      // the clock advances or the scene moves, and would otherwise invalidate the KV cache for
+      // every history token behind it each time it did.
+      const worldDescriptionLines = world
+        ? [world.description?.trim(), world.rules?.trim() ? `World rules: ${world.rules.trim()}` : ''].filter(Boolean)
+        : []
+      const worldMomentLines = [
         ...(world
           ? [
-              world.description?.trim(),
-              world.rules?.trim() ? `World rules: ${world.rules.trim()}` : '',
               describeWorldMoment({
                 worldId: world.id,
                 characterId: speaker.id,
@@ -629,6 +637,7 @@ export function useChatSession(chatId: string | null) {
         freshChat.scene?.atmosphere ? `Scene atmosphere: ${freshChat.scene.atmosphere}` : '',
       ].filter(Boolean)
       const worldDescription = worldDescriptionLines.length > 0 ? worldDescriptionLines.join('\n') : undefined
+      const worldMoment = worldMomentLines.length > 0 ? worldMomentLines.join('\n') : undefined
 
       const { count: staticSceneTurns, currentBackground: staticSceneBackground } = countStaticSceneTurns(messages)
       const speakerPresence = speaker.schedule?.length
@@ -810,6 +819,10 @@ export function useChatSession(chatId: string | null) {
       const isVisualNovel = vnOverride === 'auto' ? isVnReady(speaker, world) : !!vnOverride
       // How a reply is written when it lands in a dialogue box under a sprite (`prompt/vnProse.ts`).
       const vnProseLine = vnProseNote(isVisualNovel, speaker.card.name, persona?.name || 'You', speakerTrack.mood)
+      // Whether anything on screen will actually use an expression/background/outfit tag this turn
+      // — the VN stage, or the reactive portrait a live date puts beside the log. See the note on
+      // `sceneOptions` below for why this gates what the model is asked for.
+      const wantsFullSceneTag = isVisualNovel || isLiveScene(freshChat.activeEvent)
 
       // Where and when, resolved once: the state block asserts these as fact and `continuityGuard.ts`
       // checks the reply against them afterwards, so both halves have to be reading the same values.
@@ -1003,6 +1016,7 @@ export function useChatSession(chatId: string | null) {
         history: recentHistory,
         chatSummary: freshChat.summary,
         worldDescription,
+        worldMoment,
         lorebooks: [...worldLorebook, ...lorebooks, ...boundBooks, ...factsLorebook],
         template,
         contextBudget: Math.max(contextBudget, 256),
@@ -1020,13 +1034,27 @@ export function useChatSession(chatId: string | null) {
         authorNote: freshChat.authorNote,
         regexScripts,
         sceneOptions: {
+          // Only ask for what something is actually going to render. The full instruction — the
+          // format line plus every valid id — costs around 245 tokens of context on every single
+          // turn, and outside Visual Novel mode most of it is spent on a stage nobody is looking
+          // at: no background is drawn, and the sprite (so the expression and the outfit picking
+          // it) only appears while a live date or hangout is running, via `ReactivePortrait`. Mood
+          // is the exception and stays asked for either way, because `resolveBgmTrack` uses it to
+          // pick the background music, which plays in both modes.
+          //
+          // Switching a chat into VN mode later is self-correcting: the stage reads the most recent
+          // tag, so it starts neutral and picks up the real scene from the next reply — the same
+          // state a brand-new chat's first message already leaves it in.
+          //
           // VN scene-tagging stays keyed on the primary — per-participant sprites are a separate, larger lift.
-          expressionIds: getUnlockedExpressionIds(character, affection),
-          backgroundIds: getUnlockedBackgroundIds(world, affection),
+          expressionIds: wantsFullSceneTag ? getUnlockedExpressionIds(character, affection) : [],
+          backgroundIds: wantsFullSceneTag ? getUnlockedBackgroundIds(world, affection) : [],
           // Only ask for a mood tag when this world actually has music to drive with it.
           moodIds: world?.music && Object.keys(world.music).length > 0 ? SCENE_MOOD_IDS : undefined,
           // A character with no outfit art gets a single-entry list, treated as no choice.
-          outfitIds: selectableOutfitIds(character.outfits, character.sprites, affection, new Set(freshChat.sceneFlags ?? [])),
+          outfitIds: wantsFullSceneTag
+            ? selectableOutfitIds(character.outfits, character.sprites, affection, new Set(freshChat.sceneFlags ?? []))
+            : [],
           currentOutfitId: currentOutfitFrom(messages),
         },
         affection,

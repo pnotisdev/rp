@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { Button } from '@/components/ui/Button'
 import { useConfirmStore } from '@/lib/store/useConfirmStore'
+import { useVnChromeClass } from '@/lib/store/useVnChromeStore'
 
 /**
  * The single mount point for `confirmDialog(...)` — sits next to `<ToastViewport />` in `App.tsx`.
@@ -9,6 +10,8 @@ import { useConfirmStore } from '@/lib/store/useConfirmStore'
  * exactly like dismissing `window.confirm`.
  */
 export function ConfirmDialog() {
+  // Matches the stage when this opens over a VN scene — see `Modal`'s own note and `.vn-chrome`.
+  const vnChrome = useVnChromeClass()
   const pending = useConfirmStore((s) => s.pending)
   const settle = useConfirmStore((s) => s.settle)
   const confirmRef = useRef<HTMLButtonElement>(null)
@@ -39,7 +42,7 @@ export function ConfirmDialog() {
         aria-modal="true"
         aria-label={pending.title}
         onClick={(e) => e.stopPropagation()}
-        className="animate-panel-in flex w-full max-w-sm flex-col rounded-2xl border border-border bg-bg-elevated p-6 themed-shadow"
+        className={`animate-panel-in flex w-full max-w-sm flex-col rounded-2xl border border-border bg-bg-elevated p-6 themed-shadow ${vnChrome}`}
       >
         <h2 className="text-sm font-semibold text-text">{pending.title}</h2>
         {pending.body && <p className="mt-2 text-sm leading-relaxed text-text-muted">{pending.body}</p>}

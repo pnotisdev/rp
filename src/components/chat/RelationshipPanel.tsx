@@ -1,11 +1,11 @@
 import { useState } from 'react'
-import { ArrowUpRight, Heart, X } from 'lucide-react'
+import { ArrowUpRight, Cake, Heart, Package, X } from 'lucide-react'
 import type { Character, GalleryEntry } from '@/lib/characters/cardSpec'
 import type { Chat, WorldCard } from '@/lib/types'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { chatFactsApi, chatsApi, relationshipEventsApi } from '@/lib/api/client'
 import { getGiftCatalog, giftTasteLabel } from '@/lib/dating/gifts'
-import { getItemCatalog } from '@/lib/dating/items'
+import { getItemCatalog, itemEffectSummary } from '@/lib/dating/items'
 import {
   canActuallyAskForCommitment,
   canInitiateFirstTime,
@@ -47,6 +47,8 @@ import type { CommitmentStatus } from '@/lib/types'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { Section } from '@/components/ui/Section'
+import { CatalogAction, CatalogCard, CoinBalance } from '@/components/ui/CatalogCard'
+import { catalogIcon } from '@/lib/dating/catalogVisuals'
 import { SelectField } from '@/components/ui/Field'
 import { confirmDialog } from '@/lib/store/useConfirmStore'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
@@ -676,16 +678,24 @@ export function RelationshipPanel({
       )}
 
       {activeTab === 'shop' && hasShop && (
-        <div className="space-y-4">
+        <div className="space-y-5">
           {viewingCharacter?.birthday !== undefined &&
             world &&
             daysUntilAnnualDate(world.currentDay ?? 0, viewingCharacter.birthday) === 0 && (
-              <div className="rounded-xl bg-romance/10 px-3 py-2.5 text-sm text-romance">
-                🎂 It's {viewingCharacter.card.name}'s birthday today. A gift means a lot more than usual.
+              <div className="flex items-center gap-2.5 rounded-xl bg-romance/10 px-3 py-2.5 text-sm text-romance">
+                <Cake size={16} strokeWidth={1.75} className="shrink-0" />
+                <span>
+                  It's {viewingCharacter.card.name}'s birthday today — a gift lands far harder than usual.
+                </span>
               </div>
             )}
-          <Section title="Gift inventory" description={`Coins: ${chat.giftCoins ?? 0}`} surface="sunken">
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          <Section
+            title="Gifts"
+            description={`Given in person, in the scene. ${viewingCharacter?.card.name ?? 'They'} reacts to what you pick.`}
+            action={<CoinBalance coins={chat.giftCoins ?? 0} />}
+            surface="sunken"
+          >
+            <div className="space-y-2">
               {giftCatalog.map((gift) => {
                 const qty = inventory[gift.id] ?? 0
                 // Progressive taste reveal: only once this exact gift has actually been given at
@@ -693,66 +703,93 @@ export function RelationshipPanel({
                 const discovered = (track.giftsGiven?.[gift.id] ?? 0) > 0
                 const tasteLabel = discovered ? giftTasteLabel(viewingCharacter?.card.name ?? '', viewingCharacter?.giftPreferences?.[gift.id] ?? 0) : ''
                 return (
-                  <div key={gift.id} className="rounded-lg bg-bg-elevated p-3">
-                    <div className="text-sm text-text">{gift.name}</div>
-                    <div className="text-xs text-text-muted">{gift.rarity} • {gift.price} coins • owned {qty}</div>
-                    {tasteLabel && <div className="mt-0.5 text-xs text-romance">{tasteLabel}</div>}
-                    <Button className="mt-2" onClick={() => onBuyGift(gift.id)} disabled={(chat.giftCoins ?? 0) < gift.price}>
-                      Buy
-                    </Button>
-                  </div>
+                  <CatalogCard
+                    key={gift.id}
+                    icon={catalogIcon(gift.tags)}
+                    name={gift.name}
+                    tone={gift.rarity}
+                    owned={qty}
+                    meta={gift.rarity === 'common' ? gift.tags.join(', ') : `${gift.rarity} · ${gift.tags.join(', ')}`}
+                    note={tasteLabel || undefined}
+                    action={
+                      <CatalogAction
+                        label="Buy"
+                        price={gift.price}
+                        onClick={() => onBuyGift(gift.id)}
+                        disabled={(chat.giftCoins ?? 0) < gift.price}
+                      />
+                    }
+                  />
                 )
               })}
             </div>
           </Section>
 
           {itemCatalog.length > 0 && (
-            <Section title="Item shop" description="Buy here, use from the Bag for an immediate effect." surface="sunken">
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {itemCatalog.map((item) => {
-                  const qty = itemInventory[item.id] ?? 0
-                  return (
-                    <div key={item.id} className="rounded-lg bg-bg-elevated p-3">
-                      <div className="text-sm text-text">{item.name}</div>
-                      <div className="text-xs text-text-muted">{item.rarity} • {item.price} coins • owned {qty}</div>
-                      <Button className="mt-2" onClick={() => onBuyItem(item.id)} disabled={(chat.giftCoins ?? 0) < item.price}>
-                        Buy
-                      </Button>
-                    </div>
-                  )
-                })}
+            <Section title="Items" description="Bought here, used from the Bag for an immediate effect." surface="sunken">
+              <div className="space-y-2">
+                {itemCatalog.map((item) => (
+                  <CatalogCard
+                    key={item.id}
+                    icon={catalogIcon(item.tags, Package)}
+                    name={item.name}
+                    tone={item.rarity}
+                    owned={itemInventory[item.id] ?? 0}
+                    meta={itemEffectSummary(item)}
+                    action={
+                      <CatalogAction
+                        label="Buy"
+                        price={item.price}
+                        onClick={() => onBuyItem(item.id)}
+                        disabled={(chat.giftCoins ?? 0) < item.price}
+                      />
+                    }
+                  />
+                ))}
               </div>
             </Section>
           )}
 
           {allowedCategories.includes('toy') && toyCatalogAll.length > 0 && (
             <Section
-              title="Toy shop"
-              description="Warmth/commitment unlocks which of these are buyable. Also reachable from the Unlocks tab once a toy is eligible."
+              title="Toys"
+              description="Warmth and commitment decide which of these are buyable. Also reachable from Unlocks once one is eligible."
               surface="sunken"
             >
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="space-y-2">
                 {toyCatalogAll.map((toy) => {
                   const owned = (toyInventory[toy.id] ?? 0) > 0
                   const eligible = unlockedToyIds.has(toy.id)
                   const price = toy.price ?? 0
                   return (
-                    <div key={toy.id} className={`rounded-lg bg-bg-elevated p-3 ${!eligible ? 'opacity-50' : ''}`}>
-                      <div className="text-sm capitalize text-text">{toy.label}</div>
-                      <div className="text-xs text-text-muted">
-                        {price > 0 ? `${price} coins` : 'Free'}
-                        {owned ? ' • owned' : !eligible ? ` • unlocks at ${toy.minWarmth} warmth${toy.minCommitment ? ` and ${formatCommitmentStatus(toy.minCommitment)}` : ''}` : ''}
-                      </div>
-                      {!owned && (
-                        <Button
-                          className="mt-2"
-                          onClick={() => handleBuyToy(toy.id)}
-                          disabled={!eligible || buyingToyId === toy.id || (chat.giftCoins ?? 0) < price}
-                        >
-                          {buyingToyId === toy.id ? 'Buying…' : 'Buy'}
-                        </Button>
-                      )}
-                    </div>
+                    <CatalogCard
+                      key={toy.id}
+                      icon={Heart}
+                      name={toy.label}
+                      tone="intimate"
+                      locked={!eligible}
+                      owned={owned ? 1 : 0}
+                      meta={
+                        eligible
+                          ? owned
+                            ? 'Yours — use it from Unlocks'
+                            : price > 0
+                              ? 'Available now'
+                              : 'Free'
+                          : `Unlocks at ${toy.minWarmth} warmth${toy.minCommitment ? ` and ${formatCommitmentStatus(toy.minCommitment)}` : ''}`
+                      }
+                      action={
+                        owned ? undefined : (
+                          <CatalogAction
+                            label={buyingToyId === toy.id ? 'Buying…' : 'Buy'}
+                            price={price > 0 ? price : undefined}
+                            tone="romance"
+                            onClick={() => handleBuyToy(toy.id)}
+                            disabled={!eligible || buyingToyId === toy.id || (chat.giftCoins ?? 0) < price}
+                          />
+                        )
+                      }
+                    />
                   )
                 })}
               </div>

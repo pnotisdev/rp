@@ -21,6 +21,7 @@ import { IconButton } from '@/components/ui/IconButton'
 import { Slider } from '@/components/ui/Slider'
 import { TextAreaField } from '@/components/ui/Field'
 import { Button } from '@/components/ui/Button'
+import { useVnChromeClass } from '@/lib/store/useVnChromeStore'
 
 const SELECT_CLASS =
   'w-full cursor-pointer rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40'
@@ -52,6 +53,8 @@ export function TuningPanel({
   /** Optional deep link to the full Settings → Generation tab, for presets/advanced fields/import-export. */
   onOpenSettings?: () => void
 }) {
+  // Matches the stage when this opens over a VN scene — see `Modal`'s own note and `.vn-chrome`.
+  const vnChrome = useVnChromeClass()
   const sampler = useSettingsStore((s) => s.sampler)
   const setSampler = useSettingsStore((s) => s.setSampler)
   const chatBackend = useSettingsStore((s) => s.chatBackend)
@@ -108,7 +111,7 @@ export function TuningPanel({
     <aside
       aria-hidden={!open}
       aria-label="Quick tuning"
-      className={`absolute inset-y-0 right-0 z-40 flex w-full flex-col border-l border-border bg-bg-elevated shadow-2xl transition-transform duration-300 ease-out sm:w-96 ${
+      className={`absolute inset-y-0 right-0 z-40 flex w-full flex-col border-l border-border bg-bg-elevated shadow-2xl transition-transform duration-300 ease-out sm:w-96 ${vnChrome} ${
         open ? 'translate-x-0' : 'pointer-events-none translate-x-full'
       }`}
     >
