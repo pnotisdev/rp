@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildPrompt, type ChatMessage, type PromptBuildInput } from './builder'
+import { buildPrompt, type ChatMessage, type PromptBuildInput, type StyleGuidanceItem } from './builder'
 import { getInstructTemplate } from './instructTemplates'
 import type { CharacterCardData } from '@/lib/characters/cardSpec'
 
@@ -662,5 +662,91 @@ describe('buildPrompt — worldMoment sits after the history, not in the cacheab
     const result = await buildPrompt(baseInput({ history, worldDescription: 'STABLE_WORLD' }))
     expect(result.prompt).toContain('STABLE_WORLD')
     expect(result.prompt).not.toContain('undefined')
+  })
+})
+
+describe('styleGuidanceItems — graceful degradation under a tight budget', () => {
+  // Zeroes every fixed section so `fixedTokens` is 0 and the only thing competing for the budget
+  // besides history is the postHistory block itself — makes the token math in these tests exact
+  // rather than approximate.
+  const noFixedSections: Partial<PromptBuildInput> = {
+    promptSections: { system: false, summary: false, world: false, description: false, participants: false, persona: false, examples: false },
+  }
+
+  it('includes every item, in order, when the budget is roomy', async () => {
+    const items: StyleGuidanceItem[] = [
+      { text: 'ESSENTIAL_ONE', essential: true },
+      { text: 'FLAVOR_ONE', essential: false },
+      { text: 'FLAVOR_TWO', essential: false },
+      { text: 'ESSENTIAL_TWO', essential: true },
+    ]
+    const result = await buildPrompt(baseInput({ ...noFixedSections, styleGuidanceItems: items, contextBudget: 4000 }))
+    expect(result.styleGuidanceDroppedCount).toBe(0)
+    expect(result.prompt.indexOf('ESSENTIAL_ONE')).toBeLessThan(result.prompt.indexOf('FLAVOR_ONE'))
+    expect(result.prompt.indexOf('FLAVOR_ONE')).toBeLessThan(result.prompt.indexOf('FLAVOR_TWO'))
+    expect(result.prompt.indexOf('FLAVOR_TWO')).toBeLessThan(result.prompt.indexOf('ESSENTIAL_TWO'))
+  })
+
+  it('drops the item nearest the end of the non-essential run first, keeping an earlier one as long as it can', async () => {
+    const essential: StyleGuidanceItem = { text: 'ESSENTIAL_MARKER', essential: true }
+    const flavorKept: StyleGuidanceItem = { text: 'KEPT_MARKER', essential: false }
+    // ~104 tokens (estimator: ceil(len/4)) vs KEPT_MARKER's ~3 — a gap wide enough that the exact
+    // value of buildPrompt's internal history-reserve floor can't accidentally make this flaky.
+    const flavorDropped: StyleGuidanceItem = { text: `DROPPED_MARKER_${'x'.repeat(400)}`, essential: false }
+
+    // Calibrate against the real function rather than hand-computing token counts: build once with
+    // only the item that's expected to survive, and read off exactly how much room it and the
+    // generation cue actually cost.
+    const keptOnly = await buildPrompt(
+      baseInput({ ...noFixedSections, styleGuidanceItems: [essential, flavorKept], contextBudget: 4000, includeSectionBreakdown: true }),
+    )
+    const keptOnlyPostHistoryTokens = keptOnly.sectionBreakdown!.find((s) => s.id === 'postHistory')!.tokens
+    const genCueTokens = keptOnly.sectionBreakdown!.find((s) => s.id === 'generationCue')!.tokens
+    // Exactly enough for the kept-only block plus a 320-token cushion: comfortably above the 300
+    // reserve `buildPrompt` holds back for history once nothing more is worth dropping, but well
+    // short of the ~104 extra tokens the long item would add back in if it were still there.
+    const contextBudget = keptOnlyPostHistoryTokens + genCueTokens + 320
+
+    const result = await buildPrompt(
+      baseInput({ ...noFixedSections, styleGuidanceItems: [essential, flavorKept, flavorDropped], contextBudget, includeSectionBreakdown: true }),
+    )
+    expect(result.styleGuidanceDroppedCount).toBe(1)
+    expect(result.prompt).toContain('ESSENTIAL_MARKER')
+    expect(result.prompt).toContain('KEPT_MARKER')
+    expect(result.prompt).not.toContain('DROPPED_MARKER')
+  })
+
+  it('never drops an essential item, however tight the budget gets', async () => {
+    const items: StyleGuidanceItem[] = [
+      { text: 'ESSENTIAL_ALWAYS', essential: true },
+      { text: 'FLAVOR_A', essential: false },
+      { text: 'FLAVOR_B', essential: false },
+      { text: 'FLAVOR_C', essential: false },
+    ]
+    const result = await buildPrompt(baseInput({ ...noFixedSections, styleGuidanceItems: items, contextBudget: 50, history: [] }))
+    expect(result.prompt).toContain('ESSENTIAL_ALWAYS')
+    expect(result.prompt).not.toContain('FLAVOR_A')
+    expect(result.prompt).not.toContain('FLAVOR_B')
+    expect(result.prompt).not.toContain('FLAVOR_C')
+    expect(result.styleGuidanceDroppedCount).toBe(3)
+  })
+
+  it('a plain-string styleGuidance becomes one essential item — never dropped, count always 0', async () => {
+    const result = await buildPrompt(baseInput({ ...noFixedSections, styleGuidance: 'OLD_STYLE_STRING', contextBudget: 50, history: [] }))
+    expect(result.prompt).toContain('OLD_STYLE_STRING')
+    expect(result.styleGuidanceDroppedCount).toBe(0)
+  })
+
+  it('styleGuidanceItems wins when both forms are somehow given', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        ...noFixedSections,
+        styleGuidance: 'SHOULD_NOT_APPEAR',
+        styleGuidanceItems: [{ text: 'SHOULD_APPEAR', essential: true }],
+        contextBudget: 4000,
+      }),
+    )
+    expect(result.prompt).toContain('SHOULD_APPEAR')
+    expect(result.prompt).not.toContain('SHOULD_NOT_APPEAR')
   })
 })

@@ -13,6 +13,7 @@ import {
   Play,
   RotateCcw,
   Star,
+  Sunrise,
   Volume1,
   Volume2,
   X,
@@ -61,7 +62,7 @@ import { resolveExpressionSprite } from '@/lib/vn/expressions'
 import { currentOutfitFrom } from '@/lib/vn/outfits'
 import { vnArtHint } from '@/lib/vn/artHint'
 import { getWorldTemplate } from '@/lib/world/worldTemplates'
-import { isNightPhase } from '@/lib/world/calendar'
+import { getEnergyRemaining, getMaxEnergyForDay, isNightPhase } from '@/lib/world/calendar'
 
 /**
  * Visual-novel presentation of a chat: full-bleed scene background, each cast member's sprite
@@ -447,6 +448,13 @@ export function VNStage({
   // the narration itself, which is what stops a chat's opening messages (a static greeting carries
   // no `<<scene:>>` tag at all) from landing on an unplaced void.
   const night = isNightPhase(world?.currentPhaseIndex)
+  // The day-planner's action budget, surfaced here too — it used to live only inside the "Plan your
+  // day" modal, so knowing whether there was still room for another activity today meant actually
+  // opening it. Same visibility gate `ChatWindow`'s own day-planner toolbar button uses, so the
+  // readout never claims a budget exists for a mode/character that has opted the whole mechanic out.
+  const showEnergy = !!world && !character?.dateModeOptOut && chat.assistOverrides?.showDateEventButton !== false
+  const energyRemaining = showEnergy ? getEnergyRemaining(world!.currentDay ?? 0, world!.currentPhaseIndex ?? 0) : 0
+  const energyMax = showEnergy ? getMaxEnergyForDay(world!.currentDay ?? 0) : 0
   const narration = [lastCharMsg?.text, lastUserMsg?.text].filter(Boolean).join(' ')
   const resolvedBackground = resolveSceneBackground({
     taggedBackground: scene?.background,
@@ -855,6 +863,26 @@ export function VNStage({
             </div>
             <StageMeter value={warmth} variant="vn" className="w-28 max-w-full" />
           </StageRow>
+          {showEnergy && (
+            // Same "N/M actions" budget the Day Planner modal shows, surfaced here too — knowing
+            // whether there's still room for another activity today used to mean actually opening
+            // that modal to find out.
+            <div
+              className="flex items-center gap-1.5 truncate border-t border-white/10 px-3 py-1.5 text-xs"
+              title="Today's day-planner action budget. Opens in Plan your day."
+            >
+              <Sunrise size={11} strokeWidth={2.25} className="shrink-0 text-white/60" />
+              <span className="shrink-0 uppercase tracking-wide text-white/60">Today</span>
+              <span className="flex shrink-0 items-center gap-0.5">
+                {Array.from({ length: energyMax }).map((_, i) => (
+                  <span key={i} className={`h-1.5 w-1.5 rounded-full ${i < energyRemaining ? 'bg-white/90' : 'bg-white/20'}`} />
+                ))}
+              </span>
+              <span className="truncate text-white/70">
+                {energyRemaining === 0 ? 'Out of actions — rest to reset' : `${energyRemaining} action${energyRemaining === 1 ? '' : 's'} left`}
+              </span>
+            </div>
+          )}
           {chat.activeEvent?.title && (
             <div className="flex items-center gap-1.5 truncate border-t border-white/10 px-3 py-1.5 text-xs">
               <span className="shrink-0 uppercase tracking-wide text-white/60">

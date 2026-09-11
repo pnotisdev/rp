@@ -18,6 +18,12 @@ export { BUILTIN_SYSTEM_PROMPTS } from './systemPrompts'
  * budget, and injecting depth-positioned notes and lorebook entries.
  */
 
+/** One line of `styleGuidanceItems` — see that field's doc comment for what `essential` gates. */
+export interface StyleGuidanceItem {
+  text: string
+  essential: boolean
+}
+
 /** Prompt sections a caller (Settings → Generation) can toggle on/off. Not included: world-info blocks and the Author's Note, which have their own placement controls. */
 export type PromptSectionId = 'system' | 'summary' | 'world' | 'description' | 'participants' | 'persona' | 'examples'
 
@@ -100,8 +106,32 @@ export interface PromptBuildInput {
   activeObjective?: { title: string; description?: string; pendingTasks: string[] }
   /** Short natural-language relationship-stage nudge, same late placement as activeObjective. */
   relationshipDescription?: string
-  /** Global writing-style steering (e.g. "avoid em dashes"), same late placement. */
+  /**
+   * Global writing-style steering (e.g. "avoid em dashes"), same late placement. Plain-string form:
+   * always included in full, at whatever token cost. Prefer `styleGuidanceItems` below for anything
+   * assembled from several independent lines — it degrades gracefully under a tight budget instead
+   * of silently eating into the history window.
+   */
   styleGuidance?: string
+  /**
+   * The prioritized alternative to `styleGuidance`. `useChatSession.ts` builds VN mode's ~30-line
+   * steer (mood/need/intent/fear/desire, agency guard, scene state, intimacy guidance, and the
+   * rest) from this array instead of a pre-joined string, because that whole block used to be
+   * unconditional: every line went in regardless of `contextBudget`, and only `history` ever paid
+   * for a small context window being small. A model running at 4k-8k context with an active VN
+   * scene could lose most of its history to a "steering" block bigger than the reply it was steering.
+   *
+   * `essential: true` items are never dropped (content policy, format rules, the user's own global
+   * style setting, and anything stating concrete engine state like the scene ledger or an active
+   * event — dropping those would make the model contradict what the UI is showing). Everything else
+   * is "character mind" texture (mood/need/fear/desire/plans/beliefs, stock-phrasing/rebuff/
+   * reciprocity nudges) that thins a reply's colour if it's missing but never breaks it, and is
+   * dropped lowest-value-first — see the doc comment on the drop loop in `buildPrompt` — only once
+   * dropping it is what keeps the history window from collapsing. Wins over `styleGuidance` when
+   * both are given; when omitted, `styleGuidance` is used unchanged (every existing caller keeps
+   * working exactly as before).
+   */
+  styleGuidanceItems?: StyleGuidanceItem[]
   /** SillyTavern-style Author's Note. `at_depth` is injected into history `depth` turns up from the latest; `before_char`/`after_char` sit in the fixed identity region. */
   authorNote?: { text: string; position: 'before_char' | 'after_char' | 'at_depth'; depth: number }
   /** User-defined find/replace rules applied to each history turn's text before rendering. */
@@ -137,6 +167,8 @@ export interface PromptBuildResult {
   activatedEntries: LorebookEntry[]
   droppedForBudget: LorebookEntry[]
   droppedForGroup: LorebookEntry[]
+  /** How many `styleGuidanceItems` (non-essential ones only) were dropped to keep the history window from collapsing. 0 whenever the plain-string `styleGuidance` field was used instead, or nothing needed dropping. */
+  styleGuidanceDroppedCount: number
   /** Present only when `includeSectionBreakdown` was requested — per-section token counts (approximate, won't sum exactly to `tokensUsed`). */
   sectionBreakdown?: PromptSectionBreakdownItem[]
   /** Sticky/cooldown state to persist for the next turn — undefined when `worldInfoState` wasn't passed in. */
@@ -256,27 +288,8 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
   )
   const worldAtDepthTokens = worldAtDepthItems.reduce((sum, i) => sum + i.tokens, 0)
 
-  // Injected right before generation, same late placement as post-history-instructions. Impersonation
-  // suppresses the character-reply steers, since the card's post-history note and scene tag assume {{char}} is speaking.
-  const imp = !!input.impersonateAsUser
-  const postHistoryBlock = [
-    // Scene framing first: where and when, before anything about how to behave.
-    worldMomentBlock,
-    imp || !character.post_history_instructions?.trim() ? '' : sub(character.post_history_instructions),
-    imp || !input.globalPostHistory?.trim() ? '' : sub(input.globalPostHistory),
-    buildObjectiveBlock(input.activeObjective, sub),
-    input.relationshipDescription?.trim() ? sub(input.relationshipDescription) : '',
-    input.styleGuidance?.trim() ? input.styleGuidance.trim() : '',
-    imp ? '' : buildSceneInstruction(input.sceneOptions),
-    imp
-      ? ''
-      : `Conversation fidelity: keep statements with their speaker. Resolve references from the exchange; never attribute ${macroCtx.charName}'s words or beliefs to ${macroCtx.userName}. Answer ${macroCtx.userName}'s latest message directly.`,
-    imp ? `[Write only ${macroCtx.userName}'s next message. Stop before ${macroCtx.charName} replies.]` : '',
-  ]
-    .filter(Boolean)
-    .join('\n\n')
-  const postHistoryTokens = postHistoryBlock ? await countTokens(postHistoryBlock) : 0
-
+  // Computed ahead of postHistoryBlock below — genCue doesn't depend on it, and the drop loop needs
+  // genCueTokens to know how much room history actually has left.
   const continuing = !!input.continueLastTurn && history.length > 0
   const continuedTurn = continuing ? history[history.length - 1] : null
   const historyForTrimming = continuing ? history.slice(0, -1) : history
@@ -287,6 +300,64 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
       ? turnPrefix('user', macroCtx.userName, template)
       : turnPrefix('char', input.nextSpeakerName?.trim() || macroCtx.charName, template)
   const genCueTokens = await countTokens(genCue)
+
+  // Injected right before generation, same late placement as post-history-instructions. Impersonation
+  // suppresses the character-reply steers, since the card's post-history note and scene tag assume {{char}} is speaking.
+  const imp = !!input.impersonateAsUser
+
+  // `styleGuidanceItems` wins when given; the plain string becomes a single essential item so the
+  // rest of this function never has to branch on which form the caller used.
+  let styleItems: StyleGuidanceItem[] = input.styleGuidanceItems
+    ? input.styleGuidanceItems.filter((i) => i.text.trim())
+    : input.styleGuidance?.trim()
+      ? [{ text: input.styleGuidance.trim(), essential: true }]
+      : []
+
+  const buildPostHistory = (items: StyleGuidanceItem[]) =>
+    [
+      // Scene framing first: where and when, before anything about how to behave.
+      worldMomentBlock,
+      imp || !character.post_history_instructions?.trim() ? '' : sub(character.post_history_instructions),
+      imp || !input.globalPostHistory?.trim() ? '' : sub(input.globalPostHistory),
+      buildObjectiveBlock(input.activeObjective, sub),
+      input.relationshipDescription?.trim() ? sub(input.relationshipDescription) : '',
+      items.map((i) => i.text).join('\n'),
+      imp ? '' : buildSceneInstruction(input.sceneOptions),
+      imp
+        ? ''
+        : `Conversation fidelity: keep statements with their speaker. Resolve references from the exchange; never attribute ${macroCtx.charName}'s words or beliefs to ${macroCtx.userName}. Answer ${macroCtx.userName}'s latest message directly.`,
+      imp ? `[Write only ${macroCtx.userName}'s next message. Stop before ${macroCtx.charName} replies.]` : '',
+    ]
+      .filter(Boolean)
+      .join('\n\n')
+
+  let postHistoryBlock = buildPostHistory(styleItems)
+  let postHistoryTokens = postHistoryBlock ? await countTokens(postHistoryBlock) : 0
+
+  // Below this many tokens, history has essentially nothing left to work with — the model would be
+  // answering off a single truncated turn or none at all. VN mode's steering block used to be
+  // unconditional (every mood/need/fear/plan line, every turn, whatever the budget), so on a small
+  // context window it was this floor collapsing to zero that first exposed the problem: the fixed
+  // "how to write this reply" text was crowding out the "what has actually happened" text it was
+  // supposed to be steering. Chosen as comfortably more than one ordinary turn, not a measured
+  // science — the point is having *a* floor, not this exact number.
+  const HISTORY_FLOOR_TOKENS = 300
+  let styleGuidanceDroppedCount = 0
+  while (
+    contextBudget - fixedTokens - postHistoryTokens - genCueTokens - authorNoteAtDepthTokens - worldAtDepthTokens <
+    HISTORY_FLOOR_TOKENS
+  ) {
+    // Drop the least-essential item still standing. Items are dropped from the end of the
+    // non-essential run first — `useChatSession.ts` orders its flavor lines least-valuable-last
+    // (mood, the line most central to a character's voice, drops last of all of them) — so this is
+    // "lowest-value first" without this function needing to know what any individual line means.
+    const dropIndex = findLastIndex(styleItems, (i) => !i.essential)
+    if (dropIndex === -1) break // Nothing left that's safe to drop; let history do what it can.
+    styleItems = styleItems.filter((_, i) => i !== dropIndex)
+    styleGuidanceDroppedCount++
+    postHistoryBlock = buildPostHistory(styleItems)
+    postHistoryTokens = postHistoryBlock ? await countTokens(postHistoryBlock) : 0
+  }
 
   let remaining =
     contextBudget - fixedTokens - postHistoryTokens - genCueTokens - authorNoteAtDepthTokens - worldAtDepthTokens
@@ -367,6 +438,7 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
     activatedEntries,
     droppedForBudget,
     droppedForGroup,
+    styleGuidanceDroppedCount,
     sectionBreakdown,
     worldInfoState,
     systemText: fixedText,
@@ -376,6 +448,14 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
 
 function fillTemplate(part: string, name: string): string {
   return part.replace('{name}', name)
+}
+
+/** `Array.prototype.findLastIndex` — not available at this project's ES2020 target. */
+function findLastIndex<T>(items: T[], predicate: (item: T) => boolean): number {
+  for (let i = items.length - 1; i >= 0; i--) {
+    if (predicate(items[i])) return i
+  }
+  return -1
 }
 
 function buildObjectiveBlock(
