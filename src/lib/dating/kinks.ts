@@ -19,6 +19,16 @@ export const BUILT_IN_KINKS = [
   'oral',
   'rough',
   'gentle',
+  // A catalog entry can only ever be ruled out by a kink an author can actually name, and the
+  // editor offers exactly this list — so a content class with no id here ships ungateable however
+  // carefully the entry itself is written.
+  'anal',
+  'marking',
+  'overstimulation',
+  'bodily_fluids',
+  'recording',
+  'voyeurism',
+  'degradation',
 ] as const
 
 /** Deliberately open: a world's own entries can name kinks the built-in list never anticipated. */

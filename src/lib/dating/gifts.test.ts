@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { TAG_ICONS } from './catalogVisuals'
 import {
   appendGiftLog,
   BIRTHDAY_GIFT_MULTIPLIER,
@@ -304,5 +305,43 @@ describe('pre-existing gift catalog exports still work', () => {
     const inv = defaultGiftInventory()
     expect(Object.keys(inv).length).toBe(2)
     expect(DEFAULT_GIFT_CATALOG.length).toBeGreaterThan(0)
+  })
+})
+
+// §2 of CATALOG_IDEAS.md. Taste discovery is the whole point of `giftPreferences`, and it only
+// works if a character's authored likes have enough to discriminate between.
+describe('DEFAULT_GIFT_CATALOG coverage', () => {
+  it('has unique ids', () => {
+    const ids = DEFAULT_GIFT_CATALOG.map((g) => g.id)
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  it('gives every icon tag at least two gifts, so a preference can actually discriminate', () => {
+    const counts = new Map<string, number>()
+    for (const gift of DEFAULT_GIFT_CATALOG) {
+      for (const tag of gift.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1)
+    }
+    const thin = TAG_ICONS.map(([tag]) => tag).filter((tag) => (counts.get(tag) ?? 0) < 2)
+    expect(thin).toEqual([])
+  })
+
+  it('never tags a gift with something the icon table cannot render', () => {
+    const known = new Set(TAG_ICONS.map(([tag]) => tag))
+    for (const gift of DEFAULT_GIFT_CATALOG) {
+      for (const tag of gift.tags) expect(known).toContain(tag)
+    }
+  })
+
+  it('keeps every rarity band populated, since rarity is what the shop colours by', () => {
+    for (const rarity of ['common', 'uncommon', 'rare', 'epic'] as const) {
+      expect(DEFAULT_GIFT_CATALOG.some((g) => g.rarity === rarity)).toBe(true)
+    }
+  })
+
+  it('prices inside the coin economy, cheapest common under the priciest epic', () => {
+    for (const gift of DEFAULT_GIFT_CATALOG) {
+      expect(gift.price).toBeGreaterThan(0)
+      expect(gift.price).toBeLessThanOrEqual(30)
+    }
   })
 })

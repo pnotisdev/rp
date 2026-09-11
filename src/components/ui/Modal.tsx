@@ -22,6 +22,8 @@ interface ModalProps {
   size?: ModalSize
   /** Caps the panel at one consistent height so tall content scrolls internally instead of ever overflowing the viewport — leave off for a short, static-height form. Scroll regions within stay up to the content (a single body, or several independent ones, e.g. a fixed summary above a scrolling list). */
   scrollable?: boolean
+  /** Trims the shell's padding and the header's gap — for a dense, tabbed panel where the default roominess pushes the actual content off the bottom. */
+  compact?: boolean
   /** Hides the header's own Close button — for a dialog whose footer already has a Cancel action, so there's only one way to dismiss it. */
   hideHeaderClose?: boolean
   /** Extra controls in the header, between the title and Close — rare; most panels don't need this. */
@@ -41,6 +43,7 @@ export function Modal({
   description,
   size = 'lg',
   scrollable,
+  compact,
   hideHeaderClose,
   headerExtra,
   children,
@@ -78,9 +81,11 @@ export function Modal({
         aria-label={title}
         tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
-        className={`animate-panel-in flex w-full flex-col rounded-2xl border border-border bg-bg-elevated p-5 themed-shadow sm:p-7 ${vnChrome} ${SIZE_CLASSES[size]} ${scrollable ? 'max-h-[90vh] sm:max-h-[85vh]' : ''}`}
+        className={`animate-panel-in flex w-full flex-col rounded-2xl border border-border bg-bg-elevated themed-shadow ${
+          compact ? 'p-4 sm:p-5' : 'p-5 sm:p-7'
+        } ${vnChrome} ${SIZE_CLASSES[size]} ${scrollable ? 'max-h-[90vh] sm:max-h-[85vh]' : ''}`}
       >
-        <div className={`flex shrink-0 items-center justify-between gap-4 ${description ? 'mb-2' : 'mb-4'}`}>
+        <div className={`flex shrink-0 items-center justify-between gap-4 ${description ? 'mb-2' : compact ? 'mb-3' : 'mb-4'}`}>
           <h2 className="text-sm font-semibold text-text">{title}</h2>
           <div className="flex items-center gap-2">
             {headerExtra}

@@ -12,18 +12,24 @@ import {
   intimacyOptionsGuidance,
   nextLockedInCategory,
   resolveIntimacyPromptNote,
+  type IntimacyCategory,
   type IntimacyUnlockable,
 } from './intimacyCatalog'
+import { BUILT_IN_KINKS, isAnyHardLimit } from './kinks'
 
 describe('getUnlockedIntimacyOptions', () => {
   it('unlocks nothing at zero warmth', () => {
     expect(getUnlockedIntimacyOptions(0, 'none')).toEqual([])
   })
 
-  it('unlocks low-warmth kissing spots before anything else', () => {
+  it('unlocks only non-explicit closeness and kissing at low warmth', () => {
     const unlocked = getUnlockedIntimacyOptions(20, 'none')
     expect(unlocked.length).toBeGreaterThan(0)
-    expect(unlocked.every((i) => i.category === 'kissing_spot')).toBe(true)
+    // Both low-band categories, and nothing explicit — `affection` joined `kissing_spot` here so
+    // the ladder has rungs below its first kiss, which it previously did not.
+    expect(unlocked.every((i) => i.category === 'kissing_spot' || i.category === 'affection')).toBe(true)
+    expect(unlocked.some((i) => i.category === 'affection')).toBe(true)
+    expect(unlocked.some((i) => i.category === 'kissing_spot')).toBe(true)
   })
 
   it('keeps a warmth-eligible item locked when its commitment floor is not met', () => {
@@ -262,10 +268,14 @@ describe('intimacyOptionsGuidance', () => {
 })
 
 describe('allowedIntimacyCategories / isExplicitCategory', () => {
-  it('treats kissing as romantic rather than explicit, at every level', () => {
+  it('treats closeness and kissing as romantic rather than explicit, at every level', () => {
     expect(isExplicitCategory('kissing_spot')).toBe(false)
+    // Holding hands in public is not explicit content. Filed under `activity` it would have been
+    // hidden from every rating except 'explicit', which is exactly backwards.
+    expect(isExplicitCategory('affection')).toBe(false)
     for (const level of ['default', 'fade_to_black', 'suggestive', 'explicit'] as const) {
       expect(allowedIntimacyCategories(level)).toContain('kissing_spot')
+      expect(allowedIntimacyCategories(level)).toContain('affection')
     }
   })
 
@@ -276,12 +286,12 @@ describe('allowedIntimacyCategories / isExplicitCategory', () => {
   })
 
   it('offers everything at the explicit level', () => {
-    expect(allowedIntimacyCategories('explicit')).toEqual(['kissing_spot', 'position', 'toy', 'activity'])
+    expect(allowedIntimacyCategories('explicit')).toEqual(['affection', 'kissing_spot', 'position', 'toy', 'activity'])
   })
 
   it('takes explicit actions away only when the rating asks for less', () => {
     for (const level of ['fade_to_black', 'suggestive'] as const) {
-      expect(allowedIntimacyCategories(level)).toEqual(['kissing_spot'])
+      expect(allowedIntimacyCategories(level)).toEqual(['affection', 'kissing_spot'])
     }
   })
 
@@ -289,7 +299,7 @@ describe('allowedIntimacyCategories / isExplicitCategory', () => {
     // `intimacyGuidance`'s own contract: 'default' is "the exact behavior every chat already had
     // before this setting existed". Hiding actions from someone who never opened the setting would
     // break that promise and silently remove buttons they already had.
-    expect(allowedIntimacyCategories('default')).toEqual(['kissing_spot', 'position', 'toy', 'activity'])
+    expect(allowedIntimacyCategories('default')).toEqual(['affection', 'kissing_spot', 'position', 'toy', 'activity'])
   })
 
   it('deliberately differs from the prompt gating at the default level', () => {
@@ -336,9 +346,30 @@ describe('per-character limits on the action set', () => {
     expect(getUnlockedIntimacyOptions(100, 'exclusive', undefined, undefined, dislikes).some((i) => i.id === 'toy-handcuffs')).toBe(true)
   })
 
-  it('leaves the action set alone for a character with no profile at all', () => {
-    const all = getUnlockedIntimacyOptions(100, 'exclusive')
-    expect(getUnlockedIntimacyOptions(100, 'exclusive', undefined, undefined, {})).toHaveLength(all.length)
+  it('withholds nothing from a profile-less character beyond the opt-in entries', () => {
+    const eligible = DEFAULT_INTIMACY_CATALOG.filter((o) => o.minWarmth <= 100 && o.category !== 'toy')
+    const offered = getUnlockedIntimacyOptions(100, 'exclusive')
+    const withheld = eligible.filter((o) => !offered.some((k) => k.id === o.id))
+    // Every other entry is a veto model: absent a hard limit, it is offered. These are the only
+    // ones that are opt-in, and "no profile at all" is exactly the case they exist to catch —
+    // an unauthored character sits at 0 on every kink, and 0 is not consent.
+    expect(withheld.map((o) => o.id)).toEqual(['act-recording'])
+    expect(withheld.every((o) => o.requiresEagerness)).toBe(true)
+    // An empty profile object behaves identically to no profile at all.
+    const withEmptyProfile = getUnlockedIntimacyOptions(100, 'exclusive', undefined, undefined, {})
+    expect(withEmptyProfile.map((o) => o.id)).toEqual(offered.map((o) => o.id))
+  })
+
+  it('withholds a requiresEagerness entry until the character is actually into it, not merely silent', () => {
+    const has = (profile: Parameters<typeof getUnlockedIntimacyOptions>[4]) =>
+      getUnlockedIntimacyOptions(100, 'exclusive', undefined, undefined, profile).some((o) => o.id === 'act-recording')
+    expect(has({})).toBe(false)
+    expect(has({ kinks: { valence: { recording: 0 } } })).toBe(false)
+    expect(has({ kinks: { valence: { recording: -1 } } })).toBe(false)
+    expect(has({ kinks: { valence: { recording: 1 } } })).toBe(true)
+    expect(has({ kinks: { valence: { recording: 2 } } })).toBe(true)
+    // A hard limit still wins over eagerness recorded elsewhere.
+    expect(has({ kinks: { valence: { recording: 2 }, hardLimits: ['recording'] } })).toBe(false)
   })
 })
 
@@ -366,5 +397,104 @@ describe('entry tagging', () => {
 
   it('reads an untagged entry as involving no kinks rather than guessing', () => {
     expect(intimacyEntryKinks({ id: 'unknown', category: 'activity', label: 'x', minWarmth: 0 })).toEqual([])
+  })
+})
+
+// §8 of CATALOG_IDEAS.md. `isAnyHardLimit([])` is always false, so an entry missing from
+// `BUILT_IN_ENTRY_KINKS` can never be excluded by a limit — which is fine for a wrist kiss and is
+// the entire safety mechanism for an explicit entry. These pin that the table stays the gate.
+describe('built-in entries are reachable by the hard-limit system', () => {
+  const EXPLICIT_CATEGORIES: IntimacyCategory[] = ['position', 'toy', 'activity']
+
+  // The entries where an untagged row would mean the limits system is inert for the riskiest
+  // content in the catalog. Pinned individually rather than as a coverage percentage, because the
+  // thing that matters is not how many are tagged but that *these* are.
+  const MUST_DECLARE: Record<string, string> = {
+    'act-anal': 'anal',
+    'act-recording': 'recording',
+    'act-overstimulation': 'overstimulation',
+    'act-finish-on': 'bodily_fluids',
+    'act-cleaning-up': 'bodily_fluids',
+    'act-marking': 'marking',
+    'act-begging': 'degradation',
+    'act-public-risk': 'exhibitionism',
+    'act-mutual-watching': 'voyeurism',
+    'pos-full-nelson': 'bondage',
+    'pos-window': 'exhibitionism',
+    'toy-plug': 'anal',
+    'toy-wand': 'overstimulation',
+    'toy-under-bed': 'bondage',
+    'toy-spreader': 'bondage',
+    'toy-mirror': 'voyeurism',
+  }
+
+  it('declares the content class on every entry a limit most needs to reach', () => {
+    for (const [id, kink] of Object.entries(MUST_DECLARE)) {
+      const entry = DEFAULT_INTIMACY_CATALOG.find((o) => o.id === id)
+      expect(entry, `${id} is missing from the catalog`).toBeDefined()
+      expect(intimacyEntryKinks(entry!), id).toContain(kink)
+    }
+  })
+
+  it('keeps untagged explicit entries to the handful that carry no stance at all', () => {
+    const untagged = DEFAULT_INTIMACY_CATALOG.filter(
+      (o) => EXPLICIT_CATEGORIES.includes(o.category) && intimacyEntryKinks(o).length === 0,
+    )
+    // A ceiling rather than an exact list: a new entry is free to be stanceless, but if most of a
+    // growing catalog drifts that way the hard-limit system quietly stops meaning anything.
+    const explicit = DEFAULT_INTIMACY_CATALOG.filter((o) => EXPLICIT_CATEGORIES.includes(o.category))
+    expect(untagged.length / explicit.length).toBeLessThan(0.3)
+    for (const entry of untagged) expect(Object.keys(MUST_DECLARE)).not.toContain(entry.id)
+  })
+
+  it('a hard limit actually removes the entries that declare it', () => {
+    const profile = { hardLimits: ['bondage' as const] }
+    const bondage = DEFAULT_INTIMACY_CATALOG.filter((o) => intimacyEntryKinks(o).includes('bondage'))
+    expect(bondage.length).toBeGreaterThan(0)
+    for (const entry of bondage) {
+      expect(isAnyHardLimit(profile, intimacyEntryKinks(entry))).toBe(true)
+    }
+  })
+
+  it('names every kink the catalog uses in BUILT_IN_KINKS, so an author can actually set it as a limit', () => {
+    const used = new Set(DEFAULT_INTIMACY_CATALOG.flatMap((o) => intimacyEntryKinks(o)))
+    for (const kink of used) {
+      expect(BUILT_IN_KINKS).toContain(kink)
+    }
+  })
+})
+
+// §9.2 of CATALOG_IDEAS.md. "The edge of the onsen" is nonsense in a classroom, and warmth is no
+// kind of gate on that.
+describe('requiresBackground', () => {
+  const at = (background?: string) =>
+    getUnlockedIntimacyOptions(100, 'exclusive', undefined, undefined, undefined, background).map((o) => o.id)
+
+  it('offers a location-tied entry only where it makes sense', () => {
+    expect(at('onsen')).toContain('pos-onsen-edge')
+    expect(at('classroom')).not.toContain('pos-onsen-edge')
+    expect(at('bedroom')).not.toContain('pos-onsen-edge')
+  })
+
+  it('offers it in any of the places it lists, not just the first', () => {
+    expect(at('shower')).toContain('pos-shower-bench')
+    expect(at('onsen')).toContain('pos-shower-bench')
+    expect(at('kitchen')).not.toContain('pos-shower-bench')
+  })
+
+  it("treats 'unknown' as different from 'wrong place', so a caller with no background loses nothing", () => {
+    expect(at(undefined)).toContain('pos-onsen-edge')
+    expect(at(undefined)).toContain('pos-desk')
+  })
+
+  it('leaves every entry with no location requirement alone', () => {
+    // `requiresEagerness` entries are withheld for their own reason; this is about location only.
+    const unrestricted = DEFAULT_INTIMACY_CATALOG.filter((o) => !o.requiresBackground && !o.requiresEagerness)
+    for (const background of ['classroom', 'onsen', 'bedroom']) {
+      const offered = at(background)
+      for (const entry of unrestricted) {
+        if (entry.minWarmth <= 100 && entry.category !== 'toy') expect(offered, `${entry.id} in ${background}`).toContain(entry.id)
+      }
+    }
   })
 })

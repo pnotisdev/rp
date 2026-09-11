@@ -31,12 +31,12 @@ export function CatalogCard({ icon: Icon, name, tone = 'common', meta, note, own
   const tones = RARITY_TONE[tone]
   return (
     <div
-      className={`flex items-center gap-3 rounded-xl bg-bg-elevated p-3 ring-1 transition-colors ${
+      className={`flex items-center gap-2.5 rounded-lg bg-bg-elevated px-2.5 py-2 ring-1 transition-colors ${
         locked ? 'opacity-55 ring-border/60' : `${tones.ring} hover:bg-bg-elevated/70`
       }`}
     >
-      <div className={`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${tones.tile}`}>
-        <Icon size={18} strokeWidth={1.75} />
+      <div className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${tones.tile}`}>
+        <Icon size={17} strokeWidth={1.75} />
         {locked && (
           <span className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-bg-sunken text-text-muted ring-1 ring-border">
             <Lock size={9} strokeWidth={2.5} />
@@ -47,15 +47,15 @@ export function CatalogCard({ icon: Icon, name, tone = 'common', meta, note, own
         <div className="flex items-center gap-1.5">
           {/* `first-letter:uppercase`, not `capitalize`: the toy catalog stores lowercase labels
               ("a feather tickler"), and CSS `capitalize` would Title Case Every Word of them. */}
-          <span className="truncate text-sm text-text first-letter:uppercase">{name}</span>
+          <span className="truncate text-[13px] text-text first-letter:uppercase">{name}</span>
           {owned > 0 && (
             <span className="shrink-0 rounded-full bg-bg-sunken px-1.5 text-[11px] tabular-nums text-text-muted">
               ×{owned}
             </span>
           )}
         </div>
-        {meta && <div className="truncate text-xs text-text-muted">{meta}</div>}
-        {note && <div className="truncate text-xs text-romance">{note}</div>}
+        {meta && <div className="truncate text-[11px] text-text-muted">{meta}</div>}
+        {note && <div className="truncate text-[11px] text-romance">{note}</div>}
       </div>
       {action && <div className="shrink-0">{action}</div>}
     </div>

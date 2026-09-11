@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { charactersApi, chatFactsApi, chatsApi, instructTemplatesApi, messagesApi, objectivesApi, personasApi, relationshipEventsApi, worldInfoBooksApi, worldsApi } from '@/lib/api/client'
 import { newId } from '@/lib/id'
-import type { AuthorNote, Chat, CommitmentStatus, DateEventCard, MessageIntent, Objective, ObjectiveTask, RelationshipStage, StoredMessage, WorldCard } from '@/lib/types'
+import type { AuthorNote, Chat, CommitmentStatus, DateEventCard, ItemEffect, MessageIntent, Objective, ObjectiveTask, RelationshipStage, StoredMessage, WorldCard } from '@/lib/types'
 import { collectImageBase64, composeMessageText, type PendingAttachment } from '@/lib/attachments'
 import { makeGenKey } from '@/lib/api/kobold'
 import { generateWithTimeout } from '@/lib/api/generateWithTimeout'
@@ -149,6 +149,7 @@ import { getInstructTemplate, resolveInstructTemplate } from '@/lib/prompt/instr
 import { intimacyGuidance, resolveIntimacyLevel } from '@/lib/prompt/intimacyGuidance'
 import { chatCompletionSamplerToRequest } from '@/lib/api/chatCompletionSampler'
 import { extractSceneTag, stripSceneTagForDisplay, type SceneTag } from '@/lib/vn/sceneTag'
+import { resolveSceneBackground } from '@/lib/vn/resolveBackground'
 import { withIndefiniteArticle } from '@/lib/text/article'
 import {
   balanceTrailingMarkup,
@@ -726,11 +727,25 @@ export function useChatSession(chatId: string | null) {
       const ownedToyIds = new Set(Object.keys(freshChat.toyInventory ?? {}))
       // A world's own content rating wins over the global Settings dial.
       const intimacyLevel = resolveIntimacyLevel(world?.intimacyLevel, globalIntimacyLevel)
+      // Same location gate the panel applies — an entry tied to a place the scene isn't in should
+      // not be described to the model either, or it will reach for it and the prose goes somewhere
+      // the background says it can't be.
+      const sceneBackgroundId = resolveSceneBackground({
+        taggedBackground: undefined,
+        chat: freshChat,
+        world,
+        affection: speakerWarmth,
+        narration: undefined,
+      }).id
       const intimacyOptions = intimacyOptionsGuidance(
-        getUnlockedIntimacyOptions(speakerWarmth, speakerTrack.commitmentStatus ?? 'none', world, ownedToyIds, {
-          touch: speaker.touchProfile,
-          kinks: speaker.kinkProfile,
-        }),
+        getUnlockedIntimacyOptions(
+          speakerWarmth,
+          speakerTrack.commitmentStatus ?? 'none',
+          world,
+          ownedToyIds,
+          { touch: speaker.touchProfile, kinks: speaker.kinkProfile },
+          sceneBackgroundId,
+        ),
         intimacyLevel,
       )
 
@@ -1801,28 +1816,46 @@ export function useChatSession(chatId: string | null) {
         inventory[itemId] = inStock - 1
         if (inventory[itemId] <= 0) delete inventory[itemId]
 
+        // Applied into one accumulating patch rather than one branch per effect, so a `multi`
+        // item lands as a single write — two sequential updates would give the second one a stale
+        // read of the first's stats and silently drop it.
         const patch: Record<string, unknown> = { itemInventory: inventory }
-        let toastMessage = `Used ${def.name}.`
-        if (def.effect.kind === 'currency') {
-          patch.giftCoins = Math.max(0, (freshChat.giftCoins ?? 0) + def.effect.amount)
-          toastMessage = `Used ${def.name} — gained ${def.effect.amount} coins.`
-        } else if (def.effect.kind === 'flag') {
-          const flags = new Set((freshChat.sceneFlags ?? []) as SceneFlag[])
-          flags.add(def.effect.flag)
-          patch.sceneFlags = [...flags]
-          toastMessage = `Used ${def.name}.`
-        } else {
-          const dim = def.effect.dimension
-          if (dim === 'affection') {
-            patch.affection = clampAffection((freshChat.affection ?? 0) + def.effect.amount)
-          } else {
-            const stats = getRelationshipStats(freshChat)
-            patch.relationshipStats = { ...stats, [dim]: clampStat(stats[dim] + def.effect.amount) }
+        const notes: string[] = []
+        const flags = new Set((freshChat.sceneFlags ?? []) as SceneFlag[])
+        let stats = getRelationshipStats(freshChat)
+        let affection = freshChat.affection ?? 0
+        let coins = freshChat.giftCoins ?? 0
+
+        const apply = (effect: ItemEffect) => {
+          if (effect.kind === 'multi') {
+            effect.effects.forEach(apply)
+            return
           }
-          toastMessage = `Used ${def.name} — ${def.effect.amount > 0 ? '+' : ''}${def.effect.amount} ${dim}.`
+          if (effect.kind === 'currency') {
+            coins = Math.max(0, coins + effect.amount)
+            patch.giftCoins = coins
+            notes.push(`gained ${effect.amount} coins`)
+            return
+          }
+          if (effect.kind === 'flag') {
+            flags.add(effect.flag)
+            patch.sceneFlags = [...flags]
+            return
+          }
+          const dim = effect.dimension
+          if (dim === 'affection') {
+            affection = clampAffection(affection + effect.amount)
+            patch.affection = affection
+          } else {
+            stats = { ...stats, [dim]: clampStat(stats[dim] + effect.amount) }
+            patch.relationshipStats = stats
+          }
+          notes.push(`${effect.amount > 0 ? '+' : ''}${effect.amount} ${dim}`)
         }
+        apply(def.effect)
+
         await chatsApi.update(chatId, patch)
-        toastSuccess(toastMessage)
+        toastSuccess(notes.length ? `Used ${def.name} — ${notes.join(', ')}.` : `Used ${def.name}.`)
       })
     },
     [character, chatId, world],
