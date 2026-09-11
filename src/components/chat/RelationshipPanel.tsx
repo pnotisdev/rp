@@ -13,6 +13,7 @@ import {
   Lock,
   Package,
   Settings2,
+  Shirt,
   ShoppingBag,
   Sparkles,
   Wand2,
@@ -66,6 +67,7 @@ import type { CommitmentStatus } from '@/lib/types'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { resolveSceneBackground } from '@/lib/vn/resolveBackground'
+import { purchasableOutfits } from '@/lib/vn/outfits'
 import { TabRail, type TabRailItem } from '@/components/ui/TabRail'
 import { Section } from '@/components/ui/Section'
 import { CatalogAction, CatalogCard, CoinBalance } from '@/components/ui/CatalogCard'
@@ -129,6 +131,8 @@ interface RelationshipPanelProps {
   onBuyGift: (giftId: string) => Promise<void>
   onBuyItem: (itemId: string) => Promise<void>
   onBuyToy: (toyId: string) => Promise<void>
+  /** Buying a wardrobe state for this character — see `purchasableOutfits`. */
+  onBuyOutfit: (characterId: string, outfitId: string) => Promise<void>
   onAskCommitment: (tier: Exclude<CommitmentStatus, 'none'>, characterId?: string) => Promise<void>
   /** The "First time together" milestone ask — see `stage.ts`'s `canInitiateFirstTime`. */
   onInitiateFirstTime: (characterId?: string) => Promise<void>
@@ -189,6 +193,7 @@ export function RelationshipPanel({
   onBuyGift,
   onBuyItem,
   onBuyToy,
+  onBuyOutfit,
   onAskCommitment,
   onInitiateFirstTime,
   onEndRelationship,
@@ -303,6 +308,17 @@ export function RelationshipPanel({
     }
   }
 
+  const [buyingOutfitId, setBuyingOutfitId] = useState<string | null>(null)
+  const handleBuyOutfit = async (outfitId: string) => {
+    if (!viewingCharacter) return
+    setBuyingOutfitId(outfitId)
+    try {
+      await onBuyOutfit(viewingCharacter.id, outfitId)
+    } finally {
+      setBuyingOutfitId(null)
+    }
+  }
+
   const handleBuyToy = async (toyId: string) => {
     setBuyingToyId(toyId)
     try {
@@ -323,7 +339,12 @@ export function RelationshipPanel({
   }
 
   const [tab, setTab] = useState<PanelTab>('overview')
-  const hasShop = giftCatalog.length > 0 || itemCatalog.length > 0 || (allowedCategories.includes('toy') && toyCatalogAll.length > 0)
+  const outfitsForSale = purchasableOutfits(viewingCharacter?.outfits, viewingCharacter?.sprites, affection, flags)
+  const hasShop =
+    giftCatalog.length > 0 ||
+    itemCatalog.length > 0 ||
+    outfitsForSale.length > 0 ||
+    (allowedCategories.includes('toy') && toyCatalogAll.length > 0)
   // Counts on the rail so the menu says what's behind a tab without opening it — the Unlocks badge
   // in particular is the whole progression loop at a glance.
   const tabs: TabRailItem<PanelTab>[] = [
@@ -872,6 +893,53 @@ export function RelationshipPanel({
                         onClick={() => onBuyItem(item.id)}
                         disabled={(chat.giftCoins ?? 0) < item.price}
                       />
+                    }
+                  />
+                ))}
+              </div>
+            </Section>
+          )}
+
+          {outfitsForSale.length > 0 && (
+            <Section
+              title="Wardrobe"
+              icon={Shirt}
+              description={`Outfits ${viewingCharacter?.card.name ?? 'they'} can wear once you've bought them. Changes what you actually see on the scene, not just what the story says.`}
+              surface="sunken"
+              contentClassName="!p-3"
+            >
+              <div className="space-y-1.5">
+                {outfitsForSale.map(({ outfit, price, owned, warmthShort, missingFlags }) => (
+                  <CatalogCard
+                    key={outfit.id}
+                    icon={Shirt}
+                    name={outfit.label}
+                    tone="intimate"
+                    locked={!owned && (warmthShort || missingFlags.length > 0)}
+                    owned={owned ? 1 : 0}
+                    meta={
+                      owned
+                        ? warmthShort
+                          ? `Bought — shows at ${outfit.unlockAffection} warmth`
+                          : missingFlags.length > 0
+                            ? `Bought — still needs ${missingFlags.join(', ').replace(/_/g, ' ')}`
+                            : 'Hers to wear'
+                        : warmthShort
+                          ? `Needs ${outfit.unlockAffection} warmth`
+                          : missingFlags.length > 0
+                            ? `Needs ${missingFlags.join(', ').replace(/_/g, ' ')}`
+                            : 'Available now'
+                    }
+                    action={
+                      owned ? undefined : (
+                        <CatalogAction
+                          label={buyingOutfitId === outfit.id ? 'Buying…' : 'Buy'}
+                          price={price}
+                          tone="romance"
+                          onClick={() => handleBuyOutfit(outfit.id)}
+                          disabled={buyingOutfitId === outfit.id || (chat.giftCoins ?? 0) < price}
+                        />
+                      )
                     }
                   />
                 ))}

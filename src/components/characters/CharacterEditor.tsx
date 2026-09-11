@@ -1080,6 +1080,20 @@ export function CharacterEditor({
                         className="w-12 rounded-md bg-bg px-1 py-1 text-center text-[11px] text-text outline-none"
                       />
                     </label>
+                    <label
+                      className="flex items-center gap-1.5 text-[11px] text-text-muted"
+                      title="Coins this outfit has to be bought for in the Relationship panel's Shop before it unlocks, on top of any warmth gate. 0 means it is earned rather than sold. Only outfits with art drawn for them are ever offered for sale."
+                    >
+                      Price
+                      <input
+                        type="number"
+                        min={0}
+                        max={999}
+                        value={Number(outfit.price ?? 0)}
+                        onChange={(e) => updateOutfit(outfit.id, { price: Number(e.target.value) || 0 })}
+                        className="w-14 rounded-md bg-bg px-1 py-1 text-center text-[11px] text-text outline-none"
+                      />
+                    </label>
                     <label className="flex items-center gap-1.5 text-[11px] text-text-muted" title="The model is never offered this outfit. It only appears if the story unlocks it another way. For a state you don't want picked just because a reply read as suggestive.">
                       <input
                         type="checkbox"

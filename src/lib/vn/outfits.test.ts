@@ -4,8 +4,11 @@ import {
   currentOutfitFrom,
   intimateOutfitFor,
   expressionIdsForOutfit,
+  isOutfitOwnedFlag,
   isOutfitUnlocked,
   outfitCoverage,
+  outfitOwnedFlag,
+  purchasableOutfits,
   parseSpriteKey,
   sanitizeOutfitId,
   selectableOutfitIds,
@@ -247,5 +250,60 @@ describe('currentOutfitFrom', () => {
     expect(
       currentOutfitFrom([{ role: 'char', scene: { outfit: 'gala' }, swipeScenes: [{ outfit: 'swimsuit' }, { outfit: 'gala' }], activeSwipe: 0 }]),
     ).toBe('swimsuit')
+  })
+})
+
+// The wardrobe shop: an outfit is art, so buying one unlocks a sprite rather than an inventory row.
+describe('purchasable outfits', () => {
+  const swimsuit = { id: 'swimsuit', label: 'Swimsuit', price: 20 }
+  const sprites = { 'swimsuit--neutral': 'a.png', neutral: 'b.png' }
+
+  it('keeps a priced outfit locked until it has actually been bought, however much warmth there is', () => {
+    expect(isOutfitUnlocked(swimsuit, 100, new Set())).toBe(false)
+    expect(isOutfitUnlocked(swimsuit, 100, new Set([outfitOwnedFlag('swimsuit')]))).toBe(true)
+  })
+
+  it('still applies the warmth and flag gates on top of having bought it', () => {
+    const gated = { ...swimsuit, unlockAffection: 60, requiredFlags: ['first_date'] }
+    const bought = new Set([outfitOwnedFlag('swimsuit')])
+    expect(isOutfitUnlocked(gated, 50, bought)).toBe(false)
+    expect(isOutfitUnlocked(gated, 60, bought)).toBe(false)
+    expect(isOutfitUnlocked(gated, 60, new Set([...bought, 'first_date']))).toBe(true)
+  })
+
+  it('leaves an unpriced outfit exactly as it behaved before the shop existed', () => {
+    const earned = { id: 'uniform', label: 'Uniform', unlockAffection: 30 }
+    expect(isOutfitUnlocked(earned, 30, new Set())).toBe(true)
+    expect(isOutfitUnlocked(earned, 20, new Set())).toBe(false)
+  })
+
+  it('only offers an outfit that has art — buying one with no sprites would unlock nothing to see', () => {
+    expect(purchasableOutfits([swimsuit], sprites, 0, new Set())).toHaveLength(1)
+    expect(purchasableOutfits([swimsuit], { neutral: 'b.png' }, 0, new Set())).toHaveLength(0)
+  })
+
+  it('never offers an outfit with no price — that one is earned, not sold', () => {
+    expect(purchasableOutfits([{ id: 'swimsuit', label: 'Swimsuit' }], sprites, 0, new Set())).toHaveLength(0)
+  })
+
+  it('reports what each purchase still needs, so the shop can say so instead of just failing', () => {
+    const gated = { ...swimsuit, unlockAffection: 60, requiredFlags: ['first_date'] }
+    const [row] = purchasableOutfits([gated], sprites, 10, new Set())
+    expect(row).toMatchObject({ price: 20, owned: false, warmthShort: true, missingFlags: ['first_date'] })
+    const [bought] = purchasableOutfits([gated], sprites, 80, new Set([outfitOwnedFlag('swimsuit'), 'first_date']))
+    expect(bought).toMatchObject({ owned: true, warmthShort: false, missingFlags: [] })
+  })
+
+  // The prefix is what keeps the marker out of the judge's vocabulary and the panel's flag row.
+  it('marks an ownership flag as reserved, distinct from a story flag', () => {
+    expect(isOutfitOwnedFlag(outfitOwnedFlag('swimsuit'))).toBe(true)
+    expect(isOutfitOwnedFlag('first_date')).toBe(false)
+  })
+
+  it('keeps a bought outfit out of the model menu when it is still flag-gated', () => {
+    const gated = { ...swimsuit, requiredFlags: ['first_date'] }
+    const bought = new Set([outfitOwnedFlag('swimsuit')])
+    expect(selectableOutfitIds([gated], sprites, 100, bought)).toEqual(['base'])
+    expect(selectableOutfitIds([gated], sprites, 100, new Set([...bought, 'first_date']))).toEqual(['base', 'swimsuit'])
   })
 })

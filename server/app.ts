@@ -69,6 +69,9 @@ function normalizeOutfits(raw: unknown) {
         ? Math.max(0, Math.min(100, Math.round(Number(e.unlockAffection))))
         : undefined,
       requiredFlags: normalizeStringArray(e.requiredFlags),
+      // Wardrobe shop. Clamped rather than trusted, same as `unlockAffection` above — this is a
+      // price the client sends, and it is the whole gate on a purchasable outfit.
+      price: Number.isFinite(Number(e.price)) ? Math.max(0, Math.min(999, Math.round(Number(e.price)))) : undefined,
       manualOnly: e.manualOnly === true,
       intimate: e.intimate === true,
     }))

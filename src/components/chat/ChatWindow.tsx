@@ -145,6 +145,7 @@ export function ChatWindow({
     buyGift,
     buyItem,
     buyToy,
+    buyOutfit,
     chooseIntimacyBranch,
     useItem,
     askForCommitment,
@@ -809,6 +810,7 @@ export function ChatWindow({
           onBuyGift={buyGift}
           onBuyItem={buyItem}
           onBuyToy={buyToy}
+          onBuyOutfit={buyOutfit}
           onAskCommitment={askForCommitment}
           onInitiateFirstTime={initiateFirstTime}
           onEndRelationship={endRelationship}

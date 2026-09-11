@@ -168,7 +168,7 @@ import { replyMaxTokens, resolveReplyLength, usesActionMarkup } from '@/lib/char
 import { SCENE_MOOD_IDS } from '@/lib/vn/moods'
 import { DEFAULT_EXPRESSIONS, expressionCandidatesFor } from '@/lib/vn/expressions'
 import { getUnlockedBackgroundIds, getUnlockedExpressionIds } from '@/lib/vn/unlocks'
-import { currentOutfitFrom, intimateOutfitFor, selectableOutfitIds, spriteKey } from '@/lib/vn/outfits'
+import { currentOutfitFrom, intimateOutfitFor, outfitOwnedFlag, selectableOutfitIds, spriteKey } from '@/lib/vn/outfits'
 import {
   AFTERGLOW_TURNS,
   aftercareDeltas,
@@ -1734,6 +1734,36 @@ export function useChatSession(chatId: string | null) {
       })
     },
     [chatId, world],
+  )
+
+  /**
+   * Buying a wardrobe state. Unlike a gift, an item or a toy, what this owns is *art* — so it is
+   * recorded as a reserved scene flag (`outfitOwnedFlag`) rather than an inventory count: every
+   * reader of `isOutfitUnlocked` already threads `chat.sceneFlags` through, so the sprite, the
+   * model's outfit menu and the editor all pick it up with no further plumbing.
+   */
+  const buyOutfit = useCallback(
+    async (characterId: string, outfitId: string) => {
+      if (!chatId) return
+      const { active: target } = resolveSpeaker(characterId)
+      const outfit = target?.outfits?.find((o) => o.id === outfitId)
+      const price = Number(outfit?.price ?? 0)
+      if (!outfit || price <= 0) return
+      await getCoinMutex(chatId).run(async () => {
+        const freshChat = await chatsApi.get(chatId)
+        if (!freshChat) return
+        const coins = freshChat.giftCoins ?? 0
+        if (coins < price) return
+        const flag = outfitOwnedFlag(outfitId)
+        const flags = new Set((freshChat.sceneFlags ?? []) as SceneFlag[])
+        // Already owned — never charge twice for the same wardrobe state.
+        if (flags.has(flag)) return
+        flags.add(flag)
+        await chatsApi.update(chatId, { giftCoins: coins - price, sceneFlags: [...flags] })
+        toastSuccess(`Bought ${outfit.label}.`)
+      })
+    },
+    [chatId, resolveSpeaker],
   )
 
   /** Byte-for-byte mirrors `buyGift`/`buyItem` — a toy is a purchase like either, just tracked in its own `toyInventory` (`intimacyCatalog.ts`'s own doc comment explains why toys, unlike every other intimacy-catalog category, need an actual ownership step). */
@@ -3841,6 +3871,7 @@ export function useChatSession(chatId: string | null) {
     buyGift,
     buyItem,
     buyToy,
+    buyOutfit,
     chooseIntimacyBranch,
     useItem,
     askForCommitment,
