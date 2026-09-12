@@ -1,4 +1,5 @@
 import { KoboldApiError } from './types'
+import { isKreaImageModel, type KreaPolicy, type KreaPresentation } from './openMayhemKrea'
 
 export const OPENMAYHEM_BASE_URL = 'https://api.openmayhem.ai/v1'
 export const OPENMAYHEM_PROXY = '/api/openmayhem'
@@ -8,10 +9,14 @@ export function isOpenMayhem(baseUrl: string): boolean {
 }
 
 export type Attribute = { enumValues?: unknown[]; minimum?: number; maximum?: number; default?: unknown; multipleOf?: number; maxLength?: number; minLength?: number }
-export type OpenMayhemEndpoint = 'CHAT' | 'IMAGES' | 'AUDIO_SPEECH'
+export type OpenMayhemEndpoint = 'CHAT' | 'IMAGES' | 'AUDIO_SPEECH' | 'WORKFLOWS'
 type Contract = { endpoint: string; required?: string[]; attributes: Record<string, Attribute> }
 export interface OpenMayhemModel {
   id: string
+  name?: string
+  workflow_media?: KreaPresentation
+  workflow?: KreaPolicy
+  live_capacity_profiles?: { modalities: { image?: { unit: string; maxItemUnits: number; maxItemsPerRequest: number } } }[]
   endpoints: string[]
   context_length?: number
   availability?: string
@@ -64,6 +69,7 @@ export function loadOpenMayhemModels(refresh = false, endpoint: OpenMayhemEndpoi
 }
 
 export function isCompatibleOpenMayhemModel(model: OpenMayhemModel, endpoint: OpenMayhemEndpoint): boolean {
+  if (endpoint === 'WORKFLOWS') return isKreaImageModel(model)
   if (endpoint === 'CHAT') return isOpenMayhemChatModel(model)
   const supplied = endpoint === 'IMAGES'
     ? ['model', 'prompt', 'size', 'width', 'height', 'n', 'steps', 'cfg_scale', 'seed', 'negative_prompt']
@@ -79,6 +85,12 @@ export function isCompatibleOpenMayhemModel(model: OpenMayhemModel, endpoint: Op
     return (!voices || voices.length > 0) && (!formats || formats.some((f) => f === 'wav' || f === 'mp3'))
   }
   return true
+}
+
+/** One image picker, with endpoint-specific execution kept inside the image backend. */
+export async function loadOpenMayhemImageModels(refresh = false): Promise<OpenMayhemModel[]> {
+  const catalogs = await Promise.all([loadOpenMayhemModels(refresh, 'IMAGES'), loadOpenMayhemModels(refresh, 'WORKFLOWS')])
+  return [...new Map(catalogs.flat().map((model) => [model.id, model])).values()]
 }
 
 /** Intersect runtime contracts: a request may route to any available implementation. */

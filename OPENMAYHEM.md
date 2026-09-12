@@ -1,5 +1,21 @@
 # OpenMayhem integration
 
+## Krea base-image workflows (September 12, 2026)
+
+The image picker combines the paginated IMAGES catalog with supported image-producing WORKFLOWS entries. Users see Z-Image Turbo, Krea 2 Turbo, and Krea 2 Quality when their providers are available. Stable API IDs are saved separately from display names. Discovery still refreshes every 30 seconds/on focus, and generation rechecks availability before submitting. A catalog failure does not silently retain an obsolete selectable list.
+
+Krea support is based on `workflow_media` schema version 1 (`krea2-turbo` and `krea2-raw`), the published workflow policy, request contracts, and live image capacity. A small base-image adapter constructs ten reviewed graph roles from the advertised loader parts and allowed links. It never adds LoRA nodes, uses the model's default preset, and selects the published `turbo-negative` preset when a negative prompt is supplied. Unsupported metadata, required extra nodes, invalid sampling values, and unsupported inputs are rejected before submission. Other workflow families, image editing, references and optional LoRAs are outside this release.
+
+Slot dimensions fit the policy's grid, dimension bounds, and pixel capacity. Each job produces one image. Krea jobs go through the fixed `/api/openmayhem/workflows` relay and reuse image artifact validation, polling, cancellation, MIME preservation, and local asset storage. No new account, workflow editor, SDK dependency, or provider-specific setup is exposed in RP Suite.
+
+One OpenMayhem key now serves chat, images and voice. Editing it on an OpenMayhem settings page updates the shared key; switching chat to another provider clears that provider field without leaking the shared secret. On upgrade, a saved media key takes precedence if both legacy fields differ; otherwise an existing OpenMayhem chat key is reused. Restricted API keys need Chat, Images, Audio Speech, and Workflows permissions for the corresponding features.
+
+Test fixtures were captured from the public catalog on September 12; provider identities and optional LoRA catalogs were removed. They are test data only, never bundled as runtime model choices. Automated coverage includes graph construction without LoRAs, Turbo negative prompts, capacity/ratio fitting, unknown metadata rejection, live paginated discovery, workflow execution, cancellation, relay authorization, and shared-key migration/isolation.
+
+Live validation generated images with all three models. Browser checks covered the three friendly choices, persisted Krea selection, a Turbo preview, and a Quality portrait created and reopened from local avatar storage at 832x1216. Separate image-client calls downloaded a Z-Image landscape and a 768x512 Turbo landscape with a negative prompt, seed 42, ten graph nodes, and zero LoRA nodes. A temporary OpenMayhem maintenance 503 was displayed without automatic resubmission; an explicit retry later succeeded. Browser Stop returned to idle without a cancellation error, but the provider job ultimately completed: this is cancellation-request handling, not a guarantee of stopped work or refunded credit.
+
+Validation: 2,142 tests across 114 files passed; the final metadata checks were also retested separately. TypeScript and production build are checked before opening the PR. The browser retains a local `Krea integration test` character for manual inspection. No API keys or generated personal assets are included in the PR.
+
 ## Recommended first release
 
 Use the existing OpenAI-compatible chat backend with a named OpenMayhem preset, plus dedicated async image and speech adapters in the existing media workflows. Keep signup, email/card verification, credit claims, key issuance, and payments on OpenMayhem. The user returns to RP Suite with an API key and chooses a model. This avoids introducing a second account system or embedding payment handling in a local roleplay client.

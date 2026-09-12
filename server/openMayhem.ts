@@ -12,6 +12,7 @@ export function openMayhemRouter() {
     ['get', '/campaign', '/campaigns/featured'],
     ['post', '/chat/completions', '/v1/chat/completions'],
     ['post', '/images/generations', '/v1/images/generations'],
+    ['post', '/workflows', '/v1/workflows'],
     ['post', '/audio/speech', '/v1/audio/speech'],
     ['get', '/jobs/:id', '/v1/jobs/'],
     ['delete', '/jobs/:id', '/v1/jobs/'],
@@ -25,7 +26,7 @@ export function openMayhemRouter() {
       if (localPath === '/models') {
         const endpoint = req.query.endpoint_family ?? 'CHAT'
         const cursor = req.query.cursor
-        if (!['CHAT', 'IMAGES', 'AUDIO_SPEECH'].includes(endpoint as string)
+        if (!['CHAT', 'IMAGES', 'AUDIO_SPEECH', 'WORKFLOWS'].includes(endpoint as string)
           || (cursor !== undefined && (typeof cursor !== 'string' || cursor.length > 4096))) {
           res.status(400).json({ error: { message: 'Invalid model catalog query.' } }); return
         }

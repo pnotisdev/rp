@@ -22,6 +22,7 @@ describe('chat provider credentials', () => {
     expect(useSettingsStore.getState()).toMatchObject({ ttsApiKey: '', ttsModel: '', openMayhemApiKey: 'media-secret' })
   })
   it('clears the old key and model when entering and leaving OpenMayhem', () => {
+    useSettingsStore.getState().setOpenMayhemApiKey('')
     const set = useSettingsStore.getState().setChatBackendConfig
     set({ chatBackend: 'openai-compatible', chatBackendBaseUrl: 'https://example.test/v1', chatBackendApiKey: 'old-secret', chatBackendModel: 'old-model' })
     set({ chatBackendBaseUrl: 'https://api.openmayhem.ai/v1' })
@@ -29,6 +30,27 @@ describe('chat provider credentials', () => {
     set({ chatBackendApiKey: 'mayhem-secret', chatBackendModel: 'example/chat' })
     set({ chatBackendBaseUrl: 'https://example.test/v1' })
     expect(useSettingsStore.getState()).toMatchObject({ chatBackendApiKey: '', chatBackendModel: '' })
+  })
+  it('shares one key across chat and media while keeping other providers isolated', () => {
+    const s = useSettingsStore.getState()
+    s.setOpenMayhemApiKey('shared')
+    s.setChatBackendConfig({ chatBackend: 'openai-compatible', chatBackendBaseUrl: 'https://api.openmayhem.ai/v1' })
+    expect(useSettingsStore.getState().chatBackendApiKey).toBe('shared')
+    s.setChatBackendConfig({ chatBackendApiKey: 'replacement' })
+    expect(useSettingsStore.getState().openMayhemApiKey).toBe('replacement')
+    s.setOpenMayhemApiKey('')
+    expect(useSettingsStore.getState().chatBackendApiKey).toBe('')
+    s.setChatBackendConfig({ chatBackendBaseUrl: 'https://other.test/v1', chatBackendApiKey: 'other' })
+    s.setOpenMayhemApiKey('private-to-mayhem')
+    expect(useSettingsStore.getState().chatBackendApiKey).toBe('other')
+  })
+  it('migrates saved chat-only keys and preserves the existing media key when both were configured', () => {
+    const merge = useSettingsStore.persist.getOptions().merge!
+    const current = useSettingsStore.getState()
+    const saved = { chatBackend: 'openai-compatible', chatBackendBaseUrl: 'https://api.openmayhem.ai/v1', chatBackendApiKey: 'chat-only' }
+    expect(merge(saved, current)).toMatchObject({ openMayhemApiKey: 'chat-only', chatBackendApiKey: 'chat-only' })
+    expect(merge({ ...saved, openMayhemApiKey: 'media' }, current)).toMatchObject({ openMayhemApiKey: 'media', chatBackendApiKey: 'media' })
+    expect(merge({ ...saved, chatBackendBaseUrl: 'https://other.test/v1' }, current)).toMatchObject({ openMayhemApiKey: '', chatBackendApiKey: 'chat-only' })
   })
   it('keeps credentials when choosing a different model on the same provider', () => {
     const set = useSettingsStore.getState().setChatBackendConfig

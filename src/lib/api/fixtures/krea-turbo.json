@@ -1,0 +1,609 @@
+{
+  "id": "image.heavy.le1_2mp",
+  "name": "Krea 2 Turbo",
+  "endpoints": [
+    "WORKFLOWS"
+  ],
+  "providers_available": 1,
+  "availability_stale": false,
+  "workflow_media": {
+    "schema_version": 1,
+    "kind": "image",
+    "family": "krea2-turbo",
+    "loras": [],
+    "presets": [
+      {
+        "id": "turbo",
+        "name": "Turbo",
+        "inputs": [
+          {
+            "role": "sampler",
+            "input": "steps",
+            "value": 8
+          },
+          {
+            "role": "sampler",
+            "input": "cfg",
+            "value": 1
+          },
+          {
+            "role": "sampler",
+            "input": "sampler_name",
+            "value": "euler"
+          },
+          {
+            "role": "sampler",
+            "input": "scheduler",
+            "value": "simple"
+          },
+          {
+            "role": "sampling",
+            "input": "base_shift",
+            "value": 1.15
+          },
+          {
+            "role": "sampling",
+            "input": "max_shift",
+            "value": 1.15
+          }
+        ]
+      },
+      {
+        "id": "turbo-negative",
+        "name": "Turbo \u2014 negative prompt",
+        "inputs": [
+          {
+            "role": "sampler",
+            "input": "steps",
+            "value": 8
+          },
+          {
+            "role": "sampler",
+            "input": "cfg",
+            "value": 4
+          },
+          {
+            "role": "sampler",
+            "input": "sampler_name",
+            "value": "euler"
+          },
+          {
+            "role": "sampler",
+            "input": "scheduler",
+            "value": "simple"
+          },
+          {
+            "role": "sampling",
+            "input": "base_shift",
+            "value": 1.15
+          },
+          {
+            "role": "sampling",
+            "input": "max_shift",
+            "value": 1.15
+          }
+        ]
+      }
+    ],
+    "default_preset": "turbo"
+  },
+  "workflow": {
+    "whitelisted_nodes": [
+      "CLIPLoader",
+      "CLIPTextEncode",
+      "EmptySD3LatentImage",
+      "KSampler",
+      "LoraLoaderModelOnly",
+      "ModelSamplingFlux",
+      "SaveImage",
+      "UNETLoader",
+      "VAEDecode",
+      "VAELoader"
+    ],
+    "parts": [
+      {
+        "part_id": "6335241281bfe4537bda70cab1aca27211a9afb14197740c16778a253836bdae",
+        "name": "krea2_turbo_fp8_scaled.safetensors",
+        "type": "checkpoint",
+        "sha256": "eb4dd8c612cfd10f64f25b057e6e6bbcb5737c94a7372177e456dbf7579502f1"
+      },
+      {
+        "part_id": "19d454e5e0516af43d0a6aee3aefd468897851bd879add036fe1b9350b66825c",
+        "name": "qwen3vl_4b_fp8_scaled.safetensors",
+        "type": "text-encoder",
+        "sha256": "54bd5144df0bbc25dd6ccadfcb826b521445a1b06ae5a42570bdd2974ca87094"
+      },
+      {
+        "part_id": "106d81a4897fa125d63b62fbcf2d7d1e88dc66f1b89e6f793f7142f928c7aa70",
+        "name": "qwen_image_vae.safetensors",
+        "type": "vae",
+        "sha256": "a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f"
+      }
+    ],
+    "runtime_id": "comfyui-v0.30.1",
+    "outcome_class": "image.heavy.le1_2mp",
+    "pricing_unit": "megapixel_step",
+    "max_nodes": 14,
+    "max_width": 1920,
+    "max_height": 1920,
+    "max_frames": 1,
+    "max_duration_seconds": 1,
+    "max_steps": 8,
+    "max_artifacts": 4,
+    "dimension_bounds": {
+      "min_width": 256,
+      "min_height": 256,
+      "max_pixels": 1200000,
+      "width_multiple": 64,
+      "height_multiple": 64
+    },
+    "graph_constraints": {
+      "output_role": "output",
+      "roles": {
+        "clip": {
+          "class_type": "CLIPLoader",
+          "min_count": 1,
+          "max_count": 1,
+          "inputs": {
+            "clip_name": {
+              "value_type": "part",
+              "required": true,
+              "part_type": "text-encoder",
+              "part_names": [
+                "qwen3vl_4b_fp8_scaled.safetensors"
+              ],
+              "distinct": false
+            },
+            "device": {
+              "value_type": "string",
+              "required": true,
+              "fixed": "default",
+              "distinct": false
+            },
+            "type": {
+              "value_type": "string",
+              "required": true,
+              "fixed": "krea2",
+              "distinct": false
+            }
+          }
+        },
+        "decode": {
+          "class_type": "VAEDecode",
+          "min_count": 1,
+          "max_count": 1,
+          "inputs": {
+            "samples": {
+              "value_type": "link",
+              "required": true,
+              "distinct": false,
+              "sources": [
+                {
+                  "role": "sampler",
+                  "output": 0
+                }
+              ]
+            },
+            "vae": {
+              "value_type": "link",
+              "required": true,
+              "distinct": false,
+              "sources": [
+                {
+                  "role": "vae",
+                  "output": 0
+                }
+              ]
+            }
+          }
+        },
+        "denoiser": {
+          "class_type": "UNETLoader",
+          "min_count": 1,
+          "max_count": 1,
+          "inputs": {
+            "unet_name": {
+              "value_type": "part",
+              "required": true,
+              "part_type": "checkpoint",
+              "part_names": [
+                "krea2_turbo_fp8_scaled.safetensors"
+              ],
+              "distinct": false
+            },
+            "weight_dtype": {
+              "value_type": "string",
+              "required": true,
+              "fixed": "default",
+              "distinct": false
+            }
+          }
+        },
+        "latent": {
+          "class_type": "EmptySD3LatentImage",
+          "min_count": 1,
+          "max_count": 1,
+          "inputs": {
+            "batch_size": {
+              "value_type": "integer",
+              "required": true,
+              "minimum": 1,
+              "maximum": 4,
+              "distinct": false
+            },
+            "height": {
+              "value_type": "integer",
+              "required": true,
+              "minimum": 256,
+              "maximum": 1920,
+              "multiple_of": 64,
+              "distinct": false
+            },
+            "width": {
+              "value_type": "integer",
+              "required": true,
+              "minimum": 256,
+              "maximum": 1920,
+              "multiple_of": 64,
+              "distinct": false
+            }
+          }
+        },
+        "negative": {
+          "class_type": "CLIPTextEncode",
+          "min_count": 1,
+          "max_count": 1,
+          "inputs": {
+            "clip": {
+              "value_type": "link",
+              "required": true,
+              "distinct": false,
+              "sources": [
+                {
+                  "role": "clip",
+                  "output": 0
+                }
+              ]
+            },
+            "text": {
+              "value_type": "string",
+              "required": true,
+              "min_length": 0,
+              "max_length": 16384,
+              "distinct": false
+            }
+          }
+        },
+        "output": {
+          "class_type": "SaveImage",
+          "min_count": 1,
+          "max_count": 1,
+          "inputs": {
+            "filename_prefix": {
+              "value_type": "string",
+              "required": true,
+              "min_length": 1,
+              "max_length": 128,
+              "distinct": false
+            },
+            "images": {
+              "value_type": "link",
+              "required": true,
+              "distinct": false,
+              "sources": [
+                {
+                  "role": "decode",
+                  "output": 0
+                }
+              ]
+            }
+          }
+        },
+        "positive": {
+          "class_type": "CLIPTextEncode",
+          "min_count": 1,
+          "max_count": 1,
+          "inputs": {
+            "clip": {
+              "value_type": "link",
+              "required": true,
+              "distinct": false,
+              "sources": [
+                {
+                  "role": "clip",
+                  "output": 0
+                }
+              ]
+            },
+            "text": {
+              "value_type": "string",
+              "required": true,
+              "min_length": 0,
+              "max_length": 16384,
+              "distinct": false
+            }
+          }
+        },
+        "sampler": {
+          "class_type": "KSampler",
+          "min_count": 1,
+          "max_count": 1,
+          "inputs": {
+            "cfg": {
+              "value_type": "number",
+              "required": true,
+              "minimum": 1,
+              "maximum": 4,
+              "distinct": false
+            },
+            "denoise": {
+              "value_type": "number",
+              "required": true,
+              "fixed": 1,
+              "distinct": false
+            },
+            "latent_image": {
+              "value_type": "link",
+              "required": true,
+              "distinct": false,
+              "sources": [
+                {
+                  "role": "latent",
+                  "output": 0
+                }
+              ]
+            },
+            "model": {
+              "value_type": "link",
+              "required": true,
+              "distinct": false,
+              "sources": [
+                {
+                  "role": "sampling",
+                  "output": 0
+                }
+              ]
+            },
+            "negative": {
+              "value_type": "link",
+              "required": true,
+              "distinct": false,
+              "sources": [
+                {
+                  "role": "negative",
+                  "output": 0
+                }
+              ]
+            },
+            "positive": {
+              "value_type": "link",
+              "required": true,
+              "distinct": false,
+              "sources": [
+                {
+                  "role": "positive",
+                  "output": 0
+                }
+              ]
+            },
+            "sampler_name": {
+              "value_type": "string",
+              "required": true,
+              "enum_values": [
+                "euler"
+              ],
+              "distinct": false
+            },
+            "scheduler": {
+              "value_type": "string",
+              "required": true,
+              "enum_values": [
+                "simple"
+              ],
+              "distinct": false
+            },
+            "seed": {
+              "value_type": "integer",
+              "required": true,
+              "minimum": 0,
+              "maximum": 9007199254740991,
+              "distinct": false
+            },
+            "steps": {
+              "value_type": "integer",
+              "required": true,
+              "minimum": 1,
+              "maximum": 8,
+              "distinct": false
+            }
+          }
+        },
+        "sampling": {
+          "class_type": "ModelSamplingFlux",
+          "min_count": 1,
+          "max_count": 1,
+          "inputs": {
+            "base_shift": {
+              "value_type": "number",
+              "required": true,
+              "minimum": 0,
+              "maximum": 2,
+              "distinct": false
+            },
+            "height": {
+              "value_type": "integer",
+              "required": true,
+              "minimum": 256,
+              "maximum": 1920,
+              "multiple_of": 64,
+              "distinct": false,
+              "same_value_as": {
+                "role": "latent",
+                "input": "height"
+              }
+            },
+            "max_shift": {
+              "value_type": "number",
+              "required": true,
+              "minimum": 0,
+              "maximum": 2,
+              "distinct": false
+            },
+            "model": {
+              "value_type": "link",
+              "required": true,
+              "distinct": false,
+              "sources": [
+                {
+                  "role": "user_lora",
+                  "output": 0
+                },
+                {
+                  "role": "denoiser",
+                  "output": 0
+                }
+              ]
+            },
+            "width": {
+              "value_type": "integer",
+              "required": true,
+              "minimum": 256,
+              "maximum": 1920,
+              "multiple_of": 64,
+              "distinct": false,
+              "same_value_as": {
+                "role": "latent",
+                "input": "width"
+              }
+            }
+          }
+        },
+        "user_lora": {
+          "class_type": "LoraLoaderModelOnly",
+          "min_count": 0,
+          "max_count": 4,
+          "inputs": {
+            "lora_name": {
+              "value_type": "part",
+              "required": true,
+              "part_type": "lora",
+              "part_names": [],
+              "distinct": true
+            },
+            "model": {
+              "value_type": "link",
+              "required": true,
+              "distinct": false,
+              "sources": [
+                {
+                  "role": "user_lora",
+                  "output": 0
+                },
+                {
+                  "role": "denoiser",
+                  "output": 0
+                }
+              ]
+            },
+            "strength_model": {
+              "value_type": "number",
+              "required": true,
+              "minimum": -2,
+              "maximum": 2,
+              "distinct": false
+            }
+          }
+        },
+        "vae": {
+          "class_type": "VAELoader",
+          "min_count": 1,
+          "max_count": 1,
+          "inputs": {
+            "vae_name": {
+              "value_type": "part",
+              "required": true,
+              "part_type": "vae",
+              "part_names": [
+                "qwen_image_vae.safetensors"
+              ],
+              "distinct": false
+            }
+          }
+        }
+      }
+    }
+  },
+  "request_contracts": [
+    {
+      "family": "mayhem_comfy_workflows",
+      "endpoint": "WORKFLOWS",
+      "required": [
+        "model",
+        "workflow"
+      ],
+      "attributes": {
+        "user": {
+          "maxLength": 512,
+          "minLength": 1,
+          "valueTypes": [
+            "string"
+          ]
+        },
+        "model": {
+          "valueTypes": [
+            "string"
+          ]
+        },
+        "workflow": {
+          "valueTypes": [
+            "object"
+          ]
+        },
+        "runtime_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "valueTypes": [
+            "string"
+          ]
+        },
+        "timeout_ms": {
+          "default": 120000,
+          "maximum": 3600000,
+          "minimum": 1000,
+          "valueTypes": [
+            "integer"
+          ]
+        },
+        "outcome_class": {
+          "maxLength": 128,
+          "minLength": 1,
+          "valueTypes": [
+            "string"
+          ]
+        },
+        "response_format": {
+          "default": "artifact",
+          "enumValues": [
+            "artifact",
+            "json"
+          ],
+          "valueTypes": [
+            "string"
+          ]
+        }
+      }
+    }
+  ],
+  "live_capacity_profiles": [
+    {
+      "modalities": {
+        "image": {
+          "unit": "pixel",
+          "maxItemsPerRequest": 4,
+          "maxItemBytes": 1620975,
+          "maxItemUnits": 1048576
+        }
+      }
+    }
+  ]
+}

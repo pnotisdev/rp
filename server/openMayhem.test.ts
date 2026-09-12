@@ -82,7 +82,7 @@ describe('OpenMayhem local forwarding', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
   it('requires authorization for job status, cancellation, artifacts and both generation endpoints', async () => {
-    for (const [path, method] of [['/jobs/job_1', 'GET'], ['/jobs/job_1', 'DELETE'], ['/artifacts/a_1', 'GET'], ['/images/generations', 'POST'], ['/audio/speech', 'POST']]) {
+    for (const [path, method] of [['/jobs/job_1', 'GET'], ['/jobs/job_1', 'DELETE'], ['/artifacts/a_1', 'GET'], ['/images/generations', 'POST'], ['/workflows', 'POST'], ['/audio/speech', 'POST']]) {
       expect((await call(path, method)).status).toBe(401)
       fetchMock.mockResolvedValueOnce(new Response('{}'))
       expect((await call(path, method, { Authorization: 'Bearer media-key' }, method === 'POST' ? { model: 'test' } : undefined)).status).toBe(200)
@@ -93,6 +93,12 @@ describe('OpenMayhem local forwarding', () => {
         expect(fetchMock.mock.lastCall?.[1].body).toBeUndefined()
       }
     }
+  })
+  it('loads workflow metadata through the public catalog without forwarding credentials', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('{"data":[]}'))
+    expect((await call('/models?endpoint_family=WORKFLOWS', 'GET', { Authorization: 'Bearer private' })).status).toBe(200)
+    expect(fetchMock.mock.lastCall?.[0]).toBe('https://api.openmayhem.ai/v1/models?endpoint_family=WORKFLOWS&limit=100')
+    expect(fetchMock.mock.lastCall?.[1].headers).toEqual({ Accept: 'application/json' })
   })
   it('downloads a signed artifact redirect without forwarding the bearer or cookies', async () => {
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 302, headers: { Location: 'https://bucket.s3.amazonaws.com/signed-artifact?signature=abc' } }))

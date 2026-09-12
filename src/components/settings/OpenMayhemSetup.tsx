@@ -37,7 +37,7 @@ export function OpenMayhemSetup({ media = false }: { media?: boolean }) {
             <a className={LINK} href="https://openmayhem.ai/dashboard/credits" target="_blank" rel="noopener noreferrer">Check credits and current offers</a> on OpenMayhem.
           </>}
         </li>
-        <li><a className={LINK} href="https://openmayhem.ai/dashboard/keys" target="_blank" rel="noopener noreferrer">Create an API key</a> with {media ? 'Images and Audio Speech' : 'Chat'} permission, paste it below, then choose a model.</li>
+        <li><a className={LINK} href="https://openmayhem.ai/dashboard/keys" target="_blank" rel="noopener noreferrer">Create an API key</a> with access to the models you want to use, paste it below, then choose a model. The same key works across OpenMayhem chat, images and voice.</li>
       </ol>
       <p className="mt-3">{media ? 'Images and speech use your OpenMayhem credits. Prompts, speech text, and your key pass through your RP Suite server to OpenMayhem.' : 'Replies and background scoring use your OpenMayhem credits. Chats stay saved here; prompts and your key pass through your RP Suite server to OpenMayhem for inference.'}</p>
       {!media && <p className="mt-2">Thinking is disabled when the model supports it so short replies and scoring calls have room to answer. Stopping a reply may still incur the provider’s generation cost.</p>}

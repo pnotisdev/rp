@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { hasAvailableOpenMayhemProvider, loadOpenMayhemModels, type OpenMayhemEndpoint, type OpenMayhemModel } from '@/lib/api/openMayhem'
+import { hasAvailableOpenMayhemProvider, loadOpenMayhemModels, loadOpenMayhemImageModels, type OpenMayhemEndpoint, type OpenMayhemModel } from '@/lib/api/openMayhem'
 
 export function useOpenMayhemModels(endpoint: OpenMayhemEndpoint, enabled: boolean) {
   const [models, setModels] = useState<OpenMayhemModel[] | null>(null)
@@ -15,7 +15,7 @@ export function useOpenMayhemModels(endpoint: OpenMayhemEndpoint, enabled: boole
       if (fetching) return
       fetching = true
       try {
-        const catalog = await loadOpenMayhemModels(true, endpoint)
+        const catalog = await (endpoint === 'IMAGES' ? loadOpenMayhemImageModels(true) : loadOpenMayhemModels(true, endpoint))
         if (!disposed) setModels(catalog.filter(hasAvailableOpenMayhemProvider).sort((a, b) => a.id.localeCompare(b.id)))
       } catch { if (!disposed) setModels(null) }
       finally { fetching = false; if (!disposed) setLoading(false) }

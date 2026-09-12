@@ -4,6 +4,7 @@
  * image, TTS). Persisted to localStorage as `rp-settings`, with a deep `merge` for a few nested keys.
  */
 import { create } from 'zustand'
+import { isOpenMayhem } from '@/lib/api/openMayhem'
 import { persist } from 'zustand/middleware'
 import type { ChatCompletionSamplerParams, GenerationParams } from '@/lib/api/types'
 import { DEFAULT_CHAT_COMPLETION_SAMPLER } from '@/lib/api/types'
@@ -293,7 +294,7 @@ interface SettingsState {
   ttsRegion: string
   ttsVoice: string
   ttsModel: string
-  /** Shared only by OpenMayhem image generation and speech; never used for another provider. */
+  /** Shared by OpenMayhem chat, images and speech; never used for another provider. */
   openMayhemApiKey: string
   setOpenMayhemApiKey: (key: string) => void
   setVoiceConfig: (patch: Partial<{
@@ -510,7 +511,9 @@ export const useSettingsStore = create<SettingsState>()(
       ttsVoice: '',
       ttsModel: '',
       openMayhemApiKey: '',
-      setOpenMayhemApiKey: (key) => set({ openMayhemApiKey: key }),
+      setOpenMayhemApiKey: (key) => set((s) => ({ openMayhemApiKey: key,
+        ...(s.chatBackend === 'openai-compatible' && isOpenMayhem(s.chatBackendBaseUrl) ? { chatBackendApiKey: key } : {}),
+      })),
       setVoiceConfig: (patch) => set((s) => {
         const changesProvider = patch.ttsProvider !== undefined && patch.ttsProvider !== s.ttsProvider
           || patch.ttsBaseUrl !== undefined && patch.ttsBaseUrl !== s.ttsBaseUrl
@@ -525,7 +528,12 @@ export const useSettingsStore = create<SettingsState>()(
         // A provider change must not send the previous provider's secret to its replacement.
         const changesProvider = (patch.chatBackendBaseUrl !== undefined && patch.chatBackendBaseUrl !== s.chatBackendBaseUrl)
           || (patch.chatBackend !== undefined && patch.chatBackend !== s.chatBackend)
-        return changesProvider ? { chatBackendApiKey: '', chatBackendModel: '', ...patch } : patch
+        const next = changesProvider ? { chatBackendApiKey: '', chatBackendModel: '', ...patch } : { ...patch }
+        if ((patch.chatBackend ?? s.chatBackend) === 'openai-compatible' && isOpenMayhem(patch.chatBackendBaseUrl ?? s.chatBackendBaseUrl)) {
+          const key = patch.chatBackendApiKey ?? s.openMayhemApiKey
+          return { ...next, openMayhemApiKey: key, chatBackendApiKey: key }
+        }
+        return next
       }),
 
       chatCompletionSampler: DEFAULT_CHAT_COMPLETION_SAMPLER,
@@ -547,9 +555,13 @@ export const useSettingsStore = create<SettingsState>()(
       // Deep-merge just these nested keys so new tokens/params backfill instead of being hidden by an old persisted object.
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<SettingsState>
+        const usesOpenMayhem = p.chatBackend === 'openai-compatible' && isOpenMayhem(p.chatBackendBaseUrl ?? '')
+        const key = p.openMayhemApiKey || (usesOpenMayhem ? p.chatBackendApiKey : '') || ''
         return {
           ...current,
           ...p,
+          openMayhemApiKey: key,
+          ...(usesOpenMayhem ? { chatBackendApiKey: key } : {}),
           themeTokensLight: { ...current.themeTokensLight, ...p.themeTokensLight },
           themeTokensDark: { ...current.themeTokensDark, ...p.themeTokensDark },
           sampler: { ...current.sampler, ...p.sampler },
