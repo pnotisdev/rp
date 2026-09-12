@@ -37,6 +37,7 @@ describe('OpenMayhem media catalog and contracts', () => {
     for (const model of [{ ...image, providers_available: 0 }, { ...image, availability_stale: true },
       { ...image, request_contracts: [{ ...image.request_contracts![0], required: ['model', 'prompt', 'input_reference'] }] }]) {
       fetchMock.mockResolvedValueOnce(json({ data: [model] }))
+        .mockResolvedValueOnce(json({ data: [] }))
       await expect(availableMediaModel('IMAGES', image.id)).rejects.toThrow('no available compatible provider')
     }
     expect(fetchMock.mock.calls.every(([, init]) => !init.method)).toBe(true)
@@ -75,11 +76,11 @@ describe('OpenMayhem async media lifecycle', () => {
     expect(fetchMock.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(1)
     expect(fetchMock.mock.calls.every(([, init]) => init.headers.Authorization === 'Bearer key')).toBe(true)
   })
-  it('recovers the ID and cancels when Stop arrives during submission', async () => {
+  it.each(['IMAGES', 'WORKFLOWS'] as const)('recovers the ID and cancels %s when Stop arrives during submission', async (endpoint) => {
     const controller = new AbortController()
     fetchMock.mockImplementationOnce(async () => { controller.abort(); return json({ id: 'job_1', status: 'running' }) })
       .mockResolvedValueOnce(json({ status: 'cancelled' }))
-    await expect(generateOpenMayhemMedia('IMAGES', 'key', {}, controller.signal)).rejects.toMatchObject({ name: 'AbortError' })
+    await expect(generateOpenMayhemMedia(endpoint, 'key', {}, controller.signal)).rejects.toMatchObject({ name: 'AbortError' })
     expect(fetchMock.mock.calls[1]).toEqual(['/api/openmayhem/jobs/job_1', expect.objectContaining({ method: 'DELETE' })])
   })
   it('surfaces failed cancellation rather than promising the job stopped', async () => {
@@ -122,17 +123,18 @@ describe('OpenMayhem async media lifecycle', () => {
   })
   it('uses the dedicated key in the shared image factory and defaults the speech voice', async () => {
     fetchMock.mockResolvedValueOnce(json({ data: [image] }))
+      .mockResolvedValueOnce(json({ data: [] }))
       .mockResolvedValueOnce(json({ id: 'job', status: 'completed', artifacts: [{ id: 'a', contentType: 'image/png' }] }))
       .mockResolvedValueOnce(new Response('png', { headers: { 'Content-Type': 'image/png' } }))
     const backend = createImageBackend({ imageBackend: 'openmayhem', imageBackendModel: image.id, imageBackendBaseUrl: 'https://wrong.test', imageBackendUsername: 'wrong-key', imageBackendPassword: '', openMayhemApiKey: 'media-key' })
     const result = await backend.generateImage({ prompt: 'x', width: 832, height: 1216, steps: 28, cfgScale: 7 })
     expect(result.mimeType).toBe('image/png')
     expect(atob(result.base64)).toBe('png')
-    expect(fetchMock.mock.calls[1][1].headers.Authorization).toBe('Bearer media-key')
+    expect(fetchMock.mock.calls[2][1].headers.Authorization).toBe('Bearer media-key')
     fetchMock.mockResolvedValueOnce(json({ data: [speech] }))
       .mockResolvedValueOnce(json({ id: 'job', status: 'completed', artifacts: [{ id: 'a', contentType: 'audio/wav' }] }))
       .mockResolvedValueOnce(new Response('wav', { headers: { 'Content-Type': 'audio/wav' } }))
     await speakOpenMayhem('media-key', speech.id, 'Hello', '')
-    expect(JSON.parse(fetchMock.mock.calls[4][1].body)).toEqual({ model: speech.id, input: 'Hello', voice: 'default', response_format: 'wav' })
+    expect(JSON.parse(fetchMock.mock.calls[5][1].body)).toEqual({ model: speech.id, input: 'Hello', voice: 'default', response_format: 'wav' })
   })
 })

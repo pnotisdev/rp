@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { openMayhemImageLabel } from '@/lib/api/openMayhemKrea'
 import { useOpenMayhemModels } from '@/lib/hooks/useOpenMayhemModels'
 import { OpenMayhemModelSelect } from './OpenMayhemModelSelect'
 import { OpenMayhemMediaKey } from './OpenMayhemMediaKey'
@@ -63,6 +64,7 @@ export function ImageGenSettings() {
         {imageBackend === 'openmayhem' && <>
           <OpenMayhemMediaKey />
           <OpenMayhemModelSelect kind="image" models={models?.map((m) => m.id) ?? null} loading={loading} value={imageBackendModel}
+            labels={Object.fromEntries((models ?? []).map((m) => [m.id, openMayhemImageLabel(m)]))}
             onChange={(model) => { setImageBackendConfig({ imageBackendModel: model }); setPreview('') }} />
           <Button onClick={reload} disabled={loading}>Refresh models</Button>
           <p className="my-3 text-xs text-text-muted">Uses the selected model's default steps and guidance. Image dimensions fit the slot and the model's limits. Each image is a billed job; stopping requests cancellation, but work already done may still be billed.</p>

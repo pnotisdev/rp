@@ -61,9 +61,9 @@ OpenMayhem uses `https://api.openmayhem.ai/v1`. Requests pass through RP Suite's
 
 The connection check reads the public catalog without spending credit; it does **not** validate your key or balance. Those are checked on your first inference request. See [OpenMayhem integration notes](OPENMAYHEM.md) for behavior, research, and validation limits.
 
-For images and speech, choose **OpenMayhem** in **Settings > Images** and **Settings > Voice**. Enter a media key with Images and Audio Speech permissions (or use the button to copy your OpenMayhem chat key), then choose each model. Voice options also come from the selected model. The image preview and voice test perform real, billed generation.
+For images and speech, choose **OpenMayhem** in **Settings > Images** and **Settings > Voice**. One OpenMayhem key is shared across chat, images and voice. Enable Chat, Images, Audio Speech and Workflows permissions for the features you use. The image picker includes **Z-Image Turbo**, **Krea 2 Turbo** and **Krea 2 Quality** when available. Krea uses its base model and published preset without additional LoRAs; RP Suite handles the workflow automatically. Voice options also come from the selected model. The image preview and voice test perform real, billed generation.
 
-All three model lists load every catalog page and refresh every 30 seconds and on window focus. Only compatible models with available, non-stale providers are selectable, so newly added live models appear automatically. Images use model sampling defaults and slot dimensions adapted to its limits. Stop requests media-job cancellation; completed work may still cost credit. Generated assets saved to a character or world remain stored locally.
+All three model lists load every catalog page and refresh every 30 seconds and on window focus. Only compatible models with available, non-stale providers are selectable. New models using supported image/chat/speech interfaces or supported Krea base-image workflow metadata appear automatically; other workflow families need an adapter. Images use model sampling defaults and slot dimensions adapted to its limits. Stop requests media-job cancellation; completed work may still cost credit. Generated assets saved to a character or world remain stored locally.
 
 ### Characters
 
