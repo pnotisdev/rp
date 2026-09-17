@@ -76,6 +76,34 @@ describe('cleanModelOutput — meta/preamble removal', () => {
     expect(cleanModelOutput('He muttered that x < y was obvious.')).toBe('He muttered that x < y was obvious.')
   })
 
+  it('strips a closed <think> block whole, tag and reasoning text together, not just the tag markup', () => {
+    const raw = '<think>The user wants a short reply. I should keep this terse.</think>"Fine."'
+    // Plain tag-stripping alone (like the <b>/<p> case above) would leave the reasoning prose
+    // dangling in front of the reply instead of removing it with its tag.
+    expect(cleanModelOutput(raw)).toBe('"Fine."')
+  })
+
+  it('strips the <thinking> spelling too', () => {
+    expect(cleanModelOutput('<thinking>Hmm, what should she say?</thinking>*She shrugs.* "Dunno."')).toBe(
+      '*She shrugs.* "Dunno."',
+    )
+  })
+
+  it('only removes a well-formed, closed think block — an unclosed one (generation cut off mid-thought) is not guessed at and eaten wholesale', () => {
+    // THINK_BLOCK_RE requires a matching close, so an open-ended block isn't swallowed here.
+    // The bare `<think>` marker itself still goes, same as any other unrecognised tag
+    // (normalizeRpMarkup strips tag markup generically) — only its *content* survives untouched,
+    // reading as an odd but visible reply rather than silently vanishing.
+    const raw = '<think>Still reasoning about how to open this scene'
+    expect(cleanModelOutput(raw)).toBe('Still reasoning about how to open this scene')
+  })
+
+  it('remains idempotent with a think block in the mix', () => {
+    const raw = '<think>Reasoning...</think>Sumire: Certainly!\n\n## Scene\n"Hello."\n(OOC: note)'
+    const once = cleanModelOutput(raw, { charName: 'Sumire' })
+    expect(cleanModelOutput(once, { charName: 'Sumire' })).toBe(once)
+  })
+
   it('is idempotent', () => {
     const raw = 'Sumire: Certainly!\n\n## Scene\n"Hello."\n(OOC: note)'
     const once = cleanModelOutput(raw, { charName: 'Sumire' })

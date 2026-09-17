@@ -107,6 +107,19 @@ const MD_HEADING_RE = /^[ \t]*#{1,6}[ \t]+/gm
 /** Three or more blank lines collapse to one blank line. */
 const EXCESS_BLANKS_RE = /\n{3,}/g
 
+/**
+ * A thinking/reasoning model's hidden reasoning phase (DeepSeek R1, Qwen3, GPT-OSS, and similar
+ * local GGUF thinking models), wrapped in `<think>`/`<thinking>` tags when a server streams it
+ * inline rather than splitting it into its own `reasoning_content` field. Stripped whole — tag and
+ * contents together — before anything else runs: `normalizeRpMarkup` below only strips bare tag
+ * markup, which would otherwise leave the reasoning prose itself merged straight into the visible
+ * reply with no separation at all. Only matches a *closed* block, so it's never tempted to guess
+ * where an unclosed one (generation cut off mid-thought) would have ended; that rarer case falls
+ * through to `normalizeRpMarkup`, which still strips the bare `<think>` marker itself but leaves
+ * the reasoning prose after it as visible (if odd-looking) text rather than deleting it unseen.
+ */
+const THINK_BLOCK_RE = /<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi
+
 export interface CleanModelOutputOptions {
   /** The speaking character's name, to strip an echoed `Name:` prefix the prompt's own generation cue invited. */
   charName?: string
@@ -213,11 +226,12 @@ export function trimToLastSentence(text: string, maxLossRatio = 0.35): string {
 
 /**
  * The deterministic scrub applied once to a completed generation before it's stored. Order
- * matters: turn markers cut first, then whole-line meta removals, then cosmetic collapses. Idempotent.
+ * matters: closed `<think>` blocks stripped first, then turn markers, then whole-line meta
+ * removals, then cosmetic collapses. Idempotent.
  */
 export function cleanModelOutput(text: string, opts: CleanModelOutputOptions = {}): string {
   if (!text) return text
-  let out = text
+  let out = text.replace(THINK_BLOCK_RE, '')
 
   if (opts.charName || opts.personaName) {
     out = truncateAtStrayTurnMarker(out, opts.charName ?? '', opts.personaName ?? '')

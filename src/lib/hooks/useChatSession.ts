@@ -395,6 +395,7 @@ export interface GenerationStats {
 
 export function useChatSession(chatId: string | null) {
   const sampler = useSettingsStore((s) => s.sampler)
+  const reasoningTokenReserve = useSettingsStore((s) => s.reasoningTokenReserve)
   const chatBackend = useSettingsStore((s) => s.chatBackend)
   const chatCompletionSampler = useSettingsStore((s) => s.chatCompletionSampler)
   const instructTemplateId = useSettingsStore((s) => s.instructTemplateId)
@@ -2304,8 +2305,9 @@ export function useChatSession(chatId: string | null) {
       const isPrimarySpeaker = speaker.id === character.id
       // Hard max_length ceiling from this speaker's reply-length band, so a terse character stays
       // terse even if the model ignores the prose instruction. Only tightens the user's cap, never raises it.
+      // `reasoningTokenReserve` (Settings → Generation) adds thinking headroom on top for reasoning models.
       const replyBand = resolveReplyLength(speaker.replyLength, speaker.card).band
-      const effectiveMaxLength = replyMaxTokens(replyBand, sampler.max_length)
+      const effectiveMaxLength = replyMaxTokens(replyBand, sampler.max_length, reasoningTokenReserve)
       const bandCapsBelowUserMax = effectiveMaxLength < sampler.max_length
       // Becomes true once an auto-continue round kicks in — every remaining round then behaves like a manual continue.
       let continuing = !!opts?.continuing

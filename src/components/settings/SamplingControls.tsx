@@ -55,6 +55,8 @@ export function SamplingControls() {
   const setSampler = useSettingsStore((s) => s.setSampler)
   const contextLengthAuto = useSettingsStore((s) => s.contextLengthAuto)
   const setContextLengthAuto = useSettingsStore((s) => s.setContextLengthAuto)
+  const reasoningTokenReserve = useSettingsStore((s) => s.reasoningTokenReserve)
+  const setReasoningTokenReserve = useSettingsStore((s) => s.setReasoningTokenReserve)
   const autoSummarize = useSettingsStore((s) => s.autoSummarize)
   const setAutoSummarize = useSettingsStore((s) => s.setAutoSummarize)
   const keepRecentMessages = useSettingsStore((s) => s.keepRecentMessages)
@@ -189,6 +191,15 @@ export function SamplingControls() {
           value={String(sampler.max_length)}
           onChange={(e) => setSampler({ max_length: Math.max(1, Math.round(Number(e.target.value) || 0)) })}
           hint="Ceiling for a single reply. A character's own reply-length band can still cap it lower."
+        />
+        <NumberField
+          label="Reasoning token reserve"
+          suffix="tokens"
+          min={0}
+          step={256}
+          value={String(reasoningTokenReserve)}
+          onChange={(e) => setReasoningTokenReserve(Number(e.target.value) || 0)}
+          hint="Thinking/reasoning models only (DeepSeek R1, Qwen3, GPT-OSS, and similar local GGUF thinking models). Its hidden reasoning phase counts against the same reply cap as the visible text, so a tight reply-length band can cut the model off before it even finishes thinking. Adds this many extra tokens on top of that band's cap. Leave at 0 for ordinary models."
         />
       </Section>
 

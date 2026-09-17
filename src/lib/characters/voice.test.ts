@@ -216,4 +216,22 @@ describe('replyMaxTokens', () => {
   it('keeps a sane floor even against an extreme user setting', () => {
     expect(replyMaxTokens('brief', 10)).toBeGreaterThanOrEqual(48)
   })
+
+  it('defaults to no reasoning reserve, reproducing the old prose-only cap', () => {
+    expect(replyMaxTokens('brief', 512)).toBe(replyMaxTokens('brief', 512, 0))
+  })
+
+  it('adds the reasoning reserve on top of the band cap, for a thinking model headroom to finish its reasoning phase before the visible reply', () => {
+    const withoutReserve = replyMaxTokens('brief', 8000)
+    const withReserve = replyMaxTokens('brief', 8000, 3000)
+    expect(withReserve).toBe(withoutReserve + 3000)
+  })
+
+  it('still never raises the user ceiling, even with a large reasoning reserve', () => {
+    expect(replyMaxTokens('detailed', 512, 4000)).toBe(512)
+  })
+
+  it('ignores a negative reserve rather than lowering the cap', () => {
+    expect(replyMaxTokens('brief', 512, -100)).toBe(replyMaxTokens('brief', 512, 0))
+  })
 })

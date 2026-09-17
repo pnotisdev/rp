@@ -309,8 +309,16 @@ export function detectVoiceFingerprint(
 const TOKENS_PER_WORD = 1.6
 const SENTENCE_HEADROOM = 1.5
 
-/** Hard ceiling on this turn's `max_length`. Never above `userMaxLength` — only ever tightens it. */
-export function replyMaxTokens(band: ReplyLengthBand, userMaxLength: number): number {
-  const cap = Math.ceil(BANDS[band].words * TOKENS_PER_WORD * SENTENCE_HEADROOM)
+/**
+ * Hard ceiling on this turn's `max_length`. Never above `userMaxLength` — only ever tightens it.
+ * `reasoningReserve` adds headroom on top of the band's own prose cap for a thinking/reasoning
+ * model's hidden reasoning phase (DeepSeek R1, Qwen3, GPT-OSS, and similar GGUF thinking models
+ * served locally, e.g. via llama.cpp): that reasoning counts against the same server-side token
+ * budget as the visible reply, so without it a terse band cap (a few hundred tokens) starves the
+ * model before it even finishes thinking, let alone replies. 0 (the default) reproduces the old
+ * prose-only cap exactly.
+ */
+export function replyMaxTokens(band: ReplyLengthBand, userMaxLength: number, reasoningReserve = 0): number {
+  const cap = Math.ceil(BANDS[band].words * TOKENS_PER_WORD * SENTENCE_HEADROOM) + Math.max(0, reasoningReserve)
   return Math.max(48, Math.min(userMaxLength, cap))
 }

@@ -190,6 +190,8 @@ interface SettingsState {
   sampler: GenerationParams
   /** When true, `sampler.max_context_length` tracks the connected model's real limit (see `useAutoContextLength`). Any manual edit to that field turns it off. */
   contextLengthAuto: boolean
+  /** Extra `max_length` headroom for a thinking/reasoning model's hidden reasoning phase (see `replyMaxTokens`). Backend-agnostic, so kept outside `sampler` (KoboldCpp's own wire-format shape, serialized as-is) rather than as one more of its fields. 0 = off, reproducing the old behavior. */
+  reasoningTokenReserve: number
   instructTemplateId: string
   /** Which of `builder.ts`'s fixed prompt sections are included; a missing key defaults to on. */
   promptSections: Record<PromptSectionId, boolean>
@@ -198,6 +200,7 @@ interface SettingsState {
   /** Sets `max_context_length` without turning `contextLengthAuto` off — the auto-detect path only. */
   setDetectedContextLength: (n: number) => void
   setContextLengthAuto: (v: boolean) => void
+  setReasoningTokenReserve: (n: number) => void
   setInstructTemplateId: (id: string) => void
   setPromptSectionEnabled: (id: PromptSectionId, enabled: boolean) => void
 
@@ -407,6 +410,7 @@ export const useSettingsStore = create<SettingsState>()(
       advancedSamplerMode: false,
       sampler: { ...DEFAULT_SAMPLER },
       contextLengthAuto: true,
+      reasoningTokenReserve: 0,
       instructTemplateId: 'plain-chat',
       promptSections: DEFAULT_PROMPT_SECTIONS,
       setAdvancedSamplerMode: (v) => set({ advancedSamplerMode: v }),
@@ -414,6 +418,7 @@ export const useSettingsStore = create<SettingsState>()(
       setDetectedContextLength: (n) =>
         set((s) => (s.sampler.max_context_length === n ? {} : { sampler: { ...s.sampler, max_context_length: n } })),
       setContextLengthAuto: (v) => set({ contextLengthAuto: v }),
+      setReasoningTokenReserve: (n) => set({ reasoningTokenReserve: Math.max(0, Math.round(n) || 0) }),
       setInstructTemplateId: (id) => set({ instructTemplateId: id }),
       setPromptSectionEnabled: (id, enabled) => set((s) => ({ promptSections: { ...s.promptSections, [id]: enabled } })),
 
