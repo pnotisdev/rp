@@ -7,12 +7,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { charactersApi, chatFactsApi, chatsApi, instructTemplatesApi, messagesApi, objectivesApi, personasApi, relationshipEventsApi, worldInfoBooksApi, worldsApi } from '@/lib/api/client'
 import { newId } from '@/lib/id'
-import type { AuthorNote, Chat, CommitmentStatus, DateEventCard, MessageIntent, Objective, ObjectiveTask, RelationshipStage, StoredMessage, WorldCard } from '@/lib/types'
+import type { AuthorNote, Chat, CommitmentStatus, DateEventCard, ItemEffect, MessageIntent, Objective, ObjectiveTask, RelationshipStage, StoredMessage, WorldCard } from '@/lib/types'
 import { collectImageBase64, composeMessageText, type PendingAttachment } from '@/lib/attachments'
 import { makeGenKey } from '@/lib/api/kobold'
 import { generateWithTimeout } from '@/lib/api/generateWithTimeout'
 import { useChatBackendClient } from '@/lib/hooks/useChatBackendClient'
-import { BUILTIN_SYSTEM_PROMPTS, buildPrompt, estimateTokens, type ChatMessage } from '@/lib/prompt/builder'
+import { BUILTIN_SYSTEM_PROMPTS, buildPrompt, estimateTokens, type ChatMessage, type StyleGuidanceItem } from '@/lib/prompt/builder'
+import { countTokensCached } from '@/lib/tokenCache'
 import { SUMMARY_MAX_LENGTH, summarizeMessages } from '@/lib/prompt/summarize'
 import { generateChoices } from '@/lib/prompt/choices'
 import { detectCompletedTasks, generateTasks, suggestObjective } from '@/lib/objectives/objectiveAssist'
@@ -83,6 +84,7 @@ import { dateEventCardForActivity, type DayPlannerActivity } from '@/lib/world/d
 import { sceneContinuityNote } from '@/lib/prompt/sceneContinuity'
 import { sceneStateBlock } from '@/lib/prompt/sceneStateBlock'
 import { vnProseNote } from '@/lib/prompt/vnProse'
+import { expressionRepeatNote } from '@/lib/vn/expressionRepeat'
 import { isVnReady } from '@/lib/vn/artHint'
 import { detectContinuityBreak, describeContinuityBreak } from '@/lib/dating/continuityGuard'
 import { getScenarioCatalog, scenarioById, selectScenario, successorScenario } from '@/lib/dating/scenarios'
@@ -148,6 +150,7 @@ import { getInstructTemplate, resolveInstructTemplate } from '@/lib/prompt/instr
 import { intimacyGuidance, resolveIntimacyLevel } from '@/lib/prompt/intimacyGuidance'
 import { chatCompletionSamplerToRequest } from '@/lib/api/chatCompletionSampler'
 import { extractSceneTag, stripSceneTagForDisplay, type SceneTag } from '@/lib/vn/sceneTag'
+import { resolveSceneBackground } from '@/lib/vn/resolveBackground'
 import { withIndefiniteArticle } from '@/lib/text/article'
 import {
   balanceTrailingMarkup,
@@ -166,7 +169,7 @@ import { replyMaxTokens, resolveReplyLength, usesActionMarkup } from '@/lib/char
 import { SCENE_MOOD_IDS } from '@/lib/vn/moods'
 import { DEFAULT_EXPRESSIONS, expressionCandidatesFor } from '@/lib/vn/expressions'
 import { getUnlockedBackgroundIds, getUnlockedExpressionIds } from '@/lib/vn/unlocks'
-import { currentOutfitFrom, intimateOutfitFor, selectableOutfitIds, spriteKey } from '@/lib/vn/outfits'
+import { currentOutfitFrom, intimateOutfitFor, outfitOwnedFlag, selectableOutfitIds, spriteKey } from '@/lib/vn/outfits'
 import {
   AFTERGLOW_TURNS,
   aftercareDeltas,
@@ -541,16 +544,18 @@ export function useChatSession(chatId: string | null) {
     [character, participantCharacters],
   )
 
+  // Cached: `buildPrompt` counts every history turn to decide what fits, and a single generation
+  // builds the prompt more than once. See `tokenCache.ts` for how the cache is invalidated.
   const countTokens = useCallback(
-    async (text: string) => {
-      if (!text) return 0
-      try {
-        const r = await client.tokenCount(text)
-        return r.count
-      } catch {
-        return estimateTokens(text)
-      }
-    },
+    async (text: string) =>
+      countTokensCached(text, async (t) => {
+        try {
+          const r = await client.tokenCount(t)
+          return r.count
+        } catch {
+          return estimateTokens(t)
+        }
+      }),
     [client],
   )
 
@@ -597,11 +602,16 @@ export function useChatSession(chatId: string | null) {
       // comes from the world clock — only the phase is per-chat.
       const scenePhaseIndex = freshChat.scene?.timePhase ? PHASES.indexOf(freshChat.scene.timePhase) : -1
       const promptPhaseIndex = scenePhaseIndex >= 0 ? scenePhaseIndex : (world?.currentPhaseIndex ?? 0)
-      const worldDescriptionLines = [
+      // Split in two on purpose (see `PromptBuildInput.worldMoment`): what the world *is* is stable
+      // and belongs in the cacheable prefix, while what the world is *doing right now* changes as
+      // the clock advances or the scene moves, and would otherwise invalidate the KV cache for
+      // every history token behind it each time it did.
+      const worldDescriptionLines = world
+        ? [world.description?.trim(), world.rules?.trim() ? `World rules: ${world.rules.trim()}` : ''].filter(Boolean)
+        : []
+      const worldMomentLines = [
         ...(world
           ? [
-              world.description?.trim(),
-              world.rules?.trim() ? `World rules: ${world.rules.trim()}` : '',
               describeWorldMoment({
                 worldId: world.id,
                 characterId: speaker.id,
@@ -630,6 +640,7 @@ export function useChatSession(chatId: string | null) {
         freshChat.scene?.atmosphere ? `Scene atmosphere: ${freshChat.scene.atmosphere}` : '',
       ].filter(Boolean)
       const worldDescription = worldDescriptionLines.length > 0 ? worldDescriptionLines.join('\n') : undefined
+      const worldMoment = worldMomentLines.length > 0 ? worldMomentLines.join('\n') : undefined
 
       const { count: staticSceneTurns, currentBackground: staticSceneBackground } = countStaticSceneTurns(messages)
       const speakerPresence = speaker.schedule?.length
@@ -718,11 +729,25 @@ export function useChatSession(chatId: string | null) {
       const ownedToyIds = new Set(Object.keys(freshChat.toyInventory ?? {}))
       // A world's own content rating wins over the global Settings dial.
       const intimacyLevel = resolveIntimacyLevel(world?.intimacyLevel, globalIntimacyLevel)
+      // Same location gate the panel applies — an entry tied to a place the scene isn't in should
+      // not be described to the model either, or it will reach for it and the prose goes somewhere
+      // the background says it can't be.
+      const sceneBackgroundId = resolveSceneBackground({
+        taggedBackground: undefined,
+        chat: freshChat,
+        world,
+        affection: speakerWarmth,
+        narration: undefined,
+      }).id
       const intimacyOptions = intimacyOptionsGuidance(
-        getUnlockedIntimacyOptions(speakerWarmth, speakerTrack.commitmentStatus ?? 'none', world, ownedToyIds, {
-          touch: speaker.touchProfile,
-          kinks: speaker.kinkProfile,
-        }),
+        getUnlockedIntimacyOptions(
+          speakerWarmth,
+          speakerTrack.commitmentStatus ?? 'none',
+          world,
+          ownedToyIds,
+          { touch: speaker.touchProfile, kinks: speaker.kinkProfile },
+          sceneBackgroundId,
+        ),
         intimacyLevel,
       )
 
@@ -811,6 +836,22 @@ export function useChatSession(chatId: string | null) {
       const isVisualNovel = vnOverride === 'auto' ? isVnReady(speaker, world) : !!vnOverride
       // How a reply is written when it lands in a dialogue box under a sprite (`prompt/vnProse.ts`).
       const vnProseLine = vnProseNote(isVisualNovel, speaker.card.name, persona?.name || 'You', speakerTrack.mood)
+      // The reactive half of `vnExpressionGuidance`'s standing "let the face move" rule — names the
+      // specific expression back once it's actually gone stale, the same pressure `slopAvoidance`
+      // applies to repeated phrasing. Costs nothing on the (typical) turn nothing has gone stale.
+      const expressionRepeatLine = isVisualNovel
+        ? (expressionRepeatNote(
+            speaker.card.name,
+            messages
+              .filter((m) => m.role === 'char' && m.name === speaker.card.name)
+              .slice(-SLOP_SCAN_TURNS)
+              .map((m) => m.scene?.expression),
+          ) ?? '')
+        : ''
+      // Whether anything on screen will actually use an expression/background/outfit tag this turn
+      // — the VN stage, or the reactive portrait a live date puts beside the log. See the note on
+      // `sceneOptions` below for why this gates what the model is asked for.
+      const wantsFullSceneTag = isVisualNovel || isLiveScene(freshChat.activeEvent)
 
       // Where and when, resolved once: the state block asserts these as fact and `continuityGuard.ts`
       // checks the reply against them afterwards, so both halves have to be reading the same values.
@@ -942,55 +983,75 @@ export function useChatSession(chatId: string | null) {
       const markupRule = usesActionMarkup(speaker.card)
         ? 'Put every action and piece of narration in *asterisks* and every line of spoken dialogue in "quotes". Close every mark you open: no half-quoted sentence, no narration sentence left bare between two quoted lines.'
         : ''
-      const styleGuidance = impersonating
-        ? // Impersonation only gets the rules that shape prose, not {{char}}'s behaviour/phrasing.
-          [emDashRule, styleGuidanceNote.trim(), opts?.extraStyleGuidance ?? ''].filter(Boolean).join('\n') || undefined
+      // One line, tagged essential or not — replaces what used to be a flat `.filter(Boolean).join`
+      // of every guidance line, unconditionally, regardless of how small `sampler.max_context_length`
+      // was. `buildPrompt` only ever paid for that block by trimming `history`, so a small-context
+      // model running VN mode with an active scene could lose most of its history to a steering
+      // block bigger than the reply it was steering — the history window shrank around a
+      // fixed-size "how to write this" block instead of the two ever trading off against each other.
+      //
+      // `essential: true` is content policy, format rules, the user's own settings, and anything
+      // stating concrete engine state (the scene ledger, an active event, group-scene correctness) —
+      // dropping those would make the reply contradict what the UI is already showing. Everything
+      // else is "character mind" texture: it colours a reply but doesn't break it if thin, so it's
+      // what `buildPrompt` sheds first when a tight context budget needs the room back, listed here
+      // most-to-least valuable — see that function's drop loop for why order matters.
+      const guidance = (text: string, essential = false): StyleGuidanceItem[] => (text ? [{ text, essential }] : [])
+      const styleGuidanceItems: StyleGuidanceItem[] = impersonating
+        ? // Impersonation only gets the rules that shape prose, not {{char}}'s behaviour/phrasing —
+          // three short essential lines, nothing here is ever worth dropping.
+          [...guidance(emDashRule, true), ...guidance(styleGuidanceNote.trim(), true), ...guidance(opts?.extraStyleGuidance ?? '', true)]
         : [
-            emDashRule,
-            markupRule,
-            effectiveAssistFlag(freshChat.assistOverrides?.slowBurnPacing, slowBurnPacing)
-              ? slowBurnPacingNote(speaker.card.name, speakerTrack.mood, speakerHoldingBackByPlan)
-              : '',
-            intimacyGuidance(intimacyLevel),
-            vnProseLine,
-            intimacyOptions,
-            activityInitiativeGuidance,
-            afterglowLine,
-            explicitAftercareLine,
-            moodLine,
-            needLine,
-            intentLine,
-            fearLine,
-            desireLine,
-            plansLine,
-            beliefsLine,
-            expectationsLine,
-            priorityLine,
-            stockRomancePhrasingLine,
-            agencyGuardLine,
-            sceneContinuityLine,
-            intimacySceneLine,
-            explicitSceneLine,
-            escalationShapeLine,
-            intimacyConsentTensionLine,
-            intimacyAnticipationLine,
-            rebuffLine,
-            reciprocityLine,
-            repeatNudge ?? '',
-            sceneNudge,
-            scheduleConflictLine,
-            earlyEscalationLine,
-            triggerStyleLine,
-            ambientLine,
-            participantGuidance ?? '',
-            replyLengthInstruction,
-            styleGuidanceNote.trim(),
-            slopAvoidance ?? '',
-            sceneStateLine,
-            opts?.extraStyleGuidance ?? '',
+            ...guidance(emDashRule, true),
+            ...guidance(markupRule, true),
+            ...guidance(
+              effectiveAssistFlag(freshChat.assistOverrides?.slowBurnPacing, slowBurnPacing)
+                ? slowBurnPacingNote(speaker.card.name, speakerTrack.mood, speakerHoldingBackByPlan)
+                : '',
+              true,
+            ),
+            ...guidance(intimacyGuidance(intimacyLevel), true),
+            ...guidance(vnProseLine, true),
+            ...guidance(intimacyOptions, true),
+            ...guidance(activityInitiativeGuidance, true),
+            ...guidance(afterglowLine, true),
+            ...guidance(explicitAftercareLine, true),
+            // Character-mind texture, most- to least-valuable — dropped from the bottom of this
+            // run first (see `buildPrompt`'s drop loop), so mood (closest to voice) survives longest.
+            ...guidance(moodLine),
+            ...guidance(needLine),
+            ...guidance(beliefsLine),
+            ...guidance(expectationsLine),
+            ...guidance(plansLine),
+            ...guidance(rebuffLine),
+            ...guidance(reciprocityLine),
+            ...guidance(stockRomancePhrasingLine),
+            ...guidance(escalationShapeLine),
+            ...guidance(intimacyAnticipationLine),
+            ...guidance(repeatNudge ?? ''),
+            ...guidance(earlyEscalationLine),
+            ...guidance(intentLine),
+            ...guidance(fearLine),
+            ...guidance(desireLine),
+            ...guidance(priorityLine),
+            // Back to essential: mechanics, safety guards, and concrete engine state.
+            ...guidance(agencyGuardLine, true),
+            ...guidance(sceneContinuityLine, true),
+            ...guidance(intimacySceneLine, true),
+            ...guidance(explicitSceneLine, true),
+            ...guidance(intimacyConsentTensionLine, true),
+            ...guidance(sceneNudge, true),
+            ...guidance(scheduleConflictLine, true),
+            ...guidance(triggerStyleLine, true),
+            ...guidance(ambientLine, true),
+            ...guidance(participantGuidance ?? '', true),
+            ...guidance(replyLengthInstruction, true),
+            ...guidance(styleGuidanceNote.trim(), true),
+            ...guidance(slopAvoidance ?? '', true),
+            ...guidance(expressionRepeatLine, true),
+            ...guidance(sceneStateLine, true),
+            ...guidance(opts?.extraStyleGuidance ?? '', true),
           ]
-            .filter(Boolean)
-            .join('\n') || undefined
 
       const contextBudget = sampler.max_context_length - sampler.max_length - 32
       return buildPrompt({
@@ -1004,6 +1065,7 @@ export function useChatSession(chatId: string | null) {
         history: recentHistory,
         chatSummary: freshChat.summary,
         worldDescription,
+        worldMoment,
         lorebooks: [...worldLorebook, ...lorebooks, ...boundBooks, ...factsLorebook],
         template,
         contextBudget: Math.max(contextBudget, 256),
@@ -1017,17 +1079,31 @@ export function useChatSession(chatId: string | null) {
         worldInfoTurn: messages.length,
         activeObjective: objectiveForPrompt,
         relationshipDescription,
-        styleGuidance,
+        styleGuidanceItems,
         authorNote: freshChat.authorNote,
         regexScripts,
         sceneOptions: {
+          // Only ask for what something is actually going to render. The full instruction — the
+          // format line plus every valid id — costs around 245 tokens of context on every single
+          // turn, and outside Visual Novel mode most of it is spent on a stage nobody is looking
+          // at: no background is drawn, and the sprite (so the expression and the outfit picking
+          // it) only appears while a live date or hangout is running, via `ReactivePortrait`. Mood
+          // is the exception and stays asked for either way, because `resolveBgmTrack` uses it to
+          // pick the background music, which plays in both modes.
+          //
+          // Switching a chat into VN mode later is self-correcting: the stage reads the most recent
+          // tag, so it starts neutral and picks up the real scene from the next reply — the same
+          // state a brand-new chat's first message already leaves it in.
+          //
           // VN scene-tagging stays keyed on the primary — per-participant sprites are a separate, larger lift.
-          expressionIds: getUnlockedExpressionIds(character, affection),
-          backgroundIds: getUnlockedBackgroundIds(world, affection),
+          expressionIds: wantsFullSceneTag ? getUnlockedExpressionIds(character, affection) : [],
+          backgroundIds: wantsFullSceneTag ? getUnlockedBackgroundIds(world, affection) : [],
           // Only ask for a mood tag when this world actually has music to drive with it.
           moodIds: world?.music && Object.keys(world.music).length > 0 ? SCENE_MOOD_IDS : undefined,
           // A character with no outfit art gets a single-entry list, treated as no choice.
-          outfitIds: selectableOutfitIds(character.outfits, character.sprites, affection, new Set(freshChat.sceneFlags ?? [])),
+          outfitIds: wantsFullSceneTag
+            ? selectableOutfitIds(character.outfits, character.sprites, affection, new Set(freshChat.sceneFlags ?? []))
+            : [],
           currentOutfitId: currentOutfitFrom(messages),
         },
         affection,
@@ -1694,6 +1770,36 @@ export function useChatSession(chatId: string | null) {
     [chatId, world],
   )
 
+  /**
+   * Buying a wardrobe state. Unlike a gift, an item or a toy, what this owns is *art* — so it is
+   * recorded as a reserved scene flag (`outfitOwnedFlag`) rather than an inventory count: every
+   * reader of `isOutfitUnlocked` already threads `chat.sceneFlags` through, so the sprite, the
+   * model's outfit menu and the editor all pick it up with no further plumbing.
+   */
+  const buyOutfit = useCallback(
+    async (characterId: string, outfitId: string) => {
+      if (!chatId) return
+      const { active: target } = resolveSpeaker(characterId)
+      const outfit = target?.outfits?.find((o) => o.id === outfitId)
+      const price = Number(outfit?.price ?? 0)
+      if (!outfit || price <= 0) return
+      await getCoinMutex(chatId).run(async () => {
+        const freshChat = await chatsApi.get(chatId)
+        if (!freshChat) return
+        const coins = freshChat.giftCoins ?? 0
+        if (coins < price) return
+        const flag = outfitOwnedFlag(outfitId)
+        const flags = new Set((freshChat.sceneFlags ?? []) as SceneFlag[])
+        // Already owned — never charge twice for the same wardrobe state.
+        if (flags.has(flag)) return
+        flags.add(flag)
+        await chatsApi.update(chatId, { giftCoins: coins - price, sceneFlags: [...flags] })
+        toastSuccess(`Bought ${outfit.label}.`)
+      })
+    },
+    [chatId, resolveSpeaker],
+  )
+
   /** Byte-for-byte mirrors `buyGift`/`buyItem` — a toy is a purchase like either, just tracked in its own `toyInventory` (`intimacyCatalog.ts`'s own doc comment explains why toys, unlike every other intimacy-catalog category, need an actual ownership step). */
   const buyToy = useCallback(
     async (toyId: string) => {
@@ -1774,28 +1880,46 @@ export function useChatSession(chatId: string | null) {
         inventory[itemId] = inStock - 1
         if (inventory[itemId] <= 0) delete inventory[itemId]
 
+        // Applied into one accumulating patch rather than one branch per effect, so a `multi`
+        // item lands as a single write — two sequential updates would give the second one a stale
+        // read of the first's stats and silently drop it.
         const patch: Record<string, unknown> = { itemInventory: inventory }
-        let toastMessage = `Used ${def.name}.`
-        if (def.effect.kind === 'currency') {
-          patch.giftCoins = Math.max(0, (freshChat.giftCoins ?? 0) + def.effect.amount)
-          toastMessage = `Used ${def.name} — gained ${def.effect.amount} coins.`
-        } else if (def.effect.kind === 'flag') {
-          const flags = new Set((freshChat.sceneFlags ?? []) as SceneFlag[])
-          flags.add(def.effect.flag)
-          patch.sceneFlags = [...flags]
-          toastMessage = `Used ${def.name}.`
-        } else {
-          const dim = def.effect.dimension
-          if (dim === 'affection') {
-            patch.affection = clampAffection((freshChat.affection ?? 0) + def.effect.amount)
-          } else {
-            const stats = getRelationshipStats(freshChat)
-            patch.relationshipStats = { ...stats, [dim]: clampStat(stats[dim] + def.effect.amount) }
+        const notes: string[] = []
+        const flags = new Set((freshChat.sceneFlags ?? []) as SceneFlag[])
+        let stats = getRelationshipStats(freshChat)
+        let affection = freshChat.affection ?? 0
+        let coins = freshChat.giftCoins ?? 0
+
+        const apply = (effect: ItemEffect) => {
+          if (effect.kind === 'multi') {
+            effect.effects.forEach(apply)
+            return
           }
-          toastMessage = `Used ${def.name} — ${def.effect.amount > 0 ? '+' : ''}${def.effect.amount} ${dim}.`
+          if (effect.kind === 'currency') {
+            coins = Math.max(0, coins + effect.amount)
+            patch.giftCoins = coins
+            notes.push(`gained ${effect.amount} coins`)
+            return
+          }
+          if (effect.kind === 'flag') {
+            flags.add(effect.flag)
+            patch.sceneFlags = [...flags]
+            return
+          }
+          const dim = effect.dimension
+          if (dim === 'affection') {
+            affection = clampAffection(affection + effect.amount)
+            patch.affection = affection
+          } else {
+            stats = { ...stats, [dim]: clampStat(stats[dim] + effect.amount) }
+            patch.relationshipStats = stats
+          }
+          notes.push(`${effect.amount > 0 ? '+' : ''}${effect.amount} ${dim}`)
         }
+        apply(def.effect)
+
         await chatsApi.update(chatId, patch)
-        toastSuccess(toastMessage)
+        toastSuccess(notes.length ? `Used ${def.name} — ${notes.join(', ')}.` : `Used ${def.name}.`)
       })
     },
     [character, chatId, world],
@@ -3782,6 +3906,7 @@ export function useChatSession(chatId: string | null) {
     buyGift,
     buyItem,
     buyToy,
+    buyOutfit,
     chooseIntimacyBranch,
     useItem,
     askForCommitment,

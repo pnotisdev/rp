@@ -90,11 +90,10 @@ export function StageCard({
   className?: string
   children: ReactNode
 }) {
-  const surface =
-    variant === 'vn'
-      ? 'bg-black/40 text-white backdrop-blur-sm'
-      : 'bg-bg-sunken/80 ring-1 ring-border/70 backdrop-blur-sm'
-  return <div className={`min-w-0 overflow-hidden rounded-xl ${surface} ${className}`}>{children}</div>
+  // `vn-glass` is the stage's own material (globals.css) — shared so a card rendered here and one
+  // rendered by VNStage itself can't drift into two different translucencies.
+  const surface = variant === 'vn' ? 'vn-glass text-white' : 'bg-bg-sunken/80 ring-1 ring-border/70 backdrop-blur-sm'
+  return <div className={`min-w-0 overflow-hidden rounded-2xl ${surface} ${className}`}>{children}</div>
 }
 
 /**

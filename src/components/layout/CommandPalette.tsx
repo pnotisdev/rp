@@ -3,6 +3,7 @@ import { Search } from 'lucide-react'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { charactersApi, chatsApi, worldsApi } from '@/lib/api/client'
 import { NAV, type ViewId } from './Sidebar'
+import { useVnChromeClass } from '@/lib/store/useVnChromeStore'
 
 interface PaletteResult {
   key: string
@@ -34,6 +35,8 @@ export function CommandPalette({
   onSelectWorld: (worldId: string) => void
 }) {
   const [query, setQuery] = useState('')
+  // Matches the stage when this opens over a VN scene — see `Modal`'s own note and `.vn-chrome`.
+  const vnChrome = useVnChromeClass()
   const [activeIndex, setActiveIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -130,7 +133,7 @@ export function CommandPalette({
       onClick={onClose}
     >
       <div
-        className="animate-panel-in w-full max-w-lg overflow-hidden rounded-2xl border border-border bg-bg-elevated themed-shadow"
+        className={`animate-panel-in w-full max-w-lg overflow-hidden rounded-2xl border border-border bg-bg-elevated themed-shadow ${vnChrome}`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-2.5 border-b border-border px-4 py-3">

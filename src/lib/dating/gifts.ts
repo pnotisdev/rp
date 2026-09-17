@@ -149,13 +149,40 @@ export function giftReactionGuidance(
 }
 
 /** Built-in fallback catalog, used by any character not living in a world with its own gifts. */
+/**
+ * Twenty gifts across fourteen tags, sized so **every tag in `catalogVisuals.ts`'s `TAG_ICONS` has
+ * at least two entries**. That's not decoration: `giftPreferences` scores a gift per character and
+ * the shop only reveals a taste once one has actually been given, so with six gifts across nine
+ * tags an authored preference had almost nothing to discriminate between — and
+ * `giftRepetitionMultiplier` started flattening repeats before there was an alternative to switch
+ * to. Two per tag is the floor at which "they like thoughtful things, not flashy ones" becomes a
+ * readable pattern rather than a coin flip.
+ */
 export const DEFAULT_GIFT_CATALOG: GiftItem[] = [
+  // common — the everyday register, cheap enough to give often
   { id: 'flower-bouquet', name: 'Flower Bouquet', rarity: 'common', price: 6, tags: ['romance', 'sweet'] },
   { id: 'handmade-charm', name: 'Handmade Charm', rarity: 'common', price: 7, tags: ['personal', 'cute'] },
+  { id: 'omamori-charm', name: 'Omamori Charm', rarity: 'common', price: 5, tags: ['luck', 'cute'] },
+  { id: 'mixtape', name: 'A Made Playlist', rarity: 'common', price: 6, tags: ['music', 'personal'] },
+  { id: 'convenience-snacks', name: 'Armful of Convenience-Store Snacks', rarity: 'common', price: 4, tags: ['casual', 'sweet'] },
+  { id: 'plush-keepsake', name: 'Ridiculous Plush', rarity: 'common', price: 5, tags: ['cute', 'comfort'] },
+  // uncommon
   { id: 'artisan-chocolate', name: 'Artisan Chocolate', rarity: 'uncommon', price: 10, tags: ['sweet', 'comfort'] },
   { id: 'favorite-novel', name: 'Favorite Novel', rarity: 'uncommon', price: 12, tags: ['book', 'thoughtful'] },
+  { id: 'four-leaf-clover', name: 'Pressed Four-Leaf Clover', rarity: 'uncommon', price: 9, tags: ['luck', 'personal'] },
+  { id: 'aquarium-pass', name: 'Aquarium Day Pass', rarity: 'uncommon', price: 11, tags: ['ticket', 'casual'] },
+  { id: 'sketchbook', name: 'Good Sketchbook', rarity: 'uncommon', price: 10, tags: ['creative', 'thoughtful'] },
+  { id: 'paint-set', name: 'Small Paint Set', rarity: 'uncommon', price: 12, tags: ['creative', 'personal'] },
+  { id: 'poetry-collection', name: 'Worn Poetry Collection', rarity: 'uncommon', price: 11, tags: ['book', 'elegant'] },
+  // rare
   { id: 'silver-pendant', name: 'Silver Pendant', rarity: 'rare', price: 18, tags: ['romance', 'elegant'] },
+  { id: 'concert-ticket', name: 'Concert Ticket', rarity: 'rare', price: 17, tags: ['music', 'ticket', 'event'] },
+  { id: 'fountain-pen', name: 'Fountain Pen', rarity: 'rare', price: 16, tags: ['elegant', 'thoughtful'] },
+  { id: 'knit-scarf', name: 'Hand-Knit Scarf', rarity: 'rare', price: 15, tags: ['personal', 'comfort', 'romance'] },
+  { id: 'star-projector', name: 'Star Projector', rarity: 'rare', price: 19, tags: ['romance', 'thoughtful'] },
+  // epic — the two things you save up for, and they say different things
   { id: 'festival-kimono', name: 'Festival Kimono', rarity: 'epic', price: 28, tags: ['event', 'romance'] },
+  { id: 'couple-ring', name: 'Simple Couple Ring', rarity: 'epic', price: 30, tags: ['romance', 'elegant'] },
 ]
 
 const RARITY_MULTIPLIER: Record<GiftRarity, number> = {

@@ -1,11 +1,31 @@
 import { useState } from 'react'
-import { ArrowUpRight, Heart, X } from 'lucide-react'
+import {
+  ArrowUpRight,
+  Cake,
+  CheckCircle2,
+  BookMarked,
+  Gauge,
+  Gift,
+  Heart,
+  History,
+  ImageIcon,
+  KeyRound,
+  Lock,
+  Package,
+  Settings2,
+  Shirt,
+  ShoppingBag,
+  Sparkles,
+  Wand2,
+  X,
+  type LucideIcon,
+} from 'lucide-react'
 import type { Character, GalleryEntry } from '@/lib/characters/cardSpec'
 import type { Chat, WorldCard } from '@/lib/types'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { chatFactsApi, chatsApi, relationshipEventsApi } from '@/lib/api/client'
 import { getGiftCatalog, giftTasteLabel } from '@/lib/dating/gifts'
-import { getItemCatalog } from '@/lib/dating/items'
+import { getItemCatalog, itemEffectSummary } from '@/lib/dating/items'
 import {
   canActuallyAskForCommitment,
   canInitiateFirstTime,
@@ -46,7 +66,12 @@ import { daysUntilAnnualDate } from '@/lib/world/calendar'
 import type { CommitmentStatus } from '@/lib/types'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
+import { resolveSceneBackground } from '@/lib/vn/resolveBackground'
+import { purchasableOutfits } from '@/lib/vn/outfits'
+import { TabRail, type TabRailItem } from '@/components/ui/TabRail'
 import { Section } from '@/components/ui/Section'
+import { CatalogAction, CatalogCard, CoinBalance } from '@/components/ui/CatalogCard'
+import { catalogIcon, DIMENSION_ICONS, INTIMACY_CATEGORY_ICONS } from '@/lib/dating/catalogVisuals'
 import { SelectField } from '@/components/ui/Field'
 import { confirmDialog } from '@/lib/store/useConfirmStore'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
@@ -68,7 +93,26 @@ const DIMENSION_LABELS: Record<(typeof ALL_STAT_KEYS)[number], string> = {
   tension: 'Tension',
 }
 
+/** One "what unlocks next" line: a glyph, what it is, and the number it's waiting on. */
+function ProgressRow({ icon: Icon, label, at }: { icon: LucideIcon; label: string; at?: string | number }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <Icon size={11} strokeWidth={1.75} className="shrink-0 opacity-60" />
+      <span className="min-w-0 truncate">{label}</span>
+      {at !== undefined && <span className="ml-auto shrink-0 tabular-nums opacity-70">@ {at}</span>}
+    </div>
+  )
+}
+
+/** A count riding on a tab-rail label, e.g. how many intimate options are unlocked. */
+function RailCount({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="rounded-full bg-current/15 px-1.5 text-[11px] font-medium tabular-nums opacity-80">{children}</span>
+  )
+}
+
 const INTIMACY_CATEGORIES: { id: IntimacyCategory; label: string }[] = [
+  { id: 'affection', label: 'Closeness' },
   { id: 'kissing_spot', label: 'Kissing spots' },
   { id: 'position', label: 'Positions' },
   { id: 'toy', label: 'Toys' },
@@ -87,6 +131,8 @@ interface RelationshipPanelProps {
   onBuyGift: (giftId: string) => Promise<void>
   onBuyItem: (itemId: string) => Promise<void>
   onBuyToy: (toyId: string) => Promise<void>
+  /** Buying a wardrobe state for this character — see `purchasableOutfits`. */
+  onBuyOutfit: (characterId: string, outfitId: string) => Promise<void>
   onAskCommitment: (tier: Exclude<CommitmentStatus, 'none'>, characterId?: string) => Promise<void>
   /** The "First time together" milestone ask — see `stage.ts`'s `canInitiateFirstTime`. */
   onInitiateFirstTime: (characterId?: string) => Promise<void>
@@ -147,6 +193,7 @@ export function RelationshipPanel({
   onBuyGift,
   onBuyItem,
   onBuyToy,
+  onBuyOutfit,
   onAskCommitment,
   onInitiateFirstTime,
   onEndRelationship,
@@ -196,7 +243,24 @@ export function RelationshipPanel({
   // the enforcement point for `touchProfile`/`kinkProfile` (`dating/kinks.ts` explains why it's here
   // and not in a prompt instruction).
   const intimacyProfiles = { touch: viewingCharacter?.touchProfile, kinks: viewingCharacter?.kinkProfile }
-  const intimacyUnlocked = getUnlockedIntimacyOptions(warmth, commitmentStatus, world, undefined, intimacyProfiles)
+  // Where the scene actually is, so a location-tied entry ("the edge of the onsen") isn't offered
+  // in a classroom. The same resolution VN mode paints with, so the two can never disagree about
+  // where this is happening.
+  const sceneBackgroundId = resolveSceneBackground({
+    taggedBackground: undefined,
+    chat,
+    world,
+    affection,
+    narration: undefined,
+  }).id
+  const intimacyUnlocked = getUnlockedIntimacyOptions(
+    warmth,
+    commitmentStatus,
+    world,
+    undefined,
+    intimacyProfiles,
+    sceneBackgroundId,
+  )
   // The full catalog (not just `intimacyUnlocked`), so a locked toy is still shown with its requirement rather than hidden.
   const toyCatalogAll = getIntimacyCatalog(world).filter((i) => i.category === 'toy')
   const unlockedToyIds = new Set(intimacyUnlocked.filter((i) => i.category === 'toy').map((i) => i.id))
@@ -244,6 +308,17 @@ export function RelationshipPanel({
     }
   }
 
+  const [buyingOutfitId, setBuyingOutfitId] = useState<string | null>(null)
+  const handleBuyOutfit = async (outfitId: string) => {
+    if (!viewingCharacter) return
+    setBuyingOutfitId(outfitId)
+    try {
+      await onBuyOutfit(viewingCharacter.id, outfitId)
+    } finally {
+      setBuyingOutfitId(null)
+    }
+  }
+
   const handleBuyToy = async (toyId: string) => {
     setBuyingToyId(toyId)
     try {
@@ -264,12 +339,24 @@ export function RelationshipPanel({
   }
 
   const [tab, setTab] = useState<PanelTab>('overview')
-  const hasShop = giftCatalog.length > 0 || itemCatalog.length > 0 || (allowedCategories.includes('toy') && toyCatalogAll.length > 0)
-  const tabs: { id: PanelTab; label: string }[] = [
-    { id: 'overview', label: 'Overview' },
-    { id: 'unlocks', label: 'Unlocks' },
-    ...(hasShop ? [{ id: 'shop' as const, label: 'Shop' }] : []),
-    { id: 'more', label: 'More' },
+  const outfitsForSale = purchasableOutfits(viewingCharacter?.outfits, viewingCharacter?.sprites, affection, flags)
+  const hasShop =
+    giftCatalog.length > 0 ||
+    itemCatalog.length > 0 ||
+    outfitsForSale.length > 0 ||
+    (allowedCategories.includes('toy') && toyCatalogAll.length > 0)
+  // Counts on the rail so the menu says what's behind a tab without opening it — the Unlocks badge
+  // in particular is the whole progression loop at a glance.
+  const tabs: TabRailItem<PanelTab>[] = [
+    { id: 'overview', label: 'Overview', icon: Gauge },
+    {
+      id: 'unlocks',
+      label: 'Unlocks',
+      icon: KeyRound,
+      badge: intimacyUnlocked.length ? <RailCount>{intimacyUnlocked.length}</RailCount> : undefined,
+    },
+    ...(hasShop ? [{ id: 'shop' as const, label: 'Shop', icon: ShoppingBag }] : []),
+    { id: 'more', label: 'More', icon: Settings2 },
   ]
   // Falls back off the shop tab if it stops applying (re-derived from the catalogs every render).
   const activeTab: PanelTab = tab === 'shop' && !hasShop ? 'overview' : tab
@@ -361,44 +448,74 @@ export function RelationshipPanel({
     .sort((a, b) => Number(a[1]) - Number(b[1]))[0]
 
   return (
-    <Modal onClose={onClose} title="Relationship" size="3xl" scrollable>
+    <Modal
+      onClose={onClose}
+      title="Relationship"
+      size="3xl"
+      scrollable
+      compact
+      // The one number a shop should never bury, and it's read from three of the four tabs — so it
+      // lives in the shell's header rather than inside the Shop tab's first section.
+      headerExtra={hasShop ? <CoinBalance coins={chat.giftCoins ?? 0} /> : undefined}
+    >
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Pinned: never scrolls away, regardless of which tab below is open. */}
       <div className="shrink-0">
       {trackedCharacters.length > 1 && (
-        <div className="mb-4 flex flex-wrap gap-1.5 rounded-xl bg-bg-sunken p-1.5">
+        <div className="mb-3 flex flex-wrap gap-1 rounded-xl bg-bg-sunken p-1">
           {trackedCharacters.map((c) => (
             <button
               key={c.id}
               onClick={() => setViewingId(c.id)}
-              className={`flex-1 rounded-lg px-3 py-2 text-sm capitalize transition-colors ${
-                viewingCharacter?.id === c.id ? 'bg-bg-elevated text-text themed-shadow' : 'text-text-muted hover:text-text'
+              className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-2.5 py-1.5 text-sm transition-colors ${
+                viewingCharacter?.id === c.id ? 'bg-accent/15 text-accent' : 'text-text-muted hover:text-text'
               }`}
             >
-              {c.card.name}
+              {c.avatarDataUrl && (
+                <img src={c.avatarDataUrl} alt="" className="h-5 w-5 shrink-0 rounded-full object-cover" />
+              )}
+              <span className="truncate font-display">{c.card.name}</span>
             </button>
           ))}
         </div>
       )}
 
-      {/* Pinned above the tabs: bond/warmth, current emotional read, and the at-risk banner if any. */}
-      <div className="mb-4 rounded-xl bg-bg-sunken p-4">
-        {/* The VN HUD's own Bond row, same label treatment and same meter (`ui/Stage`) — the two are
-            the same components now rather than two drifting copies of one look. */}
-        <div className="mb-1.5 flex min-w-0 items-center gap-1.5 text-xs">
-          <Heart size={11} strokeWidth={2.25} className="shrink-0 text-romance" fill="currentColor" fillOpacity={0.4} />
-          <StageLabel>Bond{trackedCharacters.length > 1 ? ` · ${viewingCharacter?.card.name ?? ''}` : ''}</StageLabel>
-          <span className="truncate font-semibold capitalize text-romance">{formatRelationshipStage(relationshipStage)}</span>
-          <span className="shrink-0 text-text">{warmth}</span>
+      {/* Pinned above the tabs: who this is, bond/warmth, current emotional read, and the at-risk
+          banner if any. Laid out as a character card — portrait, name, stage, meter — rather than
+          the stack of full-width paragraphs it was, which cost most of the panel's height before
+          any tab content got a look in. */}
+      <div className="mb-3 rounded-xl bg-bg-sunken p-3">
+        <div className="flex items-center gap-3">
+          {viewingCharacter?.avatarDataUrl ? (
+            <img
+              src={viewingCharacter.avatarDataUrl}
+              alt=""
+              className="h-12 w-12 shrink-0 rounded-xl object-cover ring-1 ring-romance/25"
+            />
+          ) : (
+            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-romance/12 text-romance">
+              <Heart size={20} strokeWidth={1.75} fill="currentColor" fillOpacity={0.25} />
+            </span>
+          )}
+          <div className="min-w-0 flex-1">
+            {/* The VN HUD's own Bond row, same label treatment and same meter (`ui/Stage`) — the two
+                are the same components now rather than two drifting copies of one look. */}
+            <div className="flex min-w-0 items-baseline gap-1.5">
+              <span className="truncate font-display text-sm text-text">{viewingCharacter?.card.name ?? 'Relationship'}</span>
+              <span className="truncate text-xs font-semibold capitalize text-romance">
+                {formatRelationshipStage(relationshipStage)}
+              </span>
+              <span className="ml-auto shrink-0 text-sm tabular-nums text-text">{warmth}</span>
+            </div>
+            <StageMeter value={warmth} className="mt-1.5" />
+            <p className="mt-1.5 flex items-center gap-1 text-[11px] text-text-muted">
+              <StageLabel>{nextMilestone ? 'Next' : 'Bond'}</StageLabel>
+              {nextMilestone
+                ? `${formatRelationshipStage(nextMilestone.stage)} at ${nextMilestone.at}`
+                : 'Max stage reached'}
+            </p>
+          </div>
         </div>
-        <StageMeter value={warmth} />
-        {nextMilestone ? (
-          <p className="mt-2 text-xs text-text-muted">
-            Next stage: {formatRelationshipStage(nextMilestone.stage)} at {nextMilestone.at} warmth
-          </p>
-        ) : (
-          <p className="mt-2 text-xs text-text-muted">Max stage reached.</p>
-        )}
         {(track.mood || track.currentNeed || describeMomentum(track.momentum) || describeInitiativeBalance(track.initiativeBalance)) && (
           <p className="mt-2 border-t border-bg-elevated pt-2 text-xs italic text-text-muted">
             Right now:{' '}
@@ -452,7 +569,7 @@ export function RelationshipPanel({
       </div>
 
       {pendingChoice && (
-        <div className="mb-4 rounded-xl border border-romance/40 bg-romance/10 p-4">
+        <div className="mb-3 rounded-xl bg-romance/10 p-3 ring-1 ring-romance/30">
           <div className="text-sm font-semibold text-romance">The scene is waiting on you</div>
           <p className="mt-1 text-xs text-text-muted">
             It won't move past this on its own. Pick where it goes.
@@ -473,7 +590,7 @@ export function RelationshipPanel({
       )}
 
       {track.relationshipWarning && (
-        <div className="mb-4 rounded-xl border border-danger/40 bg-danger/10 p-4">
+        <div className="mb-3 rounded-xl bg-danger/10 p-3 ring-1 ring-danger/30">
           <div className="text-sm font-semibold text-danger">On the rocks</div>
           <p className="mt-1 text-xs text-text-muted">
             {track.relationshipWarning.reason.charAt(0).toUpperCase() + track.relationshipWarning.reason.slice(1)} if this
@@ -482,28 +599,16 @@ export function RelationshipPanel({
         </div>
       )}
 
-      <div className="mb-4 flex gap-1 border-b border-border">
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={`border-b-2 px-3 py-2 text-sm transition-colors ${
-              activeTab === t.id ? 'border-accent text-accent' : 'border-transparent text-text-muted hover:text-text'
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <TabRail items={tabs} value={activeTab} onChange={setTab} className="mb-3" />
       </div>
 
       {/* The only part that scrolls — bounded by the Modal's max-height regardless of tab content. */}
       <div className="min-h-0 flex-1 overflow-y-auto">
       {activeTab === 'overview' && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between rounded-xl bg-bg-sunken p-4">
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-bg-sunken p-3">
             <div>
-              <div className="text-xs text-text-muted">Status</div>
+              <StageLabel>Status</StageLabel>
               <div className="text-sm capitalize text-text">{formatCommitmentStatus(commitmentStatus)}</div>
               {track.breakupCount ? (
                 <div className="mt-0.5 text-[11px] text-text-muted">
@@ -544,20 +649,23 @@ export function RelationshipPanel({
             </div>
           </div>
 
-          <Section title="Relationship stats" surface="sunken">
-            <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-4">
+          <Section title="Relationship stats" icon={Gauge} surface="sunken" contentClassName="!p-3">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               {ALL_STAT_KEYS.map((key) => {
                 const value = key === 'affection' ? affection : stats[key]
+                const DimIcon = DIMENSION_ICONS[key] ?? Heart
+                // Tension isn't a "more is better" dimension, so it stays neutral rather than romance-tinted.
+                const neutral = key === 'tension'
                 return (
-                  <div key={key}>
-                    <div className="mb-0.5 flex items-center justify-between text-[11px] text-text-muted">
-                      <span>{DIMENSION_LABELS[key]}</span>
-                      <span>{value}</span>
+                  <div key={key} className="rounded-lg bg-bg-elevated px-2.5 py-2">
+                    <div className="mb-1 flex items-center gap-1.5 text-[11px] text-text-muted">
+                      <DimIcon size={12} strokeWidth={1.75} className={`shrink-0 ${neutral ? '' : 'text-romance/70'}`} />
+                      <span className="truncate">{DIMENSION_LABELS[key]}</span>
+                      <span className="ml-auto tabular-nums text-text">{value}</span>
                     </div>
-                    <div className="h-1.5 overflow-hidden rounded-full bg-bg-elevated">
+                    <div className="h-1 overflow-hidden rounded-full bg-bg-sunken">
                       <div
-                        // Tension isn't a "more is better" dimension, so its bar stays neutral rather than romance-tinted.
-                        className={`h-full rounded-full transition-[width] duration-500 ${key === 'tension' ? 'bg-text-muted/50' : 'bg-romance/70'}`}
+                        className={`h-full rounded-full transition-[width] duration-500 ${neutral ? 'bg-text-muted/50' : 'bg-romance/70'}`}
                         style={{ width: `${value}%` }}
                       />
                     </div>
@@ -570,29 +678,57 @@ export function RelationshipPanel({
       )}
 
       {activeTab === 'unlocks' && (
-        <div className="space-y-4">
-          <Section title="Scene flags" surface="sunken">
-            <div className="flex flex-wrap gap-2">
-              {knownFlags.map((f) => (
-                <span key={f.id} className={`rounded-lg px-2 py-1 text-xs ${flags.has(f.id) ? 'bg-romance/15 text-romance' : 'bg-bg-elevated text-text-muted'}`}>
-                  {f.label}
-                </span>
-              ))}
+        <div className="space-y-3">
+          <Section
+            title="Scene flags"
+            icon={CheckCircle2}
+            action={
+              <span className="text-[11px] tabular-nums text-text-muted">
+                {knownFlags.filter((f) => flags.has(f.id)).length}/{knownFlags.length}
+              </span>
+            }
+            surface="sunken"
+            contentClassName="!p-3"
+          >
+            <div className="flex flex-wrap gap-1.5">
+              {/* Earned vs not is the whole point of this list, so it's carried by a glyph as well
+                  as a tint — a colour difference alone read as decoration rather than progress. */}
+              {knownFlags.map((f) => {
+                const earned = flags.has(f.id)
+                return (
+                  <span
+                    key={f.id}
+                    className={`flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs ${
+                      earned ? 'bg-romance/15 text-romance' : 'bg-bg-elevated text-text-muted/70'
+                    }`}
+                  >
+                    {earned ? <CheckCircle2 size={11} strokeWidth={2.25} /> : <Lock size={10} strokeWidth={2.25} />}
+                    {f.label}
+                  </span>
+                )
+              })}
             </div>
           </Section>
 
           <Section
             title="Intimate unlocks"
+            icon={KeyRound}
             description="Kissing spots, positions, toys, and other beats this relationship has earned. Click one and the model writes your move into it, adapted to where the scene is, for you to review in the composer before you send."
             surface="sunken"
+            contentClassName="!p-3"
           >
-            <div className="space-y-3">
+            <div className="space-y-1.5">
               {INTIMACY_CATEGORIES.filter((c) => allowedCategories.includes(c.id)).map(({ id, label }) => {
                 const items = intimacyUnlocked.filter((i) => i.category === id)
                 const next = nextLockedInCategory(id, warmth, commitmentStatus, world)
+                const CatIcon = INTIMACY_CATEGORY_ICONS[id] ?? Sparkles
                 return (
-                  <div key={id}>
-                    <div className="mb-1 text-[11px] font-medium text-text-muted">{label}</div>
+                  <div key={id} className="rounded-lg bg-bg-elevated px-2.5 py-2">
+                    <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium text-text-muted">
+                      <CatIcon size={12} strokeWidth={1.75} className="shrink-0 text-romance/70" />
+                      {label}
+                      {items.length > 0 && <span className="ml-auto tabular-nums">{items.length}</span>}
+                    </div>
                     {items.length > 0 ? (
                       <div className="flex flex-wrap gap-1.5">
                         {items.map((i) => {
@@ -605,8 +741,9 @@ export function RelationshipPanel({
                                 onClick={() => handleUseIntimacyOption(i)}
                                 disabled={!!pendingActionId}
                                 title={`${i.label}. The model writes your move into it, adapted to the scene, for you to review`}
-                                className="rounded-lg bg-romance/15 px-2 py-1 text-xs text-romance transition-colors hover:bg-romance/25 disabled:opacity-40"
+                                className="flex items-center gap-1.5 rounded-lg bg-romance/15 px-2 py-1 text-xs text-romance transition-colors first-letter:uppercase hover:bg-romance/25 disabled:opacity-40"
                               >
+                                <Sparkles size={10} strokeWidth={2.25} className="shrink-0 opacity-70" />
                                 {pendingActionId === i.id ? 'Writing…' : i.label}
                               </button>
                             )
@@ -617,20 +754,25 @@ export function RelationshipPanel({
                               onClick={() => handleBuyToy(i.id)}
                               disabled={buyingToyId === i.id || (chat.giftCoins ?? 0) < (i.price ?? 0)}
                               title={`Buy ${i.label} for ${i.price} coins`}
-                              className="rounded-lg border border-romance/40 px-2 py-1 text-xs text-romance/80 transition-colors hover:bg-romance/10 disabled:opacity-40"
+                              className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-romance/80 ring-1 ring-romance/35 transition-colors first-letter:uppercase hover:bg-romance/10 disabled:opacity-40"
                             >
-                              {buyingToyId === i.id ? 'Buying…' : `${i.label} · ${i.price}c`}
+                              <ShoppingBag size={10} strokeWidth={2.25} className="shrink-0 opacity-70" />
+                              {buyingToyId === i.id ? 'Buying…' : `${i.label} · ${i.price}◆`}
                             </button>
                           )
                         })}
                       </div>
                     ) : (
-                      <div className="text-xs text-text-muted">Nothing unlocked yet.</div>
+                      <div className="text-xs text-text-muted/70">Nothing unlocked yet.</div>
                     )}
                     {next && (
-                      <div className="mt-1 text-[11px] text-text-muted">
-                        Next: {next.label} at {next.minWarmth} warmth
-                        {next.minCommitment ? ` and ${formatCommitmentStatus(next.minCommitment)}` : ''}.
+                      <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-text-muted">
+                        <Lock size={10} strokeWidth={2.25} className="shrink-0 opacity-70" />
+                        <span className="truncate first-letter:uppercase">{next.label}</span>
+                        <span className="shrink-0 opacity-70">
+                          at {next.minWarmth}
+                          {next.minCommitment ? ` · ${formatCommitmentStatus(next.minCommitment)}` : ''}
+                        </span>
                       </div>
                     )}
                   </div>
@@ -640,7 +782,7 @@ export function RelationshipPanel({
           </Section>
 
           {(canTakeFirstTime || track.firstIntimateSceneAt) && (
-            <Section title="Milestone" surface="sunken">
+            <Section title="Milestone" icon={Sparkles} surface="sunken" contentClassName="!p-3">
               {track.firstIntimateSceneAt ? (
                 <p className="text-xs text-text-muted">Already happened. Their first time together.</p>
               ) : (
@@ -654,16 +796,17 @@ export function RelationshipPanel({
             </Section>
           )}
 
-          <Section title="Progress" surface="sunken">
+          <Section title="Coming up" icon={ImageIcon} surface="sunken" contentClassName="!p-3">
             <div className="space-y-1 text-xs text-text-muted">
-              <div>{nextSpriteUnlock ? `Expression ${nextSpriteUnlock[0]} @ ${nextSpriteUnlock[1]}` : 'No locked expressions'}</div>
-              <div>{nextBackgroundUnlock ? `Background ${nextBackgroundUnlock[0]} @ ${nextBackgroundUnlock[1]}` : 'No locked backgrounds'}</div>
+              <ProgressRow icon={Sparkles} label={nextSpriteUnlock ? `Expression: ${nextSpriteUnlock[0]}` : 'No locked expressions'} at={nextSpriteUnlock?.[1]} />
+              <ProgressRow icon={ImageIcon} label={nextBackgroundUnlock ? `Background: ${nextBackgroundUnlock[0]}` : 'No locked backgrounds'} at={nextBackgroundUnlock?.[1]} />
               {upcoming.slice(0, 4).map((g) => (
-                <div key={g.id}>
-                  Gallery: {g.title}
-                  {g.missingAffection > 0 ? ` (+${g.missingAffection} affection)` : ''}
-                  {g.missingFlags.length > 0 ? `. Missing flags: ${g.missingFlags.join(', ')}` : ''}
-                </div>
+                <ProgressRow
+                  key={g.id}
+                  icon={ImageIcon}
+                  label={`Gallery: ${g.title}${g.missingFlags.length > 0 ? ` · needs ${g.missingFlags.join(', ')}` : ''}`}
+                  at={g.missingAffection > 0 ? `+${g.missingAffection}` : undefined}
+                />
               ))}
               {upcoming.length === 0 && <div>Everything unlocked for this character.</div>}
             </div>
@@ -680,12 +823,21 @@ export function RelationshipPanel({
           {viewingCharacter?.birthday !== undefined &&
             world &&
             daysUntilAnnualDate(world.currentDay ?? 0, viewingCharacter.birthday) === 0 && (
-              <div className="rounded-xl bg-romance/10 px-3 py-2.5 text-sm text-romance">
-                🎂 It's {viewingCharacter.card.name}'s birthday today. A gift means a lot more than usual.
+              <div className="flex items-center gap-2.5 rounded-xl bg-romance/10 px-3 py-2.5 text-sm text-romance">
+                <Cake size={16} strokeWidth={1.75} className="shrink-0" />
+                <span>
+                  It's {viewingCharacter.card.name}'s birthday today — a gift lands far harder than usual.
+                </span>
               </div>
             )}
-          <Section title="Gift inventory" description={`Coins: ${chat.giftCoins ?? 0}`} surface="sunken">
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          <Section
+            title="Gifts"
+            description={`Given in person, in the scene. ${viewingCharacter?.card.name ?? 'They'} reacts to what you pick.`}
+            icon={Gift}
+            surface="sunken"
+            contentClassName="!p-3"
+          >
+            <div className="space-y-1.5">
               {giftCatalog.map((gift) => {
                 const qty = inventory[gift.id] ?? 0
                 // Progressive taste reveal: only once this exact gift has actually been given at
@@ -693,66 +845,150 @@ export function RelationshipPanel({
                 const discovered = (track.giftsGiven?.[gift.id] ?? 0) > 0
                 const tasteLabel = discovered ? giftTasteLabel(viewingCharacter?.card.name ?? '', viewingCharacter?.giftPreferences?.[gift.id] ?? 0) : ''
                 return (
-                  <div key={gift.id} className="rounded-lg bg-bg-elevated p-3">
-                    <div className="text-sm text-text">{gift.name}</div>
-                    <div className="text-xs text-text-muted">{gift.rarity} • {gift.price} coins • owned {qty}</div>
-                    {tasteLabel && <div className="mt-0.5 text-xs text-romance">{tasteLabel}</div>}
-                    <Button className="mt-2" onClick={() => onBuyGift(gift.id)} disabled={(chat.giftCoins ?? 0) < gift.price}>
-                      Buy
-                    </Button>
-                  </div>
+                  <CatalogCard
+                    key={gift.id}
+                    icon={catalogIcon(gift.tags)}
+                    name={gift.name}
+                    tone={gift.rarity}
+                    owned={qty}
+                    meta={gift.rarity === 'common' ? gift.tags.join(', ') : `${gift.rarity} · ${gift.tags.join(', ')}`}
+                    note={tasteLabel || undefined}
+                    action={
+                      <CatalogAction
+                        label="Buy"
+                        price={gift.price}
+                        onClick={() => onBuyGift(gift.id)}
+                        disabled={(chat.giftCoins ?? 0) < gift.price}
+                      />
+                    }
+                  />
                 )
               })}
             </div>
           </Section>
 
           {itemCatalog.length > 0 && (
-            <Section title="Item shop" description="Buy here, use from the Bag for an immediate effect." surface="sunken">
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {itemCatalog.map((item) => {
-                  const qty = itemInventory[item.id] ?? 0
-                  return (
-                    <div key={item.id} className="rounded-lg bg-bg-elevated p-3">
-                      <div className="text-sm text-text">{item.name}</div>
-                      <div className="text-xs text-text-muted">{item.rarity} • {item.price} coins • owned {qty}</div>
-                      <Button className="mt-2" onClick={() => onBuyItem(item.id)} disabled={(chat.giftCoins ?? 0) < item.price}>
-                        Buy
-                      </Button>
-                    </div>
-                  )
-                })}
+            <Section
+              title="Items"
+              icon={Package}
+              description="Bought here, used from the Bag for an immediate effect."
+              surface="sunken"
+              contentClassName="!p-3"
+            >
+              <div className="space-y-1.5">
+                {itemCatalog.map((item) => (
+                  <CatalogCard
+                    key={item.id}
+                    icon={catalogIcon(item.tags, Package)}
+                    name={item.name}
+                    tone={item.rarity}
+                    owned={itemInventory[item.id] ?? 0}
+                    meta={itemEffectSummary(item)}
+                    action={
+                      // A zero-price item is a job, not a purchase (`part-time-shift` pays coins
+                      // *in*) — "Buy 0 ◆" reads as a bug, so it gets a free action's treatment.
+                      <CatalogAction
+                        label={item.price > 0 ? 'Buy' : 'Take'}
+                        price={item.price > 0 ? item.price : undefined}
+                        onClick={() => onBuyItem(item.id)}
+                        disabled={(chat.giftCoins ?? 0) < item.price}
+                      />
+                    }
+                  />
+                ))}
+              </div>
+            </Section>
+          )}
+
+          {outfitsForSale.length > 0 && (
+            <Section
+              title="Wardrobe"
+              icon={Shirt}
+              description={`Outfits ${viewingCharacter?.card.name ?? 'they'} can wear once you've bought them. Changes what you actually see on the scene, not just what the story says.`}
+              surface="sunken"
+              contentClassName="!p-3"
+            >
+              <div className="space-y-1.5">
+                {outfitsForSale.map(({ outfit, price, owned, warmthShort, missingFlags }) => (
+                  <CatalogCard
+                    key={outfit.id}
+                    icon={Shirt}
+                    name={outfit.label}
+                    tone="intimate"
+                    locked={!owned && (warmthShort || missingFlags.length > 0)}
+                    owned={owned ? 1 : 0}
+                    meta={
+                      owned
+                        ? warmthShort
+                          ? `Bought — shows at ${outfit.unlockAffection} warmth`
+                          : missingFlags.length > 0
+                            ? `Bought — still needs ${missingFlags.join(', ').replace(/_/g, ' ')}`
+                            : 'Hers to wear'
+                        : warmthShort
+                          ? `Needs ${outfit.unlockAffection} warmth`
+                          : missingFlags.length > 0
+                            ? `Needs ${missingFlags.join(', ').replace(/_/g, ' ')}`
+                            : 'Available now'
+                    }
+                    action={
+                      owned ? undefined : (
+                        <CatalogAction
+                          label={buyingOutfitId === outfit.id ? 'Buying…' : 'Buy'}
+                          price={price}
+                          tone="romance"
+                          onClick={() => handleBuyOutfit(outfit.id)}
+                          disabled={buyingOutfitId === outfit.id || (chat.giftCoins ?? 0) < price}
+                        />
+                      )
+                    }
+                  />
+                ))}
               </div>
             </Section>
           )}
 
           {allowedCategories.includes('toy') && toyCatalogAll.length > 0 && (
             <Section
-              title="Toy shop"
-              description="Warmth/commitment unlocks which of these are buyable. Also reachable from the Unlocks tab once a toy is eligible."
+              title="Toys"
+              icon={Wand2}
+              description="Warmth and commitment decide which of these are buyable. Also reachable from Unlocks once one is eligible."
               surface="sunken"
+              contentClassName="!p-3"
             >
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="space-y-1.5">
                 {toyCatalogAll.map((toy) => {
                   const owned = (toyInventory[toy.id] ?? 0) > 0
                   const eligible = unlockedToyIds.has(toy.id)
                   const price = toy.price ?? 0
                   return (
-                    <div key={toy.id} className={`rounded-lg bg-bg-elevated p-3 ${!eligible ? 'opacity-50' : ''}`}>
-                      <div className="text-sm capitalize text-text">{toy.label}</div>
-                      <div className="text-xs text-text-muted">
-                        {price > 0 ? `${price} coins` : 'Free'}
-                        {owned ? ' • owned' : !eligible ? ` • unlocks at ${toy.minWarmth} warmth${toy.minCommitment ? ` and ${formatCommitmentStatus(toy.minCommitment)}` : ''}` : ''}
-                      </div>
-                      {!owned && (
-                        <Button
-                          className="mt-2"
-                          onClick={() => handleBuyToy(toy.id)}
-                          disabled={!eligible || buyingToyId === toy.id || (chat.giftCoins ?? 0) < price}
-                        >
-                          {buyingToyId === toy.id ? 'Buying…' : 'Buy'}
-                        </Button>
-                      )}
-                    </div>
+                    <CatalogCard
+                      key={toy.id}
+                      icon={Heart}
+                      name={toy.label}
+                      tone="intimate"
+                      locked={!eligible}
+                      owned={owned ? 1 : 0}
+                      meta={
+                        eligible
+                          ? owned
+                            ? 'Yours — use it from Unlocks'
+                            : price > 0
+                              ? 'Available now'
+                              : 'Free'
+                          : `Unlocks at ${toy.minWarmth} warmth${toy.minCommitment ? ` and ${formatCommitmentStatus(toy.minCommitment)}` : ''}`
+                      }
+                      action={
+                        owned ? undefined : (
+                          <CatalogAction
+                            label={buyingToyId === toy.id ? 'Buying…' : 'Buy'}
+                            price={price > 0 ? price : undefined}
+                            tone="romance"
+                            onClick={() => handleBuyToy(toy.id)}
+                            disabled={!eligible || buyingToyId === toy.id || (chat.giftCoins ?? 0) < price}
+                          />
+                        )
+                      }
+                    />
                   )
                 })}
               </div>
@@ -766,8 +1002,13 @@ export function RelationshipPanel({
       )}
 
       {activeTab === 'more' && (
-        <div className="space-y-4">
-          <Section title="Chat settings" surface="sunken" contentClassName="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="space-y-3">
+          <Section
+            title="Chat settings"
+            icon={Settings2}
+            surface="sunken"
+            contentClassName="!p-3 grid grid-cols-1 gap-3 sm:grid-cols-2"
+          >
             <SelectField
               label="Play style"
               hint="Just a label, shown in the header and chat list. It doesn't touch the toggles below."
@@ -814,7 +1055,7 @@ export function RelationshipPanel({
           </Section>
 
           {/* Chat-wide, not per-character — stays the same across the character switcher above. */}
-          <Section title="What's remembered in this chat" surface="sunken">
+          <Section title="What's remembered in this chat" icon={BookMarked} surface="sunken" contentClassName="!p-3">
             <div className="mb-3 flex flex-wrap gap-2">
               {activeFacts.map((f) => (
                 <button
@@ -834,15 +1075,18 @@ export function RelationshipPanel({
                 value={newFactText}
                 onChange={(e) => setNewFactText(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && addFact()}
-                placeholder="Add a fact by hand (e.g. )'Allergic to cats'"
+                placeholder="Add a fact by hand (e.g. &quot;Allergic to cats&quot;)"
                 className="flex-1 rounded-xl bg-bg-elevated px-3 py-2 text-xs text-text outline-none"
               />
               <Button onClick={addFact} disabled={!newFactText.trim()}>Add</Button>
             </div>
           </Section>
 
-          <details className="rounded-xl bg-bg-sunken p-4">
-            <summary className="cursor-pointer text-sm font-semibold text-text">History ({events.length})</summary>
+          <details className="rounded-xl bg-bg-sunken p-3">
+            <summary className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-text">
+              <History size={14} strokeWidth={2} className="shrink-0 text-text-muted" />
+              History ({events.length})
+            </summary>
             <div className="mt-2 max-h-56 space-y-2 overflow-y-auto">
               {events.map((e) => (
                 <div key={e.id} className="rounded-lg bg-bg-elevated px-3 py-2 text-xs">

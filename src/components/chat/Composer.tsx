@@ -27,6 +27,8 @@ interface ComposerProps {
   intentSlot?: ReactNode
   /** 'vn' strips its own chrome (border/background/margin) to sit bare inside the glass dialogue box it's nested in, and switches text/icon colors for a photo backdrop instead of the app surface. */
   variant?: 'default' | 'vn'
+  /** VN inline input: fills the dialogue box's fixed height instead of hugging its content, so the box never resizes as the draft grows. */
+  fillHeight?: boolean
 }
 
 export function Composer({
@@ -48,6 +50,7 @@ export function Composer({
   turnPolicyHint,
   intentSlot,
   variant = 'default',
+  fillHeight = false,
 }: ComposerProps) {
   const [attachments, setAttachments] = useState<PendingAttachment[]>([])
   const [composerError, setComposerError] = useState<string | null>(null)
@@ -113,11 +116,11 @@ export function Composer({
     : 'bg-bg-elevated text-text-muted hover:text-danger'
 
   return (
-    <div className={vn ? 'w-full' : 'border-t border-border/50 bg-bg-elevated p-3'}>
+    <div className={vn ? `w-full ${fillHeight ? 'flex h-full min-h-0 flex-col' : ''}` : 'border-t border-border/50 bg-bg-elevated p-3'}>
       <div
         className={
           vn
-            ? 'w-full'
+            ? `w-full ${fillHeight ? 'flex min-h-0 flex-1 flex-col' : ''}`
             : 'mx-auto max-w-chat rounded-2xl bg-bg-sunken p-3 ring-1 ring-transparent transition-shadow focus-within:ring-accent/30'
         }
       >
@@ -188,11 +191,11 @@ export function Composer({
           disabled={disabled}
           rows={1}
           className={`w-full resize-none bg-transparent px-1.5 py-1.5 text-base outline-none sm:text-sm ${
-            vn ? 'text-white placeholder:text-white/45' : 'text-text placeholder:text-text-muted'
-          }`}
+            vn ? 'text-white placeholder:text-white/40' : 'text-text placeholder:text-text-muted'
+          } ${fillHeight ? 'min-h-0 flex-1' : ''}`}
         />
 
-        <div className="flex items-center justify-between px-0.5 pt-0.5">
+        <div className={`flex items-center justify-between px-0.5 pt-0.5 ${fillHeight ? 'mt-auto shrink-0' : ''}`}>
           <div className="flex items-center gap-1">
             {turnPolicyHint ? (
               <span

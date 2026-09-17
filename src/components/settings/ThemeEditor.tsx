@@ -107,6 +107,8 @@ export function ThemeEditor() {
   const visualNovelMode = useSettingsStore((s) => s.visualNovelMode)
   const setVisualNovelMode = useSettingsStore((s) => s.setVisualNovelMode)
   const vnChoiceStyle = useSettingsStore((s) => s.vnChoiceStyle)
+  const vnInputMode = useSettingsStore((s) => s.vnInputMode)
+  const setVnInputMode = useSettingsStore((s) => s.setVnInputMode)
   const setVnChoiceStyle = useSettingsStore((s) => s.setVnChoiceStyle)
   const visionSceneDetection = useSettingsStore((s) => s.visionSceneDetection)
   const toggleFlag = useSettingsStore((s) => s.toggleFlag)
@@ -421,6 +423,27 @@ export function ThemeEditor() {
             ]}
             value={vnChoiceStyle}
             onChange={setVnChoiceStyle}
+          />
+        </div>
+        <div className="flex items-center justify-between gap-4 py-2">
+          <span className="flex flex-col">
+            <span className="text-sm text-text">VN input</span>
+            <span className="text-xs text-text-muted">
+              "Inline" hands the dialogue box itself over when you write — the same frame in the same
+              place, with the nameplate and the accent rail switched to your persona, so the scene
+              isn't paying for a composer bar that's on screen even while you're only reading. Press
+              Enter to take the box, Escape to hand it back. "Docked" keeps the composer permanently
+              below the box instead.
+            </span>
+          </span>
+          <SegmentedControl
+            size="sm"
+            options={[
+              { value: 'inline', label: 'Inline' },
+              { value: 'docked', label: 'Docked' },
+            ]}
+            value={vnInputMode}
+            onChange={setVnInputMode}
           />
         </div>
         <Toggle

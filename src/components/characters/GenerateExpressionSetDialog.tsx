@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import { createImageBackend } from '@/lib/api/createImageBackend'
 import { errorMessage } from '@/lib/store/useToastStore'
@@ -44,6 +44,8 @@ export function GenerateExpressionSetDialog({
   // itself in the loop below would silently never actually stop anything. The ref is mutated
   // in-place and read fresh every iteration, so the check below always sees the current value.
   const stopRef = useRef(false)
+  const controllerRef = useRef<AbortController | null>(null)
+  useEffect(() => () => { stopRef.current = true; controllerRef.current?.abort() }, [])
   const [progress, setProgress] = useState<{ done: number; total: number; currentLabel: string | null }>({
     done: 0,
     total: 0,
@@ -51,6 +53,7 @@ export function GenerateExpressionSetDialog({
   })
   const [results, setResults] = useState<{ succeeded: string[]; failed: string[] } | null>(null)
 
+  const openMayhemApiKey = useSettingsStore((s) => s.openMayhemApiKey)
   const imageBackend = useSettingsStore((s) => s.imageBackend)
   const imageBackendBaseUrl = useSettingsStore((s) => s.imageBackendBaseUrl)
   const imageBackendUsername = useSettingsStore((s) => s.imageBackendUsername)
@@ -70,10 +73,12 @@ export function GenerateExpressionSetDialog({
     setBusy(true)
     setStopRequested(false)
     stopRef.current = false
+    const controller = new AbortController()
+    controllerRef.current = controller
     setResults(null)
     setProgress({ done: 0, total: targets.length, currentLabel: targets[0].label })
 
-    const backend = createImageBackend({ imageBackend, imageBackendBaseUrl, imageBackendUsername, imageBackendPassword, imageBackendModel })
+    const backend = createImageBackend({ openMayhemApiKey, imageBackend, imageBackendBaseUrl, imageBackendUsername, imageBackendPassword, imageBackendModel })
     const succeeded: string[] = []
     const failed: string[] = []
 
@@ -89,12 +94,13 @@ export function GenerateExpressionSetDialog({
           steps: 28,
           cfgScale: 7,
           model: imageBackendModel || undefined,
-        })
+        }, controller.signal)
+        controller.signal.throwIfAborted()
         if (!result.base64) throw new Error('The backend returned no image data.')
-        onGenerated(exp.id, `data:image/png;base64,${result.base64}`)
+        onGenerated(exp.id, `data:${result.mimeType || 'image/png'};base64,${result.base64}`)
         succeeded.push(exp.label)
       } catch (e) {
-        failed.push(`${exp.label} (${errorMessage(e)})`)
+        if (!(e instanceof DOMException && e.name === 'AbortError')) failed.push(`${exp.label} (${errorMessage(e)})`)
       }
       setProgress({ done: i + 1, total: targets.length, currentLabel: exp.label })
     }
@@ -154,6 +160,7 @@ export function GenerateExpressionSetDialog({
               variant="ghost"
               onClick={() => {
                 stopRef.current = true
+                controllerRef.current?.abort()
                 setStopRequested(true)
               }}
               disabled={stopRequested}

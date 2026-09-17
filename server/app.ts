@@ -23,6 +23,7 @@ import {
 import { removeAvatar, resolveAvatar, resolveAvatarMap, resolveAvatarMapVariants, resolveWorldBackgroundsNightMap, resolveWorldMusicMap } from './avatars.ts'
 import { encodeTokens, tokenizerForModel } from './novelaiTokenizer.ts'
 import { originGuard } from './originCheck.ts'
+import { openMayhemRouter } from './openMayhem.ts'
 
 /**
  * Express app: REST routes for characters, personas, chats/messages, world info books, sampler
@@ -37,6 +38,7 @@ app.use(originGuard)
 
 // Raised generously (a bulk sprite upload easily clears 25MB) — local-only app, no untrusted-request concern.
 app.use(express.json({ limit: '150mb' }))
+app.use('/api/openmayhem', openMayhemRouter())
 app.use('/avatars', express.static(avatarsDir))
 
 function notFound(res: express.Response) {
@@ -67,6 +69,9 @@ function normalizeOutfits(raw: unknown) {
         ? Math.max(0, Math.min(100, Math.round(Number(e.unlockAffection))))
         : undefined,
       requiredFlags: normalizeStringArray(e.requiredFlags),
+      // Wardrobe shop. Clamped rather than trusted, same as `unlockAffection` above — this is a
+      // price the client sends, and it is the whole gate on a purchasable outfit.
+      price: Number.isFinite(Number(e.price)) ? Math.max(0, Math.min(999, Math.round(Number(e.price)))) : undefined,
       manualOnly: e.manualOnly === true,
       intimate: e.intimate === true,
     }))

@@ -57,11 +57,22 @@ export function buildSceneInstruction(options?: {
   /** What the character is wearing right now, so the model knows what it would be *changing from*. */
   currentOutfitId?: string
 }): string {
-  if (!options || (options.expressionIds.length === 0 && options.backgroundIds.length === 0)) return ''
+  if (!options) return ''
   const wantsMood = !!options.moodIds && options.moodIds.length > 0
+  // Nothing worth asking for. Mood counts on its own: outside Visual Novel mode it is the only
+  // field anything still reads (it picks the background music), so a mood-only request is valid.
+  if (options.expressionIds.length === 0 && options.backgroundIds.length === 0 && !wantsMood) return ''
   // One id is no choice at all (it's always just the base outfit), so it isn't worth a field.
   const wantsOutfit = !!options.outfitIds && options.outfitIds.length > 1
-  const format = `<<scene:expression=ID,background=ID${wantsMood ? ',mood=ID' : ''}${wantsOutfit ? ',outfit=ID' : ''}>>`
+  // Only the fields actually being asked for appear in the format line — a mood-only request must
+  // not still show `expression=ID` in the template it tells the model to follow.
+  const fields = [
+    options.expressionIds.length ? 'expression=ID' : '',
+    options.backgroundIds.length ? 'background=ID' : '',
+    wantsMood ? 'mood=ID' : '',
+    wantsOutfit ? 'outfit=ID' : '',
+  ].filter(Boolean)
+  const format = `<<scene:${fields.join(',')}>>`
   return [
     'After writing your in-character reply, end it with exactly one new line in this exact format. This line is metadata only: never mention or explain it in the dialogue.',
     format,
@@ -72,9 +83,11 @@ export function buildSceneInstruction(options?: {
     wantsOutfit
       ? `The character is currently wearing "${options.currentOutfitId || 'base'}". Only use a different outfit ID when the story has actually changed what they are wearing — they got changed, arrived somewhere needing different clothes, undressed. Otherwise repeat the current one. Never change an outfit just because the mood shifted.`
       : '',
-    wantsMood
-      ? "Pick whichever IDs best match the character's emotion, the current setting, and the overall feeling of the scene."
-      : "Pick whichever IDs best match the character's emotion and the current setting.",
+    options.expressionIds.length || options.backgroundIds.length
+      ? wantsMood
+        ? "Pick whichever IDs best match the character's emotion, the current setting, and the overall feeling of the scene."
+        : "Pick whichever IDs best match the character's emotion and the current setting."
+      : 'Pick whichever ID best matches the overall feeling of the scene.',
   ]
     .filter(Boolean)
     .join('\n')

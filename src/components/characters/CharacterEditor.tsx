@@ -43,6 +43,8 @@ import { RegenerateFieldButton } from './RegenerateFieldButton'
 import { LorebookEditor } from '@/components/worldinfo/LorebookEditor'
 import { getGiftCatalog } from '@/lib/dating/gifts'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
+import { useOpenMayhemModels } from '@/lib/hooks/useOpenMayhemModels'
+import { OpenMayhemVoiceField } from '@/components/settings/OpenMayhemVoiceField'
 import { maximumImmersionChecklist, maximumImmersionSamplerParams, maximumImmersionSystemPrompt } from '@/lib/prompt/immersionPreset'
 import {
   PHASES,
@@ -206,6 +208,10 @@ export function CharacterEditor({
   const [weatherHates, setWeatherHates] = useState<WeatherKind[]>(character?.weatherPreferences?.hates ?? [])
   const [schedule, setSchedule] = useState<ScheduleEntry[]>(character?.schedule ?? [])
   const [voiceProvider, setVoiceProvider] = useState<TtsProviderId | ''>(character?.voice?.provider ?? '')
+  const globalTtsProvider = useSettingsStore((s) => s.ttsProvider)
+  const globalTtsModel = useSettingsStore((s) => s.ttsModel)
+  const usesOpenMayhemVoice = (voiceProvider || globalTtsProvider) === 'openmayhem'
+  const { models: speechModels } = useOpenMayhemModels('AUDIO_SPEECH', tab === 'voice' && usesOpenMayhemVoice)
   const [voiceId, setVoiceId] = useState(character?.voice?.voiceId ?? '')
   const [verbalTics, setVerbalTics] = useState<string[]>(character?.voiceFingerprint?.verbalTics ?? [])
   const [catchphrases, setCatchphrases] = useState<string[]>(character?.voiceFingerprint?.catchphrases ?? [])
@@ -1074,6 +1080,20 @@ export function CharacterEditor({
                         className="w-12 rounded-md bg-bg px-1 py-1 text-center text-[11px] text-text outline-none"
                       />
                     </label>
+                    <label
+                      className="flex items-center gap-1.5 text-[11px] text-text-muted"
+                      title="Coins this outfit has to be bought for in the Relationship panel's Shop before it unlocks, on top of any warmth gate. 0 means it is earned rather than sold. Only outfits with art drawn for them are ever offered for sale."
+                    >
+                      Price
+                      <input
+                        type="number"
+                        min={0}
+                        max={999}
+                        value={Number(outfit.price ?? 0)}
+                        onChange={(e) => updateOutfit(outfit.id, { price: Number(e.target.value) || 0 })}
+                        className="w-14 rounded-md bg-bg px-1 py-1 text-center text-[11px] text-text outline-none"
+                      />
+                    </label>
                     <label className="flex items-center gap-1.5 text-[11px] text-text-muted" title="The model is never offered this outfit. It only appears if the story unlocks it another way. For a state you don't want picked just because a reply read as suggestive.">
                       <input
                         type="checkbox"
@@ -1687,7 +1707,7 @@ export function CharacterEditor({
       {tab === 'voice' && (
         <Section
           title="Voice"
-          description="Overrides the global Settings → Voice provider/voice when this character's lines are read aloud in Visual Novel mode. Leave blank to use the global default."
+          description="Leave blank to use the global voice. A provider override must match Settings → Voice, where its key and model are configured. OpenMayhem voices use that speech model."
           surface="bare"
         >
           <div className="grid grid-cols-1 gap-x-3 sm:grid-cols-2">
@@ -1699,12 +1719,12 @@ export function CharacterEditor({
                 </option>
               ))}
             </SelectField>
-            <TextField
+            {usesOpenMayhemVoice ? <OpenMayhemVoiceField model={speechModels?.find((m) => m.id === globalTtsModel)} value={voiceId} onChange={setVoiceId} label="Voice / speaker ID override" placeholder="Use global voice" /> : <TextField
               label="Voice / speaker ID override"
               value={voiceId}
               onChange={(e) => setVoiceId(e.target.value)}
               placeholder="Leave blank to use the global voice"
-            />
+            />}
           </div>
         </Section>
       )}

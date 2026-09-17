@@ -238,11 +238,18 @@ export interface GiftItem {
   tags: string[]
 }
 
-/** 10d's item catalog — deliberately the deterministic subset (immediate relationship nudge, scene flag, or coins). Permanent stat boosts and time-limited buffs aren't modeled yet. */
+/** 10d's item catalog — deliberately the deterministic subset (immediate relationship nudge, scene flag, coins, or a combination). Permanent stat boosts and time-limited buffs aren't modeled yet. */
 export type ItemEffect =
   | { kind: 'relationship'; dimension: 'affection' | RelationshipDimension; amount: number }
   | { kind: 'flag'; flag: SceneFlag }
   | { kind: 'currency'; amount: number }
+  /**
+   * Several of the above at once, applied in order. Most things a consumable naturally wants to do
+   * are two-part — a long walk home takes the tension out *and* leaves you closer — and modelling
+   * that as one dimension was the reason half the item catalog read as flatter than it is.
+   * Deliberately not recursive in practice: nest one level and stop.
+   */
+  | { kind: 'multi'; effects: ItemEffect[] }
 
 export interface ItemDef {
   id: string

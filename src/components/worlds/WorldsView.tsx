@@ -916,6 +916,7 @@ function WorldEditor({
                     value={option.category}
                     onChange={(e) => updateIntimacyOption(option.id, { category: e.target.value as IntimacyCategory })}
                   >
+                    <option value="affection">Closeness</option>
                     <option value="kissing_spot">Kissing spot</option>
                     <option value="position">Position</option>
                     <option value="toy">Toy</option>

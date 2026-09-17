@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import { createChatBackend } from '@/lib/api/createChatBackend'
+import { invalidateTokenCache } from '@/lib/tokenCache'
 import type { ChatBackend } from '@/lib/api/chatBackend'
 
 /**
@@ -17,8 +18,10 @@ export function useChatBackendClient(): ChatBackend {
   const chatBackendBaseUrl = useSettingsStore((s) => s.chatBackendBaseUrl)
   const chatBackendApiKey = useSettingsStore((s) => s.chatBackendApiKey)
   const chatBackendModel = useSettingsStore((s) => s.chatBackendModel)
-  return useMemo(
-    () => createChatBackend({ chatBackend, baseUrl, chatBackendBaseUrl, chatBackendApiKey, chatBackendModel }),
-    [chatBackend, baseUrl, chatBackendBaseUrl, chatBackendApiKey, chatBackendModel],
-  )
+  return useMemo(() => {
+    // A different backend or model means a different tokenizer, so every memoized token count from
+    // the previous one is now wrong.
+    invalidateTokenCache()
+    return createChatBackend({ chatBackend, baseUrl, chatBackendBaseUrl, chatBackendApiKey, chatBackendModel })
+  }, [chatBackend, baseUrl, chatBackendBaseUrl, chatBackendApiKey, chatBackendModel])
 }

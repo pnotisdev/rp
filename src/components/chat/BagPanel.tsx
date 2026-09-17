@@ -1,6 +1,11 @@
+import { Backpack, Package } from 'lucide-react'
 import type { GiftItem, ItemDef } from '@/lib/types'
-import { Button } from '@/components/ui/Button'
+import { catalogIcon } from '@/lib/dating/catalogVisuals'
+import { itemEffectSummary } from '@/lib/dating/items'
+import { CatalogAction, CatalogCard } from '@/components/ui/CatalogCard'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { Modal } from '@/components/ui/Modal'
+import { Section } from '@/components/ui/Section'
 
 interface BagPanelProps {
   giftCatalog: GiftItem[]
@@ -13,13 +18,6 @@ interface BagPanelProps {
   onUseItem: (item: ItemDef) => void
 }
 
-function effectSummary(item: ItemDef): string {
-  const e = item.effect
-  if (e.kind === 'currency') return `+${e.amount} coins`
-  if (e.kind === 'flag') return `sets "${e.flag.replace('_', ' ')}"`
-  return `${e.amount > 0 ? '+' : ''}${e.amount} ${e.dimension}`
-}
-
 /**
  * 10d's "Bag/inventory view" — distinct from the shops in `RelationshipPanel` (buying), this is
  * for using what you already own. Gifts here were previously only ever given through an AI
@@ -27,6 +25,8 @@ function effectSummary(item: ItemDef): string {
  * exact same `sendUserMessage` gift-choice path a suggested choice uses. Items are a separate,
  * simpler case — an authored effect (10d's item catalog) applied immediately and deterministically,
  * no in-scene reaction needed, so "Use" doesn't touch the chat at all.
+ *
+ * Shares `CatalogCard` with the shop, so an item looks the same wherever you meet it.
  */
 export function BagPanel({
   giftCatalog,
@@ -40,63 +40,60 @@ export function BagPanel({
 }: BagPanelProps) {
   const ownedGifts = giftCatalog.filter((g) => (giftInventory[g.id] ?? 0) > 0)
   const ownedItems = itemCatalog.filter((i) => (itemInventory[i.id] ?? 0) > 0)
+  const empty = ownedGifts.length === 0 && ownedItems.length === 0
 
   return (
     <Modal
       onClose={onClose}
       title="Bag"
-      description={`Gifts you already own. Give one to ${characterName} now, in person. Buy more from the relationship panel.`}
+      description={`What you're carrying. Give ${characterName} a gift in person, or use an item on the spot.`}
       size="lg"
       scrollable
     >
-      <div className="flex-1 overflow-y-auto">
-        <div className="space-y-2">
-          {ownedGifts.map((gift) => (
-            <div key={gift.id} className="flex items-center justify-between rounded-xl bg-bg-sunken p-3">
-              <div>
-                <div className="text-sm text-text">{gift.name}</div>
-                <div className="text-xs text-text-muted">
-                  {gift.rarity} • owned {giftInventory[gift.id]}
-                </div>
-              </div>
-              <Button variant="primary" onClick={() => onGive(gift)}>
-                Give
-              </Button>
-            </div>
-          ))}
-          {ownedGifts.length === 0 && (
-            <div className="rounded-xl bg-bg-sunken p-4 text-xs text-text-muted">
-              Nothing in your bag yet. Buy a gift from the relationship panel first.
-            </div>
-          )}
-        </div>
+      <div className="flex-1 space-y-5 overflow-y-auto">
+        {empty && (
+          <EmptyState>
+            <span className="mb-2 flex justify-center text-text-muted">
+              <Backpack size={22} strokeWidth={1.5} />
+            </span>
+            Nothing in your bag yet. Buy a gift or an item from the Relationship panel's Shop tab first.
+          </EmptyState>
+        )}
 
-        {itemCatalog.length > 0 && (
-          <>
-            <p className="mb-3 mt-6 text-sm font-medium text-text">
-              Items <span className="font-normal text-text-muted">used on the spot for their effect, not given in a scene.</span>
-            </p>
+        {ownedGifts.length > 0 && (
+          <Section title="Gifts" description={`Handed over in the scene — ${characterName} reacts.`} surface="bare">
+            <div className="space-y-2">
+              {ownedGifts.map((gift) => (
+                <CatalogCard
+                  key={gift.id}
+                  icon={catalogIcon(gift.tags)}
+                  name={gift.name}
+                  tone={gift.rarity}
+                  owned={giftInventory[gift.id]}
+                  meta={gift.rarity === 'common' ? gift.tags.join(', ') : `${gift.rarity} · ${gift.tags.join(', ')}`}
+                  action={<CatalogAction label="Give" tone="romance" onClick={() => onGive(gift)} />}
+                />
+              ))}
+            </div>
+          </Section>
+        )}
+
+        {ownedItems.length > 0 && (
+          <Section title="Items" description="Used on the spot for their effect, not given in a scene." surface="bare">
             <div className="space-y-2">
               {ownedItems.map((item) => (
-                <div key={item.id} className="flex items-center justify-between rounded-xl bg-bg-sunken p-3">
-                  <div>
-                    <div className="text-sm text-text">{item.name}</div>
-                    <div className="text-xs text-text-muted">
-                      {item.rarity} • owned {itemInventory[item.id]} • {effectSummary(item)}
-                    </div>
-                  </div>
-                  <Button variant="primary" onClick={() => onUseItem(item)}>
-                    Use
-                  </Button>
-                </div>
+                <CatalogCard
+                  key={item.id}
+                  icon={catalogIcon(item.tags, Package)}
+                  name={item.name}
+                  tone={item.rarity}
+                  owned={itemInventory[item.id]}
+                  meta={itemEffectSummary(item)}
+                  action={<CatalogAction label="Use" onClick={() => onUseItem(item)} />}
+                />
               ))}
-              {ownedItems.length === 0 && (
-                <div className="rounded-xl bg-bg-sunken p-4 text-xs text-text-muted">
-                  No items owned yet. Buy one from the relationship panel first.
-                </div>
-              )}
             </div>
-          </>
+          </Section>
         )}
       </div>
     </Modal>

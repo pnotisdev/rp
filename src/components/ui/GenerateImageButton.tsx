@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Sparkles } from 'lucide-react'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import { createImageBackend } from '@/lib/api/createImageBackend'
@@ -7,15 +7,6 @@ import { Button } from '@/components/ui/Button'
 import { TextAreaField } from '@/components/ui/Field'
 import { IconButton } from '@/components/ui/IconButton'
 
-/**
- * Section 11's "generate directly into a specific slot" — wired into every existing image slot
- * (character avatar, per-expression sprites, world backgrounds, gallery CGs), each seeded with a
- * prompt built from real context (the character/world's own description, the specific expression
- * or scene it's for) rather than one generic blank box. None of the four backends this calls into
- * have been run against a real server (NovelAI image got one real, partial check — see ROADMAP.md
- * #124/#125); a failure here is at least as likely to be a wrong assumption in this app's own
- * client as a problem with the server it's pointed at.
- */
 export function GenerateImageButton({
   onGenerated,
   initialPrompt = '',
@@ -33,18 +24,23 @@ export function GenerateImageButton({
   const [open, setOpen] = useState(false)
   const [prompt, setPrompt] = useState(initialPrompt)
   const [busy, setBusy] = useState(false)
+  const controllerRef = useRef<AbortController | null>(null)
 
+  const openMayhemApiKey = useSettingsStore((s) => s.openMayhemApiKey)
   const imageBackend = useSettingsStore((s) => s.imageBackend)
   const imageBackendBaseUrl = useSettingsStore((s) => s.imageBackendBaseUrl)
   const imageBackendUsername = useSettingsStore((s) => s.imageBackendUsername)
   const imageBackendPassword = useSettingsStore((s) => s.imageBackendPassword)
   const imageBackendModel = useSettingsStore((s) => s.imageBackendModel)
+  useEffect(() => () => controllerRef.current?.abort(), [imageBackend, imageBackendModel, imageBackendBaseUrl, openMayhemApiKey, imageBackendUsername, imageBackendPassword])
 
   const generate = async () => {
     if (!prompt.trim() || busy) return
     setBusy(true)
+    const controller = new AbortController()
+    controllerRef.current = controller
     try {
-      const backend = createImageBackend({
+      const backend = createImageBackend({ openMayhemApiKey,
         imageBackend,
         imageBackendBaseUrl,
         imageBackendUsername,
@@ -58,20 +54,22 @@ export function GenerateImageButton({
         steps: 28,
         cfgScale: 7,
         model: imageBackendModel || undefined,
-      })
+      }, controller.signal)
+      controller.signal.throwIfAborted()
       if (!result.base64) throw new Error('The backend returned no image data.')
-      onGenerated(`data:image/png;base64,${result.base64}`)
+      onGenerated(`data:${result.mimeType || 'image/png'};base64,${result.base64}`)
       setOpen(false)
     } catch (e) {
-      toastError(`Image generation failed: ${errorMessage(e)}`)
+      if (!(e instanceof DOMException && e.name === 'AbortError')) toastError(`Image generation failed: ${errorMessage(e)}`)
     } finally {
+      controllerRef.current = null
       setBusy(false)
     }
   }
 
   if (!open) {
     return (
-      <IconButton icon={Sparkles} title={label} onClick={() => setOpen(true)} size={13} boxSize={26} />
+      <IconButton icon={Sparkles} title={label} onClick={() => { setPrompt(initialPrompt); setOpen(true) }} size={13} boxSize={26} />
     )
   }
 
@@ -86,8 +84,8 @@ export function GenerateImageButton({
         hint={`Sends to ${imageBackend}. See Settings → Images.`}
       />
       <div className="mt-2 flex justify-end gap-2">
-        <Button variant="ghost" onClick={() => setOpen(false)} disabled={busy}>
-          Cancel
+        <Button variant="ghost" onClick={() => { controllerRef.current?.abort(); setOpen(false) }}>
+          {busy ? 'Stop' : 'Cancel'}
         </Button>
         <Button variant="primary" onClick={generate} disabled={busy || !prompt.trim()}>
           {busy ? 'Generating…' : 'Generate'}

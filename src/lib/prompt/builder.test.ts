@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildPrompt, type ChatMessage, type PromptBuildInput } from './builder'
+import { buildPrompt, type ChatMessage, type PromptBuildInput, type StyleGuidanceItem } from './builder'
 import { getInstructTemplate } from './instructTemplates'
 import type { CharacterCardData } from '@/lib/characters/cardSpec'
 
@@ -536,5 +536,217 @@ describe('buildPrompt — promptSections (section 13 instruct-template-manager p
       baseInput({ participants: [{ name: 'Kestrel' }], promptSections: { participants: false } }),
     )
     expect(result.prompt).not.toContain('Also present in this scene')
+  })
+})
+
+describe('buildPrompt — history trimming stops once the budget is spent', () => {
+  /** 40 turns of ~25 tokens each against a budget only a couple of them can fit into. */
+  function longHistory(count: number): ChatMessage[] {
+    return Array.from({ length: count }, (_, i) => ({
+      id: String(i),
+      role: (i % 2 === 0 ? 'user' : 'char') as ChatMessage['role'],
+      name: i % 2 === 0 ? 'You' : 'Aria',
+      text: `Turn number ${i} with enough text to cost a real number of tokens.`,
+    }))
+  }
+
+  it('keeps a contiguous window — never drops a long turn but keeps shorter ones behind it', async () => {
+    // The failure this guards: turn 5 is far too big to fit, but turns 0-4 are tiny. Skipping 5
+    // and keeping 0-4 would hand the model a transcript with a beat missing from the middle.
+    const msgs: ChatMessage[] = [
+      { id: '0', role: 'user', name: 'You', text: 'a' },
+      { id: '1', role: 'char', name: 'Aria', text: 'b' },
+      { id: '2', role: 'user', name: 'You', text: 'c' },
+      { id: '3', role: 'char', name: 'Aria', text: 'd' },
+      { id: '4', role: 'user', name: 'You', text: 'HUGE '.repeat(400) },
+      { id: '5', role: 'char', name: 'Aria', text: 'the latest reply' },
+    ]
+    const result = await buildPrompt(baseInput({ history: msgs, contextBudget: 200 }))
+    expect(result.prompt).toContain('the latest reply')
+    // The oversized turn is out, and so is everything older than it — no hole in the middle.
+    expect(result.prompt).not.toContain('HUGE')
+    expect(result.prompt).not.toContain('You: a')
+    expect(result.includedMessageCount).toBe(1)
+    expect(result.excludedMessageCount).toBe(5)
+  })
+
+  it('does not count turns it already knows cannot fit', async () => {
+    const counted: string[] = []
+    const result = await buildPrompt(
+      baseInput({
+        history: longHistory(40),
+        contextBudget: 60,
+        countTokens: async (text: string) => {
+          counted.push(text)
+          return Math.ceil(text.length / 4)
+        },
+      }),
+    )
+    // Every turn is either kept or dropped — the accounting stays exact despite the early exit.
+    expect(result.includedMessageCount + result.excludedMessageCount).toBe(40)
+    expect(result.includedMessageCount).toBeGreaterThan(0)
+    // The whole point: the 30-odd turns past the budget never reached the tokenizer. Counting is
+    // one HTTP round-trip per call against a real backend, so this is the cost being avoided.
+    const historyCalls = counted.filter((t) => t.includes('Turn number'))
+    expect(historyCalls.length).toBeLessThan(10)
+  })
+
+  it('keeps the newest turns, not the oldest', async () => {
+    const result = await buildPrompt(baseInput({ history: longHistory(40), contextBudget: 60 }))
+    expect(result.prompt).toContain('Turn number 39')
+    expect(result.prompt).not.toContain('Turn number 0 ')
+  })
+
+  it('still keeps the latest turn when it alone blows the whole budget', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        history: longHistory(5),
+        // Smaller than a single rendered turn, so the "always keep one" guard is what decides.
+        contextBudget: 1,
+      }),
+    )
+    expect(result.includedMessageCount).toBe(1)
+    expect(result.excludedMessageCount).toBe(4)
+    expect(result.prompt).toContain('Turn number 4')
+  })
+})
+
+describe('buildPrompt — worldMoment sits after the history, not in the cacheable prefix', () => {
+  const history: ChatMessage[] = [
+    { id: '1', role: 'user', name: 'You', text: 'HISTORY_MARKER' },
+  ]
+
+  it('places stable world text before the history and the moment after it', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        history,
+        worldDescription: 'STABLE_WORLD',
+        worldMoment: 'VOLATILE_MOMENT',
+      }),
+    )
+    const stable = result.prompt.indexOf('STABLE_WORLD')
+    const hist = result.prompt.indexOf('HISTORY_MARKER')
+    const moment = result.prompt.indexOf('VOLATILE_MOMENT')
+    expect(stable).toBeGreaterThanOrEqual(0)
+    expect(moment).toBeGreaterThanOrEqual(0)
+    // The whole point of the split: changing the moment must not disturb any token before it.
+    expect(stable).toBeLessThan(hist)
+    expect(hist).toBeLessThan(moment)
+  })
+
+  it('leaves the cacheable prefix byte-identical when only the moment changes', async () => {
+    const morning = await buildPrompt(
+      baseInput({ history, worldDescription: 'STABLE_WORLD', worldMoment: 'It is a clear morning.' }),
+    )
+    const storm = await buildPrompt(
+      baseInput({ history, worldDescription: 'STABLE_WORLD', worldMoment: 'It is a stormy night.' }),
+    )
+    expect(morning.systemText).toBe(storm.systemText)
+    expect(morning.conversationText).not.toBe(storm.conversationText)
+  })
+
+  it('the world section toggle governs the moment too', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        history,
+        worldDescription: 'STABLE_WORLD',
+        worldMoment: 'VOLATILE_MOMENT',
+        promptSections: { world: false },
+      }),
+    )
+    expect(result.prompt).not.toContain('STABLE_WORLD')
+    expect(result.prompt).not.toContain('VOLATILE_MOMENT')
+  })
+
+  it('omitting worldMoment leaves the prompt exactly as it was before the split', async () => {
+    const result = await buildPrompt(baseInput({ history, worldDescription: 'STABLE_WORLD' }))
+    expect(result.prompt).toContain('STABLE_WORLD')
+    expect(result.prompt).not.toContain('undefined')
+  })
+})
+
+describe('styleGuidanceItems — graceful degradation under a tight budget', () => {
+  // Zeroes every fixed section so `fixedTokens` is 0 and the only thing competing for the budget
+  // besides history is the postHistory block itself — makes the token math in these tests exact
+  // rather than approximate.
+  const noFixedSections: Partial<PromptBuildInput> = {
+    promptSections: { system: false, summary: false, world: false, description: false, participants: false, persona: false, examples: false },
+  }
+
+  it('includes every item, in order, when the budget is roomy', async () => {
+    const items: StyleGuidanceItem[] = [
+      { text: 'ESSENTIAL_ONE', essential: true },
+      { text: 'FLAVOR_ONE', essential: false },
+      { text: 'FLAVOR_TWO', essential: false },
+      { text: 'ESSENTIAL_TWO', essential: true },
+    ]
+    const result = await buildPrompt(baseInput({ ...noFixedSections, styleGuidanceItems: items, contextBudget: 4000 }))
+    expect(result.styleGuidanceDroppedCount).toBe(0)
+    expect(result.prompt.indexOf('ESSENTIAL_ONE')).toBeLessThan(result.prompt.indexOf('FLAVOR_ONE'))
+    expect(result.prompt.indexOf('FLAVOR_ONE')).toBeLessThan(result.prompt.indexOf('FLAVOR_TWO'))
+    expect(result.prompt.indexOf('FLAVOR_TWO')).toBeLessThan(result.prompt.indexOf('ESSENTIAL_TWO'))
+  })
+
+  it('drops the item nearest the end of the non-essential run first, keeping an earlier one as long as it can', async () => {
+    const essential: StyleGuidanceItem = { text: 'ESSENTIAL_MARKER', essential: true }
+    const flavorKept: StyleGuidanceItem = { text: 'KEPT_MARKER', essential: false }
+    // ~104 tokens (estimator: ceil(len/4)) vs KEPT_MARKER's ~3 — a gap wide enough that the exact
+    // value of buildPrompt's internal history-reserve floor can't accidentally make this flaky.
+    const flavorDropped: StyleGuidanceItem = { text: `DROPPED_MARKER_${'x'.repeat(400)}`, essential: false }
+
+    // Calibrate against the real function rather than hand-computing token counts: build once with
+    // only the item that's expected to survive, and read off exactly how much room it and the
+    // generation cue actually cost.
+    const keptOnly = await buildPrompt(
+      baseInput({ ...noFixedSections, styleGuidanceItems: [essential, flavorKept], contextBudget: 4000, includeSectionBreakdown: true }),
+    )
+    const keptOnlyPostHistoryTokens = keptOnly.sectionBreakdown!.find((s) => s.id === 'postHistory')!.tokens
+    const genCueTokens = keptOnly.sectionBreakdown!.find((s) => s.id === 'generationCue')!.tokens
+    // Exactly enough for the kept-only block plus a 320-token cushion: comfortably above the 300
+    // reserve `buildPrompt` holds back for history once nothing more is worth dropping, but well
+    // short of the ~104 extra tokens the long item would add back in if it were still there.
+    const contextBudget = keptOnlyPostHistoryTokens + genCueTokens + 320
+
+    const result = await buildPrompt(
+      baseInput({ ...noFixedSections, styleGuidanceItems: [essential, flavorKept, flavorDropped], contextBudget, includeSectionBreakdown: true }),
+    )
+    expect(result.styleGuidanceDroppedCount).toBe(1)
+    expect(result.prompt).toContain('ESSENTIAL_MARKER')
+    expect(result.prompt).toContain('KEPT_MARKER')
+    expect(result.prompt).not.toContain('DROPPED_MARKER')
+  })
+
+  it('never drops an essential item, however tight the budget gets', async () => {
+    const items: StyleGuidanceItem[] = [
+      { text: 'ESSENTIAL_ALWAYS', essential: true },
+      { text: 'FLAVOR_A', essential: false },
+      { text: 'FLAVOR_B', essential: false },
+      { text: 'FLAVOR_C', essential: false },
+    ]
+    const result = await buildPrompt(baseInput({ ...noFixedSections, styleGuidanceItems: items, contextBudget: 50, history: [] }))
+    expect(result.prompt).toContain('ESSENTIAL_ALWAYS')
+    expect(result.prompt).not.toContain('FLAVOR_A')
+    expect(result.prompt).not.toContain('FLAVOR_B')
+    expect(result.prompt).not.toContain('FLAVOR_C')
+    expect(result.styleGuidanceDroppedCount).toBe(3)
+  })
+
+  it('a plain-string styleGuidance becomes one essential item — never dropped, count always 0', async () => {
+    const result = await buildPrompt(baseInput({ ...noFixedSections, styleGuidance: 'OLD_STYLE_STRING', contextBudget: 50, history: [] }))
+    expect(result.prompt).toContain('OLD_STYLE_STRING')
+    expect(result.styleGuidanceDroppedCount).toBe(0)
+  })
+
+  it('styleGuidanceItems wins when both forms are somehow given', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        ...noFixedSections,
+        styleGuidance: 'SHOULD_NOT_APPEAR',
+        styleGuidanceItems: [{ text: 'SHOULD_APPEAR', essential: true }],
+        contextBudget: 4000,
+      }),
+    )
+    expect(result.prompt).toContain('SHOULD_APPEAR')
+    expect(result.prompt).not.toContain('SHOULD_NOT_APPEAR')
   })
 })

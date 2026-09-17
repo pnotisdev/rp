@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { KoboldClient } from '@/lib/api/kobold'
 import { detectInstructTemplateId } from '@/lib/prompt/instructTemplates'
+import { invalidateTokenCache } from '@/lib/tokenCache'
 
 export type ConnectionStatus = 'checking' | 'online' | 'offline'
 
@@ -15,6 +16,9 @@ export function useConnectionStatus(baseUrl: string) {
   useEffect(() => {
     let cancelled = false
     const client = new KoboldClient(baseUrl)
+    // Tracked separately from the `model` state so the comparison below sees the previous poll's
+    // value rather than whatever React has re-rendered with.
+    let lastModel: string | null = null
     setStatus('checking')
 
     async function check() {
@@ -24,6 +28,10 @@ export function useConnectionStatus(baseUrl: string) {
         setStatus('online')
         setVersion(v.version)
         setModel(m)
+        // Someone swapped the loaded GGUF without touching this app's settings: the tokenizer is a
+        // different one now, so memoized token counts from the old model no longer apply.
+        if (lastModel !== null && lastModel !== m) invalidateTokenCache()
+        lastModel = m
         // Best-effort and separate from the required version/model check above — an older
         // KoboldCpp build without this extra endpoint shouldn't be reported as "offline".
         client

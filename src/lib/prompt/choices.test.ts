@@ -24,6 +24,13 @@ const HISTORY: ChatMessage[] = [
 const BASE = { history: HISTORY, charName: 'Sumire', userName: 'Kai' }
 
 describe('generateChoices', () => {
+  it('uses a JSON object envelope for backends that prefer validated JSON output', async () => {
+    let sent: Record<string, unknown> = {}
+    const client = { ...stubClient('{"choices":[{"kind":"action","label":"Wave","text":"*waves*"}]}', (p) => { sent = p }), prefersJsonObject: true }
+    expect((await generateChoices(client, BASE))[0]).toMatchObject({ label: 'Wave', text: '*waves*' })
+    expect(sent.jsonOutput).toBe(true)
+    expect(sent.prompt).toContain('"choices" array')
+  })
   it('parses a JSON array of options, defaulting an omitted kind to "line"', async () => {
     const options = await generateChoices(
       stubClient('[{"label":"Tease her","text":"You just love that view, don\'t you?"}]'),

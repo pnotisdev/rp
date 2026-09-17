@@ -296,6 +296,133 @@ select:focus-visible,
   .sakura-petal { display: none; }
 }
 
+/*
+  VN mode's one glass material. Every floating surface over the scene (dialogue box, HUD card,
+  quick menu, choice bars) is built from this rather than each hand-rolling its own
+  bg-black/NN + backdrop-blur combination, which is how they drifted into four different
+  translucencies. Deliberately dark and low-contrast: the art behind it is the subject.
+*/
+.vn-glass {
+  background-color: rgb(10 10 14 / 0.52);
+  backdrop-filter: blur(14px) saturate(1.15);
+  -webkit-backdrop-filter: blur(14px) saturate(1.15);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.10),
+    inset 0 0 0 1px rgb(255 255 255 / 0.06),
+    0 18px 48px -24px rgb(0 0 0 / 0.9);
+}
+/* The dialogue box specifically — a touch more opaque, since it carries the text that has to be read. */
+.vn-glass-solid {
+  background-color: rgb(8 9 13 / 0.68);
+  backdrop-filter: blur(20px) saturate(1.2);
+  -webkit-backdrop-filter: blur(20px) saturate(1.2);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.12),
+    inset 0 0 0 1px rgb(255 255 255 / 0.07),
+    0 24px 60px -28px rgb(0 0 0 / 0.95);
+}
+
+/*
+  The bottom stack's column: the floating strip (location caption, assist bar, choices, quick
+  replies), the dialogue box, and the docked composer bar all sit in it. One class rather than the
+  same Tailwind string written out three times — written out, they drifted: the strip applied its
+  padding to a full-width parent and centred the capped column *inside* that, while the box capped
+  and centred the padded element itself, which put the two 20px apart on any window wider than the
+  cap. Alignment here is structural, not a convention to remember.
+*/
+.vn-stack {
+  width: 100%;
+  max-width: 64rem;
+  margin-inline: auto;
+  padding-inline: 0.75rem;
+}
+@media (min-width: 640px) {
+  .vn-stack {
+    padding-inline: 1.25rem;
+  }
+}
+
+/*
+  The dialogue box's read <-> write swap. Same frame, same height; only the nameplate identity, a
+  soft accent ring and the caret change, so the state is unmistakable without anything moving.
+
+  The heights live here rather than in Tailwind classes because the two states have to agree to the
+  pixel: read state is body + footer strip ("Say something as …"), write state is one taller body
+  with the composer's own control row inside it. Deriving the write height from the read one with
+  `calc` makes that equality structural instead of two clamps that have to be kept in sync by hand.
+*/
+.vn-box {
+  --vn-box-body: clamp(112px, 21vh, 168px);
+  --vn-box-foot: 42px;
+}
+@media (min-width: 640px) {
+  .vn-box {
+    --vn-box-body: clamp(124px, 19vh, 184px);
+  }
+}
+.vn-box-body {
+  height: var(--vn-box-body);
+}
+.vn-box-body-write {
+  height: calc(var(--vn-box-body) + var(--vn-box-foot));
+}
+.vn-box-foot {
+  height: var(--vn-box-foot);
+}
+
+/* A background change cross-dissolves instead of cutting — VNStage keys the incoming layer by its
+   resolved background id, so this replays only when the scene actually moves somewhere else. */
+@keyframes vn-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.vn-backdrop-in {
+  animation: vn-backdrop-in 700ms ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .vn-backdrop-in { animation: none; }
+}
+
+/* Choice bars land one after another rather than all at once — a beat of ceremony for a real
+   decision point. `--i` is the row index, set inline. */
+@keyframes vn-choice-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+.vn-choice-row {
+  animation: vn-choice-in 260ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation-delay: calc(var(--i, 0) * 45ms);
+}
+@media (prefers-reduced-motion: reduce) {
+  .vn-choice-row { animation: none; }
+}
+
+/*
+  Menus over the VN scene. A panel built on the shared `Modal`/`ConfirmDialog`/`TuningPanel` shells
+  is app chrome — in the light theme, a white slab dropped on top of a night-time scene. Rather than
+  restyling a dozen panels one by one, this re-points the theme tokens *within the panel's own
+  subtree*, so every `bg-bg-elevated` / `text-text` / `border-border` inside it resolves to the same
+  glass material as the stage. Scoped, never global: the sidebar and everything outside the panel
+  keep the user's actual theme.
+*/
+.vn-chrome {
+  --c-bg: 12 13 18;
+  --c-bg-elevated: 22 24 32;
+  --c-bg-sunken: 15 16 22;
+  --c-border: 60 64 78;
+  --c-text: 238 238 240;
+  --c-text-muted: 156 158 170;
+  --c-msg-char: 30 32 42;
+  color: rgb(var(--c-text));
+  background-color: rgb(var(--c-bg-elevated) / 0.86) !important;
+  backdrop-filter: blur(20px) saturate(1.15);
+  -webkit-backdrop-filter: blur(20px) saturate(1.15);
+  border-color: rgb(255 255 255 / 0.10) !important;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.08),
+    0 30px 70px -30px rgb(0 0 0 / 0.95);
+}
+
 /* thin, theme-aware scrollbars */
 * {
   scrollbar-width: thin;

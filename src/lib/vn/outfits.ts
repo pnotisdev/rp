@@ -22,6 +22,19 @@ export interface Outfit {
   unlockAffection?: number
   /** Every one of these scene flags must be set before the outfit unlocks. */
   requiredFlags?: string[]
+  /**
+   * Coins this outfit has to be bought for before it unlocks, on top of any `unlockAffection` /
+   * `requiredFlags` gate. Unset means it is earned rather than sold, which is every outfit that
+   * existed before the wardrobe shop.
+   *
+   * Ownership is recorded as a reserved scene flag (`outfitOwnedFlag`) rather than a new field on
+   * `Chat`, because every call site of `isOutfitUnlocked` already threads `chat.sceneFlags` through
+   * — so the gate below needed no plumbing at all. The prefix keeps it out of the judge's flag
+   * vocabulary (`relationshipAssist.ts` only ever offers `SCENE_FLAGS` plus a world's own) and out
+   * of the Unlocks tab's list (`combinedSceneFlags`), so it is invisible to both the model and the
+   * player as anything other than a bought outfit.
+   */
+  price?: number
   /** Withheld from the model's scene-tag menu even when unlocked — for a state only ever entered deliberately (app or player), never auto-picked. */
   manualOnly?: boolean
   /** The wardrobe state an explicit intimacy action switches this character into (one-way; the story tags its way back out via a later `outfit=`). */
@@ -82,7 +95,53 @@ export function outfitCoverage(
 /** Whether an outfit's affection/flag gates are satisfied. Ignores `manualOnly`, which only governs model auto-selection. */
 export function isOutfitUnlocked(outfit: Outfit, affection: number, flags: ReadonlySet<string>): boolean {
   if (affection < Number(outfit.unlockAffection ?? 0)) return false
+  // A priced outfit stays locked until actually bought, however much warmth there is.
+  if (Number(outfit.price ?? 0) > 0 && !flags.has(outfitOwnedFlag(outfit.id))) return false
   return (outfit.requiredFlags ?? []).every((f) => flags.has(f))
+}
+
+/** Reserved prefix for "this chat has bought outfit X". Never offered to the judge, never listed in the panel's flag row. */
+export const OUTFIT_OWNED_FLAG_PREFIX = 'owned-outfit:'
+
+/** The scene flag that records having bought this outfit. */
+export function outfitOwnedFlag(outfitId: string): string {
+  return `${OUTFIT_OWNED_FLAG_PREFIX}${outfitId}`
+}
+
+/** Whether a flag is one of the reserved wardrobe-ownership markers rather than a story flag. */
+export function isOutfitOwnedFlag(flag: string): boolean {
+  return flag.startsWith(OUTFIT_OWNED_FLAG_PREFIX)
+}
+
+export interface PurchasableOutfit {
+  outfit: Outfit
+  price: number
+  owned: boolean
+  /** Warmth is still short of this outfit's own `unlockAffection`, so buying it now would not show it. */
+  warmthShort: boolean
+  /** Story flags it still needs beyond being bought. */
+  missingFlags: string[]
+}
+
+/**
+ * The outfits a character actually has for sale: priced, and with art drawn for them. An outfit with
+ * no sprites is not a product — buying it would unlock a wardrobe state that renders as nothing.
+ */
+export function purchasableOutfits(
+  outfits: Outfit[] | undefined,
+  sprites: Record<string, string> | undefined,
+  affection: number,
+  flags: ReadonlySet<string> = new Set(),
+): PurchasableOutfit[] {
+  return (outfits ?? [])
+    .filter((o) => Number(o.price ?? 0) > 0 && expressionIdsForOutfit(sprites, o.id).length > 0)
+    .map((outfit) => ({
+      outfit,
+      price: Number(outfit.price),
+      owned: flags.has(outfitOwnedFlag(outfit.id)),
+      warmthShort: affection < Number(outfit.unlockAffection ?? 0),
+      missingFlags: (outfit.requiredFlags ?? []).filter((f) => !flags.has(f)),
+    }))
 }
 
 /** The outfits the model may tag right now: unlocked, not `manualOnly`, with at least one sprite drawn. Always includes `BASE_OUTFIT_ID`. */

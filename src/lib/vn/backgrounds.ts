@@ -64,20 +64,75 @@ export function slugifyBackgroundId(label: string, existingIds: string[]): strin
 }
 
 /**
- * Deterministic, no-model fallback for tagging a chat's opening scene: matches greeting text
- * against candidate background labels/ids by keyword, so VN mode still opens on something
- * plausible even when there's no client to run `detectGreetingScene`'s model-based pass (or it
- * declined to answer). Longest matching needle wins so a more specific label beats a generic one;
- * returns `undefined` when nothing in the text matches.
+ * Phrases beyond a background's own label/id that indicate it. A greeting almost never says
+ * "school hallway" outright — it says lockers, or the corridor — which is why the label-only match
+ * this replaces so rarely fired, leaving VN mode on a bare placeholder for the opening scene.
+ * Default backgrounds only; a world's custom background still matches on its own label/id, which is
+ * all this app knows about it.
+ */
+const BACKGROUND_ALIASES: Record<string, string[]> = {
+  classroom: ['class room', 'homeroom', 'blackboard', 'chalkboard', 'her desk', 'his desk', 'the desks', 'after class', 'during class', 'lesson'],
+  'school-hallway': ['hallway', 'corridor', 'lockers', 'locker', 'the halls'],
+  'school-rooftop': ['school roof', 'roof of the school', 'rooftop of the school'],
+  'school-gate': ['school gates', 'front gate', 'the gates'],
+  'school-courtyard': ['courtyard', 'schoolyard', 'quad'],
+  library: ['bookshelves', 'the shelves', 'the stacks', 'reading room', 'study room', 'librarian', 'media room', 'card catalog', 'card-catalog'],
+  'club-room': ['clubroom', 'club house', 'clubhouse'],
+  gymnasium: ['the gym', 'sports hall', 'basketball court', 'volleyball court'],
+  'school-nurse-office': ['infirmary', 'nurse office', "nurse's office", 'sick bay'],
+  cafeteria: ['lunchroom', 'canteen', 'dining hall'],
+  'city-street': ['the street', 'downtown', 'sidewalk', 'crosswalk', 'busy street', 'city sidewalk', 'shopping district'],
+  'train-station': ['the platform', 'train platform', 'the subway', 'subway station', 'ticket gate', 'last train'],
+  'convenience-store': ['konbini', 'corner store', 'the register', 'supermarket', 'grocery store'],
+  restaurant: ['the diner', 'a diner', 'the table for two', 'ramen shop', 'izakaya', 'dinner out'],
+  cafe: ['coffee shop', 'coffee house', 'the counter', 'latte', 'espresso'],
+  karaoke: ['karaoke box', 'karaoke room', 'the microphone'],
+  'movie-theater': ['cinema', 'the movies', 'movie theatre', 'the screen dims', 'back row'],
+  hospital: ['hospital room', 'hospital bed', 'the ward', 'waiting room', 'emergency room'],
+  rooftop: ['the roof', 'up on the roof', 'roof access'],
+  park: ['the bench', 'park bench', 'playground', 'the fountain', 'garden path'],
+  forest: ['the woods', 'the trees', 'treeline', 'woodland', 'the grove'],
+  beach: ['the shore', 'the sand', 'shoreline', 'the waves', 'seaside', 'ocean'],
+  shrine: ['torii', 'the temple', 'shrine grounds', 'offering box', 'the omikuji'],
+  onsen: ['hot spring', 'hot springs', 'the bath house', 'bathhouse'],
+  festival: ['summer festival', 'the stalls', 'food stalls', 'festival grounds', 'yukata', 'matsuri'],
+  'fireworks-viewing': ['the fireworks', 'firework display', 'hanabi'],
+  'living-room': ['the couch', 'the sofa', 'the coffee table', 'the tv', 'her apartment', 'his apartment', 'her place', 'his place'],
+  bedroom: ['her room', 'his room', 'my room', 'your room', 'the bed', 'her bed', 'his bed', 'futon', 'the sheets', 'bedside'],
+  kitchen: ['the stove', 'the counter top', 'countertop', 'the fridge', 'cooking', 'the kettle'],
+  shower: ['the bathroom', 'bath tub', 'bathtub', 'under the water', 'the steam'],
+  office: ['the desk job', 'her office', 'his office', 'meeting room', 'the cubicle', 'break room', 'overtime'],
+}
+
+/** Whole-word (or whole-phrase) containment, so "cafe" doesn't fire inside "cafeteria" and "park" doesn't fire inside "parking". */
+function containsPhrase(haystack: string, needle: string): boolean {
+  const i = haystack.indexOf(needle)
+  if (i === -1) return false
+  const before = i === 0 ? '' : haystack[i - 1]
+  const after = haystack[i + needle.length] ?? ''
+  return !/[a-z0-9]/.test(before) && !/[a-z0-9]/.test(after)
+}
+
+/**
+ * Deterministic, no-model fallback for tagging a scene's location: matches narration against
+ * candidate background labels/ids and their `BACKGROUND_ALIASES`, so VN mode still opens on
+ * something plausible even with no client to run `detectGreetingScene` (or when it declined).
+ * Longest matching phrase wins, so a specific label beats a generic alias; returns `undefined`
+ * when nothing in the text matches, which is what keeps a genuinely unplaceable scene unplaced
+ * rather than guessed at.
  */
 export function matchBackgroundKeyword(text: string, candidates: { id: string; label: string }[]): string | undefined {
   const lower = text.toLowerCase()
   let best: { id: string; length: number } | undefined
   for (const c of candidates) {
-    const needles = new Set([c.label.toLowerCase(), c.id.replace(/-/g, ' ').toLowerCase()])
+    const needles = new Set([
+      c.label.toLowerCase(),
+      c.id.replace(/-/g, ' ').toLowerCase(),
+      ...(BACKGROUND_ALIASES[c.id] ?? []),
+    ])
     for (const needle of needles) {
       if (needle.length < 4) continue // skip needles too short to mean much ("bar" inside "barely")
-      if (lower.includes(needle) && (!best || needle.length > best.length)) best = { id: c.id, length: needle.length }
+      if (containsPhrase(lower, needle) && (!best || needle.length > best.length)) best = { id: c.id, length: needle.length }
     }
   }
   return best?.id

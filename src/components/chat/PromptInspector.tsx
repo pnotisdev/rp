@@ -148,6 +148,16 @@ export function PromptInspector({
                 higher-priority entry in the same inclusion group: {result.droppedForGroup.map(describeEntry).join(', ')}
               </p>
             )}
+            {result.styleGuidanceDroppedCount > 0 && (
+              // The context window was too tight for every steering line at once — `buildPrompt`
+              // dropped the least-essential ones (mood/need/plans texture, never content policy or
+              // scene state) so the chat history it was steering didn't get squeezed out instead.
+              <p className="mb-5 text-xs text-warning">
+                Context is tight: {result.styleGuidanceDroppedCount} lower-priority steering{' '}
+                {result.styleGuidanceDroppedCount === 1 ? 'line was' : 'lines were'} dropped to leave room for chat
+                history. A larger context length keeps all of it.
+              </p>
+            )}
 
             <h3 className="mb-1 text-xs font-semibold text-text-muted">Exact text sent to the model</h3>
             <pre className="whitespace-pre-wrap rounded-xl bg-bg-sunken p-4 text-xs text-text">{result.prompt}</pre>

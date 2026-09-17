@@ -136,6 +136,63 @@ describe('OpenAICompatibleClient — request building', () => {
     expect(body).not.toHaveProperty('verbosity')
   })
 
+  // Live-verified against a real key: OpenRouter's free tier increasingly routes to reasoning
+  // models, and one (`nex-agi/nex-n2.5-mini:free`) reproduced exactly this — reasoning tokens
+  // filled the whole `max_tokens` budget and `content` came back empty every time, with no error at
+  // all, until `reasoning: {enabled: false}` was added to the request.
+  describe('reasoning — OpenRouter only', () => {
+    it("requests reasoning off by default, since a hidden 'thinking' phase only costs reply budget in a roleplay app", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { choices: [{ message: { content: 'hi' } }] }))
+      vi.stubGlobal('fetch', fetchMock)
+      const client = new OpenAICompatibleClient('https://openrouter.ai/api/v1', '', 'some/model:free')
+
+      await client.generate(BASE_REQUEST)
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body as string)
+      expect(body.reasoning).toEqual({ enabled: false })
+    })
+
+    it("translates an explicit reasoning_effort into OpenRouter's own shape too, alongside the OpenAI-style field", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { choices: [{ message: { content: 'hi' } }] }))
+      vi.stubGlobal('fetch', fetchMock)
+      const client = new OpenAICompatibleClient('https://openrouter.ai/api/v1', '', 'some/model:free')
+
+      await client.generate({ ...BASE_REQUEST, reasoning_effort: 'low' })
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body as string)
+      expect(body.reasoning_effort).toBe('low')
+      expect(body.reasoning).toEqual({ effort: 'low' })
+    })
+
+    it('never sends the OpenRouter-only field to a different host', async () => {
+      const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { choices: [{ message: { content: 'hi' } }] }))
+      vi.stubGlobal('fetch', fetchMock)
+      const client = new OpenAICompatibleClient('https://api.openai.com/v1', '', 'gpt-4o-mini')
+
+      await client.generate(BASE_REQUEST)
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body as string)
+      expect(body).not.toHaveProperty('reasoning')
+    })
+
+    it('recognises openrouter.ai regardless of a trailing slash or path', async () => {
+      const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { choices: [{ message: { content: 'hi' } }] }))
+      vi.stubGlobal('fetch', fetchMock)
+      const client = new OpenAICompatibleClient('https://openrouter.ai/api/v1/', '', 'some/model:free')
+
+      await client.generate(BASE_REQUEST)
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body as string)
+      expect(body.reasoning).toEqual({ enabled: false })
+    })
+
+    it('does not mistake a look-alike host for the real one', async () => {
+      const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { choices: [{ message: { content: 'hi' } }] }))
+      vi.stubGlobal('fetch', fetchMock)
+      const client = new OpenAICompatibleClient('https://openrouter.ai.evil.example.com/v1', '', 'some/model:free')
+
+      await client.generate(BASE_REQUEST)
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body as string)
+      expect(body).not.toHaveProperty('reasoning')
+    })
+  })
+
   it('sends an Authorization header only when an API key is configured', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { choices: [{ message: { content: 'hi' } }] }))
     vi.stubGlobal('fetch', fetchMock)
@@ -164,6 +221,113 @@ describe('OpenAICompatibleClient — request building', () => {
   })
 })
 
+// A real user hit this against real OpenAI: "Unsupported parameter: 'max_tokens' is not supported
+// with this model. Use 'max_completion_tokens' instead." OpenAI made that switch mandatory for
+// o1/o3/o4-mini and has since widened it to some GPT-5-family models too, with no published,
+// queryable way to know ahead of time which name a given model wants — every other project that's
+// hit this (opencode, crush, several LangChain issues) confirms the same thing. So this client
+// doesn't guess from the model name; it sends the widely-supported `max_tokens` first and only
+// switches for the rest of its lifetime once it's actually seen that specific rejection.
+describe('OpenAICompatibleClient — max_tokens / max_completion_tokens', () => {
+  function maxTokensRejection() {
+    return jsonResponse(400, {
+      error: { message: "Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead." },
+    })
+  }
+
+  it('sends max_tokens on the first request, same as ever', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { choices: [{ message: { content: 'hi' } }] }))
+    vi.stubGlobal('fetch', fetchMock)
+    const client = new OpenAICompatibleClient('https://api.openai.com/v1', '', 'gpt-5.1')
+
+    await client.generate({ ...BASE_REQUEST, max_length: 300 })
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string)
+    expect(body.max_tokens).toBe(300)
+    expect(body).not.toHaveProperty('max_completion_tokens')
+  })
+
+  it('retries once with max_completion_tokens when that exact rejection comes back, and the retry succeeds transparently', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(maxTokensRejection())
+      .mockResolvedValueOnce(jsonResponse(200, { choices: [{ message: { content: 'Hello.' } }] }))
+    vi.stubGlobal('fetch', fetchMock)
+    const client = new OpenAICompatibleClient('https://api.openai.com/v1', '', 'gpt-5.1')
+
+    const text = await client.generate({ ...BASE_REQUEST, max_length: 300 })
+    expect(text).toBe('Hello.')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+
+    const firstBody = JSON.parse(fetchMock.mock.calls[0][1].body as string)
+    expect(firstBody.max_tokens).toBe(300)
+    const secondBody = JSON.parse(fetchMock.mock.calls[1][1].body as string)
+    expect(secondBody.max_completion_tokens).toBe(300)
+    expect(secondBody).not.toHaveProperty('max_tokens')
+  })
+
+  it('remembers the switch — every later call on the same client instance goes straight to max_completion_tokens, no wasted retry', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(maxTokensRejection())
+      .mockResolvedValueOnce(jsonResponse(200, { choices: [{ message: { content: 'first' } }] }))
+      .mockResolvedValueOnce(jsonResponse(200, { choices: [{ message: { content: 'second' } }] }))
+    vi.stubGlobal('fetch', fetchMock)
+    const client = new OpenAICompatibleClient('https://api.openai.com/v1', '', 'gpt-5.1')
+
+    await client.generate(BASE_REQUEST)
+    fetchMock.mockClear()
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { choices: [{ message: { content: 'second' } }] }))
+
+    await client.generate(BASE_REQUEST)
+    expect(fetchMock).toHaveBeenCalledTimes(1) // no rejected first attempt this time
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string)
+    expect(body.max_completion_tokens).toBeDefined()
+    expect(body).not.toHaveProperty('max_tokens')
+  })
+
+  it('only ever retries once — a second, different rejection surfaces as a real error instead of looping', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(maxTokensRejection())
+    vi.stubGlobal('fetch', fetchMock)
+    const client = new OpenAICompatibleClient('https://api.openai.com/v1', '', 'gpt-5.1')
+
+    await expect(client.generate(BASE_REQUEST)).rejects.toThrow(/max_completion_tokens/)
+    expect(fetchMock).toHaveBeenCalledTimes(2) // the one legitimate retry, then it gives up
+  })
+
+  it('leaves an unrelated 400 alone — never mistaken for the max_tokens rejection', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(400, { error: { message: 'Invalid API key' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const client = new OpenAICompatibleClient('https://api.openai.com/v1', '', 'gpt-5.1')
+
+    await expect(client.generate(BASE_REQUEST)).rejects.toThrow(/Invalid API key/)
+    expect(fetchMock).toHaveBeenCalledTimes(1) // no retry for a different kind of 400
+  })
+
+  it('applies the same retry to generateStream()', async () => {
+    const events = [`data: ${JSON.stringify({ choices: [{ delta: { content: 'Hi' } }] })}`, 'data: [DONE]'].map((e) => e + '\n\n').join('')
+    const fetchMock = vi.fn().mockResolvedValueOnce(maxTokensRejection()).mockResolvedValueOnce(sseResponse(events))
+    vi.stubGlobal('fetch', fetchMock)
+    const client = new OpenAICompatibleClient('https://api.openai.com/v1', '', 'gpt-5.1')
+
+    const tokens: string[] = []
+    const full = await client.generateStream(BASE_REQUEST, (t) => tokens.push(t))
+    expect(full).toBe('Hi')
+    expect(tokens).toEqual(['Hi'])
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const secondBody = JSON.parse(fetchMock.mock.calls[1][1].body as string)
+    expect(secondBody.max_completion_tokens).toBeDefined()
+  })
+
+  it("still resolves quietly (not a throw) on generateStream() when the signal was already aborted — same contract as before this retry existed", async () => {
+    const controller = new AbortController()
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new DOMException('Aborted', 'AbortError')))
+    controller.abort()
+    const client = new OpenAICompatibleClient('https://api.openai.com/v1', '', 'gpt-5.1')
+    const full = await client.generateStream(BASE_REQUEST, () => {}, controller.signal)
+    expect(full).toBe('')
+  })
+})
+
 describe('OpenAICompatibleClient — generate()', () => {
   it('extracts choices[0].message.content from a successful response', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, { choices: [{ message: { content: 'Hello, world.' } }] })))
@@ -175,6 +339,31 @@ describe('OpenAICompatibleClient — generate()', () => {
   it('returns an empty string when the response has no choices', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, {})))
     const client = new OpenAICompatibleClient('https://api.example.com/v1', '', 'gpt-4o-mini')
+    const text = await client.generate(BASE_REQUEST)
+    expect(text).toBe('')
+  })
+
+  it('throws a specific error, not a bare empty string, when reasoning tokens filled the whole budget', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(jsonResponse(200, { choices: [{ message: { content: '', reasoning: 'thinking about it for a while...' } }] })),
+    )
+    const client = new OpenAICompatibleClient('https://openrouter.ai/api/v1', '', 'some/model:free')
+    await expect(client.generate(BASE_REQUEST)).rejects.toThrow(/hidden reasoning/)
+  })
+
+  it("also recognises DeepSeek's own reasoning_content name for the same field", async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(jsonResponse(200, { choices: [{ message: { content: '', reasoning_content: 'thinking...' } }] })),
+    )
+    const client = new OpenAICompatibleClient('https://api.deepseek.com/v1', '', 'deepseek-reasoner')
+    await expect(client.generate(BASE_REQUEST)).rejects.toThrow(/hidden reasoning/)
+  })
+
+  it('leaves an ordinary empty reply (no reasoning either) exactly as it always returned — an empty string, not a throw', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, { choices: [{ message: { content: '' } }] })))
+    const client = new OpenAICompatibleClient('https://openrouter.ai/api/v1', '', 'some/model:free')
     const text = await client.generate(BASE_REQUEST)
     expect(text).toBe('')
   })
@@ -268,6 +457,51 @@ describe('OpenAICompatibleClient — generateStream()', () => {
     controller.abort()
     const client = new OpenAICompatibleClient('https://api.example.com/v1', '', 'gpt-4o-mini')
     const full = await client.generateStream(BASE_REQUEST, () => {}, controller.signal)
+    expect(full).toBe('')
+  })
+
+  // Reproduces the live shape captured from an actual OpenRouter response: `delta.reasoning`
+  // streams real text every chunk while `delta.content` stays `''` for the whole reply, right up to
+  // `[DONE]` — the model spent its entire token budget thinking and never actually answered.
+  it('throws a specific error (not a silent empty reply) when every delta was reasoning and none was content', async () => {
+    const events = [
+      `data: ${JSON.stringify({ choices: [{ delta: { content: '', role: 'assistant', reasoning: 'Let me consider how ' } }] })}`,
+      `data: ${JSON.stringify({ choices: [{ delta: { content: '', reasoning: 'Sumire would respond here...' } }] })}`,
+      'data: [DONE]',
+    ]
+      .map((e) => e + '\n\n')
+      .join('')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sseResponse(events)))
+
+    const client = new OpenAICompatibleClient('https://openrouter.ai/api/v1', '', 'some/model:free')
+    const tokens: string[] = []
+    await expect(client.generateStream(BASE_REQUEST, (t) => tokens.push(t))).rejects.toThrow(/hidden reasoning/)
+    // The reasoning text is never handed to the caller as if it were the reply.
+    expect(tokens).toEqual([])
+  })
+
+  it('never calls onToken with a reasoning delta, even when content deltas are also present', async () => {
+    const events = [
+      `data: ${JSON.stringify({ choices: [{ delta: { reasoning: 'thinking first...' } }] })}`,
+      `data: ${JSON.stringify({ choices: [{ delta: { content: 'Hi' } }] })}`,
+      'data: [DONE]',
+    ]
+      .map((e) => e + '\n\n')
+      .join('')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sseResponse(events)))
+
+    const client = new OpenAICompatibleClient('https://openrouter.ai/api/v1', '', 'some/model:free')
+    const tokens: string[] = []
+    const full = await client.generateStream(BASE_REQUEST, (t) => tokens.push(t))
+    expect(tokens).toEqual(['Hi'])
+    expect(full).toBe('Hi')
+  })
+
+  it('leaves a genuinely empty stream (no reasoning either) returning an empty string, same as always', async () => {
+    const events = ['data: [DONE]'].map((e) => e + '\n\n').join('')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sseResponse(events)))
+    const client = new OpenAICompatibleClient('https://openrouter.ai/api/v1', '', 'some/model:free')
+    const full = await client.generateStream(BASE_REQUEST, () => {})
     expect(full).toBe('')
   })
 })

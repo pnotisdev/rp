@@ -365,7 +365,7 @@ export async function assessRelationshipMoment(
 
   const text = await generateWithTimeout(
     client,
-    { ...REL_PARAMS, max_length: 380, max_context_length: await client.getEffectiveMaxContext(), prompt },
+    { ...REL_PARAMS, ...(client.prefersJsonObject ? { jsonOutput: true } : {}), max_length: 380, max_context_length: await client.getEffectiveMaxContext(), prompt },
     'Relationship check-in',
   )
   const parsed = parseLenientJson(text)

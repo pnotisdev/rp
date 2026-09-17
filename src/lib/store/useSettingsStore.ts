@@ -4,6 +4,7 @@
  * image, TTS). Persisted to localStorage as `rp-settings`, with a deep `merge` for a few nested keys.
  */
 import { create } from 'zustand'
+import { isOpenMayhem } from '@/lib/api/openMayhem'
 import { persist } from 'zustand/middleware'
 import type { ChatCompletionSamplerParams, GenerationParams } from '@/lib/api/types'
 import { DEFAULT_CHAT_COMPLETION_SAMPLER } from '@/lib/api/types'
@@ -161,6 +162,11 @@ interface SettingsState {
    *  VN mode only; the ordinary chat layout's choices/quick-replies are unaffected either way. */
   vnChoiceStyle: 'docked' | 'centered'
   setVnChoiceStyle: (v: 'docked' | 'centered') => void
+  /** Where the player writes in VN mode. `'inline'` hands the dialogue box itself over — same
+   *  frame, same height, nameplate and accent rail switched to the persona — so the scene isn't
+   *  paying for a permanently docked composer bar. `'docked'` keeps that bar under the box. */
+  vnInputMode: 'inline' | 'docked'
+  setVnInputMode: (v: 'inline' | 'docked') => void
   /** With a vision-capable model loaded, runs a post-reply pass to correct the model's `<<scene:>>` tag. Off by default. */
   visionSceneDetection: boolean
   setChatStyle: (s: ChatStyle) => void
@@ -290,12 +296,17 @@ interface SettingsState {
   ttsBaseUrl: string
   ttsRegion: string
   ttsVoice: string
+  ttsModel: string
+  /** Shared by OpenMayhem chat, images and speech; never used for another provider. */
+  openMayhemApiKey: string
+  setOpenMayhemApiKey: (key: string) => void
   setVoiceConfig: (patch: Partial<{
     ttsProvider: TtsProviderId
     ttsApiKey: string
     ttsBaseUrl: string
     ttsRegion: string
     ttsVoice: string
+    ttsModel: string
   }>) => void
 
   /** Defaults to `'koboldcpp'`; the other three fields only matter for `'openai-compatible'`. */
@@ -399,8 +410,10 @@ export const useSettingsStore = create<SettingsState>()(
       clickToEdit: true,
       visualNovelMode: false,
       setVisualNovelMode: (v) => set({ visualNovelMode: v }),
-      vnChoiceStyle: 'docked',
+      vnChoiceStyle: 'centered',
       setVnChoiceStyle: (v) => set({ vnChoiceStyle: v }),
+      vnInputMode: 'inline',
+      setVnInputMode: (v) => set({ vnInputMode: v }),
       visionSceneDetection: false,
       setChatStyle: (s) => set({ chatStyle: s }),
       setAvatarShape: (s) => set({ avatarShape: s }),
@@ -501,13 +514,32 @@ export const useSettingsStore = create<SettingsState>()(
       ttsBaseUrl: '',
       ttsRegion: '',
       ttsVoice: '',
-      setVoiceConfig: (patch) => set(patch),
+      ttsModel: '',
+      openMayhemApiKey: '',
+      setOpenMayhemApiKey: (key) => set((s) => ({ openMayhemApiKey: key,
+        ...(s.chatBackend === 'openai-compatible' && isOpenMayhem(s.chatBackendBaseUrl) ? { chatBackendApiKey: key } : {}),
+      })),
+      setVoiceConfig: (patch) => set((s) => {
+        const changesProvider = patch.ttsProvider !== undefined && patch.ttsProvider !== s.ttsProvider
+          || patch.ttsBaseUrl !== undefined && patch.ttsBaseUrl !== s.ttsBaseUrl
+        return changesProvider ? { ttsApiKey: '', ttsVoice: '', ttsModel: '', ...patch } : patch
+      }),
 
       chatBackend: 'koboldcpp',
       chatBackendBaseUrl: '',
       chatBackendApiKey: '',
       chatBackendModel: '',
-      setChatBackendConfig: (patch) => set(patch),
+      setChatBackendConfig: (patch) => set((s) => {
+        // A provider change must not send the previous provider's secret to its replacement.
+        const changesProvider = (patch.chatBackendBaseUrl !== undefined && patch.chatBackendBaseUrl !== s.chatBackendBaseUrl)
+          || (patch.chatBackend !== undefined && patch.chatBackend !== s.chatBackend)
+        const next = changesProvider ? { chatBackendApiKey: '', chatBackendModel: '', ...patch } : { ...patch }
+        if ((patch.chatBackend ?? s.chatBackend) === 'openai-compatible' && isOpenMayhem(patch.chatBackendBaseUrl ?? s.chatBackendBaseUrl)) {
+          const key = patch.chatBackendApiKey ?? s.openMayhemApiKey
+          return { ...next, openMayhemApiKey: key, chatBackendApiKey: key }
+        }
+        return next
+      }),
 
       chatCompletionSampler: DEFAULT_CHAT_COMPLETION_SAMPLER,
       setChatCompletionSampler: (patch) => set((s) => ({ chatCompletionSampler: { ...s.chatCompletionSampler, ...patch } })),
@@ -517,16 +549,24 @@ export const useSettingsStore = create<SettingsState>()(
       imageBackendUsername: '',
       imageBackendPassword: '',
       imageBackendModel: '',
-      setImageBackendConfig: (patch) => set(patch),
+      setImageBackendConfig: (patch) => set((s) => {
+        const changesProvider = patch.imageBackend !== undefined && patch.imageBackend !== s.imageBackend
+          || patch.imageBackendBaseUrl !== undefined && patch.imageBackendBaseUrl !== s.imageBackendBaseUrl
+        return changesProvider ? { imageBackendUsername: '', imageBackendPassword: '', imageBackendModel: '', ...patch } : patch
+      }),
     }),
     {
       name: 'rp-settings',
       // Deep-merge just these nested keys so new tokens/params backfill instead of being hidden by an old persisted object.
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<SettingsState>
+        const usesOpenMayhem = p.chatBackend === 'openai-compatible' && isOpenMayhem(p.chatBackendBaseUrl ?? '')
+        const key = p.openMayhemApiKey || (usesOpenMayhem ? p.chatBackendApiKey : '') || ''
         return {
           ...current,
           ...p,
+          openMayhemApiKey: key,
+          ...(usesOpenMayhem ? { chatBackendApiKey: key } : {}),
           themeTokensLight: { ...current.themeTokensLight, ...p.themeTokensLight },
           themeTokensDark: { ...current.themeTokensDark, ...p.themeTokensDark },
           sampler: { ...current.sampler, ...p.sampler },
