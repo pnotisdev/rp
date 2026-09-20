@@ -1,5 +1,5 @@
 import type { ChatBackend } from '@/lib/api/chatBackend'
-import { generateWithTimeout } from '@/lib/api/generateWithTimeout'
+import { generateWithTimeout, type AssistShaping } from '@/lib/api/generateWithTimeout'
 import { parseLenientJson } from '@/lib/jsonRepair'
 import type { AiLoreSubject } from '@/lib/characters/aiAssist'
 
@@ -32,6 +32,7 @@ export async function generateTasks(
   objectiveDescription: string,
   character: AiLoreSubject,
   count = 4,
+  assist?: AssistShaping,
 ): Promise<string[]> {
   const prompt = [
     'You are helping plan a roleplay chat.',
@@ -46,6 +47,8 @@ export async function generateTasks(
     client,
     { ...GENERATE_PARAMS, max_context_length: await client.getEffectiveMaxContext(), prompt },
     'Generate tasks',
+    undefined,
+    assist,
   )
   const parsed = parseLenientJson(text)
   if (!Array.isArray(parsed)) throw new Error('Model did not return a JSON array of tasks')
@@ -57,6 +60,7 @@ export async function suggestObjective(
   client: ChatBackend,
   character: AiLoreSubject,
   persona: AiLoreSubject,
+  assist?: AssistShaping,
 ): Promise<{ title: string; description: string }> {
   const prompt = [
     'You are helping plan a roleplay chat between two participants.',
@@ -71,6 +75,8 @@ export async function suggestObjective(
     client,
     { ...GENERATE_PARAMS, max_context_length: await client.getEffectiveMaxContext(), prompt },
     'Suggest objective',
+    undefined,
+    assist,
   )
   const parsed = parseLenientJson(text)
   if (!parsed || typeof parsed !== 'object') throw new Error('Model did not return a JSON object')
@@ -90,6 +96,7 @@ export async function detectCompletedTasks(
   client: ChatBackend,
   replyText: string,
   pendingTasks: string[],
+  assist?: AssistShaping,
 ): Promise<number[]> {
   if (pendingTasks.length === 0) return []
   const taskList = pendingTasks.map((t, i) => `${i}: ${t}`).join('\n')
@@ -112,6 +119,8 @@ export async function detectCompletedTasks(
       prompt,
     },
     'Detect completed tasks',
+    undefined,
+    assist,
   )
   const parsed = parseLenientJson(text)
   if (!Array.isArray(parsed)) return []

@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChatBackend } from './chatBackend'
+import type { GenerateRequest } from './types'
 import { ASSIST_TIMEOUT_MS, generateWithTimeout } from './generateWithTimeout'
+import { getInstructTemplate } from '../prompt/instructTemplates'
 
 describe('generateWithTimeout', () => {
   // The live repro this exists for: a provider response that simply never resolves (confirmed
@@ -62,5 +64,91 @@ describe('generateWithTimeout', () => {
     // long-settled controller — harmless either way, but asserting no pending timers confirms the
     // `finally`'s `clearTimeout` actually ran.
     expect(vi.getTimerCount()).toBe(0)
+  })
+})
+
+describe('generateWithTimeout prompt shaping', () => {
+  // rp#7 + rp#6: a background judge call (relationship tracker, objectives, choices, director
+  // pick, rapport, scene vision) used to send a flat, unwrapped prompt with a small fixed
+  // max_length — no cue that it's the model's turn to speak (Gemma answers with EOS instead of
+  // JSON) and no headroom for a thinking model's hidden reasoning (truncated before the visible
+  // answer). `shaping` fixes both, but only when a caller actually opts in.
+  function captureClient() {
+    let sent: GenerateRequest | undefined
+    const client = {
+      generate: async (p: GenerateRequest) => {
+        sent = p
+        return '{}'
+      },
+    } as unknown as ChatBackend
+    return { client, sent: () => sent! }
+  }
+
+  it('leaves the prompt and max_length untouched with no shaping given, exactly like before', async () => {
+    const { client, sent } = captureClient()
+    await generateWithTimeout(client, { prompt: 'JSON:', max_length: 200 } as GenerateRequest, 'Test call')
+    expect(sent().prompt).toBe('JSON:')
+    expect(sent().max_length).toBe(200)
+  })
+
+  it('wraps the prompt in the given template and merges in its stop sequences', async () => {
+    const { client, sent } = captureClient()
+    const gemma = getInstructTemplate('gemma')
+    await generateWithTimeout(
+      client,
+      { prompt: 'JSON:', max_length: 200, stop_sequence: ['```'] } as GenerateRequest,
+      'Test call',
+      undefined,
+      { template: gemma },
+    )
+    expect(sent().prompt).toBe('<start_of_turn>user\nJSON:<end_of_turn>\n<start_of_turn>model\n')
+    expect(sent().stop_sequence).toEqual(['```', '<end_of_turn>', '<start_of_turn>'])
+  })
+
+  it('is a no-op for plain-chat (beyond the trailing newline), same as omitting a template', async () => {
+    const { client, sent } = captureClient()
+    await generateWithTimeout(
+      client,
+      { prompt: 'JSON:', max_length: 200 } as GenerateRequest,
+      'Test call',
+      undefined,
+      { template: getInstructTemplate('plain-chat') },
+    )
+    expect(sent().prompt).toBe('JSON:\n')
+    expect(sent().stop_sequence).toBeUndefined()
+  })
+
+  it('adds reasoningReserve on top of the caller\'s own max_length', async () => {
+    const { client, sent } = captureClient()
+    await generateWithTimeout(
+      client,
+      { prompt: 'JSON:', max_length: 200 } as GenerateRequest,
+      'Test call',
+      undefined,
+      { reasoningReserve: 800 },
+    )
+    expect(sent().max_length).toBe(1000)
+    expect(sent().prompt).toBe('JSON:')
+  })
+
+  it('applies template wrapping and reasoning reserve together', async () => {
+    const { client, sent } = captureClient()
+    await generateWithTimeout(
+      client,
+      { prompt: 'JSON:', max_length: 200 } as GenerateRequest,
+      'Test call',
+      undefined,
+      { template: getInstructTemplate('gemma'), reasoningReserve: 800 },
+    )
+    expect(sent().max_length).toBe(1000)
+    expect(sent().prompt).toBe('<start_of_turn>user\nJSON:<end_of_turn>\n<start_of_turn>model\n')
+  })
+
+  it('ignores a zero or negative reasoningReserve rather than shrinking max_length', async () => {
+    const { client, sent } = captureClient()
+    await generateWithTimeout(client, { prompt: 'JSON:', max_length: 200 } as GenerateRequest, 'Test call', undefined, {
+      reasoningReserve: 0,
+    })
+    expect(sent().max_length).toBe(200)
   })
 })

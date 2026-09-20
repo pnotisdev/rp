@@ -10,7 +10,7 @@ import { newId } from '@/lib/id'
 import type { AuthorNote, Chat, CommitmentStatus, DateEventCard, ItemEffect, MessageIntent, Objective, ObjectiveTask, RelationshipStage, StoredMessage, WorldCard } from '@/lib/types'
 import { collectImageBase64, composeMessageText, type PendingAttachment } from '@/lib/attachments'
 import { makeGenKey } from '@/lib/api/kobold'
-import { generateWithTimeout } from '@/lib/api/generateWithTimeout'
+import { generateWithTimeout, type AssistShaping } from '@/lib/api/generateWithTimeout'
 import { useChatBackendClient } from '@/lib/hooks/useChatBackendClient'
 import { BUILTIN_SYSTEM_PROMPTS, buildPrompt, estimateTokens, type ChatMessage, type StyleGuidanceItem } from '@/lib/prompt/builder'
 import { countTokensCached } from '@/lib/tokenCache'
@@ -440,6 +440,15 @@ export function useChatSession(chatId: string | null) {
     chatBackend === 'openai-compatible'
       ? getInstructTemplate('plain-chat')
       : resolveInstructTemplate(character?.instructTemplateId || instructTemplateId, customInstructTemplates)
+  // Shared prompt shaping for every background judge/assist call below (relationship tracker,
+  // objectives, choices, director pick, rapport, scene vision) — never for the main reply, which
+  // already builds its own fully-templated, reasoning-aware prompt via `buildPrompt`/`replyMaxTokens`.
+  // Reuses this same `template` (already forced to `plain-chat` for `openai-compatible`) so a
+  // background call looks exactly like the reply's own turn shape instead of a flat, unwrapped block
+  // a strict template model (Gemma) reads as already-finished text and answers with EOS to (rp#7),
+  // and adds the same reasoning-token headroom the reply gets so a thinking model's hidden reasoning
+  // doesn't eat the whole small assist budget before the visible JSON is due (rp#6).
+  const assistShaping: AssistShaping = { reasoningReserve: reasoningTokenReserve, template }
   // Extra characters in a group chat, beyond the primary — [] for today's ordinary single-character
   // chats. Fetched by id rather than a batched endpoint since the character list is small (a local,
   // single-user app) and this reuses the exact same reactive `characters` resource as `character` above.
@@ -1174,6 +1183,8 @@ export function useChatSession(chatId: string | null) {
                 rep_pen_slope: 0.7,
               },
               'Update memory summary',
+              undefined,
+              assistShaping,
             ),
         })
         const summaryUpToTimestamp = newBatch[newBatch.length - 1].createdAt
@@ -1205,6 +1216,7 @@ export function useChatSession(chatId: string | null) {
         client,
         replyText,
         pending.map((t) => t.description),
+        assistShaping,
       )
       if (completedIndices.length === 0) return
       await applyCompletedTasks(objective, pending, completedIndices)
@@ -1310,7 +1322,7 @@ export function useChatSession(chatId: string | null) {
         presentParticipants: [...(character ? [character] : []), ...participantCharacters]
           .filter((c) => c.id !== speaker.id)
           .map((c) => c.card.name),
-      })
+      }, assistShaping)
       // A due window always closes even with no verdict — an unusable answer reads as the middle outcome, not "ask again next turn".
       const resolvedAftercare = aftercareDue ? (aftercareVerdict ?? 'awkward') : undefined
       // Same intent chip played 3+ turns running scales positive gains toward nothing (a bad move/friction still passes through).
@@ -1376,7 +1388,7 @@ export function useChatSession(chatId: string | null) {
           locked: lockedGallery,
           affection,
           latestReply,
-        })
+        }, assistShaping)
         unlockedIds.forEach((id) => unlockedSet.add(id))
       }
       // Evaluated against the state this turn just produced (not the state it started from), so a "trust >= 70" trigger fires the turn it's reached. Primary's own track only.
@@ -1951,7 +1963,7 @@ export function useChatSession(chatId: string | null) {
           tierLabel: formatCommitmentStatus(tier),
           currentStatusLabel: formatCommitmentStatus(currentStatus),
           current: { affection: currentAffection, ...currentStats },
-        })
+        }, assistShaping)
       } catch (e) {
         toastError(errorMessage(e))
         return
@@ -2037,7 +2049,7 @@ export function useChatSession(chatId: string | null) {
             commitmentStatus: tier,
             milestoneOccasion: tier,
             recentGiftName: recentMeaningfulGiftName(track.giftLog, target.giftPreferences, world),
-          })
+          }, assistShaping)
             .then((milestoneEvent) => (milestoneEvent ? startDateEventRef.current(milestoneEvent) : undefined))
             .catch((e) =>
               toastError(`Accepted, but couldn't put together the ${tier === 'married' ? 'wedding' : 'moving-in'} scene: ${errorMessage(e)}`),
@@ -2081,7 +2093,7 @@ export function useChatSession(chatId: string | null) {
           charPersonality: target.card.personality,
           userName: persona?.name || 'You',
           current: { affection: currentAffection, ...currentStats },
-        })
+        }, assistShaping)
       } catch (e) {
         toastError(errorMessage(e))
         return
@@ -2254,7 +2266,7 @@ export function useChatSession(chatId: string | null) {
           charName: character.card.name,
           userName: persona?.name || 'You',
           availableGifts,
-        })
+        }, assistShaping)
         await messagesApi.update(messageId, {
           choiceCards,
           choices: choiceCards.map((c) => c.text),
@@ -2314,7 +2326,7 @@ export function useChatSession(chatId: string | null) {
           candidates,
           taggedExpression: currentScene.expression,
           limit: 6,
-        })
+        }, assistShaping)
 
         const cache = spriteBase64Ref.current
         const sprites = (
@@ -2338,7 +2350,7 @@ export function useChatSession(chatId: string | null) {
           replyText,
           sprites,
           taggedExpression: currentScene.expression,
-        })
+        }, assistShaping)
         if (detected) next.expression = detected
       }
 
@@ -2347,7 +2359,7 @@ export function useChatSession(chatId: string | null) {
           images: userImages,
           backgroundIds: unlockedBackgrounds,
           moodIds: [...SCENE_MOOD_IDS],
-        })
+        }, assistShaping)
         if (cls.background) next.background = cls.background
         if (cls.mood) next.mood = cls.mood
       }
@@ -2387,7 +2399,7 @@ export function useChatSession(chatId: string | null) {
         replyText,
         taggedExpression: currentScene.expression,
         candidates,
-      })
+      }, assistShaping)
       if (!corrected) return
 
       const next: SceneTag = { ...currentScene, expression: corrected }
@@ -2832,7 +2844,7 @@ export function useChatSession(chatId: string | null) {
               charName: character.card.name,
               userName: persona?.name || 'You',
               charPersonality: character.card.personality,
-            })
+            }, assistShaping)
             if (!read) return
             // A genuine dealbreaker ends the date immediately; hangouts are stakes-free so a walkOut read is ignored there.
             if (read.walkOut && chat.activeEvent?.kind === 'date') {
@@ -3138,7 +3150,7 @@ export function useChatSession(chatId: string | null) {
               history: historyForDirector,
               userName: persona?.name || 'You',
               sceneLocation: freshChat.scene?.location ?? undefined,
-            })
+            }, assistShaping)
             if (pickedId) speaker = resolveSpeaker(pickedId).active
           }
         }
@@ -3452,6 +3464,8 @@ export function useChatSession(chatId: string | null) {
       activeObjective.title,
       activeObjective.description ?? '',
       character.card,
+      4,
+      assistShaping,
     )
     const newTasks: ObjectiveTask[] = tasks.map((description) => ({
       id: newId(),
@@ -3511,6 +3525,7 @@ export function useChatSession(chatId: string | null) {
       client,
       character.card,
       { name: persona?.name || 'You', description: persona?.description || '' },
+      assistShaping,
     )
   }, [character, client, persona])
 
@@ -3526,7 +3541,7 @@ export function useChatSession(chatId: string | null) {
       affection: chat.affection ?? 0,
       commitmentStatus: chat.commitmentStatus ?? 'none',
       recentGiftName: recentMeaningfulGiftName(chat.giftLog, character.giftPreferences, world),
-    })
+    }, assistShaping)
   }, [character, chat, client, persona?.name, world])
 
   /** Starting a date/hangout spends one of the world's daily energy actions; gift/milestone cards stay free. No world means energy doesn't apply. */
@@ -3589,7 +3604,7 @@ export function useChatSession(chatId: string | null) {
             charBoundaries: character.boundaries,
             eventTitle: event.title,
             warmthLabel,
-          }).catch(() => null)) ?? undefined
+          }, assistShaping).catch(() => null)) ?? undefined
       }
       // Marks this as a live, scored date/hangout; also the cutoff `endDateEvent` uses to gather its transcript. Clears any leftover rapport read.
       await chatsApi.update(chatId, { activeEvent: { ...event, startedAt: Date.now(), hiddenAgenda }, rapport: null })
@@ -3671,7 +3686,7 @@ export function useChatSession(chatId: string | null) {
       hiddenAgenda: event.hiddenAgenda,
       walkedOut: opts?.walkedOut,
       sceneKind: event.kind === 'hangout' ? 'hangout' : 'date',
-    })
+    }, assistShaping)
     const deltas = scaleDeltasForDifficulty(outcome.deltas, relationshipDifficulty)
     outcome.newFlags.forEach((flag) => existingFlags.add(flag))
     if (outcome.newFacts.length > 0) {
@@ -3710,7 +3725,7 @@ export function useChatSession(chatId: string | null) {
         locked: lockedGallery,
         affection,
         latestReply: outcome.recap,
-      })
+      }, assistShaping)
       unlockedIds.forEach((id) => unlockedSet.add(id))
     }
 

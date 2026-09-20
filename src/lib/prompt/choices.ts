@@ -1,6 +1,6 @@
 import type { ChatMessage } from '@/lib/prompt/builder'
 import type { ChatBackend } from '@/lib/api/chatBackend'
-import { generateWithTimeout } from '@/lib/api/generateWithTimeout'
+import { generateWithTimeout, type AssistShaping } from '@/lib/api/generateWithTimeout'
 import { parseLenientJson } from '@/lib/jsonRepair'
 import type { ChoiceOption } from '@/lib/types'
 
@@ -44,6 +44,7 @@ export async function generateChoices(
     count?: number
     availableGifts?: { id: string; name: string; quantity: number }[]
   },
+  assist?: AssistShaping,
 ): Promise<ChoiceOption[]> {
   const count = params.count ?? 3
   const jsonObject = client.prefersJsonObject === true
@@ -67,6 +68,8 @@ export async function generateChoices(
     client,
     { ...GENERATE_PARAMS, ...(jsonObject ? { jsonOutput: true } : {}), max_context_length: await client.getEffectiveMaxContext(), prompt },
     'Suggest choices',
+    undefined,
+    assist,
   )
   const result = parseLenientJson(text)
   const parsed = jsonObject && result && typeof result === 'object' && !Array.isArray(result)

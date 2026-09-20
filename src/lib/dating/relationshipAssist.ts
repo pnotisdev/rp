@@ -1,5 +1,5 @@
 import type { ChatBackend } from '@/lib/api/chatBackend'
-import type { GenerateRequest } from '@/lib/api/types'
+import { generateWithTimeout, type AssistShaping } from '@/lib/api/generateWithTimeout'
 import { parseLenientJson } from '@/lib/jsonRepair'
 import type { Character } from '@/lib/characters/cardSpec'
 import type { CommitmentStatus, CustomSceneFlag, DateEventCard, RelationshipDimension, SceneFlag } from '@/lib/types'
@@ -46,24 +46,9 @@ const EVENT_PARAMS = {
 }
 
 // Aborts a hung `generate` call instead of leaving the caller stuck forever (e.g. a rate-limited
-// provider that never resolves). Every assist call below shares this shape.
-export const ASSIST_TIMEOUT_MS = 45_000
-
-/** Races `client.generate` against `ASSIST_TIMEOUT_MS`, rejecting with a caller-surfaceable message on timeout. */
-export async function generateWithTimeout(client: ChatBackend, params: GenerateRequest, label: string): Promise<string> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), ASSIST_TIMEOUT_MS)
-  try {
-    return await client.generate(params, controller.signal)
-  } catch (e) {
-    if (controller.signal.aborted) {
-      throw new Error(`${label} timed out after ${Math.round(ASSIST_TIMEOUT_MS / 1000)}s — the model backend didn't respond in time.`)
-    }
-    throw e
-  } finally {
-    clearTimeout(timer)
-  }
-}
+// provider that never resolves). Every assist call below shares this shape — re-exported so existing
+// importers of this module don't need to switch to `@/lib/api/generateWithTimeout` directly.
+export { ASSIST_TIMEOUT_MS, generateWithTimeout } from '@/lib/api/generateWithTimeout'
 
 function recentText(history: ChatMessage[], charName: string, userName: string, depth = 6): string {
   return history
@@ -270,6 +255,7 @@ export async function assessRelationshipMoment(
      */
     sceneParticipants?: { id: string; name: string }[]
   },
+  assist?: AssistShaping,
 ): Promise<RelationshipMoment> {
   const hasTasks = !!params.pendingTasks?.length
   const hasAftercare = !!params.aftercareTurns?.length
@@ -367,6 +353,8 @@ export async function assessRelationshipMoment(
     client,
     { ...REL_PARAMS, ...(client.prefersJsonObject ? { jsonOutput: true } : {}), max_length: 380, max_context_length: await client.getEffectiveMaxContext(), prompt },
     'Relationship check-in',
+    undefined,
+    assist,
   )
   const parsed = parseLenientJson(text)
   const obj = (parsed && typeof parsed === 'object' ? parsed : {}) as Record<string, unknown>
@@ -450,6 +438,7 @@ export async function detectGalleryUnlocks(
     affection: number
     latestReply: string
   },
+  assist?: AssistShaping,
 ): Promise<string[]> {
   if (params.locked.length === 0) return []
   const candidates = params.locked
@@ -470,6 +459,8 @@ export async function detectGalleryUnlocks(
     client,
     { ...REL_PARAMS, max_length: 120, max_context_length: await client.getEffectiveMaxContext(), prompt },
     'Gallery unlock check',
+    undefined,
+    assist,
   )
   const parsed = parseLenientJson(text)
   if (!Array.isArray(parsed)) return []
@@ -509,6 +500,7 @@ export async function assessDateOutcome(
     /** `'hangout'` is the lower-stakes sibling of `'date'` — same judge pass, gentler framing, modest deltas. Defaults to `'date'`. */
     sceneKind?: 'date' | 'hangout'
   },
+  assist?: AssistShaping,
 ): Promise<DateOutcome> {
   const isHangout = params.sceneKind === 'hangout'
   const sceneNoun = isHangout ? 'hangout' : 'date'
@@ -554,6 +546,8 @@ export async function assessDateOutcome(
     client,
     { ...REL_PARAMS, max_length: 420, max_context_length: await client.getEffectiveMaxContext(), prompt },
     'Date/hangout outcome',
+    undefined,
+    assist,
   )
   const parsed = parseLenientJson(text)
   const obj = (parsed && typeof parsed === 'object' ? parsed : {}) as Record<string, unknown>
@@ -590,6 +584,7 @@ export async function suggestDateEvent(
     /** Name of the most recent gift that genuinely landed (`dating/gifts.ts`), so a suggestion can plausibly build on it instead of being gift-blind. */
     recentGiftName?: string
   },
+  assist?: AssistShaping,
 ): Promise<DateEventCard | null> {
   const official = params.commitmentStatus && params.commitmentStatus !== 'none' ? params.commitmentStatus : null
   const occasionLine =
@@ -627,6 +622,8 @@ export async function suggestDateEvent(
     client,
     { ...EVENT_PARAMS, max_context_length: await client.getEffectiveMaxContext(), prompt },
     'Event suggestion',
+    undefined,
+    assist,
   )
   const parsed = parseLenientJson(text)
   if (!parsed || typeof parsed !== 'object') return null
@@ -659,6 +656,7 @@ export async function draftHiddenAgenda(
     eventTitle: string
     warmthLabel: string
   },
+  assist?: AssistShaping,
 ): Promise<string | null> {
   const prompt = [
     `You are drafting a private, hidden motivation for ${params.charName} going into a scene: "${params.eventTitle}". This is NEVER shown to the other person — it is only used afterward to judge how the scene actually went for ${params.charName}.`,
@@ -679,6 +677,8 @@ export async function draftHiddenAgenda(
       client,
       { ...REL_PARAMS, max_length: 60, max_context_length: await client.getEffectiveMaxContext(), prompt },
       'Hidden agenda draft',
+      undefined,
+      assist,
     )
   } catch {
     return null
@@ -706,6 +706,7 @@ export async function assessCommitmentAsk(
     currentStatusLabel: string
     current: RelationshipDeltas
   },
+  assist?: AssistShaping,
 ): Promise<CommitmentAskOutcome> {
   const recent = recentText(params.history, params.charName, params.userName, 10)
   const prompt = [
@@ -729,6 +730,8 @@ export async function assessCommitmentAsk(
     client,
     { ...REL_PARAMS, max_length: 260, max_context_length: await client.getEffectiveMaxContext(), prompt },
     'Commitment ask',
+    undefined,
+    assist,
   )
   const parsed = parseLenientJson(text)
   const obj = (parsed && typeof parsed === 'object' ? parsed : {}) as Record<string, unknown>
@@ -754,6 +757,7 @@ export async function assessIntimacyMilestone(
     userName: string
     current: RelationshipDeltas
   },
+  assist?: AssistShaping,
 ): Promise<CommitmentAskOutcome> {
   const recent = recentText(params.history, params.charName, params.userName, 10)
   const prompt = [
@@ -777,6 +781,8 @@ export async function assessIntimacyMilestone(
     client,
     { ...REL_PARAMS, max_length: 260, max_context_length: await client.getEffectiveMaxContext(), prompt },
     'Intimacy milestone ask',
+    undefined,
+    assist,
   )
   const parsed = parseLenientJson(text)
   const obj = (parsed && typeof parsed === 'object' ? parsed : {}) as Record<string, unknown>

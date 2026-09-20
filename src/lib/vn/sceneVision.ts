@@ -8,7 +8,7 @@
  */
 
 import type { ChatBackend } from '@/lib/api/chatBackend'
-import { generateWithTimeout } from '@/lib/api/generateWithTimeout'
+import { generateWithTimeout, type AssistShaping } from '@/lib/api/generateWithTimeout'
 import { parseLenientJson } from '@/lib/jsonRepair'
 import type { SceneTag } from '@/lib/vn/sceneTag'
 
@@ -54,6 +54,7 @@ export async function detectExpressionFromSprites(
     /** What the reply's own trailing tag claimed, if anything — given to the model as a starting guess. */
     taggedExpression?: string
   },
+  assist?: AssistShaping,
 ): Promise<string | null> {
   const sprites = params.sprites.filter((s) => s.base64)
   if (sprites.length < 2) return null
@@ -87,6 +88,8 @@ export async function detectExpressionFromSprites(
       client,
       { ...VISION_PARAMS, max_context_length: await client.getEffectiveMaxContext(), prompt, images: sprites.map((s) => s.base64) },
       'Detect expression',
+      undefined,
+      assist,
     )
   } catch {
     return null
@@ -110,6 +113,7 @@ export async function shortlistExpressions(
     taggedExpression?: string
     limit?: number
   },
+  assist?: AssistShaping,
 ): Promise<string[]> {
   const limit = params.limit ?? 6
   const allIds = params.candidates.map((c) => c.id)
@@ -143,6 +147,8 @@ export async function shortlistExpressions(
       client,
       { ...VISION_PARAMS, max_length: 80, max_context_length: await client.getEffectiveMaxContext(), prompt },
       'Shortlist expressions',
+      undefined,
+      assist,
     )
   } catch {
     return fallback()
@@ -174,6 +180,7 @@ export async function classifyAttachedImageScene(
     backgroundIds: string[]
     moodIds: string[]
   },
+  assist?: AssistShaping,
 ): Promise<SceneClassification> {
   const images = params.images.filter(Boolean).slice(0, 3)
   if (images.length === 0) return {}
@@ -197,6 +204,8 @@ export async function classifyAttachedImageScene(
       client,
       { ...VISION_PARAMS, max_length: 40, max_context_length: await client.getEffectiveMaxContext(), prompt, images },
       'Classify attached image',
+      undefined,
+      assist,
     )
   } catch {
     return {}
@@ -233,6 +242,7 @@ export async function detectExpressionTextMismatch(
     taggedExpression: string
     candidates: ExpressionCandidate[]
   },
+  assist?: AssistShaping,
 ): Promise<string | null> {
   const reply = params.replyText.trim().slice(0, 900)
   const tagged = params.taggedExpression.trim()
@@ -257,6 +267,8 @@ export async function detectExpressionTextMismatch(
       client,
       { ...GREETING_SCENE_PARAMS, max_context_length: await client.getEffectiveMaxContext(), prompt },
       'Detect expression/text mismatch',
+      undefined,
+      assist,
     )
   } catch {
     return null
@@ -273,6 +285,7 @@ export async function detectExpressionTextMismatch(
 export async function detectGreetingScene(
   client: ChatBackend,
   params: { text: string; expressionIds: string[]; backgroundIds: string[] },
+  assist?: AssistShaping,
 ): Promise<SceneTag | null> {
   const text = params.text.trim()
   if (!text) return null
@@ -301,6 +314,8 @@ export async function detectGreetingScene(
       client,
       { ...GREETING_SCENE_PARAMS, max_context_length: await client.getEffectiveMaxContext(), prompt },
       'Detect greeting scene',
+      undefined,
+      assist,
     )
   } catch {
     return null

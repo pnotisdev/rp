@@ -9,7 +9,7 @@
  */
 
 import type { ChatBackend } from '@/lib/api/chatBackend'
-import { generateWithTimeout } from '@/lib/api/generateWithTimeout'
+import { generateWithTimeout, type AssistShaping } from '@/lib/api/generateWithTimeout'
 import { parseLenientJson } from '@/lib/jsonRepair'
 import type { ChatMessage } from '@/lib/prompt/builder'
 import type { RapportRead, RapportTrajectory } from '@/lib/types'
@@ -89,6 +89,7 @@ export async function assessRapport(
     userName: string
     charPersonality?: string
   },
+  assist?: AssistShaping,
 ): Promise<Omit<RapportRead, 'updatedAt'> | null> {
   const turns = params.transcript.filter((m) => m.text.trim()).slice(-8)
   if (turns.length === 0) return null
@@ -121,6 +122,8 @@ export async function assessRapport(
       client,
       { ...RAPPORT_PARAMS, max_context_length: await client.getEffectiveMaxContext(), prompt },
       'Reading the room',
+      undefined,
+      assist,
     )
   } catch {
     return null

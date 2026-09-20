@@ -178,6 +178,20 @@ export function getInstructTemplate(id: string): InstructTemplate {
 }
 
 /**
+ * Wraps a flat, single-shot judge/assist prompt (relationship tracker, objective tracking, director
+ * pick, ...) in the active instruct template's real turn markers, ending with the model's own turn
+ * already open — the same shape `builder.ts` gives the main reply. A raw KoboldCpp completion (and a
+ * background call's own hand-built prompt string) carries no chat template of its own; skipping this
+ * hands a strict, turn-trained model (Gemma) a block of plain text with nothing telling it to speak
+ * next, and it answers with EOS instead of the JSON it was asked for. A no-op for `plain-chat`
+ * (empty affixes), same as the main reply path.
+ */
+export function wrapAssistPrompt(prompt: string, template: InstructTemplate): string {
+  const openingCue = template.assistantPrefix.replace('{name}: ', '').replace('{name}', '')
+  return `${template.systemPrefix}${prompt}${template.systemSuffix}${openingCue}`
+}
+
+/**
  * Same lookup as `getInstructTemplate`, but checks a user's saved custom templates first — so a
  * duplicated-and-edited template (Settings -> Generation, or a per-character override) resolves
  * correctly instead of always falling back to a builtin. `customTemplates` accepts

@@ -1,5 +1,5 @@
 import type { ChatBackend } from '@/lib/api/chatBackend'
-import { generateWithTimeout } from '@/lib/api/generateWithTimeout'
+import { generateWithTimeout, type AssistShaping } from '@/lib/api/generateWithTimeout'
 import type { Character } from '@/lib/characters/cardSpec'
 import type { ChatMessage } from '@/lib/prompt/builder'
 import type { Scene } from '@/lib/types'
@@ -70,6 +70,7 @@ export async function pickDirectorSpeaker(
     userName: string
     sceneLocation?: string
   },
+  assist?: AssistShaping,
 ): Promise<string | undefined> {
   if (params.roster.length <= 1) return params.roster[0]?.id
   const names = params.roster.map((r) => r.name)
@@ -101,6 +102,8 @@ export async function pickDirectorSpeaker(
       client,
       { ...DIRECTOR_PARAMS, max_context_length: await client.getEffectiveMaxContext(4096), prompt },
       'Pick next speaker',
+      undefined,
+      assist,
     )
     const answer = text.trim().toLowerCase()
     // Exact match first, then "the answer starts with/contains a real name" as a looser fallback

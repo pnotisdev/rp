@@ -4,6 +4,7 @@ import {
   detectInstructTemplateId,
   getInstructTemplate,
   resolveInstructTemplate,
+  wrapAssistPrompt,
 } from './instructTemplates'
 
 describe('resolveInstructTemplate', () => {
@@ -65,5 +66,30 @@ describe('detectInstructTemplateId', () => {
     expect(detectInstructTemplateId(undefined)).toBeNull()
     expect(detectInstructTemplateId('')).toBeNull()
     expect(detectInstructTemplateId('something bespoke with no known markers')).toBeNull()
+  })
+})
+
+describe('wrapAssistPrompt', () => {
+  // rp#7: a background judge call (relationship tracker, objectives, ...) used to send its raw
+  // prompt straight to KoboldCpp's raw-completion endpoint with no turn markers at all — a strict,
+  // turn-trained model (Gemma) reads that as already-finished text and answers with EOS instead of
+  // the JSON it was asked for. This wraps the same flat prompt the way `builder.ts` wraps the real
+  // reply: the fixed context inside the template's opening turn, ending with the model's own turn
+  // already open.
+  it('wraps the prompt in Gemma turn markers, ending with the model turn open and no fake name', () => {
+    const gemma = getInstructTemplate('gemma')
+    const wrapped = wrapAssistPrompt('Return ONLY JSON.\n\nJSON:', gemma)
+    expect(wrapped).toBe('<start_of_turn>user\nReturn ONLY JSON.\n\nJSON:<end_of_turn>\n<start_of_turn>model\n')
+  })
+
+  it('is a no-op (beyond a trailing newline) for plain-chat, same as the main reply path', () => {
+    const plainChat = getInstructTemplate('plain-chat')
+    expect(wrapAssistPrompt('Return ONLY JSON.', plainChat)).toBe('Return ONLY JSON.\n')
+  })
+
+  it('never leaves the {name} placeholder unexpanded, for every builtin template', () => {
+    for (const template of BUILTIN_INSTRUCT_TEMPLATES) {
+      expect(wrapAssistPrompt('x', template)).not.toContain('{name}')
+    }
   })
 })
