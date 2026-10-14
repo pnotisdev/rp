@@ -1,12 +1,6 @@
 import { slugifyId } from '@/lib/text/slugify'
 
-/**
- * Outfits: a second axis on the sprite grid, so a character can have a school uniform, a swimsuit,
- * and an undressed state, each with its own expression set. An outfit is a complete alternate
- * sprite (not layered/composited art) selected by a second id, stored as a composite key
- * (`outfit--expression`) in the existing `sprites` map so no migration or new storage is needed —
- * the base outfit keeps using the bare expression id every character already stores.
- */
+/** Outfits: a second axis on the sprite grid */
 
 /** Separates the outfit id from the expression id in a composite sprite key. Safe because neither id (hardcoded defaults or `slugifyId` output) can itself contain `--`. */
 export const OUTFIT_SEPARATOR = '--'
@@ -22,18 +16,7 @@ export interface Outfit {
   unlockAffection?: number
   /** Every one of these scene flags must be set before the outfit unlocks. */
   requiredFlags?: string[]
-  /**
-   * Coins this outfit has to be bought for before it unlocks, on top of any `unlockAffection` /
-   * `requiredFlags` gate. Unset means it is earned rather than sold, which is every outfit that
-   * existed before the wardrobe shop.
-   *
-   * Ownership is recorded as a reserved scene flag (`outfitOwnedFlag`) rather than a new field on
-   * `Chat`, because every call site of `isOutfitUnlocked` already threads `chat.sceneFlags` through
-   * — so the gate below needed no plumbing at all. The prefix keeps it out of the judge's flag
-   * vocabulary (`relationshipAssist.ts` only ever offers `SCENE_FLAGS` plus a world's own) and out
-   * of the Unlocks tab's list (`combinedSceneFlags`), so it is invisible to both the model and the
-   * player as anything other than a bought outfit.
-   */
+  /** Coins this outfit has to be bought for before it unlocks, on top of any `unlockAffection` / `requiredFlags` gate. */
   price?: number
   /** Withheld from the model's scene-tag menu even when unlocked — for a state only ever entered deliberately (app or player), never auto-picked. */
   manualOnly?: boolean
@@ -123,10 +106,7 @@ export interface PurchasableOutfit {
   missingFlags: string[]
 }
 
-/**
- * The outfits a character actually has for sale: priced, and with art drawn for them. An outfit with
- * no sprites is not a product — buying it would unlock a wardrobe state that renders as nothing.
- */
+/** The outfits a character actually has for sale: priced, and with art drawn for them. */
 export function purchasableOutfits(
   outfits: Outfit[] | undefined,
   sprites: Record<string, string> | undefined,
@@ -159,12 +139,7 @@ export function selectableOutfitIds(
   return [BASE_OUTFIT_ID, ...usable]
 }
 
-/**
- * What the character is wearing as of the latest reply: the most recent `outfit` any stored scene
- * tag set, scanning backwards. Outfits are sticky — an absent tag means "unchanged", not "base" —
- * so this is the last *explicit* outfit, not whatever the newest message happens to carry.
- * Typed structurally (not against `StoredMessage`) so this module stays free of the app's chat types.
- */
+/** What the character is wearing as of the latest reply: the most recent `outfit` any stored scene tag set, scanning backwards. */
 export function currentOutfitFrom(
   messages: readonly { role: string; scene?: { outfit?: string }; swipeScenes?: ({ outfit?: string } | undefined)[]; activeSwipe?: number }[],
 ): string {

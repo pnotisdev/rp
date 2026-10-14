@@ -11,8 +11,7 @@ interface ChoiceListProps {
   variant?: 'default' | 'vn'
 }
 
-// A small icon reads the kind at a glance without a boxed text tag competing with the chip's
-// own pill shape — one rounded surface per choice instead of a pill nested inside a pill.
+// A small icon reads the kind at a glance without a boxed text tag competing with the chip's own pill shape
 const KIND_ICON: Record<ChoiceOption['kind'], LucideIcon> = { gift: Gift, action: Zap, line: MessageSquare }
 
 const CHIP_CLASSES = {
@@ -49,8 +48,7 @@ export function ChoiceList({ choices, onPick, onRefresh, refreshing, variant = '
       className={`flex w-full items-center gap-2 ${
         variant === 'default'
           ? 'mx-auto max-w-chat flex-wrap px-4 pb-2.5'
-          // VN, mobile: a horizontal scroller instead of wrapping to 2-3 lines — at 375px, that
-          // vertical space is the sprite/dialogue box's, not a choice row's. Wraps normally at sm+.
+          // VN, mobile: a horizontal scroller instead of wrapping to 2-3 lines — at 375px, that vertical space is the sprite/dialogue box's, not a choice row's.
           : 'flex-nowrap overflow-x-auto sm:flex-wrap sm:overflow-visible'
       }`}
     >
@@ -78,7 +76,7 @@ export function ChoiceList({ choices, onPick, onRefresh, refreshing, variant = '
         disabled={refreshing}
         title="Different options"
         aria-label="Different options"
-        className={`flex shrink-0 items-center gap-1 rounded-full px-2 py-1.5 text-xs transition-colors disabled:opacity-40 ${REFRESH_CLASSES[variant]}`}
+        className={`flex shrink-0 items-center gap-1 rounded-md px-2 py-1.5 text-xs transition-colors disabled:opacity-40 ${REFRESH_CLASSES[variant]}`}
       >
         <RotateCcw size={13} strokeWidth={2} className={refreshing ? 'animate-spin' : ''} />
         {refreshing ? 'Thinking…' : 'Different options'}

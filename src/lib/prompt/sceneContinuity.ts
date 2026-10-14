@@ -1,7 +1,4 @@
-// A short, always-computed ledger of concrete scene facts — location, time, who's present, what's
-// currently happening, and open threads — in one compact block, instead of the same facts being
-// scattered thinly across several separate styleGuidance lines. Resolves to '' (contributes
-// nothing) when none of the facts are actually known, same as every other optional guidance line.
+// A short, always-computed ledger of concrete scene facts
 
 export interface SceneContinuityFacts {
   location?: string

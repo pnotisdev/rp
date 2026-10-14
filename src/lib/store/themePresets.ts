@@ -1,10 +1,4 @@
-/**
- * Built-in color-palette presets a user can pick without hand-editing every swatch — a starting
- * point, not a locked-in look (applying one just calls the same setThemeToken() the color picker
- * uses, so every value stays editable afterward same as any hand-tuned theme). Deliberately only
- * touches color tokens, not chatStyle/avatarShape/layout/customCss — a palette shouldn't silently
- * reach into unrelated settings the way a full saved-theme "Apply" does.
- */
+/** Built-in color-palette presets a user can pick without hand-editing every swatch */
 export interface ThemePreset {
   id: string
   name: string
@@ -12,7 +6,7 @@ export interface ThemePreset {
   dark: Record<string, string>
 }
 
-export const THEME_PRESETS: ThemePreset[] = [
+const PRESET_LIST: ThemePreset[] = [
   {
     id: 'sakura',
     name: 'Sakura',
@@ -74,11 +68,7 @@ export const THEME_PRESETS: ThemePreset[] = [
     },
   },
   {
-    // Tuned for contrast, not mood — near-black-on-white / near-white-on-black text (~19:1,
-    // well past WCAG's 7:1 "AAA" bar), an actually-visible border instead of the default's subtle
-    // near-invisible divider (WCAG 1.4.11 non-text contrast), and a bright, punchy accent picked
-    // for legibility over brand consistency between the two modes — blue-on-white in light mode,
-    // gold-on-black in dark, since a single hue that reads well against both isn't the same color.
+    // Tuned for contrast, not mood — near-black-on-white / near-white-on-black text (~19:1, well past WCAG's 7:1 "AAA" bar), an…
     id: 'high-contrast',
     name: 'High Contrast',
     light: {
@@ -108,4 +98,69 @@ export const THEME_PRESETS: ThemePreset[] = [
       '--c-danger': '255 100 100',
     },
   },
+  {
+    // Monochrome: the accent is just the text colour, so nothing in the interface competes with the story.
+    id: 'ink',
+    name: 'Ink',
+    light: {
+      '--c-bg': '250 250 250',
+      '--c-bg-elevated': '255 255 255',
+      '--c-bg-sunken': '242 242 242',
+      '--c-border': '229 229 229',
+      '--c-text': '24 24 24',
+      '--c-text-muted': '115 115 115',
+      '--c-accent': '38 38 38',
+      '--c-accent-text': '255 255 255',
+      '--c-msg-user': '38 38 38',
+      '--c-msg-char': '255 255 255',
+      '--c-danger': '190 62 55',
+    },
+    dark: {
+      '--c-bg': '16 16 16',
+      '--c-bg-elevated': '25 25 25',
+      '--c-bg-sunken': '11 11 11',
+      '--c-border': '44 44 44',
+      '--c-text': '236 236 236',
+      '--c-text-muted': '150 150 150',
+      '--c-accent': '232 232 232',
+      '--c-accent-text': '16 16 16',
+      '--c-msg-user': '232 232 232',
+      '--c-msg-char': '25 25 25',
+      '--c-danger': '232 122 114',
+    },
+  },
+  {
+    id: 'slate',
+    name: 'Slate',
+    light: {
+      '--c-bg': '246 248 250',
+      '--c-bg-elevated': '255 255 255',
+      '--c-bg-sunken': '238 241 245',
+      '--c-border': '224 229 236',
+      '--c-text': '28 33 41',
+      '--c-text-muted': '104 114 128',
+      '--c-accent': '52 98 168',
+      '--c-accent-text': '255 255 255',
+      '--c-msg-user': '52 98 168',
+      '--c-msg-char': '255 255 255',
+      '--c-danger': '190 62 55',
+    },
+    dark: {
+      '--c-bg': '17 20 25',
+      '--c-bg-elevated': '25 29 36',
+      '--c-bg-sunken': '12 14 18',
+      '--c-border': '42 48 58',
+      '--c-text': '232 236 242',
+      '--c-text-muted': '140 150 165',
+      '--c-accent': '130 168 224',
+      '--c-accent-text': '14 18 26',
+      '--c-msg-user': '130 168 224',
+      '--c-msg-char': '25 29 36',
+      '--c-danger': '232 122 114',
+    },
+  },
 ]
+
+/** Quiet palettes first, the loud ones after. */
+const ORDER = ['ink', 'slate', 'sakura', 'neon-night', 'high-contrast']
+export const THEME_PRESETS: ThemePreset[] = [...PRESET_LIST].sort((a, b) => ORDER.indexOf(a.id) - ORDER.indexOf(b.id))

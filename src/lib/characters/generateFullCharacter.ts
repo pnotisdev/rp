@@ -1,4 +1,5 @@
 import type { ChatBackend } from '@/lib/api/chatBackend'
+import type { AssistShaping } from '@/lib/api/generateWithTimeout'
 import type { Outfit } from '@/lib/vn/outfits'
 import type { CharacterCardData, Lorebook, LorebookEntry } from './cardSpec'
 import {
@@ -13,19 +14,7 @@ import {
   type DraftedProfile,
 } from './aiAssist'
 
-/**
- * The "let the AI fill in a whole character" orchestrator. A local model can't reliably emit a card
- * plus a life profile plus dating traits plus a lorebook as one JSON blob — it drifts or breaks JSON
- * halfway — so this runs one focused, individually-parseable call per artifact and feeds each result
- * forward as grounding context for the next.
- *
- * Only the `card` stage is load-bearing: if it fails the whole run fails, because everything after it
- * needs a name and a description to ground on. Every later stage is best-effort — a parse failure
- * there is recorded in `failed` and the run continues, since a character with no drafted goals is
- * still a perfectly good character the user can finish by hand.
- *
- * The caller owns review-before-save: this returns a draft, it never touches the database.
- */
+/** The "let the AI fill in a whole character" orchestrator. */
 export type FullCharacterStage = 'card' | 'profile' | 'bonds' | 'outfits' | 'lore'
 
 /** The optional stages, in run order — `card` always runs and isn't listed here. */
@@ -74,6 +63,8 @@ export interface DraftFullCharacterOpts {
   stages?: readonly Exclude<FullCharacterStage, 'card'>[]
   /** How many character-lore entries to ask for in the `lore` stage. */
   loreCount?: number
+  /** Template wrapping for strict chat-template models (see assistShaping.ts). */
+  shaping?: AssistShaping
 }
 
 const abortError = () => new DOMException('The character generation was stopped.', 'AbortError')
@@ -101,7 +92,7 @@ export async function draftFullCharacter(
   seed: FullCharacterSeed,
   opts: DraftFullCharacterOpts = {},
 ): Promise<FullCharacterDraft> {
-  const { signal, onStage, stages = OPTIONAL_STAGES, loreCount = 4 } = opts
+  const { signal, onStage, stages = OPTIONAL_STAGES, loreCount = 4, shaping } = opts
   const brief = seed.brief?.trim()
   const worldTone = seed.worldTone?.trim() || undefined
   const styleGuidance = seed.styleGuidance?.trim() || undefined
@@ -122,8 +113,8 @@ export async function draftFullCharacter(
   let cardRawOutput: string
   try {
     const result = seed.portraitBase64
-      ? await draftCharacterFromPortrait(client, seed.portraitBase64, { brief, worldTone, styleGuidance, signal })
-      : await draftCharacterFromBrief(client, brief ?? '', { worldTone, styleGuidance, signal })
+      ? await draftCharacterFromPortrait(client, seed.portraitBase64, { brief, worldTone, styleGuidance, signal, shaping })
+      : await draftCharacterFromBrief(client, brief ?? '', { worldTone, styleGuidance, signal, shaping })
     card = result.card
     cardRawOutput = result.rawOutput
     if (!card.name.trim()) card.name = brief?.slice(0, 40) || 'New Character'
@@ -163,21 +154,21 @@ export async function draftFullCharacter(
   }
 
   await runStage('profile', async () => {
-    profile = await draftCharacterProfile(client, subject, { worldTone, styleGuidance, signal })
+    profile = await draftCharacterProfile(client, subject, { worldTone, styleGuidance, signal, shaping })
   })
 
   await runStage('bonds', async () => {
-    bonds = await draftCharacterBonds(client, subject, { worldTone, styleGuidance, signal })
+    bonds = await draftCharacterBonds(client, subject, { worldTone, styleGuidance, signal, shaping })
   })
 
   await runStage('outfits', async () => {
-    const drafted = await draftCharacterOutfits(client, subject, { worldTone, signal })
+    const drafted = await draftCharacterOutfits(client, subject, { worldTone, signal, shaping })
     if (drafted.length === 0) throw new Error('The model did not propose any usable outfits.')
     outfits = drafted
   })
 
   await runStage('lore', async () => {
-    const entries = await suggestLoreEntries(client, subject, [], loreCount, signal)
+    const entries = await suggestLoreEntries(client, subject, [], loreCount, signal, undefined, shaping)
     if (entries.length === 0) throw new Error('The model did not propose any usable lore entries.')
     characterBook = {
       name: `${card.name} Lore`,

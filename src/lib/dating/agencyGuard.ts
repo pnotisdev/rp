@@ -1,19 +1,11 @@
 import { splitSentences } from './boundaryGuard'
 
-// Deterministic, lexical check for a reply narrating the player persona's own agency on their
-// behalf — climax, but also feelings, thoughts, realizations, and involuntary physical reactions.
-// Only flags the persona's name as the clear grammatical subject directly before an unambiguous
-// verb/phrase — never just co-occurring in the sentence, so "Sumire, holding Kai's hand, reached
-// her own climax" doesn't false-positive on Kai, and "she turned to Kai and felt relief" doesn't
-// false-positive on Kai being the object of "to". False negatives over false positives throughout.
+// Deterministic, lexical check for a reply narrating the player persona's own agency on their behalf
 
-// Feeling/thought/realization verbs — the clearest, least ambiguous shape of the violation:
-// asserting what's inside the player's head is almost never legitimate for {{char}}'s own turn.
+// Feeling/thought/realization verbs — the clearest, least ambiguous shape of the violation
 const INTERNAL_STATE_VERBS = 'felt|feels|realized|realizes|thought|thinks|wondered|wonders|knew|understood|decided|remembered|noticed'
 
-// Bounded, genre-specific involuntary physical reactions — deliberately excludes ordinary social
-// actions (smiled, nodded, laughed) which are common enough, and low-severity enough, to risk
-// nagging rather than catching a real violation.
+// Bounded, genre-specific involuntary physical reactions
 const INVOLUNTARY_REACTION_VERBS = 'shivered|gasped|flinched|tensed|trembled|shuddered|ached|melted'
 
 /** Same "0 or 1 filler adverb, then the verb" anchor for every non-climax pattern below — tight enough that an object-of-preposition ("turned to Kai and felt") can't set up a false subject match. */

@@ -34,7 +34,6 @@ export async function generateOpenMayhemMedia(endpoint: Endpoint | 'WORKFLOWS', 
   let terminal = false
   try {
     // Keep submission alive long enough to recover its ID even if the user presses Stop.
-    // Once it arrives, the aborted lifetime triggers DELETE below instead of leaving an orphan job.
     let job: Job = await (await checkResponse(await fetch(`${OPENMAYHEM_PROXY}/${endpoint === 'WORKFLOWS' ? 'workflows' : endpoint === 'IMAGES' ? 'images/generations' : 'audio/speech'}`, {
       method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(30000),
     }))).json() as Job

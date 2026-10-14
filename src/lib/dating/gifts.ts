@@ -1,7 +1,6 @@
 import type { GiftItem, GiftRarity, WorldCard } from '@/lib/types'
 
-// Gift-giving depth: the catalog, a recency log distinct from the lifetime `giftsGiven` tally,
-// re-gift/mismatch reaction shaping, and character-initiated gift reciprocity.
+// Gift-giving depth: the catalog, a recency log distinct from the lifetime `giftsGiven` tally, re-gift/mismatch reaction shaping
 
 export interface GiftLogEntry {
   giftId: string
@@ -37,47 +36,31 @@ export function giftRepetitionMultiplier(sameGiftRun: number): number {
   return 0.1
 }
 
-/** Stardew's "one gift a day", generalized to a turn window rather than the world clock's actual
- *  day — the clock only advances when the player deliberately spends a day-planner action or a
- *  date/event, not with real elapsed turns, so a literal day-bound cap would rarely ever engage,
- *  and wouldn't apply at all to a chat with no bound world. A turn window achieves the same "don't
- *  gift-spam" goal for every chat, using data (`GiftLogEntry.turn`) already tracked. */
+/** Stardew's "one gift a day", generalized to a turn window rather than the world clock's actual day */
 export const GIFT_CADENCE_WINDOW_TURNS = 6
 
-/** How many gifts (any kind, not just a repeat of the one being given) landed within the last
- *  `GIFT_CADENCE_WINDOW_TURNS` turns — read before this gift's own log entry is appended, same
- *  convention `trailingSameGiftRun` already follows. */
+/** How many gifts (any kind, not just a repeat of the one being given) landed within the last `GIFT_CADENCE_WINDOW_TURNS` turns */
 export function recentGiftCount(log: GiftLogEntry[] | undefined, currentTurn: number): number {
   return (log ?? []).filter((e) => currentTurn - e.turn <= GIFT_CADENCE_WINDOW_TURNS).length
 }
 
-/** Diminishing returns the more gifts have landed recently, regardless of which ones — full weight
- *  for the first in the window, roughly halved for a second, heavily discounted beyond that. Never
- *  applied to an already-negative delta, same rule `giftRepetitionMultiplier` follows. */
+/** Diminishing returns the more gifts have landed recently, regardless of which ones */
 export function giftCadenceMultiplier(recentCount: number): number {
   if (recentCount <= 0) return 1
   if (recentCount === 1) return 0.5
   return 0.2
 }
 
-/** Stardew's single biggest gift multiplier: a positive gift given on the character's actual
- *  birthday (`Character.birthday`, `world/calendar.ts`) is a special occasion regardless of
- *  whether this exact gift was just given yesterday — so it bypasses `giftRepetitionMultiplier`
- *  entirely rather than stacking with it. */
+/** Stardew's single biggest gift multiplier */
 export const BIRTHDAY_GIFT_MULTIPLIER = 8
 
-/** Replaces the normal repetition-based scaling with a flat `BIRTHDAY_GIFT_MULTIPLIER` on the
- *  character's actual birthday. Never amplifies an already-negative (mismatch) `baseDelta` —
- *  a birthday doesn't make a bad gift good, it just isn't punished extra either
- *  (`giftMismatchPenalty` still applies on top of this, same as any other day). */
+/** Replaces the normal repetition-based scaling with a flat `BIRTHDAY_GIFT_MULTIPLIER` on the character's actual birthday. */
 export function giftBirthdayMultiplier(baseDelta: number, isBirthdayToday: boolean, sameGiftRun: number): number {
   if (baseDelta <= 0) return baseDelta
   return isBirthdayToday ? baseDelta * BIRTHDAY_GIFT_MULTIPLIER : baseDelta * giftRepetitionMultiplier(sameGiftRun)
 }
 
-/** One-shot reaction steer for a gift given on the character's actual birthday — replaces (not
- *  appends to) `giftReactionGuidance`'s taste-based read, since the occasion itself supersedes it:
- *  a birthday gift is a big deal regardless of whether it happens to be exactly their taste. */
+/** One-shot reaction steer for a gift given on the character's actual birthday */
 export function birthdayGiftGuidance(charName: string, giftName: string): string {
   return `Today is ${charName}'s actual birthday, which makes ${giftName} land as a much bigger deal than an ordinary gift, genuine warmth, real delight that it's today of all days, and it's fair for ${charName} to actually thank the giver for remembering. This holds regardless of whether ${giftName} would otherwise have been exactly their taste.`
 }
@@ -93,12 +76,7 @@ export interface GiftTaste {
   preferenceScore: number
 }
 
-/** A short, player-facing read of a gift's discovered preference score, for the Shop tab's
- *  progressive taste reveal — only the two tiers this file already treats as meaningful elsewhere
- *  (`isThoughtfulNotExpensive`'s `>= 2` "beloved" cutoff, `isMismatch`'s `<= -0.5` cutoff
- *  elsewhere in `useChatSession.ts`); `''` for anything in-between, meaning "no badge — nothing
- *  learned worth showing yet". The caller gates this on the gift having actually been given at
- *  least once (`RelationshipTrack.giftsGiven`) — this function itself doesn't know "discovered". */
+/** A short, player-facing read of a gift's discovered preference score, for the Shop tab's progressive taste reveal */
 export function giftTasteLabel(charName: string, preferenceScore: number): string {
   if (preferenceScore >= 2) return `${charName} loves this`
   if (preferenceScore <= -0.5) return `Not really ${charName}'s taste`
@@ -149,15 +127,7 @@ export function giftReactionGuidance(
 }
 
 /** Built-in fallback catalog, used by any character not living in a world with its own gifts. */
-/**
- * Twenty gifts across fourteen tags, sized so **every tag in `catalogVisuals.ts`'s `TAG_ICONS` has
- * at least two entries**. That's not decoration: `giftPreferences` scores a gift per character and
- * the shop only reveals a taste once one has actually been given, so with six gifts across nine
- * tags an authored preference had almost nothing to discriminate between — and
- * `giftRepetitionMultiplier` started flattening repeats before there was an alternative to switch
- * to. Two per tag is the floor at which "they like thoughtful things, not flashy ones" becomes a
- * readable pattern rather than a coin flip.
- */
+/** Twenty gifts across fourteen tags, sized so **every tag in `catalogVisuals.ts`'s `TAG_ICONS` has at least two entries**. */
 export const DEFAULT_GIFT_CATALOG: GiftItem[] = [
   // common — the everyday register, cheap enough to give often
   { id: 'flower-bouquet', name: 'Flower Bouquet', rarity: 'common', price: 6, tags: ['romance', 'sweet'] },

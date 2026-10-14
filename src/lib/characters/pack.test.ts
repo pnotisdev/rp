@@ -2,9 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { BRANCHING_SCENARIO } from '@/lib/dating/scenarios'
 import type { ScenarioGraph } from '@/lib/dating/intimacyStages'
 
-// `importCharacterPack` talks to the local API, so the two resources it creates are stubbed and the
-// calls inspected. What's under test is the scenario half: a malformed scene shape must never load,
-// and must never be dropped in silence either.
+// `importCharacterPack` talks to the local API, so the two resources it creates are stubbed and the calls inspected.
 
 const created: { world?: Record<string, unknown>; character?: Record<string, unknown> } = {}
 

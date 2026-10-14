@@ -1,12 +1,4 @@
-/**
- * Built-in system-prompt variations. The instruction block at the top of every generation, chosen
- * in Settings -> Generation (or overridden per character via `CharacterCardData.system_prompt`).
- *
- * Every one of these carries the same core DNA: write only {{char}}, take the voice from the card's
- * own description and example dialogue, and steer away from the tells of AI prose. What differs is
- * the *feel* they aim for. None of them use em dashes, by design (an em dash is one of the more
- * reliable tells of machine writing).
- */
+/** Built-in system-prompt variations. */
 export interface SystemPromptPreset {
   id: string
   name: string
@@ -141,14 +133,7 @@ export const BUILTIN_SYSTEM_PROMPTS: SystemPromptPreset[] = [
 /** The instruction used when neither the character nor the global setting supplies a system prompt. */
 export const DEFAULT_SYSTEM_PROMPT = BUILTIN_SYSTEM_PROMPTS[0].prompt
 
-/**
- * Replaces the normal "you are {{char}}" system block when the player asks the model to suggest
- * their own next line ("Suggest what you'd say next" — `impersonateAsUser`). Without a dedicated
- * prompt the model gets "write only {{char}}, never {{user}}" up top and reliably writes {{char}}'s
- * turn (or third-person narration about them) instead of {{user}}'s line. `builder.ts` also strips
- * the character-steering post-history nudges (relationship state, objective, mood/intent, pacing)
- * in this mode, since every one of them says "be {{char}}".
- */
+/** Replaces the normal "you are {{char}}" system block when the player asks the model to suggest their own next line ("Suggest what… */
 export const IMPERSONATION_SYSTEM_PROMPT = [
   "You are writing {{user}}'s next line in an ongoing roleplay between {{user}} and {{char}}. Write only {{user}}: their words, their actions, their point of view. Take {{user}}'s voice and manner from how {{user}} has written earlier in the chat.",
   "Never write {{char}}'s reply, {{char}}'s dialogue, or {{char}}'s thoughts, and do not narrate the scene from {{char}}'s side. This turn is {{user}}'s alone, and it ends as soon as {{user}}'s message does.",

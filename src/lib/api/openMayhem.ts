@@ -1,4 +1,5 @@
 import { KoboldApiError } from './types'
+import { BRAND } from '@/lib/brand'
 import { isKreaImageModel, type KreaPolicy, type KreaPresentation } from './openMayhemKrea'
 
 export const OPENMAYHEM_BASE_URL = 'https://api.openmayhem.ai/v1'
@@ -113,10 +114,7 @@ export function openMayhemAttribute(model: OpenMayhemModel, endpoint: OpenMayhem
   }
 }
 
-/** Keep short judge calls useful: disable thinking when the model explicitly supports it.
- * Send only attributes shared by its CHAT contracts, so routing to another runtime is safe.
- * Preserve the caller's token budget; never silently increase billed generation limits.
- */
+/** Keep short judge calls useful: disable thinking when the model explicitly supports it. */
 export async function openMayhemRequestBody(body: Record<string, unknown>): Promise<Record<string, unknown>> {
   if (!body.model) throw new KoboldApiError('Choose an OpenMayhem chat model first.')
   const model = (await loadOpenMayhemModels()).find((m) => m.id === body.model)
@@ -133,7 +131,7 @@ export async function openMayhemRequestBody(body: Record<string, unknown>): Prom
     )) throw new KoboldApiError(`The selected OpenMayhem model does not support ${key}=${value}. Adjust Settings → Generation.`)
     result[key] = value
   }
-  if (!('max_tokens' in result)) throw new KoboldApiError('This OpenMayhem model does not support RP Suite’s response token limit.')
+  if (!('max_tokens' in result)) throw new KoboldApiError(`This OpenMayhem model does not support ${BRAND.name}’s response token limit.`)
   if (contracts.every((c) => c.attributes.thinking_mode?.enumValues?.includes('disabled'))) {
     result.thinking_mode = 'disabled'
   }

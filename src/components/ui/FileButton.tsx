@@ -1,10 +1,6 @@
 import type { ReactNode } from 'react'
 
-/**
- * A button-styled `<label>` wrapping a hidden file input — the "click to pick a file" control used
- * across the editors, so the styling and the accessible name stay in one place instead of being
- * hand-rolled per use.
- */
+/** A button-styled `<label>` wrapping a hidden file input */
 export function FileButton({
   onPick,
   accept,
@@ -21,7 +17,7 @@ export function FileButton({
   return (
     <label
       title={title}
-      className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-bg-sunken px-3 py-1.5 text-sm font-medium text-text transition-colors hover:bg-bg-sunken/70"
+      className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-border px-3 py-1 text-[13px] font-medium text-text transition-colors hover:bg-bg-sunken"
     >
       {children}
       <input

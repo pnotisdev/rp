@@ -1,11 +1,4 @@
-/**
- * Serializes read-modify-write operations against a chat's shared `giftCoins` wallet. Every
- * coin-touching call site (buys, `useItem`'s currency effect, the judge's reward, a date payout)
- * does a GET-then-PUT round trip against a non-atomic server endpoint (shallow merge, not
- * compare-and-swap), so two in flight at once can silently overwrite each other's coin delta. This
- * mutex just guarantees only one such critical section runs at a time per chat — a queued caller
- * still runs after, unlike `GenerationLock`, which refuses a second claim outright.
- */
+/** Serializes read-modify-write operations against a chat's shared `giftCoins` wallet. */
 export interface CoinMutex {
   /** Queues `fn` behind the current holder, runs it alone, then releases (even if `fn` throws). */
   run<T>(fn: () => Promise<T>): Promise<T>

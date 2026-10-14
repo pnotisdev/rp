@@ -1,5 +1,6 @@
 import { useEffect, useRef, type ReactNode } from 'react'
-import { Button } from '@/components/ui/Button'
+import { X } from 'lucide-react'
+import { IconButton } from '@/components/ui/IconButton'
 import { useFocusTrap } from '@/lib/hooks/useFocusTrap'
 import { useVnChromeClass } from '@/lib/store/useVnChromeStore'
 
@@ -31,12 +32,7 @@ interface ModalProps {
   children: ReactNode
 }
 
-/**
- * The one modal shell every panel/dialog in the app builds on — backdrop, centering, panel
- * surface, and the title/Close header row, all in one place instead of copy-pasted per file
- * (it used to be, near-identically, in a dozen places, with small unintentional drift between
- * them — mb-3 vs mb-4 on the header, 80/85/88vh caps, p-6 vs p-4 inner cards).
- */
+/** The one modal shell every panel/dialog in the app builds on */
 export function Modal({
   onClose,
   title,
@@ -48,8 +44,7 @@ export function Modal({
   headerExtra,
   children,
 }: ModalProps) {
-  // Section 15's "discoverable keyboard shortcuts" — Escape-to-close, added once here rather than
-  // per-panel, so every modal built on this shell (there are over a dozen) gets it for free.
+  // Section 15's "discoverable keyboard shortcuts"
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
@@ -58,31 +53,28 @@ export function Modal({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [onClose])
 
-  // Section 9's accessibility finding: focus trap + initial focus + restore-on-close, shared with
-  // `<ConfirmDialog>` via the same hook rather than each shell managing it separately.
+  // Section 9's accessibility finding: focus trap + initial focus + restore-on-close, shared with `<ConfirmDialog>` via the same hook…
   const panelRef = useRef<HTMLDivElement>(null)
   useFocusTrap(panelRef, true)
 
-  // Over a VN stage, a panel wears the stage's glass instead of the app's own surface — otherwise
-  // the light theme drops a white slab on top of a night scene. See `.vn-chrome` in globals.css:
-  // it re-points the theme tokens within this subtree, so the panel's whole contents follow
-  // without any of the dozen panels built on this shell knowing about it.
+  // Over a VN stage, a panel wears the stage's glass instead of the app's own surface
   const vnChrome = useVnChromeClass()
 
   return (
     <div
-      className="animate-overlay-in fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3 backdrop-blur-sm sm:p-4"
+      className="animate-overlay-in fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-3 sm:p-4"
       onClick={onClose}
     >
       <div
         ref={panelRef}
+        data-rp-part="modal"
         role="dialog"
         aria-modal="true"
         aria-label={title}
         tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
-        className={`animate-panel-in flex w-full flex-col rounded-2xl border border-border bg-bg-elevated themed-shadow ${
-          compact ? 'p-4 sm:p-5' : 'p-5 sm:p-7'
+        className={`animate-panel-in flex w-full flex-col rounded-xl border border-border bg-bg-elevated ${
+          compact ? 'p-4' : 'p-5 sm:p-6'
         } ${vnChrome} ${SIZE_CLASSES[size]} ${scrollable ? 'max-h-[90vh] sm:max-h-[85vh]' : ''}`}
       >
         <div className={`flex shrink-0 items-center justify-between gap-4 ${description ? 'mb-2' : compact ? 'mb-3' : 'mb-4'}`}>
@@ -90,14 +82,12 @@ export function Modal({
           <div className="flex items-center gap-2">
             {headerExtra}
             {!hideHeaderClose && (
-              <Button variant="ghost" onClick={onClose}>
-                Close
-              </Button>
+              <IconButton icon={X} title="Close" boxSize={28} onClick={onClose} />
             )}
           </div>
         </div>
         {description && (
-          <p className="mb-4 shrink-0 text-sm leading-relaxed text-text-muted">{description}</p>
+          <p className="mb-4 shrink-0 text-[13px] leading-relaxed text-text-muted">{description}</p>
         )}
         {children}
       </div>

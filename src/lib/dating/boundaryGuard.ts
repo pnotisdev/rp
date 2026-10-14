@@ -1,7 +1,4 @@
-// Deterministic, lexical hard rail checking a reply against a character's authored `boundaries`
-// and a persona's stated limits in their description. False negatives preferred over false
-// positives — never blocks or rewrites, only flags for the player to review (see
-// `useChatSession.ts`'s call site).
+// Deterministic, lexical hard rail checking a reply against a character's authored `boundaries` and a persona's stated limits in their description.
 
 const STOPWORDS = new Set([
   'the', 'a', 'an', 'and', 'or', 'of', 'to', 'in', 'on', 'with', 'without', 'being', 'is', 'are',

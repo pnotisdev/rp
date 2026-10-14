@@ -1,5 +1,4 @@
-// Multi-provider text-to-speech. Every provider returns a playable audio Blob from
-// plain text — a caller doesn't need to know which provider is behind it.
+// Multi-provider text-to-speech.
 
 import { speakOpenMayhem } from '../api/openMayhemMedia'
 
@@ -38,16 +37,38 @@ async function speakOpenAiCompatible(baseUrl: string, apiKey: string | undefined
   return res.blob()
 }
 
-async function speakElevenLabs(apiKey: string, voiceId: string, text: string): Promise<Blob> {
+export const ELEVENLABS_MODELS = [
+  { id: 'eleven_flash_v2_5', label: 'Flash v2.5 (fastest, ~75 ms)' },
+  { id: 'eleven_v4_turbo', label: 'v4 Turbo (expressive, voices laughs and sighs)' },
+  { id: 'eleven_multilingual_v2', label: 'Multilingual v2 (steadiest for long text)' },
+]
+export const DEFAULT_ELEVENLABS_MODEL = 'eleven_flash_v2_5'
+
+/** Models that read inline audio tags like [laughs] instead of saying them. */
+export function supportsAudioTags(provider: TtsProviderId, model?: string): boolean {
+  return provider === 'elevenlabs' && /^eleven_v[34]/.test(model ?? '')
+}
+
+async function speakElevenLabs(apiKey: string, voiceId: string, text: string, model: string, signal?: AbortSignal): Promise<Blob> {
   if (!apiKey) throw new Error('ElevenLabs needs an API key (Settings → Voice)')
   if (!voiceId) throw new Error('ElevenLabs needs a voice ID (Settings → Voice)')
-  const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}`, {
+  const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}?output_format=mp3_44100_64`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'xi-api-key': apiKey },
-    body: JSON.stringify({ text, model_id: 'eleven_multilingual_v2' }),
+    body: JSON.stringify({ text, model_id: model || DEFAULT_ELEVENLABS_MODEL }),
+    signal,
   })
   if (!res.ok) throw new Error(`ElevenLabs TTS failed (${res.status})`)
   return res.blob()
+}
+
+/** The voices in this ElevenLabs account, for the Settings picker. */
+export async function listElevenLabsVoices(apiKey: string): Promise<{ id: string; name: string }[]> {
+  if (!apiKey.trim()) return []
+  const res = await fetch('https://api.elevenlabs.io/v1/voices', { headers: { 'xi-api-key': apiKey.trim() } })
+  if (!res.ok) throw new Error(`Couldn't load ElevenLabs voices (${res.status})`)
+  const data = (await res.json().catch(() => null)) as { voices?: { voice_id?: string; name?: string }[] } | null
+  return (data?.voices ?? []).filter((v) => v.voice_id).map((v) => ({ id: v.voice_id!, name: v.name ?? v.voice_id! }))
 }
 
 function escapeSsml(text: string): string {
@@ -70,18 +91,11 @@ async function speakAzure(apiKey: string, region: string, voiceName: string, tex
   return res.blob()
 }
 
-/**
- * Synthesizes speech for the given text using whichever provider is configured.
- * `koboldBaseUrl` is the app's own KoboldCpp connection URL (Settings → Connection) —
- * koboldcpp exposes an OpenAI-compatible /v1/audio/speech endpoint, so the local
- * provider is just the same call pointed at that URL with no API key.
- */
+/** Synthesizes speech for the given text using whichever provider is configured. */
 export async function synthesizeSpeech(config: TtsConfig, text: string, koboldBaseUrl: string, signal?: AbortSignal): Promise<Blob> {
   const trimmed = text.trim()
   if (!trimmed) throw new Error('Nothing to speak')
-  // A pasted key/id/region with a trailing space or newline is a common, silent cause of a 401 —
-  // trimmed here (at the point of use) rather than on every keystroke in Settings, so it also
-  // heals a key that's already saved with stray whitespace, without fighting the user mid-type.
+  // A pasted key/id/region with a trailing space or newline is a common, silent cause of a 401
   const apiKey = config.apiKey?.trim()
   const voice = config.voice?.trim() ?? ''
   const baseUrl = config.baseUrl?.trim()
@@ -96,12 +110,11 @@ export async function synthesizeSpeech(config: TtsConfig, text: string, koboldBa
       if (!baseUrl) throw new Error('Set a server URL for the OpenAI-compatible provider (Settings → Voice)')
       return speakOpenAiCompatible(baseUrl, apiKey, trimmed, voice)
     case 'elevenlabs':
-      return speakElevenLabs(apiKey ?? '', voice, trimmed)
+      return speakElevenLabs(apiKey ?? '', voice, trimmed, config.model ?? '', signal)
     case 'azure':
       return speakAzure(apiKey ?? '', region ?? '', voice, trimmed)
     case 'alibaba':
-      // DashScope's TTS request/response shape hasn't been confirmed against a live account —
-      // rather than guess at an API contract, this is left honestly unimplemented.
+      // DashScope's TTS request/response shape hasn't been confirmed against a live account
       throw new Error('Alibaba Cloud Model Studio isn\'t wired up yet. The other providers are ready to use.')
   }
 }

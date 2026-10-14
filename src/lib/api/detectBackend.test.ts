@@ -1,9 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { detectLocalBackend, listOpenAiModels, fetchOpenAiModelContext } from './detectBackend'
 
-// `detectLocalBackend` probes a URL with a mocked `fetch` and reports which protocol answered —
-// KoboldCpp's native API or the OpenAI-compatible /v1 shape. These lock in the probe order and
-// URL normalisation, not real server behaviour.
+// `detectLocalBackend` probes a URL with a mocked `fetch` and reports which protocol answered
 
 const ok = (body: unknown): Response => ({ ok: true, status: 200, json: async () => body } as Response)
 const notFound = (): Response => ({ ok: false, status: 404, json: async () => ({}) } as Response)

@@ -1,5 +1,4 @@
 // Rewrites em dashes inside string and template literals (never comments or regexes) to commas or full stops.
-// Usage: npx tsx scripts/strip-em-dashes.mts [--dry] <file>...
 import fs from 'node:fs'
 import ts from 'typescript'
 

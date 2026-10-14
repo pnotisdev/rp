@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Sparkles } from 'lucide-react'
+import { ImagePlus } from 'lucide-react'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import { createImageBackend } from '@/lib/api/createImageBackend'
 import { errorMessage, toastError } from '@/lib/store/useToastStore'
@@ -26,13 +26,10 @@ export function GenerateImageButton({
   const [busy, setBusy] = useState(false)
   const controllerRef = useRef<AbortController | null>(null)
 
-  const openMayhemApiKey = useSettingsStore((s) => s.openMayhemApiKey)
   const imageBackend = useSettingsStore((s) => s.imageBackend)
-  const imageBackendBaseUrl = useSettingsStore((s) => s.imageBackendBaseUrl)
-  const imageBackendUsername = useSettingsStore((s) => s.imageBackendUsername)
-  const imageBackendPassword = useSettingsStore((s) => s.imageBackendPassword)
   const imageBackendModel = useSettingsStore((s) => s.imageBackendModel)
-  useEffect(() => () => controllerRef.current?.abort(), [imageBackend, imageBackendModel, imageBackendBaseUrl, openMayhemApiKey, imageBackendUsername, imageBackendPassword])
+  // Switching backend or model abandons a generation that is still running.
+  useEffect(() => () => controllerRef.current?.abort(), [imageBackend, imageBackendModel])
 
   const generate = async () => {
     if (!prompt.trim() || busy) return
@@ -40,13 +37,7 @@ export function GenerateImageButton({
     const controller = new AbortController()
     controllerRef.current = controller
     try {
-      const backend = createImageBackend({ openMayhemApiKey,
-        imageBackend,
-        imageBackendBaseUrl,
-        imageBackendUsername,
-        imageBackendPassword,
-        imageBackendModel,
-      })
+      const backend = createImageBackend(useSettingsStore.getState())
       const result = await backend.generateImage({
         prompt: prompt.trim(),
         width,
@@ -69,12 +60,12 @@ export function GenerateImageButton({
 
   if (!open) {
     return (
-      <IconButton icon={Sparkles} title={label} onClick={() => { setPrompt(initialPrompt); setOpen(true) }} size={13} boxSize={26} />
+      <IconButton icon={ImagePlus} title={label} onClick={() => { setPrompt(initialPrompt); setOpen(true) }} size={13} boxSize={26} />
     )
   }
 
   return (
-    <div className="absolute inset-x-0 top-full z-10 mt-1.5 w-64 rounded-xl border border-border bg-bg-elevated p-3 shadow-xl">
+    <div className="absolute inset-x-0 top-full z-10 mt-1.5 w-64 rounded-xl border border-border bg-bg-elevated p-3">
       <TextAreaField
         label="Prompt"
         rows={3}

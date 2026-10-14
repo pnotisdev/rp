@@ -267,8 +267,7 @@ describe('activateWorldInfo', () => {
       })
 
       it('an unset weight in a weighted group defaults to 1, not 0', () => {
-        // Only one member ever sets groupWeight; the other two default to weight 1 and must be
-        // reachable — asserting the winner varies across the 3 members over enough draws.
+        // Only one member ever sets groupWeight
         const b = book([
           entry({ content: 'a', constant: true, activationMode: 'always', group: 'g' }),
           entry({ content: 'b', constant: true, activationMode: 'always', group: 'g' }),
@@ -338,8 +337,7 @@ describe('activateWorldInfo', () => {
   })
 
   describe('sticky and cooldown', () => {
-    // Walk several "turns", threading nextState -> prevState, and record whether the one keyword
-    // entry activated on each turn. `texts[i]` is the scan text for turn i.
+    // Walk several "turns", threading nextState -> prevState, and record whether the one keyword entry activated on each turn.
     function run(e: LorebookEntry, texts: string[]): boolean[] {
       const b: Lorebook = { entries: [e], sourceKey: 'test' }
       let state: NonNullable<ReturnType<typeof activateWorldInfo>['nextState']> = {}
@@ -366,8 +364,7 @@ describe('activateWorldInfo', () => {
 
     it('cooldown blocks re-activation by keyword for N turns after the entry deactivates', () => {
       const e = entry({ content: 'X', keys: ['tavern'], cooldown: 3 })
-      // turn 0 active, turn 1 deactivates (keyword gone) and the 3-turn cooldown starts, turns 2-3
-      // stay blocked even though the keyword is back, turn 4 is available again
+      // turn 0 active, turn 1 deactivates (keyword gone) and the 3-turn cooldown starts, turns 2-3 stay blocked even though the keyword…
       expect(run(e, ['tavern', 'gone', 'tavern', 'tavern', 'tavern'])).toEqual([true, false, false, false, true])
     })
 
@@ -445,9 +442,7 @@ describe('describeEntry', () => {
   })
 
   it('falls back past an EMPTY comment, not just a missing one', () => {
-    // The actual bug: an always-active entry needs no keys, and `keys[0] ?? comment` returns the
-    // empty string rather than falling through it — so the inspector rendered one blank slot per
-    // entry (96 of them, in the world that surfaced this).
+    // The actual bug: an always-active entry needs no keys
     expect(describeEntry({ keys: [], comment: '', content: 'The university sits on a hill.' })).toBe('The university sits on a hill.')
     expect(describeEntry({ keys: [], comment: '   ', content: 'The university sits on a hill.' })).toBe('The university sits on a hill.')
   })

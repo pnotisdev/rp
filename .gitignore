@@ -27,3 +27,14 @@ PLAYTHROUGH_REPORT.md
 
 # Editor-generated caches
 .vscode/
+
+# Throwaway sandbox data (scripts/dev-sandbox.mjs)
+data-sandbox/
+
+# Third-party SillyTavern character cards used to test imports (not part of the app)
+silly-cards/
+
+# Logs and per-machine Claude Code files
+*.log
+.claude/settings.local.json
+.claude/worktrees/

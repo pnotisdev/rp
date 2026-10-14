@@ -9,15 +9,7 @@ export interface TabRailItem<T extends string> {
   badge?: ReactNode
 }
 
-/**
- * The icon-and-label tab rail a game menu uses, on a sunken track — for a panel whose tabs are
- * *places you go* (Overview / Unlocks / Shop) rather than a two-way toggle, which is what
- * `SegmentedControl` is for.
- *
- * Deliberately not the underlined text row it replaces in `RelationshipPanel`: an underline reads
- * as document navigation, and the icons do most of the work of telling four destinations apart at
- * a glance. Labels drop below `sm` so four tabs still fit a phone as icons alone.
- */
+/** The icon-and-label tab rail a game menu uses, on a sunken track */
 export function TabRail<T extends string>({
   items,
   value,
@@ -30,7 +22,7 @@ export function TabRail<T extends string>({
   className?: string
 }) {
   return (
-    <div className={`flex gap-1 rounded-xl bg-bg-sunken p-1 ${className}`} role="tablist">
+    <div className={`flex gap-0.5 rounded-lg border border-border p-0.5 ${className}`} role="tablist">
       {items.map((item) => {
         const active = item.id === value
         return (
@@ -40,11 +32,11 @@ export function TabRail<T extends string>({
             role="tab"
             aria-selected={active}
             onClick={() => onChange(item.id)}
-            className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium transition-colors ${
-              active ? 'bg-accent/15 text-accent' : 'text-text-muted hover:bg-bg-elevated/60 hover:text-text'
+            className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-[13px] font-medium transition-colors ${
+              active ? 'bg-bg-sunken text-text' : 'text-text-muted hover:text-text'
             }`}
           >
-            <item.icon size={15} strokeWidth={1.75} className="shrink-0" />
+            <item.icon size={14} strokeWidth={1.6} className="shrink-0" />
             <span className="hidden sm:inline">{item.label}</span>
             {item.badge && <span className="hidden shrink-0 sm:inline">{item.badge}</span>}
           </button>

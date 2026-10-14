@@ -66,8 +66,7 @@ describe('startOrShiftIntimacyScene', () => {
     expect(shifted.phase).toBe('building')
   })
 
-  // Item 12's escalation-shape memory: `categoryHistory` is the running record `RelationshipTrack
-  // .intimacySceneShapeLog` gets built from once the scene resolves.
+  // Item 12's escalation-shape memory: `categoryHistory` is the running record `RelationshipTrack .intimacySceneShapeLog` gets built…
   it('starts a fresh single-entry categoryHistory when nothing was live before', () => {
     const s = startOrShiftIntimacyScene('a kiss', 'kissing_spot', 5)
     expect(s.categoryHistory).toEqual(['kissing_spot'])

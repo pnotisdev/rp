@@ -4,6 +4,7 @@ import { SwarmUIClient } from './swarmuiImage'
 import { NovelAIImageClient } from './novelaiImage'
 import { OpenMayhemImageClient } from './openMayhemMedia'
 import type { ImageBackend, ImageBackendId } from './imageBackend'
+import type { ComfyConfig } from './comfyWorkflow'
 
 export interface ImageBackendSettings {
   openMayhemApiKey?: string
@@ -15,6 +16,7 @@ export interface ImageBackendSettings {
   /** a1111's optional --api-auth password. */
   imageBackendPassword: string
   imageBackendModel: string
+  comfy?: ComfyConfig
 }
 
 /** Section 11's image-backend factory — the `createChatBackend` pattern applied to image generation. */
@@ -23,7 +25,7 @@ export function createImageBackend(settings: ImageBackendSettings): ImageBackend
     case 'openmayhem':
       return new OpenMayhemImageClient(settings.openMayhemApiKey || '', settings.imageBackendModel)
     case 'comfyui':
-      return new ComfyUIClient(settings.imageBackendBaseUrl)
+      return new ComfyUIClient(settings.imageBackendBaseUrl, settings.comfy)
     case 'swarmui':
       return new SwarmUIClient(settings.imageBackendBaseUrl)
     case 'novelai-image':

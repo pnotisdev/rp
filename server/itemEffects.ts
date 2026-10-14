@@ -15,10 +15,7 @@ export type NormalizedItemEffect =
   | { kind: 'mood'; mood: string }
   | { kind: 'multi'; effects: NormalizedItemEffect[] }
 
-/**
- * Anything unrecognised falls through to a +1 affection nudge, as before. A "multi" keeps its parts (one level
- * deep, at most six); a part that is itself invalid is dropped rather than turned into a stray nudge.
- */
+/** Anything unrecognised falls through to a +1 affection nudge, as before. */
 export function normalizeItemEffect(raw: unknown, allowedFlags: Set<string>, nested = false): NormalizedItemEffect {
   const obj = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
   if (obj.kind === 'multi' && !nested && Array.isArray(obj.effects)) {

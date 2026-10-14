@@ -168,14 +168,12 @@ describe('spendEnergy', () => {
   })
 
   it('forces a rollover to next morning once a weekday runs out at night', () => {
-    // Monday evening (phase 2), remaining energy 1 — this spend reaches night with 0 left,
-    // so it should roll straight on rather than stranding the world at night with nothing to do.
+    // Monday evening (phase 2), remaining energy 1
     expect(spendEnergy(0, 2)).toEqual({ day: 1, phaseIndex: 0, slept: true })
   })
 
   it("lets a weekend's bonus action be spent at night, rolling over naturally", () => {
-    // Saturday night (phase 3) still has 1 energy left (weekend max 4) — advancePhase's own
-    // night -> next-morning wraparound already lands exactly on the rollover, no forcing needed.
+    // Saturday night (phase 3) still has 1 energy left (weekend max 4)
     expect(spendEnergy(5, 3)).toEqual({ day: 6, phaseIndex: 0, slept: true })
   })
 
@@ -198,16 +196,13 @@ describe('activityPhase', () => {
   })
 
   it('recovers the Night phase a forced weekday rollover discards', () => {
-    // Same Monday-evening spend as spendEnergy's own test above: spendEnergy(0, 2) jumps straight
-    // to { day: 1, phaseIndex: 0 } with no trace that the activity happened at Night — this is the
-    // one place that phase is recoverable.
+    // Same Monday-evening spend as spendEnergy's own test above
     expect(spendEnergy(0, 2)).toEqual({ day: 1, phaseIndex: 0, slept: true })
     expect(activityPhase(0, 2)).toEqual({ day: 0, phaseIndex: 3 })
   })
 
   it("keeps a weekend's bonus action grounded at Night, not next morning", () => {
-    // spendEnergy(5, 3) also rolls to { day: 6, phaseIndex: 0 } — but here the activity started
-    // *at* Night (phase 3 was the caller's own phase), not a phase advancePhase stepped into.
+    // spendEnergy(5, 3) also rolls to { day
     expect(spendEnergy(5, 3)).toEqual({ day: 6, phaseIndex: 0, slept: true })
     expect(activityPhase(5, 3)).toEqual({ day: 5, phaseIndex: 3 })
   })
@@ -326,8 +321,7 @@ describe('detectNarratedPhase', () => {
 })
 
 describe('resolveScheduledPresence', () => {
-  // Mirrors the shipped Sumire seed: weekday mornings are "busy — In class", weekday evenings are
-  // "free — Home ... at Her apartment", and one afternoon slot is "free ... at School Library".
+  // Mirrors the shipped Sumire seed: weekday mornings are "busy — In class", weekday evenings are "free — Home ...
   const schedule: ScheduleEntry[] = [
     { id: 'classes', days: ['monday', 'tuesday'], phase: 'morning', status: 'busy', activity: 'In class', location: 'Sakura Hill High School' },
     { id: 'mwf-lib', days: ['monday'], phase: 'afternoon', status: 'available', activity: 'At her library table', location: 'School Library' },

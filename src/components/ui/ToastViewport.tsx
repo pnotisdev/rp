@@ -2,14 +2,13 @@ import { useEffect } from 'react'
 import { X } from 'lucide-react'
 import { useToastStore, type ToastItem, type ToastVariant } from '@/lib/store/useToastStore'
 
-const VARIANT_CLASSES: Record<ToastVariant, string> = {
-  error: 'border-danger/30 bg-danger/10 text-danger',
-  success: 'border-success/30 bg-success/10 text-success',
-  info: 'border-border bg-bg-elevated text-text',
+const DOT: Record<ToastVariant, string> = {
+  error: 'bg-danger',
+  success: 'bg-success',
+  info: 'bg-text-muted',
 }
 
-// Error toasts stay until dismissed — they can carry information the user needs after
-// looking away (e.g. a generation failure). Success/info are transient nudges.
+// Error toasts stay until dismissed — they can carry information the user needs after looking away (e.g. a generation failure).
 const AUTO_DISMISS_MS: Record<ToastVariant, number | null> = {
   error: null,
   success: 4000,
@@ -29,9 +28,10 @@ function Toast({ id, message, variant }: ToastItem) {
   return (
     <div
       role={variant === 'error' ? 'alert' : 'status'}
-      className={`animate-toast-in pointer-events-auto flex items-start gap-3 rounded-xl border px-4 py-3 text-xs shadow-lg themed-shadow ${VARIANT_CLASSES[variant]}`}
+      className="animate-toast-in pointer-events-auto flex items-start gap-3 rounded-lg border border-border bg-bg-elevated px-3.5 py-2.5 text-[13px] text-text"
     >
-      <span className="flex-1 whitespace-pre-wrap">{message}</span>
+      <span className={`mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full ${DOT[variant]}`} />
+      <span className="flex-1 whitespace-pre-wrap leading-relaxed">{message}</span>
       <button
         onClick={() => dismiss(id)}
         aria-label="Dismiss notification"

@@ -30,8 +30,7 @@ describe('expressionRepeatNote', () => {
   })
 
   it('ignores an untagged (undefined) turn rather than treating it as a break or a match', () => {
-    // Three real "happy" tags with a gap where no tag was set (e.g. a greeting) in between still
-    // reads as three genuine repeats once the untagged gaps are filtered out.
+    // Three real "happy" tags with a gap where no tag was set (e.g. a greeting) in between still reads as three genuine repeats once…
     const note = expressionRepeatNote('Aria', ['happy', undefined, 'happy', undefined, 'happy'])
     expect(note).toContain('3 replies in a row')
   })

@@ -28,12 +28,10 @@ export function useConnectionStatus(baseUrl: string) {
         setStatus('online')
         setVersion(v.version)
         setModel(m)
-        // Someone swapped the loaded GGUF without touching this app's settings: the tokenizer is a
-        // different one now, so memoized token counts from the old model no longer apply.
+        // Someone swapped the loaded GGUF without touching this app's settings
         if (lastModel !== null && lastModel !== m) invalidateTokenCache()
         lastModel = m
-        // Best-effort and separate from the required version/model check above — an older
-        // KoboldCpp build without this extra endpoint shouldn't be reported as "offline".
+        // Best-effort and separate from the required version/model check above
         client
           .getTrueMaxContextLength()
           .then((c) => !cancelled && setMaxContext(c))

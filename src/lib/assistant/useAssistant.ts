@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
-import { assistantThreadsApi, charactersApi, instructTemplatesApi } from '@/lib/api/client'
+import { agentApi, assistantThreadsApi, charactersApi, instructTemplatesApi } from '@/lib/api/client'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { createChatBackend } from '@/lib/api/createChatBackend'
 import { cleanModelOutput } from '@/lib/text/slop'
@@ -7,28 +7,31 @@ import { newId } from '@/lib/id'
 import { errorMessage, toastError, toastSuccess } from '@/lib/store/useToastStore'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import { resolveInstructTemplate } from '@/lib/prompt/instructTemplates'
+import { resolveAssistShaping } from '@/lib/api/assistShaping'
 import { draftFullCharacter, isAbortError } from '@/lib/characters/generateFullCharacter'
-import { assistantStopSequences, buildAssistantPrompt } from '@/lib/assistant/prompt'
+import { ASSISTANT_SYSTEM_PROMPT, assistantStopSequences, buildAssistantPrompt } from '@/lib/assistant/prompt'
+import { withAgentContext } from '@/lib/assistant/agentContext'
+import { buildToolbox } from '@/lib/assistant/toolbox'
+import { pendingImages, runToolLoop, stepTurns, toolInstructions, type ToolStep } from '@/lib/assistant/tools'
+import { summarizeTurns, summaryIsStale } from '@/lib/assistant/summary'
+import { base64FromDataUrl } from '@/lib/api/binaryUtils'
+import { confirmDialog } from '@/lib/store/useConfirmStore'
 import { detectProducer, type ProducerKind } from '@/lib/assistant/requests'
 import { DEFAULT_CHAPTER_COUNT, planStory, requestedChapterCount, writeChapter } from '@/lib/assistant/story'
 import { generatedToCharacterInput } from '@/lib/assistant/saveCharacter'
 import { promptTurnsOf, threadTitleFrom, type AssistantMessage, type AssistantThread } from '@/lib/assistant/thread'
 
-/**
- * The assistant thread's own session: send, stream, and the two producers.
- *
- * Deliberately not `useChatSession`. That hook is ~3500 lines of relationship track, scene state,
- * intimacy engine, objectives, day planner and world clock, all keyed to a character. The view this
- * replaced routed a plain chat through it and inherited the lot, which is why it never felt like
- * talking to a model. This talks to the backend and persists a thread, and nothing else.
- */
+/** The assistant thread's own session: send, stream, and the two producers. Deliberately not `useChatSession`. */
 
 /** Reserved for the reply, so the prompt never eats the whole context window. */
 const REPLY_RESERVE = 900
+/** Tool calls carry whole documents (a world with its lore) as arguments, so a step needs far more room. */
+const TOOL_REPLY_RESERVE = 2600
+const MAX_TOOL_STEPS = 24
 
 export interface AssistantProgress {
   /** What is being produced right now, for the progress line. */
-  kind: ProducerKind
+  kind: ProducerKind | 'tools'
   label: string
 }
 
@@ -78,6 +81,7 @@ export function useAssistant(threadId: string | null, onThreadsChanged?: () => v
         createdAt: current?.createdAt ?? Date.now(),
         updatedAt: Date.now(),
         messages,
+        ...(current?.summary ? { summary: current.summary } : {}),
       }
       setThread(next)
       threadRef.current = next
@@ -87,41 +91,95 @@ export function useAssistant(threadId: string | null, onThreadsChanged?: () => v
     [onThreadsChanged],
   )
 
+  /** Stores the running summary of turns that scrolled out of the prompt. */
+  const saveSummary = useCallback(async (id: string, summary: { text: string; covers: number }) => {
+    const current = threadRef.current
+    if (current?.id === id) {
+      const next = { ...current, summary }
+      threadRef.current = next
+      setThread(next)
+    }
+    await assistantThreadsApi.update(id, { summary })
+  }, [])
+
   const abort = useCallback(() => {
     abortRef.current?.abort()
     abortRef.current = null
   }, [])
 
-  /** One plain reply, streamed. */
+  /** One reply, streamed: with tools it can look things up, read pictures, and (with approval) change files. */
   const sendMessage = useCallback(
-    async (text: string) => {
-      const id = threadId
+    async (text: string, idOverride?: string, attachedImages: string[] = []) => {
+      const id = idOverride ?? threadId
       const trimmed = text.trim()
-      if (!id || !trimmed || isBusy) return
+      if (!id || (!trimmed && !attachedImages.length) || isBusy) return
       const controller = new AbortController()
       abortRef.current = controller
       setIsBusy(true)
       setStreamingText('')
 
-      const userMessage: AssistantMessage = { id: newId(), role: 'user', text: trimmed, createdAt: Date.now() }
-      const withUser = [...(threadRef.current?.messages ?? []), userMessage]
+      const userMessage: AssistantMessage = { id: newId(), role: 'user', text: trimmed, createdAt: Date.now(), ...(attachedImages.length ? { images: attachedImages } : {}) }
+      const withUser = [...(threadRef.current?.id === id ? threadRef.current.messages : []), userMessage]
       await persist(withUser, id)
 
+      let working: AssistantMessage[] = withUser
       try {
         const template = resolveInstructTemplate(settings.instructTemplateId, customInstructTemplates)
         const maxContext = await client.getEffectiveMaxContext(settings.sampler.max_context_length)
-        const { prompt } = buildAssistantPrompt({
-          turns: promptTurnsOf(withUser),
-          template,
-          systemPrompt: settings.assistantSystemPrompt,
-          styleGuidance: settings.styleGuidance,
-          contextBudget: Math.max(512, maxContext - REPLY_RESERVE),
+        const box = await buildToolbox({
+          mode: settings.assistantTools,
+          autoApprove: settings.assistantAutoApprove,
+          imageSettings: settings,
+          signal: controller.signal,
+          ask: (p) => confirmDialog({ title: p.title, detail: p.detail, confirmLabel: p.confirmLabel, tone: 'default' }),
         })
-        const raw = await client.generateStream(
-          {
+        const withTools = box.tools.length > 0
+        const reserve = withTools ? TOOL_REPLY_RESERVE : REPLY_RESERVE
+        const budget = Math.max(512, maxContext - reserve)
+        const [workspace, notes] = await Promise.all([agentApi.workspace().catch(() => null), agentApi.memory().catch(() => [])])
+        const base = settings.assistantSystemPrompt.trim() || ASSISTANT_SYSTEM_PROMPT
+        let summary = threadRef.current?.summary
+        const systemPrompt = () =>
+          withAgentContext(withTools ? `${base}\n\n${toolInstructions(box.tools)}` : base, {
+            now: new Date(),
+            workspaceName: withTools && workspace?.root ? workspace.root.split(/[\\/]/).filter(Boolean).pop() : undefined,
+            notes: notes.map((n) => n.text),
+            summary: summary?.text,
+          })
+
+        // Turns that no longer fit are folded into a running summary, so a long conversation keeps its thread.
+        const turns = promptTurnsOf(withUser)
+        const fit = buildAssistantPrompt({ turns, template, systemPrompt: systemPrompt(), styleGuidance: settings.styleGuidance, contextBudget: budget })
+        const dropped = turns.length - fit.usedTurns
+        if (summaryIsStale(summary, dropped)) {
+          setProgress({ kind: 'tools', label: 'Summarising the earlier conversation' })
+          try {
+            const covers = summary?.covers ?? 0
+            const folded = await summarizeTurns(client, summary?.text, turns.slice(covers, dropped), { shaping: await resolveAssistShaping(60_000), signal: controller.signal, contextLength: maxContext })
+            if (folded) {
+              summary = { text: folded, covers: dropped }
+              await saveSummary(id, summary)
+            }
+          } catch (e) {
+            if (isAbortError(e)) throw e
+          }
+          setProgress(null)
+        }
+
+        // Pictures the model should see now: the ones the user attached, then what the latest tool steps returned.
+        const request = (steps: ToolStep[]) => {
+          const { prompt } = buildAssistantPrompt({
+            turns: [...turns, ...stepTurns(steps)],
+            template,
+            systemPrompt: systemPrompt(),
+            styleGuidance: settings.styleGuidance,
+            contextBudget: budget,
+          })
+          const images = [...attachedImages.slice(0, 2), ...pendingImages(steps)].slice(-3).map(base64FromDataUrl)
+          return {
             prompt,
             max_context_length: maxContext,
-            max_length: REPLY_RESERVE,
+            max_length: reserve,
             temperature: settings.sampler.temperature,
             top_p: settings.sampler.top_p,
             top_k: settings.sampler.top_k,
@@ -131,17 +189,63 @@ export function useAssistant(threadId: string | null, onThreadsChanged?: () => v
             rep_pen: settings.sampler.rep_pen,
             rep_pen_range: settings.sampler.rep_pen_range,
             rep_pen_slope: settings.sampler.rep_pen_slope,
-            stop_sequence: assistantStopSequences(template),
+            stop_sequence: [...assistantStopSequences(template), ...(withTools ? ['</tool_call>', '<tool_call|>'] : [])],
             trim_stop: true,
-          },
-          (_token, full) => setStreamingText(full),
-          controller.signal,
-        )
+            ...(images.length ? { images } : {}),
+          }
+        }
+
+        /** One model reply for the thread so far, plus any tool steps already taken this turn. An empty reply is tried once more. */
+        const ask = async (steps: ToolStep[]) => {
+          const generate = () =>
+            client.generateStream(
+              request(steps),
+              // A tool call is plumbing, not prose: keep it out of the live text.
+              (_token, full) => setStreamingText(withTools && /<\|?tool_call/i.test(full) ? '' : full),
+              controller.signal,
+            )
+          const first = await generate()
+          return first.trim() ? first : generate()
+        }
+
+        let raw: string
+        let note = ''
+        if (!withTools) {
+          raw = await ask([])
+        } else {
+          const loop = await runToolLoop({
+            signal: controller.signal,
+            maxSteps: MAX_TOOL_STEPS,
+            ask: (steps) => {
+              setProgress({ kind: 'tools', label: steps.length ? `Thinking after ${steps.length} tool ${steps.length === 1 ? 'call' : 'calls'}` : 'Thinking' })
+              return ask(steps)
+            },
+            run: async (call) => {
+              setProgress({ kind: 'tools', label: `Using ${call.name}` })
+              return box.run(call)
+            },
+            onStep: (step) => {
+              working = [
+                ...working,
+                {
+                  id: newId(),
+                  role: 'assistant',
+                  text: '',
+                  createdAt: Date.now(),
+                  tool: { name: step.call.name, arguments: step.call.arguments, result: step.result.text, isError: step.result.isError, ...(step.result.images?.length ? { images: step.result.images } : {}) },
+                },
+              ]
+              void persist(working, id)
+            },
+          })
+          raw = loop.final || (loop.steps.length ? 'Done.' : '')
+          if (loop.exhausted) note = `\n\n(Stopped after ${MAX_TOOL_STEPS} tool calls. Say "continue" and I will pick up from here.)`
+        }
         // Same cleanup the roleplay path uses: models echo their own turn prefix back.
-        const reply = cleanModelOutput(raw, { charName: 'Assistant', personaName: 'User' }).trim()
+        const reply = `${cleanModelOutput(raw, { charName: 'Assistant', personaName: 'User' }).trim()}${note}`.trim()
         await persist(
           [
-            ...withUser,
+            ...working,
             {
               id: newId(),
               role: 'assistant',
@@ -154,28 +258,22 @@ export function useAssistant(threadId: string | null, onThreadsChanged?: () => v
         )
       } catch (e) {
         if (!isAbortError(e)) {
-          await persist(
-            [...withUser, { id: newId(), role: 'assistant', text: '', createdAt: Date.now(), error: errorMessage(e) }],
-            id,
-          )
+          await persist([...working, { id: newId(), role: 'assistant', text: '', createdAt: Date.now(), error: errorMessage(e) }], id)
         }
       } finally {
         setStreamingText('')
+        setProgress(null)
         setIsBusy(false)
         abortRef.current = null
       }
     },
-    [client, isBusy, persist, settings, threadId],
+    [client, isBusy, persist, saveSummary, settings, customInstructTemplates, threadId],
   )
 
-  /**
-   * Builds a full character from a brief and attaches it to the thread. Reuses the character
-   * library's own staged generator, so what lands here is exactly what the character editor
-   * produces — card, profile, wardrobe and lore — rather than a second, worse implementation.
-   */
+  /** Builds a full character from a brief and attaches it to the thread. */
   const produceCharacter = useCallback(
-    async (brief: string) => {
-      const id = threadId
+    async (brief: string, idOverride?: string) => {
+      const id = idOverride ?? threadId
       if (!id || isBusy) return
       const controller = new AbortController()
       abortRef.current = controller
@@ -186,6 +284,7 @@ export function useAssistant(threadId: string | null, onThreadsChanged?: () => v
           client,
           { brief, styleGuidance: settings.styleGuidance },
           {
+            shaping: await resolveAssistShaping(120_000),
             signal: controller.signal,
             onStage: (stage, status) => {
               if (status === 'start') setProgress({ kind: 'character', label: `Writing the ${stage}` })
@@ -229,8 +328,8 @@ export function useAssistant(threadId: string | null, onThreadsChanged?: () => v
 
   /** Plans a story, then writes each chapter in order, persisting as it goes so nothing is lost mid-run. */
   const produceStory = useCallback(
-    async (brief: string) => {
-      const id = threadId
+    async (brief: string, idOverride?: string) => {
+      const id = idOverride ?? threadId
       if (!id || isBusy) return
       const controller = new AbortController()
       abortRef.current = controller

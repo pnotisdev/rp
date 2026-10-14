@@ -1,7 +1,6 @@
 import type { GenerateRequest } from './types'
 
-// Shared interface implemented by `KoboldClient` and every hosted-provider client, plus the
-// provider metadata (ids, labels, known OpenAI-compatible providers) used to pick between them.
+// Shared interface implemented by `KoboldClient` and every hosted-provider client, plus the provider metadata (ids, labels, known…
 
 export interface ChatBackend {
   /** Opt JSON-producing assists into an object envelope and a validated JSON-mode request. */
@@ -32,8 +31,9 @@ export const CHAT_BACKEND_LABELS: Record<ChatBackendId, string> = {
   novelai: 'NovelAI (hosted, subscription)',
 }
 
-/** NovelAI's own two current text models this app supports. */
+/** NovelAI's text models this app supports. */
 export const NOVELAI_MODELS = [
+  { id: 'llama-3-erato-v1', label: 'Erato' },
   { id: 'kayra-v1', label: 'Kayra' },
   { id: 'clio-v1', label: 'Clio' },
 ] as const

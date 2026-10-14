@@ -2,13 +2,7 @@ import type { CommitmentStatus, RelationshipDimension } from '@/lib/types'
 import { COMMITMENT_ORDER } from '@/lib/dating/stage'
 import { slugifyId } from '@/lib/text/slugify'
 
-/**
- * Author-defined "when X, then Y" rules, scoped to a world: a closed set of conditions over
- * state the app already computes (relationship stats, flags, commitment, world clock), and a
- * closed set of actions routed into existing systems — deliberately not a scripting language.
- * Evaluation is deterministic and runs after the per-turn relationship update; nothing here
- * calls a model or can fail a turn.
- */
+/** Author-defined "when X, then Y" rules, scoped to a world */
 
 /** The numeric signals a condition can test. `warmth` is the derived average (see `stage.ts`), not a stored field. */
 export type TriggerStat = 'affection' | 'warmth' | RelationshipDimension
@@ -33,11 +27,7 @@ export type TriggerAction =
   | { kind: 'social_reaction'; topic: string }
   /** A free-text steer folded into the live per-turn `styleGuidance` channel. Pair with `repeatable: true` for a steer that stays live only while its condition holds. */
   | { kind: 'style_guidance'; text: string }
-  /** Starts a real, live, scored scene the character opens themselves — Stardew's heart events /
-   *  Persona's confidant beats, but built from `TriggerCondition`s that already cover a warmth
-   *  stage or scene-flag combination and more. Built as a `kind: 'hangout'`, `free: true`
-   *  `DateEventCard` and handed to the existing `startDateEvent` pipeline (`useChatSession.ts`) —
-   *  see that function's own handling of `free` for why it doesn't spend a day's energy. */
+  /** Starts a real, live, scored scene the character opens themselves */
   | { kind: 'start_scene'; title: string; description: string; objectiveTitle: string; objectiveDescription?: string }
 
 export interface Trigger {

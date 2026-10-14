@@ -3,11 +3,7 @@ import { asymmetricPacingNote, relationshipPacingNote } from '@/lib/dating/momen
 import type { Character } from '@/lib/characters/cardSpec'
 import type { Chat, WorldCard } from '@/lib/types'
 
-/**
- * Moved verbatim out of `useChatSession.ts` (no behavior change) so the headless outreach tick
- * (`src/lib/dating/outreach.ts`) can build the same relationship-flavor text a live chat turn
- * would, without duplicating this logic.
- */
+/** Moved verbatim out of `useChatSession.ts` (no behavior change) so the headless outreach tick (`src/lib/dating/outreach.ts`) can… */
 export function buildGiftTasteNote(character: Character): string | undefined {
   const { giftLikes, giftDislikes, loveLanguage } = character
   const parts: string[] = []
@@ -37,14 +33,12 @@ export function buildRelationshipDescription(
   if (stats.tension >= 60) notes.push('real unresolved tension between them')
   if (stats.comfort <= 20 && stage !== 'near_strangers') notes.push('things still feel a little unsettled between them')
   const giftTasteNote = buildGiftTasteNote(character)
-  // Only stated when there's an actual explicit status (10c's DTR ladder) — an unset/'none'
-  // commitment is the ordinary default for most chats and isn't worth a line every single turn.
+  // Only stated when there's an actual explicit status (10c's DTR ladder)
   const commitmentNote =
     chat.commitmentStatus && chat.commitmentStatus !== 'none'
       ? `{{user}} and ${primaryName} are officially ${formatCommitmentStatus(chat.commitmentStatus)}.`
       : undefined
-  // 10c's "Breakups & reconciliation" — a standing warning is the model's cue to actually play the
-  // strain, not just have the numbers move; a past breakup colors things even once patched up.
+  // 10c's "Breakups & reconciliation" — a standing warning is the model's cue to actually play the strain, not just have the numbers move
   const warningNote = chat.relationshipWarning
     ? `The relationship is genuinely on the rocks right now (${chat.relationshipWarning.reason}). Let that show; don't just narrate past it.`
     : undefined
@@ -52,17 +46,11 @@ export function buildRelationshipDescription(
     chat.breakupCount && chat.breakupCount > 0
       ? `${primaryName} and {{user}} have broken up before. Some caution or guardedness is earned here, whether or not that's fully behind them now.`
       : undefined
-  // Momentum: how fast (and which way) things have been moving recently, separate from where they
-  // are — the "how quickly should this relationship be moving" the level-only lines can't give.
+  // Momentum: how fast (and which way) things have been moving recently, separate from where they are
   const pacingNote = relationshipPacingNote(primaryName, warmth, chat.momentum ?? 0, stats.tension)
-  // Item 2's asymmetric-pacing signal: who's actually been initiating lately, not just how fast
-  // warmth is moving overall (that's `pacingNote` above). `{{user}}` is a real macro here — this
-  // return value is one of the few `buildPrompt` fields that IS macro-substituted (see this file's
-  // own doc comment on `giftTasteNote`), unlike ordinary `styleGuidance` strings.
+  // Item 2's asymmetric-pacing signal: who's actually been initiating lately, not just how fast warmth is moving overall (that's `pacingNote` above).
   const asymmetryNote = asymmetricPacingNote(primaryName, chat.initiativeBalance ?? 0)
-  // `primaryName` is spelled out rather than left as a `{{char}}` macro — this stays about the
-  // scene's primary/relationship-tracked character even in a group chat, where `{{char}}` would
-  // otherwise resolve to whoever's currently speaking instead (see resolveSpeaker/buildCurrentPrompt).
+  // `primaryName` is spelled out rather than left as a `{{char}}` macro
   return [
     `Relationship: {{user}} and ${primaryName} are at the "${formatRelationshipStage(stage)}" stage${notes.length ? `: ${notes.join('; ')}` : ''}.`,
     '(Let this colour tone, warmth, and what feels earned right now. Never state a number, "affection", or "stage" out loud.)',

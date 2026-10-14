@@ -8,11 +8,7 @@ export interface BookScopeContext {
   worldId?: string
 }
 
-/**
- * A standalone World Info book with no bindings at all is global — it applies to every chat, which
- * is how every book behaved before scoping existed. Once it has any binding, it applies only to a
- * chat that matches one of them: the chat itself, its primary character, or that character's world.
- */
+/** A standalone World Info book with no bindings at all is global — it applies to every chat, which is how every book behaved before scoping existed. */
 export function isGlobalBook(book: Pick<WorldInfoBook, 'boundChatIds' | 'boundCharacterIds' | 'boundWorldIds'>): boolean {
   return (
     (book.boundChatIds?.length ?? 0) === 0 &&

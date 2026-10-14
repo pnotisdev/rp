@@ -1,9 +1,4 @@
-/**
- * A thin strip shown while post-reply "assist" model calls (relationship scoring, choice
- * suggestions, objective checks, memory summary) are still running — so a result popping in a few
- * seconds after the reply reads as expected work rather than a glitch. Fed by
- * `useChatSession().assistActivity`.
- */
+/** A thin strip shown while post-reply "assist" model calls (relationship scoring, choice suggestions, objective checks, memory… */
 export function AssistActivityBar({ items, variant = 'default' }: { items: string[]; variant?: 'default' | 'vn' }) {
   if (items.length === 0) return null
   const tone = variant === 'vn' ? 'text-white/55' : 'text-text-muted'

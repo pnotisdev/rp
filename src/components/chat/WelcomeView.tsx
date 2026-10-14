@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
-import { MessageCircle, Sparkles, Trash2, Upload, Wand2 } from 'lucide-react'
+import { Trash2, Upload, Wand2 } from 'lucide-react'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { charactersApi, chatsApi } from '@/lib/api/client'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
+import { BRAND } from '@/lib/brand'
+import { BrandMark } from '@/components/layout/BrandMark'
 import { useConnectionStatus } from '@/lib/hooks/useConnectionStatus'
 import { useHostedBackendStatus } from '@/lib/hooks/useHostedBackendStatus'
 import { useOpenAiModels } from '@/lib/hooks/useOpenAiModels'
@@ -20,23 +22,19 @@ import { NewChatDialog } from './NewChatDialog'
 import { TrashPanel } from './TrashPanel'
 
 const INPUT_CLASS =
-  'flex-1 rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40'
+  'flex-1 rounded-xl border border-border bg-bg-elevated px-3 py-2 text-sm text-text outline-none focus:border-accent/70'
 
 /** Providers that are really local runners — kept off the cloud picker, since the "Local server" tab auto-detects them. */
 const LOCAL_PROVIDER_IDS = new Set(['lmstudio', 'ollama'])
 
-/** Every cloud option the welcome screen's compact picker offers — the hosted OpenAI-compatible
- *  roster (the local runners belong on the "Local server" tab, which auto-detects them) plus
- *  NovelAI folded in as one more choice, so there's a single "Provider" dropdown instead of a
- *  separate backend-kind selector (Settings → Connection's fuller, two-step version). */
+/** Every cloud option the welcome screen's compact picker offers */
 const HOSTED_PROVIDER_OPTIONS: { id: string; label: string; kind: 'openai-compatible' | 'novelai'; baseUrl?: string; modelExample?: string }[] = [
   ...KNOWN_CHAT_PROVIDERS.filter((p) => !LOCAL_PROVIDER_IDS.has(p.id)).map((p) => ({ id: p.id, label: p.label, kind: 'openai-compatible' as const, baseUrl: p.baseUrl, modelExample: p.modelExample })),
   { id: 'novelai', label: 'NovelAI (hosted, subscription)', kind: 'novelai' as const },
 ]
 const DEFAULT_HOSTED_PROVIDER = KNOWN_CHAT_PROVIDERS.find((p) => p.id === 'openrouter')!
 
-// The seeded starter character (server/seedContent.ts) — featured on the welcome screen when it
-// still exists, so a fresh install is one click from a running conversation.
+// The seeded starter character (server/seedContent.ts)
 const SEED_CHARACTER_ID = 'a0000000-0000-4000-8000-000000000002'
 
 const normalizeUrl = (u: string) => u.trim().replace(/\/+$/, '')
@@ -79,10 +77,7 @@ export function WelcomeView({
   const chatBackendModel = useSettingsStore((s) => s.chatBackendModel)
   const setChatBackendConfig = useSettingsStore((s) => s.setChatBackendConfig)
 
-  // Which panel is showing. Local now covers both KoboldCpp and an OpenAI-compatible server on
-  // localhost (LM Studio, llama.cpp, Ollama, ...) — the Check button auto-detects which. Seeded
-  // from the stored backend, then owned by the tab clicks; the stored config always stays the
-  // source of truth Settings → Connection reads.
+  // Which panel is showing.
   const [mode, setMode] = useState<'local' | 'cloud'>(() =>
     chatBackend === 'koboldcpp' ? 'local' : chatBackend === 'novelai' ? 'cloud' : isLoopbackUrl(chatBackendBaseUrl) ? 'local' : 'cloud',
   )
@@ -101,8 +96,7 @@ export function WelcomeView({
 
   const { models: cloudModels, loading: cloudModelsLoading, reload: reloadCloudModels } = useOpenAiModels(chatBackendBaseUrl, chatBackendApiKey, chatBackend === 'openai-compatible')
 
-  // The Local tab's address field. Seeded from whichever local address we already have — a
-  // detected local OpenAI server, else the KoboldCpp URL setting. Never the cloud provider URL.
+  // The Local tab's address field.
   const [urlDraft, setUrlDraft] = useState(
     chatBackend === 'openai-compatible' && isLoopbackUrl(chatBackendBaseUrl) ? chatBackendBaseUrl : baseUrl,
   )
@@ -111,16 +105,13 @@ export function WelcomeView({
   const [customModel, setCustomModel] = useState(false)
   const [showNewChat, setShowNewChat] = useState(false)
   const [showTrash, setShowTrash] = useState(false)
-  // This screen only shows at all once `chats.length === 0` — the one place a deleted chat's
-  // recoverability actually matters is right here: deleting your only/last chat bounces you to
-  // this exact screen, so without this link the trash it landed in would be unreachable.
+  // This screen only shows at all once `chats.length === 0`
   const trashCount = useApiQuery('chats', () => chatsApi.trash(), [])?.length ?? 0
 
   const seed = characters.find((c) => c.id === SEED_CHARACTER_ID)
   const featured = seed ?? characters[0]
 
-  // Reflect a KoboldCpp-URL change made in Settings while this screen is mounted, unless a detect
-  // is mid-flight or the field is already showing a detected local OpenAI server.
+  // Reflect a KoboldCpp-URL change made in Settings while this screen is mounted, unless a detect is mid-flight or the field is…
   useEffect(() => {
     if (detecting || scanning) return
     if (chatBackend === 'openai-compatible' && isLoopbackUrl(chatBackendBaseUrl)) return
@@ -174,16 +165,14 @@ export function WelcomeView({
     }
   }
 
-  // The local panel needs *a* local backend selected so its status line means
-  // something before detection; the cloud panel defaults to OpenRouter's free tier.
+  // The local panel needs *a* local backend selected so its status line means something before detection
   const selectMode = (next: 'local' | 'cloud') => {
     setMode(next)
     setCustomModel(false)
     if (next === 'local') {
       const localOpenAiConfig = chatBackend === 'openai-compatible' && isLoopbackUrl(chatBackendBaseUrl)
       setUrlDraft(localOpenAiConfig ? chatBackendBaseUrl : baseUrl)
-      // Anything but an already-local backend: fall back to KoboldCpp so the status line and the
-      // address field are both about a local server, not the cloud provider left selected.
+      // Anything but an already-local backend
       if (!localOpenAiConfig && chatBackend !== 'koboldcpp') setChatBackendConfig({ chatBackend: 'koboldcpp' })
     } else if (chatBackend === 'koboldcpp' || (chatBackend === 'openai-compatible' && isLoopbackUrl(chatBackendBaseUrl))) {
       setChatBackendConfig({ chatBackend: 'openai-compatible', chatBackendBaseUrl: DEFAULT_HOSTED_PROVIDER.baseUrl })
@@ -204,9 +193,7 @@ export function WelcomeView({
     }
   }
 
-  // Shared by the local and cloud panels for any OpenAI-compatible backend: a real dropdown of the
-  // ids `/models` returned, with a "type it in" escape hatch, falling back to a plain field when
-  // the provider doesn't expose `/models`.
+  // Shared by the local and cloud panels for any OpenAI-compatible backend
   const openAiModelField = isOpenMayhem(chatBackendBaseUrl) ? (
     <OpenMayhemModelSelect models={cloudModels} loading={cloudModelsLoading} value={chatBackendModel}
       onChange={(model) => setChatBackendConfig({ chatBackendModel: model })} />
@@ -251,23 +238,28 @@ export function WelcomeView({
   return (
     <div className="flex flex-1 items-center justify-center overflow-y-auto p-8">
       <div className="w-full max-w-lg py-10">
-        <MessageCircle size={30} strokeWidth={1.25} className="mb-4 text-accent" />
-        <h1 className="font-display text-2xl text-text">Welcome to RP Suite</h1>
-        <p className="mt-1.5 text-sm text-text-muted">
-          A local-first roleplay client. Bring your own model, running locally or through a hosted
-          API key. Two steps and you're talking.
+        <div className="mb-3 flex items-center gap-2 text-text-muted">
+          <BrandMark size={22} />
+          <span className="font-display text-sm">{BRAND.kanji}</span>
+          <span className="text-xs">{BRAND.tagline}</span>
+        </div>
+        <h1 className="text-2xl font-semibold tracking-tight text-text">Welcome to {BRAND.name}</h1>
+        <p className="mt-2 text-sm leading-relaxed text-text-muted">
+          A private roleplay app that runs on your computer. Connect a model, pick a character, and start talking.
         </p>
 
         {/* 1. Connection */}
-        <div className="mt-8 rounded-2xl border border-border bg-bg-elevated p-5">
-          <div className="mb-3 flex items-center gap-2">
-            <span
-              className={`h-2 w-2 rounded-full ${
-                activeStatus === 'online' ? 'bg-success' : activeStatus === 'checking' ? 'bg-warning' : 'bg-danger'
-              }`}
-            />
-            <span className="text-sm font-medium text-text">
-              {activeStatus === 'online' ? 'Model connected' : activeStatus === 'checking' ? 'Checking connection…' : 'No model connected'}
+        <div className="mt-8 rounded-lg border border-border bg-bg-elevated p-5">
+          <div className="mb-4 flex items-center gap-2.5">
+            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-bg-sunken text-[11px] font-medium text-text-muted">1</span>
+            <span className="text-sm font-semibold text-text">Connect a model</span>
+            <span className="ml-auto flex items-center gap-1.5 text-xs text-text-muted">
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${
+                  activeStatus === 'online' ? 'bg-success' : activeStatus === 'checking' ? 'bg-warning' : 'bg-danger'
+                }`}
+              />
+              {activeStatus === 'online' ? 'Connected' : activeStatus === 'checking' ? 'Checking…' : 'Not connected'}
             </span>
           </div>
 
@@ -393,12 +385,14 @@ export function WelcomeView({
         </div>
 
         {/* 2. First chat */}
-        <div className="mt-4 rounded-2xl border border-border bg-bg-elevated p-5">
-          <div className="mb-3 text-sm font-medium text-text">Start your first chat</div>
+        <div className="mt-4 rounded-lg border border-border bg-bg-elevated p-5">
+          <div className="mb-4 flex items-center gap-2.5">
+            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-bg-sunken text-[11px] font-medium text-text-muted">2</span>
+            <span className="text-sm font-semibold text-text">Start your first chat</span>
+          </div>
 
           {charactersLoading ? (
-            // Don't flash the "you have no characters" branch before the list has loaded — a fresh
-            // install ships with a seeded character, and that flicker reads as "the seed is missing".
+            // Don't flash the "you have no characters" branch before the list has loaded
             <div className="h-14 animate-pulse rounded-xl bg-bg-sunken" />
           ) : featured ? (
             <>
@@ -425,7 +419,7 @@ export function WelcomeView({
                   Browse characters
                 </button>
                 <button className="flex items-center gap-1 hover:text-text" onClick={() => onNavigate('characters')}>
-                  <Sparkles size={12} strokeWidth={2} /> Generate one
+                  Generate one
                 </button>
                 <button className="flex items-center gap-1 hover:text-text" onClick={() => onNavigate('characters')}>
                   <Upload size={12} strokeWidth={2} /> Import a card

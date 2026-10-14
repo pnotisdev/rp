@@ -148,8 +148,7 @@ describe('edge selection', () => {
   })
 
   it('never treats a choice-mode resolve edge as one an observed finish can take on its own', () => {
-    // How a scene ends is the player's decision when the author marked it one, so this has to stay
-    // out of the automatic path and go through `buildPendingChoice` instead.
+    // How a scene ends is the player's decision when the author marked it one
     const chosenEnding = stage({
       edges: [
         { to: RESOLVE_STAGE, mode: 'choice', label: 'End it here' },

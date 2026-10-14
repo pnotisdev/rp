@@ -5,25 +5,10 @@ import type { CommitmentStatus } from '@/lib/types'
 import type { IntimacyDetailLevel } from '@/lib/store/useSettingsStore'
 import { COMMITMENT_ORDER } from '@/lib/dating/stage'
 
-/**
- * `affection` exists because `isExplicitCategory` is the thing that decides what a player at a
- * non-explicit rating is even shown, and it keys off the category. Holding hands in public or
- * falling asleep against someone is not explicit content; filed under `activity` it would have been
- * hidden from everyone except players on the `'explicit'` dial, which is exactly backwards. It sits
- * beside `kissing_spot` as the second non-explicit category.
- */
+/** `affection` exists because `isExplicitCategory` is the thing that decides what a player at a non-explicit rating is even shown */
 export type IntimacyCategory = 'affection' | 'kissing_spot' | 'position' | 'toy' | 'activity'
 
-/**
- * One piece of intimate content this relationship can "unlock" — the user's own ask ("unlocking
- * sex positions, places to kiss at, sex toys and more"). Gated by `minWarmth` (same derived 0-100
- * warmth score that already gates `RelationshipStage`/commitment tiers, see `stage.ts`) and
- * optionally `minCommitment` (some things fit better once a relationship is actually official).
- * "Unlocked" only ever meant "the model may draw on this" until the user's own direct follow-up —
- * "unlocked ≠ usable," they want to actually *choose* a kiss spot or initiate an activity, not
- * just hope the model picks up on flavor text. `actionText`/`price` below are that: a real,
- * clickable action in `RelationshipPanel`, not only a prompt hint.
- */
+/** One piece of intimate content this relationship can "unlock" — the user's own ask ("unlocking sex positions, places to kiss at, sex toys and more"). */
 export interface IntimacyUnlockable {
   id: string
   category: IntimacyCategory
@@ -31,75 +16,25 @@ export interface IntimacyUnlockable {
   minWarmth: number
   /** Unset means no commitment floor — warmth alone is enough. */
   minCommitment?: CommitmentStatus
-  /**
-   * A natural, pre-written player-action line — the starting point for the composer when this is
-   * clicked in the Relationship panel (the connected model adapts it to the current scene first;
-   * see `draftIntimacyAction`), and the verbatim fallback via `composeIntimacyActionText` when no
-   * model is reachable. `{char}` is replaced with the real name. Every built-in entry has one,
-   * hand-written for that specific action rather than templated, since a generic "does {label}"
-   * sentence reads badly across this varied a catalog. A world's own custom entries fall back to
-   * `composeIntimacyActionText`'s generic per-category template when this is unset, so authoring
-   * one is optional, not required, to add a new unlockable.
-   */
+  /** A natural, pre-written player-action line */
   actionText?: string
-  /**
-   * A clear, model-facing description of the physical act — used in two places the terse player
-   * `actionText` isn't enough on its own: the brief for `draftIntimacyAction`'s scene-adaptation
-   * call, and a directive injected into the *character's* reply turn (`intimacyActionDirective`) so
-   * the model unmistakably registers what the player just initiated and writes a real response to
-   * it rather than glossing past a one-line stage direction. `{char}` is substituted; the player is
-   * always "you". Phrased to slot after "moved the scene into" / "initiating this now:". Falls back
-   * to `defaultIntimacyPromptNote`'s per-category template when unset (a world's custom entries).
-   */
+  /** A clear, model-facing description of the physical act */
   promptNote?: string
-  /**
-   * Coins required to actually own this before it can be bought/used (`Chat.toyInventory`) —
-   * meaningful for `toy`-category entries in practice (the user's own ask: "buy toys"); unset
-   * means no purchase step, which stays true for every kissing_spot/position/activity entry, since
-   * those aren't physical objects to own.
-   */
+  /** Coins required to actually own this before it can be bought/used (`Chat.toyInventory`) */
   price?: number
-  /**
-   * How much arousal (`dating/arousal.ts`) this activity can deliver per turn while it's the active
-   * one — the intensity axis, where `minWarmth` is the difficulty axis. A forehead kiss is 1; a
-   * position is 8. Unset falls back to `intimacyArousalWeight`'s per-category default, so a world's
-   * own entries need not set one; author it only where that default reads wrong (a winding-down
-   * activity, say).
-   */
+  /** How much arousal (`dating/arousal.ts`) this activity can deliver per turn while it's the active one */
   arousalWeight?: number
-  /**
-   * Body regions this entry actually involves (`arousal.ts`). Feeds the meter straight from a click
-   * with no model call, and lets a character's `TouchProfile` filter out an entry that would touch
-   * somewhere they've ruled out. Built-in entries are tagged in `BUILT_IN_ENTRY_REGIONS` below.
-   */
+  /** Body regions this entry actually involves (`arousal.ts`). */
   regions?: BodyRegion[]
   /** Kinks this entry involves (`kinks.ts`). One hard limit here and the entry is never offered or described. */
   kinks?: KinkId[]
-  /**
-   * A kink this entry needs the character to be *positively* into — `kinkValence >= 1` — not merely
-   * to have left unlisted. `kinks` above is a veto: absent a hard limit, an entry is offered. For a
-   * handful of things that is the wrong default, because an unauthored character scores 0 on
-   * everything and 0 would then read as consent. `kinkValence`'s own doc already says the quiet
-   * part: "Nothing on record is neutral, not permission and not refusal."
-   *
-   * Deliberately rare. Use it where the fiction has a real-world analogue that is harmful when it
-   * isn't wanted, and where warmth is a poor stand-in for having actually agreed.
-   */
+  /** A kink this entry needs the character to be *positively* into — `kinkValence >= 1` — not merely to have left unlisted. */
   requiresEagerness?: KinkId
-  /**
-   * Background ids (`vn/backgrounds.ts`) this entry only makes sense in — "the edge of the onsen"
-   * is nonsense in a classroom, and warmth is no kind of gate on that. Applied only when the caller
-   * actually knows where the scene is; a caller that passes no background gets the entry offered,
-   * since "unknown" is not the same as "wrong place".
-   */
+  /** Background ids (`vn/backgrounds.ts`) this entry only makes sense in */
   requiresBackground?: string[]
 }
 
-/**
- * Regions and kinks for the built-in entries, kept beside the catalog rather than inline so the
- * hand-written `actionText`/`promptNote` lines above stay readable. A world's own entries carry
- * their own `regions`/`kinks` on the entry itself.
- */
+/** Regions and kinks for the built-in entries, kept beside the catalog rather than inline so the hand-written… */
 const BUILT_IN_ENTRY_REGIONS: Record<string, BodyRegion[]> = {
   'aff-hands-public': ['hands'],
   'aff-earbuds': ['ears', 'shoulders'],
@@ -217,18 +152,7 @@ const BUILT_IN_ENTRY_REGIONS: Record<string, BodyRegion[]> = {
   'act-exhibitionism': ['genitals', 'hips'],
 }
 
-/**
- * What kinks each built-in entry involves. This is the *only* thing a hard limit can act on:
- * `intimacyEntryKinks` falls through to `[]` for anything missing here, and `isAnyHardLimit([])` is
- * always false — so an untagged entry cannot be excluded by any limit an author sets, however
- * carefully the entry itself is written. Half the catalog used to be missing from this table.
- *
- * The rule for what to tag: **something a character could plausibly have an opinion about.** A kiss
- * to the forehead gets `gentle` because a character can genuinely be eager for or averse to
- * tenderness (`kinkResponsiveness` reads valence, not just limits); a kiss to the wrist gets
- * nothing, because there is no coherent stance to take on it. An absent entry below is a
- * deliberate "nothing to have an opinion about", not an oversight.
- */
+/** What kinks each built-in entry involves. */
 const BUILT_IN_ENTRY_KINKS: Record<string, KinkId[]> = {
   // affection — all `gentle`, which is the only stance there is to take on closeness.
   'aff-hands-public': ['gentle'],
@@ -284,8 +208,7 @@ const BUILT_IN_ENTRY_KINKS: Record<string, KinkId[]> = {
   // toy
   'toy-massage-oil': ['gentle'],
   'toy-warming-gel': ['sensory_play'],
-  // Wearables. `roleplay` on the costume ones is the stance an author would actually rule out —
-  // someone who finds dressing up mortifying, rather than someone with a view on lingerie.
+  // Wearables.
   'toy-thighhighs': [],
   'toy-lingerie': [],
   'toy-sheer-robe': [],
@@ -363,29 +286,16 @@ export function intimacyEntryKinks(option: IntimacyUnlockable): KinkId[] {
 /** Per-category baseline for an entry with no authored `arousalWeight`. */
 const CATEGORY_AROUSAL_WEIGHT: Record<IntimacyCategory, number> = { affection: 1, kissing_spot: 1, position: 7, toy: 4, activity: 3 }
 
-/**
- * The active entry's per-turn arousal weight. The default leans on `minWarmth` as a proxy for
- * intensity — the entries a relationship earns last are the ones that escalate hardest — which
- * holds across the built-in catalog and degrades sensibly for a world's own additions.
- */
+/** The active entry's per-turn arousal weight. */
 export function intimacyArousalWeight(option: IntimacyUnlockable): number {
   if (option.arousalWeight !== undefined) return option.arousalWeight
   const tierBump = option.minWarmth >= 90 ? 2 : option.minWarmth >= 75 ? 1 : 0
   return CATEGORY_AROUSAL_WEIGHT[option.category] + tierBump
 }
 
-/**
- * `kissing_spot` sits apart from the other three categories: kissing itself is romantic content
- * this app has never gated behind the explicit-content dial (`intimacyGuidance`'s own
- * `fade_to_black` case explicitly allows scenes up through kissing), so these stay available at
- * every `IntimacyDetailLevel` once warmth earns them. `position`/`toy`/`activity` are unambiguously
- * explicit-tier content and only ever surface when the user has actually turned that dial to
- * `'explicit'` — see `intimacyOptionsGuidance`.
- */
+/** `kissing_spot` sits apart from the other three categories */
 export const DEFAULT_INTIMACY_CATALOG: IntimacyUnlockable[] = [
   // --- affection: non-explicit closeness, available at every rating (see `isExplicitCategory`).
-  //     The band a playthrough actually spends most of its time in, and the catalog had nothing in
-  //     it — every entry below is weight 1, so clicking one reads as tenderness, not escalation. ---
   { id: 'aff-hands-public', category: 'affection', label: 'holding hands in public', minWarmth: 15, arousalWeight: 1, actionText: "*I let my hand find {char}'s as we walk, and don't let go when the street gets busier.*", promptNote: "taking {char}'s hand in public and keeping it there, the small decision of not letting go when someone might see" },
   { id: 'aff-earbuds', category: 'affection', label: 'sharing earbuds', minWarmth: 15, arousalWeight: 1, actionText: "*I pull one earbud out and hold it toward {char} without saying anything about it.*", promptNote: "offering {char} one earbud and sharing a song, the two of you tethered together by a short wire and having to stand closer for it" },
   { id: 'aff-cooking', category: 'affection', label: 'cooking together', minWarmth: 15, arousalWeight: 1, actionText: "*I hand {char} a knife and the other half of the vegetables, and we work the same counter without getting in each other's way.*", promptNote: "cooking together in the same small kitchen, the easy choreography of two people working around each other, neither of them making it a big deal" },
@@ -412,9 +322,7 @@ export const DEFAULT_INTIMACY_CATALOG: IntimacyUnlockable[] = [
   { id: 'kiss-shoulder', category: 'kissing_spot', label: 'shoulder blade', minWarmth: 75, actionText: "*I move behind {char} and kiss the curve of their shoulder blade, one hand resting at their waist.*", promptNote: "a kiss to the curve of {char}'s shoulder blade from behind, one hand at their waist, them unable to see it coming" },
   { id: 'kiss-thigh', category: 'kissing_spot', label: 'inner thigh', minWarmth: 90, minCommitment: 'dating', actionText: "*I settle lower and kiss my way slowly up the inside of {char}'s thigh, taking my time.*", promptNote: "kisses working slowly up the inside of {char}'s thigh, unhurried, their leg tensing or opening as you go" },
 
-  // --- position: explicit-only (see intimacyOptionsGuidance). Phrased as guiding things there mid-scene. ---
-  // The clothed tier. Everything here can happen with clothes on, which is what makes it the right
-  // rung between a kiss and a bed — the catalog used to jump straight from one to the other.
+  // --- position: explicit-only (see intimacyOptionsGuidance). Phrased as guiding things there mid-scene.
   { id: 'pos-lap-clothed', category: 'position', label: 'pulled into their lap, still dressed', minWarmth: 55, actionText: "*I take {char} by the hips and pull them down into my lap, both of us still fully dressed, and just hold them there.*", promptNote: "{char} pulled into your lap with both of you still fully dressed, held there, nothing happening yet and both of you aware of how little would have to change" },
   { id: 'pos-pinned-standing', category: 'position', label: 'pinned standing, fully clothed', minWarmth: 55, actionText: "*I back {char} up until there's nowhere left to go and brace a hand on the wall beside their head, not touching them otherwise.*", promptNote: "{char} backed against a wall with your hand braced beside their head, fully clothed and barely touching, the whole charge of it in the not-touching" },
   { id: 'pos-chair-straddle', category: 'position', label: 'straddling them in a chair', minWarmth: 55, actionText: "*I sit back and pull {char} down to straddle my lap in the chair, their knees either side of me.*", promptNote: "{char} straddling your lap in a chair, knees either side of you, their height advantage for once, both of you still dressed" },
@@ -432,8 +340,7 @@ export const DEFAULT_INTIMACY_CATALOG: IntimacyUnlockable[] = [
   { id: 'pos-wall-one-leg', category: 'position', label: 'against the wall, one leg up', minWarmth: 75, minCommitment: 'dating', actionText: "*I press {char} to the wall and lift one of their legs to my hip, leaving the other foot on the floor.*", promptNote: "{char} against the wall with one leg hitched up to your hip and the other foot still on the floor, upright and carrying their own weight, unlike being lifted entirely" },
   { id: 'pos-against-wall', category: 'position', label: 'against the wall', minWarmth: 75, minCommitment: 'dating', actionText: "*I back {char} into the wall and lift them, their legs coming up around me, my forearm braced beside their head.*", promptNote: "{char} pinned against the wall with their legs around you, held up by you entirely, nothing under them to brace against" },
 
-  // The top tier is distinguished by exposure (somewhere you could be caught) or by trust (something
-  // that needs real coordination to be safe), not by intensity.
+  // The top tier is distinguished by exposure (somewhere you could be caught) or by trust (something that needs real coordination to…
   { id: 'pos-desk', category: 'position', label: 'bent over the desk', minWarmth: 90, minCommitment: 'exclusive', requiresBackground: ['classroom', 'office', 'club-room', 'library', 'school-nurse-office'], actionText: "*I sweep enough of the desk clear to matter and bend {char} forward over it.*", promptNote: "{char} bent forward over a desk, whatever was on it pushed aside, the wrongness of the furniture being part of it" },
   { id: 'pos-table', category: 'position', label: 'on the table', minWarmth: 90, minCommitment: 'exclusive', requiresBackground: ['kitchen', 'living-room', 'restaurant', 'cafe'], actionText: "*I lift {char} up onto the table and step in between their knees before they've finished settling.*", promptNote: "{char} lifted onto a table with you standing between their knees, everything at the wrong height and better for it" },
   { id: 'pos-window', category: 'position', label: 'against the window', minWarmth: 90, minCommitment: 'exclusive', requiresBackground: ['bedroom', 'living-room', 'office', 'hospital'], actionText: "*I walk {char} back until the glass is cold against their shoulders, and don't close the curtain.*", promptNote: "{char} pressed to a window with the curtain open, cold glass at their back, the street below and the question of who can see part of the whole thing" },
@@ -521,54 +428,27 @@ function commitmentMet(min: CommitmentStatus | undefined, actual: CommitmentStat
   return COMMITMENT_ORDER.indexOf(actual) >= COMMITMENT_ORDER.indexOf(min)
 }
 
-/**
- * The built-in ~37-entry catalog plus whatever a world has added of its own — additive by default,
- * same "author extends a fixed default set" pattern as `CustomBackground`/`DEFAULT_BACKGROUNDS`, not
- * a wholesale override like `getGiftCatalog` — a world's own kinks add to the sensible defaults
- * rather than requiring the author to redefine sex positions from scratch just to add one more.
- *
- * `replaceIntimacyCatalog` is the escape hatch that additive-only design was missing: the built-in
- * entries assume a humanoid body plan throughout (hands, hips, knees, a back to lie on), which reads
- * fine for the overwhelming majority of cards but has no honest way to be suppressed for a
- * non-humanoid or otherwise very different character — a world could add its own entries, but could
- * never stop the ~37 defaults from also surfacing alongside them. Set alongside `customIntimacyOptions`
- * (never alone; an empty catalog with nothing to draw from isn't useful on its own), this makes those
- * additions the *entire* catalog instead of a supplement to it.
- */
+/** The built-in ~37-entry catalog plus whatever a world has added of its own */
 export function getIntimacyCatalog(world?: { customIntimacyOptions?: IntimacyUnlockable[]; replaceIntimacyCatalog?: boolean }): IntimacyUnlockable[] {
   if (world?.replaceIntimacyCatalog) return world.customIntimacyOptions ?? []
   return world?.customIntimacyOptions?.length ? [...DEFAULT_INTIMACY_CATALOG, ...world.customIntimacyOptions] : DEFAULT_INTIMACY_CATALOG
 }
 
-/**
- * Every catalog entry (built-in plus this world's own additions) this specific relationship has
- * earned so far, at its current warmth and commitment tier. `ownedToyIds`, when passed, further
- * restricts `toy`-category results to ones actually bought (`Chat.toyInventory`) — warmth/
- * commitment only ever gate *eligibility to buy*, not automatic possession, so the model should
- * never be told about a toy the player hasn't actually purchased. Omitted (the Relationship
- * panel's own call) returns every eligible toy regardless of ownership, since the panel needs to
- * render a "Buy" affordance for the ones not owned yet, not just hide them.
- */
+/** Every catalog entry (built-in plus this world's own additions) this specific relationship has earned so far, at its current… */
 /** A character's own limits, applied to the action set rather than described to the model. */
 export interface IntimacyProfiles {
   touch?: TouchProfile
   kinks?: KinkProfile
 }
 
-/**
- * Whether this specific character will engage with an entry at all. A hard-limited kink or a region
- * they've ruled out (or not yet opened up at this warmth) removes the entry from the set entirely —
- * from the panel, from the prompt, and from anywhere a stage edge could route into it.
- */
+/** Whether this specific character will engage with an entry at all. */
 export function isEntryAllowed(
   option: IntimacyUnlockable,
   warmth: number,
   profiles?: IntimacyProfiles,
   sceneBackgroundId?: string,
 ): boolean {
-  // Deliberately above the no-profile check below: a character nobody has authored has no profile
-  // at all, and that is the exact case this gate exists for. Behind the early return it would have
-  // been inert precisely when it mattered.
+  // Deliberately above the no-profile check below: a character nobody has authored has no profile at all, and that is the exact case this gate exists for.
   if (option.requiresEagerness && kinkValence(profiles?.kinks, option.requiresEagerness) < 1) return false
   // Only filters when the caller actually knows where the scene is — see `requiresBackground`.
   if (option.requiresBackground?.length && sceneBackgroundId && !option.requiresBackground.includes(sceneBackgroundId)) {
@@ -601,13 +481,7 @@ export function intimacyItemById(id: string, world?: { customIntimacyOptions?: I
   return getIntimacyCatalog(world).find((i) => i.id === id)
 }
 
-/**
- * The nearest still-locked entry in one category, for a "what's coming next" readout
- * (`RelationshipPanel`'s Unlocks tab) — lowest `minWarmth` among the ones not yet unlocked. A
- * reasonable "closest" heuristic even though a returned entry's own `minCommitment` could still
- * gate it further once warmth alone clears its bar; the caller shows both requirements rather than
- * only warmth. Returns `undefined` once every entry in the category is already unlocked.
- */
+/** The nearest still-locked entry in one category, for a "what's coming next" readout (`RelationshipPanel`'s Unlocks tab) */
 export function nextLockedInCategory(
   category: IntimacyCategory,
   warmth: number,
@@ -620,13 +494,7 @@ export function nextLockedInCategory(
     .sort((a, b) => a.minWarmth - b.minWarmth)[0]
 }
 
-/**
- * The actual sent-as-the-player message when an unlocked (and, for toys, owned) entry is clicked
- * in the Relationship panel — `option.actionText` with `{char}` substituted, or a generic
- * per-category fallback when unset (always true for a world's own custom entries unless the
- * author filled one in; every built-in entry has its own hand-written line instead of using this).
- * Pure and tested on its own so the panel never has to duplicate this substitution logic.
- */
+/** The actual sent-as-the-player message when an unlocked (and, for toys, owned) entry is clicked in the Relationship panel */
 export function composeIntimacyActionText(option: IntimacyUnlockable, charName: string): string {
   const template =
     option.actionText ??
@@ -661,15 +529,7 @@ export function resolveIntimacyPromptNote(option: IntimacyUnlockable, charName: 
   return (option.promptNote ?? defaultIntimacyPromptNote(option)).replace(/\{char\}/g, charName)
 }
 
-/**
- * The line injected into the *character's* reply turn (`useChatSession` → `runGeneration`'s
- * `extraStyleGuidance`) right after the player sends an intimacy action. Its whole job is to make
- * sure the model actually registers what the player just deliberately initiated — a terse
- * `*I ease {char} onto their back*` on its own reads like a stage direction the model can gloss
- * past — and writes a real, in-the-moment response to it. Real names interpolated directly rather
- * than `{{char}}`/`{{user}}`: `styleGuidance` strings are never macro-substituted (see
- * `mindGuidance.ts`'s note on the same point).
- */
+/** The line injected into the *character's* reply turn (`useChatSession` → `runGeneration`'s `extraStyleGuidance`) right after the… */
 export function intimacyActionDirective(option: IntimacyUnlockable, personaName: string, charName: string): string {
   return `${personaName} has just moved the scene into ${resolveIntimacyPromptNote(option, charName)}. This is something ${personaName} is doing on purpose, right now, not a passing detail. Write ${charName}'s response to it as the actual next beat: how ${charName} takes it, what they do and say, in ${charName}'s own voice and at the register the scene is already at.`
 }
@@ -685,43 +545,13 @@ function topLabels(items: IntimacyUnlockable[], category: IntimacyCategory): str
     .map((i) => i.label)
 }
 
-/**
- * A `styleGuidance` line naming what this relationship has actually unlocked so far — a bank of
- * ideas for the model to draw from *if* a scene genuinely goes there, never a mandate, same
- * "deterministic code decides eligibility, model narrates" split as `sceneProgressionNudge`.
- * `position`/`toy`/`activity` only ever appear once `intimacyLevel` is `'explicit'` — `kissing_spot`
- * is romantic, not explicit, content and was never gated behind that dial to begin with, so it
- * still shows at every other level. Returns `''` with nothing to say, so a fresh relationship (or a
- * user who's left explicit content off) pays nothing for this. Callers should pass `unlocked` from
- * `getUnlockedIntimacyOptions` with `ownedToyIds` set, so an unbought toy is never mentioned here.
- */
-/**
- * Whether a category is explicit-tier content, gated behind an `'explicit'` rating. `kissing_spot`
- * is romantic rather than explicit and has never been behind that dial (`intimacyGuidance`'s own
- * `fade_to_black` case allows scenes up through kissing), so it stays available at every level.
- */
+/** A `styleGuidance` line naming what this relationship has actually unlocked so far */
+/** Whether a category is explicit-tier content, gated behind an `'explicit'` rating. */
 export function isExplicitCategory(category: IntimacyCategory): boolean {
   return category !== 'kissing_spot' && category !== 'affection'
 }
 
-/**
- * Which categories the player may deliberately *choose* from the Relationship panel at a given
- * rating. The panel used to render all four regardless of the setting, so a chat set to
- * `fade_to_black` still handed the player buttons that send an explicit action line as their own
- * message — the dial held on the prompt and not on the UI.
- *
- * Deliberately NOT the same rule as `intimacyOptionsGuidance` below, which withholds explicit
- * categories from the *prompt* at every level except `'explicit'`. The two answer different
- * questions: that one is "what may the model volunteer unprompted", this one is "what may the
- * player explicitly ask for". Only a rating that actually asks for *less* — `fade_to_black` or
- * `suggestive` — takes the choice away.
- *
- * `'default'` therefore keeps everything, and that is load-bearing rather than an oversight:
- * `intimacyGuidance`'s own contract is that `'default'` is "the exact behavior every chat already
- * had before this setting existed, so nobody's existing output changes unless they deliberately
- * pick a level". Hiding these from someone who never opened the setting would break exactly that
- * promise, and silently remove actions they already had.
- */
+/** Which categories the player may deliberately *choose* from the Relationship panel at a given rating. */
 export function allowedIntimacyCategories(level: IntimacyDetailLevel): IntimacyCategory[] {
   const all: IntimacyCategory[] = ['affection', 'kissing_spot', 'position', 'toy', 'activity']
   const asksForLess = level === 'fade_to_black' || level === 'suggestive'

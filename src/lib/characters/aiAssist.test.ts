@@ -298,6 +298,20 @@ describe('suggestLoreEntries', () => {
     const client = mockClient('{"not": "an array"}')
     await expect(suggestLoreEntries(client, CHARACTER, [])).rejects.toThrow('Model did not return a JSON array of lore entries')
   })
+
+  it('keeps a title when the model gives one', async () => {
+    const client = mockClient('[{"title":" The lab ","keys":["lab"],"content":"Off-limits."},{"keys":["x"],"content":"No title."}]')
+    const entries = await suggestLoreEntries(client, CHARACTER, [])
+    expect(entries).toEqual([{ title: 'The lab', keys: ['lab'], content: 'Off-limits.' }, { keys: ['x'], content: 'No title.' }])
+  })
+
+  it('steers toward the requested focus and asks for that many entries', async () => {
+    const client = mockClient('[{"keys":["a"],"content":"b"}]')
+    await suggestLoreEntries(client, CHARACTER, [], 6, undefined, ' the northern guilds ')
+    const prompt = (client.generate as ReturnType<typeof vi.fn>).mock.calls[0][0].prompt as string
+    expect(prompt).toContain('Propose 6 new lore entries about: the northern guilds.')
+    expect(prompt).toContain('array of 6 objects')
+  })
 })
 
 describe('generateTraitOptions', () => {
@@ -334,9 +348,7 @@ describe('generateTraitOptions', () => {
   })
 
   it('recovers positionally when the model drops array brackets and breaks JSON.parse entirely', async () => {
-    // A real captured live-model response: archetype/occupation keep their brackets, quirk and
-    // relationshipStarter don't — malformed enough that jsonRepair's generic passes can't fix
-    // it, but the positional fallback (extractTraitOptionsPositionally) recovers all four.
+    // A real captured live-model response
     const malformed =
       '{"archetype":["tsundere rival","guilt-ridden healer"],' +
       '"occupation":["night-shift ER nurse","forensic sketch artist"],' +
@@ -354,10 +366,7 @@ describe('generateTraitOptions', () => {
 })
 
 describe('timeout handling', () => {
-  // Same live-confirmed failure mode `generateWithTimeout` exists for: a provider response that
-  // simply never resolves used to leave every one of this file's callers — the field "Regenerate"
-  // button, `GenerateCharacterDialog`, the lore-entry suggester — stuck forever with no error and
-  // no way to retry.
+  // Same live-confirmed failure mode `generateWithTimeout` exists for
   beforeEach(() => vi.useFakeTimers())
   afterEach(() => vi.useRealTimers())
 

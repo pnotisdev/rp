@@ -1,11 +1,4 @@
-// Who is still wearing what, tracked by the engine rather than remembered by the model. The cheapest
-// continuity win in this genre: re-describing the removal of something already removed is the single
-// most common break, and it's pure bookkeeping — a set of removed layers per side, updated by the
-// clicked action and by one bounded observation field, rendered into the scene state block, and
-// checked against the reply afterwards by `continuityGuard.ts`.
-//
-// Two sides only for now (the speaking character and the player), matching `IntimacyScene`'s own
-// per-relationship scope; the review's multi-character step promotes this to one entry per participant.
+// Who is still wearing what, tracked by the engine rather than remembered by the model.
 
 export const CLOTHING_LAYERS = ['outerwear', 'top', 'bottoms', 'underwear', 'shoes'] as const
 

@@ -5,9 +5,7 @@ import { wrapAssistPrompt } from '../prompt/instructTemplates'
 import { recordCompute } from './computeLog'
 import { stripThinkBlocks } from '../text/slop'
 
-// Races a backend `generate()` call against a timeout, aborting the request and turning a timeout
-// into a clear, labelled error. An `external` AbortSignal (e.g. the user hitting Stop) aborts
-// immediately instead of waiting out the timeout, and passes through as a plain AbortError.
+// Races a backend `generate()` call against a timeout, aborting the request and turning a timeout into a clear, labelled error.
 
 export const ASSIST_TIMEOUT_MS = 45_000
 
@@ -33,6 +31,8 @@ export interface AssistShaping {
   reasoningReserve?: number
   /** The active instruct template — already backend-resolved (forced to `plain-chat` for `openai-compatible`, same as the main reply; see `useChatSession.ts`). Wraps the prompt in the template's real turn markers via `wrapAssistPrompt` and merges in its stop sequences. */
   template?: InstructTemplate
+  /** Overrides the default 45s timeout for long outputs (whole files, several lore entries). */
+  timeoutMs?: number
 }
 
 export async function generateWithTimeout(
@@ -46,7 +46,8 @@ export async function generateWithTimeout(
   const onExternalAbort = () => controller.abort()
   if (external?.aborted) controller.abort()
   else external?.addEventListener('abort', onExternalAbort)
-  const timer = setTimeout(() => controller.abort(), ASSIST_TIMEOUT_MS)
+  const timeoutMs = shaping?.timeoutMs ?? ASSIST_TIMEOUT_MS
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
     // A stop on the fence would end an answer that opens with one (empty result), so cut at the closing fence afterwards instead.
     const stopsOnFence = !!params.stop_sequence?.includes(FENCE)
@@ -73,7 +74,7 @@ export async function generateWithTimeout(
   } catch (e) {
     if (external?.aborted) throw e instanceof Error ? e : new Error('aborted')
     if (controller.signal.aborted) {
-      throw new Error(`${label} timed out after ${Math.round(ASSIST_TIMEOUT_MS / 1000)}s. The model backend didn't respond in time.`)
+      throw new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)}s. The model backend didn't respond in time.`)
     }
     throw e
   } finally {

@@ -1,12 +1,7 @@
 import type { Lorebook } from '@/lib/characters/cardSpec'
 import type { ChatFact } from '@/lib/types'
 
-/**
- * Turns a chat's durable facts into a synthetic constant lorebook, so they ride through the same
- * activation/budget/placement machinery as any other lorebook rather than a new prompt section.
- * Prioritized by a blend of recency, importance, and unresolved-ness so what matters survives the
- * token cut.
- */
+/** Turns a chat's durable facts into a synthetic constant lorebook */
 
 /** Token cap for the synthetic "Remembered facts" lorebook — room for roughly 15-20 short facts. */
 export const FACTS_TOKEN_BUDGET = 200

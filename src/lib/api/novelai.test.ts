@@ -4,14 +4,7 @@ import { KoboldApiError } from './types'
 import type { GenerateRequest } from './types'
 import type { ChatBackend } from './chatBackend'
 
-/**
- * Mocked against the documented/reverse-engineered contract (see novelai.ts's own header comment)
- * — this session never had a real NovelAI account to verify against. `fetch` is mocked for BOTH
- * destinations this client calls: the local `/api/novelai/tokenize` endpoint (real, tested
- * separately and thoroughly in `server/novelaiTokenizer.test.ts` against the actual bundled model
- * files) and NovelAI's own hosted API (necessarily mocked here, since it can't be reached at all
- * without a subscription).
- */
+/** Mocked against the documented/reverse-engineered contract (see novelai.ts's own header comment) */
 
 const BASE_REQUEST: GenerateRequest = {
   prompt: 'Once upon a time,',
@@ -79,8 +72,8 @@ describe('NovelAIClient — request building', () => {
     await new NovelAIClient('sk-test', 'clio-v1').generate(BASE_REQUEST)
 
     const urls = fetchMock.mock.calls.map((c) => String(c[0])).filter((u) => u.includes('/ai/generate') && !u.includes('stream'))
-    expect(urls[0]).toBe('https://text.novelai.net/ai/generate')
-    expect(urls[1]).toBe('https://api.novelai.net/ai/generate')
+    expect(urls[0]).toBe('/api/novelai/proxy/text/ai/generate')
+    expect(urls[1]).toBe('/api/novelai/proxy/api/ai/generate')
   })
 
   it('sends a Bearer Authorization header', async () => {
@@ -262,16 +255,14 @@ describe('NovelAIClient — fallback surface', () => {
   })
 })
 
-// Settings → Connection's "does this actually work" check (also the header status dot for this
-// backend) — hits the same endpoint SillyTavern's own current backend uses to verify a key
-// (GET /user/subscription), never a real generation, so it costs no subscription quota.
+// Settings → Connection's "does this actually work" check (also the header status dot for this backend)
 describe('checkConnection', () => {
   it('treats a 200 from /user/subscription as ok, with the right auth header', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { tier: 3, active: true }))
     vi.stubGlobal('fetch', fetchMock)
     const result = await new NovelAIClient('sk-real', 'kayra-v1').checkConnection()
     expect(result).toEqual({ ok: true })
-    expect(fetchMock).toHaveBeenCalledWith('https://api.novelai.net/user/subscription', expect.objectContaining({ headers: expect.any(Object) }))
+    expect(fetchMock).toHaveBeenCalledWith('/api/novelai/proxy/api/user/subscription', expect.objectContaining({ headers: expect.any(Object) }))
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect((init.headers as Record<string, string>).Authorization).toBe('Bearer sk-real')
   })

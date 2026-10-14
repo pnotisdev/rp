@@ -1,7 +1,4 @@
-/**
- * Reads/writes avatar, sprite, gallery, background, and world-music files under data/avatars/.
- * Handles data: URL decoding, size limits, and pruning stale files on re-upload/delete.
- */
+/** Reads/writes avatar, sprite, gallery, background, and world-music files under data/avatars/. */
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -118,8 +115,7 @@ export function removeAvatar(kind: AvatarEntityKind, id: string): void {
   fs.rmSync(entityDir(kind, id), { recursive: true, force: true })
 }
 
-// Fixed expression/background/gallery ids, still validated since they end up in a filename. The
-// character class (no `/`, `\`, `.`) is what prevents traversal; length allows for composite outfit-sprite keys.
+// Fixed expression/background/gallery ids, still validated since they end up in a filename.
 const SAFE_KEY_RE = /^[a-z0-9][a-z0-9-]{0,89}$/i
 
 /** Like `resolveAvatar` but for a tagged set of images (one per expression/gallery entry/background), stored under `<kind>/<id>/<subKind>/<key>.<ext>`. */
@@ -179,9 +175,7 @@ export function resolveWorldMusicMap(id: string, map: unknown): Record<string, s
   return resolveMediaMap('worlds', 'music', id, map, decodeAudioDataUrl)
 }
 
-/** Same tagged-set handling as `resolveAvatarMap('worlds', 'backgrounds', ...)`, but for
- *  `WorldCard.backgroundsNight`'s optional per-location night variants — stored in a sibling
- *  `backgrounds-night/` folder so a location's day and night art never share a filename. */
+/** Same tagged-set handling as `resolveAvatarMap('worlds', 'backgrounds', ...)` */
 export function resolveWorldBackgroundsNightMap(id: string, map: unknown): Record<string, string> | undefined {
   return resolveMediaMap('worlds', 'backgrounds-night', id, map, decodeImageDataUrl)
 }

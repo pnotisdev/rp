@@ -5,17 +5,7 @@ import { describeContact, sceneParticipants, SCENE_PLAYER } from '@/lib/dating/s
 import type { ScenarioGraph } from '@/lib/dating/intimacyStages'
 import { StageCard, StageLabel, StageMeter, StageRow, type StageVariant } from '@/components/ui/Stage'
 
-/**
- * The live intimacy scene, read back to the player in the VN HUD's own idiom.
- *
- * Everything here was already engine-tracked and already injected into the prompt by
- * `prompt/sceneStateBlock.ts`; none of it was visible anywhere. That asymmetry is the actual problem
- * this solves: the continuity guard flags a reply for contradicting clothing state the player had no
- * way to see, and the arousal meter decides when a scene can end without ever showing its hand.
- *
- * Read-only by design. The scene advances from what the writing actually does; a panel that let the
- * player drag a meter would put the controller back in the wrong place.
- */
+/** The live intimacy scene, read back to the player in the VN HUD's own idiom. */
 
 /** Sentence-cases a band phrase for use as a standalone value. */
 function bandLabel(phrase: string): string {
@@ -92,9 +82,7 @@ export function SceneStateCard({
       )}
 
       {compact ? (
-        // One line for the stage HUD: how far along, without a number to stare at. Labelled with the
-        // name rather than a word like "building", which would read as a second, contradictory stage
-        // right underneath the real one.
+        // One line for the stage HUD: how far along, without a number to stare at.
         <StageRow label={nameOf(viewingId)} variant={variant}>
           {bandLabel(AROUSAL_BAND_PHRASE[sceneArousalBand(scene, viewingId)])}
         </StageRow>

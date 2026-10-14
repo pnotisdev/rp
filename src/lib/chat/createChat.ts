@@ -10,12 +10,20 @@ import { getUnlockedBackgroundIds, getUnlockedExpressionIds } from '@/lib/vn/unl
 import { backgroundLabel, matchBackgroundKeyword } from '@/lib/vn/backgrounds'
 import type { SceneTag } from '@/lib/vn/sceneTag'
 import type { Chat, RelationshipDimension, WorldCard } from '@/lib/types'
+import { seedDriveFromPreviousChat } from '@/lib/persona/inherit'
 
 function parseGreetingGate(line: string): { minAffection: number; text: string } {
   const match = line.match(/^\s*\[affection>=\s*(\d{1,3})\]\s*/i)
   const minAffection = match ? Math.max(0, Math.min(100, Number(match[1]) || 0)) : 0
   const text = match ? line.slice(match[0].length) : line
   return { minAffection, text: text.trim() }
+}
+
+/** A live-persona character needs the relationship judge for mood and remembered facts, even in a mode that hides romance mechanics. */
+function driveAwareOverrides<T extends { autoTrackRelationship?: boolean }>(character: Character, overrides: T): T {
+  if (!character.drive?.enabled || overrides.autoTrackRelationship !== false) return overrides
+  const { autoTrackRelationship: _off, ...rest } = overrides
+  return rest as T
 }
 
 /** Every ungated (no `[affection>=N]` gate) opening line available at creation time — `first_mes` plus `alternate_greetings`, in card order. A gated greeting only becomes reachable via a swipe later, once affection actually clears its bar, so it's never offered here. */
@@ -39,32 +47,21 @@ export interface CreateChatOptions {
   greetingIndex?: number
   /** Optional — when given, fires a best-effort `detectGreetingScene` pass so the static opening greeting gets an expression/background tag too (see that function's doc comment). Omit from a context with no client handy; the chat still works fine, VN mode just starts on a placeholder until the first real reply. */
   client?: ChatBackend
-  /** The play-style chip picked in `NewChatDialog` — stored as `Chat.mode` (display only) and used
-   *  to seed `assistOverrides`, taking priority over the bound world's own template so a chat can
-   *  deliberately diverge from it. Defaults to the world's template, then 'dating_sim'. */
+  /** The play-style chip picked in `NewChatDialog` */
   mode?: WorldTemplateId
 }
 
-/**
- * The one place a chat actually gets created — `NewChatDialog`'s full picker flow and
- * `ChatsPanel`'s one-click "New chat, same character & persona" (section 14's "chat management
- * basics") both call this, so the starting-state fields (gift coins, starting inventory, assist
- * overrides, warmth-derived stage) can't drift between the two entry points the way they would as
- * two independently-maintained copies.
- */
+/** The one place a chat actually gets created */
 export async function createChat(opts: CreateChatOptions): Promise<Chat> {
   const { character, world, personaId, personaName, participantIds, startingAffection = 0, summary, greetingIndex = 0, client, mode } = opts
 
-  // A starter describes existing closeness, not built-up conflict or a curiosity spike, so it only
-  // seeds the four warmth-composing dimensions — curiosity/tension stay at a neutral 0.
+  // A starter describes existing closeness, not built-up conflict or a curiosity spike
   const startingStats: Partial<Record<RelationshipDimension, number>> | undefined =
     startingAffection > 0
       ? { trust: startingAffection, chemistry: startingAffection, comfort: startingAffection, respect: startingAffection }
       : undefined
   const warmth = computeWarmth(startingAffection, getRelationshipStats({ relationshipStats: startingStats }))
-  // Normalizes here (not just at read time) so a chat created against a world still carrying a
-  // retired template id (e.g. old data with 'slice_of_life') writes the canonical replacement
-  // going forward, rather than perpetuating a value the picker no longer offers.
+  // Normalizes here (not just at read time) so a chat created against a world still carrying a retired template id (e.g. old data…
   const resolvedMode = normalizeWorldTemplateId(mode ?? world?.template)
 
   const chat = await chatsApi.create({
@@ -82,8 +79,10 @@ export async function createChat(opts: CreateChatOptions): Promise<Chat> {
     unlockedGalleryIds: [],
     summary,
     mode: resolvedMode,
-    assistOverrides: assistOverridesForTemplate(resolvedMode),
+    assistOverrides: driveAwareOverrides(character, assistOverridesForTemplate(resolvedMode)),
   })
+
+  await seedDriveFromPreviousChat(character, chat.id).catch(() => {})
 
   const greetings = availableGreetings(character)
   if (greetingIndex >= 0 && greetings.length > 0) {
@@ -99,17 +98,12 @@ export async function createChat(opts: CreateChatOptions): Promise<Chat> {
       activeSwipe,
     })
 
-    // Best-effort, fire-and-forget — never blocks chat creation/navigation, and a failed or skipped
-    // call just leaves VN mode showing its placeholder gradient (or the world's own
-    // `defaultBackgroundId`) until the first real reply lands. Only worth a model call when there's
-    // actual custom art to pick between; the built-in default ids with no uploaded art are just
-    // differently-hued placeholder gradients either way.
+    // Best-effort, fire-and-forget — never blocks chat creation/navigation
     const hasCustomArt =
       Object.values(world?.backgrounds ?? {}).some(Boolean) || Object.keys(character.sprites ?? {}).length > 0
     const greetingText = rendered[activeSwipe]
     const backgroundIds = getUnlockedBackgroundIds(world, startingAffection)
-    // Free, deterministic and always available, unlike the model pass below — matches the greeting
-    // text against background labels/ids so a scene tag exists even with no client connected at all.
+    // Free, deterministic and always available, unlike the model pass below
     const keywordGuess = (): SceneTag | null => {
       const bg = matchBackgroundKeyword(
         greetingText,
@@ -121,9 +115,7 @@ export async function createChat(opts: CreateChatOptions): Promise<Chat> {
       if (!scene) return
       const swipeScenes = rendered.map((_, i) => (i === activeSwipe ? scene : undefined))
       const writes: Promise<unknown>[] = [messagesApi.update(greetingMessage.id, { scene, swipeScenes })]
-      // Seed the chat's own scene location from the resolved background so the prompt's
-      // schedule-presence framing has an established place to reconcile against from turn one,
-      // rather than contradicting a greeting that already placed the character somewhere.
+      // Seed the chat's own scene location from the resolved background so the prompt's schedule-presence framing has an established…
       if (scene.background) {
         writes.push(
           chatsApi.update(chat.id, {
@@ -140,8 +132,7 @@ export async function createChat(opts: CreateChatOptions): Promise<Chat> {
         backgroundIds,
       })
         .then((scene) => {
-          // Keyword guess supplies the background as a baseline; the model's own answer (expression,
-          // and a background when it gave one) wins wherever it actually answered.
+          // Keyword guess supplies the background as a baseline
           const merged = { ...keywordGuess(), ...scene }
           return applyScene(Object.keys(merged).length ? merged : null)
         })

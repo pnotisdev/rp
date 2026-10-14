@@ -18,6 +18,8 @@ import {
   seedWorld2,
   seedWorldInfoBook,
 } from './seedContent.ts'
+import { SEED_CHARACTER_3_ID, seedCharacter3 } from './seedTess.ts'
+import { SEED_CHARACTER_4_ID, seedCharacter4 } from './seedKoyuki.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // Committed at the repo root (not under data/, which is gitignored) — these ship with the app.
@@ -25,16 +27,18 @@ const seedAssetsDir = path.resolve(__dirname, '..', 'seed', 'backgrounds')
 const seedNightAssetsDir = path.resolve(__dirname, '..', 'seed', 'backgrounds-night')
 const seedSpritesDir = path.resolve(__dirname, '..', 'seed', 'sprites', 'sumire')
 
-/**
- * Populates the one bundled world/character/World Info book on first run only. Idempotent by
- * construction: it checks for the seed world's own fixed id rather than "is the database empty",
- * so deleting other data never re-triggers it, and re-running it (e.g. after `npm install`) is a
- * harmless no-op once it's already been applied once.
- */
+/** Populates the one bundled world/character/World Info book on first run only. */
 export function runSeedIfNeeded(): void {
-  // The starter persona, and later the second (Freeform) seed world/character, were both added
-  // after the original seed shipped — back-fill each for installs that already ran the seed before
-  // they existed, guarded by their own ids so this stays a one-time no-op per piece.
+  // Kirara (seedTess.ts) and Koyuki (seedKoyuki.ts) are world-less, so they back-fill on her own id for every install.
+  if (!characterStore.get(SEED_CHARACTER_3_ID)) {
+    characterStore.insert(seedCharacter3 as unknown as Record<string, unknown>)
+    console.log('[rp-server] added the seed character Kirara')
+  }
+  if (!characterStore.get(SEED_CHARACTER_4_ID)) {
+    characterStore.insert(seedCharacter4 as unknown as Record<string, unknown>)
+    console.log('[rp-server] added the seed character Koyuki')
+  }
+  // The starter persona, and later the second (Freeform) seed world/character, were both added after the original seed shipped
   if (worldStore.get(SEED_WORLD_ID)) {
     if (!personaStore.get(SEED_PERSONA_ID)) {
       personaStore.insert(seedPersona as unknown as Record<string, unknown>)
@@ -58,8 +62,7 @@ export function runSeedIfNeeded(): void {
     copied++
   }
 
-  // Night-lighting variants, same "missing is fine" tolerance — a key with no night art just shows
-  // its day art at night, same as VNStage's runtime fallback.
+  // Night-lighting variants, same "missing is fine" tolerance
   const backgroundsNightDest = path.join(avatarsDir, 'worlds', SEED_WORLD_ID, 'backgrounds-night')
   fs.mkdirSync(backgroundsNightDest, { recursive: true })
   for (const key of SEED_BACKGROUND_NIGHT_KEYS) {
@@ -69,9 +72,7 @@ export function runSeedIfNeeded(): void {
     copied++
   }
 
-  // Sumire's portrait + expression sprites, same idea as the backgrounds above — committed under
-  // seed/sprites/sumire/ and copied into her own avatars folder so she ships fully illustrated.
-  // Missing files just fall back to the main avatar for that expression, so a partial set is fine.
+  // Sumire's portrait + expression sprites, same idea as the backgrounds above
   const characterDest = path.join(avatarsDir, 'characters', SEED_CHARACTER_ID)
   const spritesDest = path.join(characterDest, 'sprites')
   fs.mkdirSync(spritesDest, { recursive: true })
@@ -85,9 +86,7 @@ export function runSeedIfNeeded(): void {
   const avatarSrc = path.join(seedSpritesDir, 'avatar.png')
   if (fs.existsSync(avatarSrc)) fs.copyFileSync(avatarSrc, path.join(characterDest, 'avatar.png'))
 
-  // The stores are intentionally typed loosely (Record<string, unknown> in, out) since they're a
-  // thin JSON-blob layer over SQLite shared by every entity kind — seedContent.ts's exports carry
-  // the real, precise types for everything written by hand above.
+  // The stores are intentionally typed loosely (Record<string, unknown> in, out) since they're a thin JSON-blob layer over SQLite…
   worldStore.insert(seedWorld as unknown as Record<string, unknown>)
   worldInfoBookStore.insert(seedWorldInfoBook as unknown as Record<string, unknown>)
   characterStore.insert(seedCharacter as unknown as Record<string, unknown>)

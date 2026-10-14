@@ -69,8 +69,7 @@ describe('findArchetypeMatch', () => {
         { connections: [{ name: 'Aiko', relation: 'her mentor' }] },
       ],
     )
-    // The first source's entry names Aiko but doesn't classify, so it must fall through to the
-    // second source rather than stopping cold at the first name match.
+    // The first source's entry names Aiko but doesn't classify
     expect(match?.archetype).toBe('mentor_mentee')
   })
 

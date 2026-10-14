@@ -1,9 +1,4 @@
-// ReDoS mitigation for World Info regex-key syntax (`activation.ts`) and Settings → Regex Scripts
-// (`regexScripts.ts`), which both compile arbitrary imported regex and run it against real
-// conversation text every turn. A shallow, fast heuristic for the common catastrophic-backtracking
-// shape, not a real static analyzer — good enough to flag a suspicious pattern at authoring time,
-// not a guarantee against an imported file that skips the editor entirely (`activation.ts` also
-// caps haystack length independent of this).
+// ReDoS mitigation for World Info regex-key syntax (`activation.ts`) and Settings → Regex Scripts (`regexScripts.ts`)
 
 /** The nested-quantifier shape, e.g. `(a+)+`, `(a*)+`, `([a-z]+)*` — by far the most common real-world ReDoS pattern. */
 const NESTED_QUANTIFIER = /\([^()]*[+*][^()]*\)[+*]/

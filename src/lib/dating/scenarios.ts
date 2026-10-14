@@ -9,16 +9,7 @@ import {
 } from '@/lib/dating/intimacyStages'
 import type { IntimacyDetailLevel } from '@/lib/store/useSettingsStore'
 
-/**
- * Scenarios as content: which shapes a scene can take, chosen per scene from what the relationship
- * and the content dial actually allow. Same "author extends a fixed default set" pattern as
- * `intimacyCatalog.ts` and `DEFAULT_BACKGROUNDS` — a world adds its own without redefining the
- * built-ins, and a malformed one is rejected at import rather than mid-scene.
- *
- * The graphs here carry structure only. Every word the model ever sees still comes from the catalog
- * entry a stage routes into and from the character's own authored voice; a stage id is engine
- * bookkeeping, and an edge label is a button in the Relationship panel.
- */
+/** Scenarios as content: which shapes a scene can take, chosen per scene from what the relationship and the content dial actually allow. */
 
 const DETAIL_ORDER: IntimacyDetailLevel[] = ['fade_to_black', 'suggestive', 'default', 'explicit']
 
@@ -27,14 +18,7 @@ function detailLevelMet(required: IntimacyDetailLevel | undefined, actual: Intim
   return DETAIL_ORDER.indexOf(actual) >= DETAIL_ORDER.indexOf(required)
 }
 
-/**
- * The scene shape the review describes: foreplay, a real decision about where it goes, and a second
- * about how it ends. Deliberately two gates and no more — every turn behind a menu would make this a
- * visual novel rather than an RP client, so everything else moves on the meter and the turn floors.
- *
- * Only offered at the explicit tier and once a relationship is actually established; anyone else gets
- * `DEFAULT_SCENARIO`'s open scene, exactly as before scenarios existed.
- */
+/** The scene shape the review describes: foreplay, a real decision about where it goes, and a second about how it ends. */
 export const BRANCHING_SCENARIO: ScenarioGraph = {
   id: 'branching-explicit',
   version: 1,
@@ -95,8 +79,7 @@ export const BRANCHING_SCENARIO: ScenarioGraph = {
       minTurns: 1,
       softMaxTurns: 6,
       edges: [
-        // Both of these end the scene, so the flag is the only thing that records which was chosen —
-        // and it is what lets a world rule react to it later (`world/triggers.ts`'s `flag_set`).
+        // Both of these end the scene, so the flag is the only thing that records which was chosen
         { to: RESOLVE_STAGE, mode: 'choice', label: 'Finish together, inside', isDefault: true, setsFlag: 'finished_inside' },
         { to: RESOLVE_STAGE, mode: 'choice', label: 'Pull out first', setsFlag: 'pulled_out' },
         { to: 'together', mode: 'choice', label: 'Not yet, draw it out' },
@@ -120,12 +103,7 @@ function isOffered(graph: ScenarioGraph, ctx: ScenarioSelectionContext): boolean
   return detailLevelMet(graph.minDetailLevel, ctx.intimacyLevel) && stageConditionsMet(graph.eligibility, ctx)
 }
 
-/**
- * The scenario a scene about to start should run on: the most specific one that's actually offered,
- * where specificity is how much a scenario asks for. A scenario that requires nothing can never beat
- * one that requires something, so the open-scene fallback only wins when nothing else qualifies —
- * and it always qualifies, so a scene can never fail to find a shape.
- */
+/** The scenario a scene about to start should run on: the most specific one that's actually offered, where specificity is how much a scenario asks for. */
 export function selectScenario(catalog: ScenarioGraph[], ctx: ScenarioSelectionContext): ScenarioGraph {
   const offered = catalog.filter((graph) => isOffered(graph, ctx))
   const ranked = [...offered].sort((a, b) => specificity(b) - specificity(a))
@@ -155,11 +133,7 @@ export function successorScenario(
   return undefined
 }
 
-/**
- * Validates an imported scenario — a `data/scenarios/*.json` file, or one riding along in a world.
- * Structure first (the shape a JSON file can get wrong in ways TypeScript never sees), then the
- * graph's own rules. Returns the problems, `[]` for a scenario that's safe to load.
- */
+/** Validates an imported scenario — a `data/scenarios/*.json` file, or one riding along in a world. */
 export function validateScenarioSource(raw: unknown): string[] {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return ['not an object']
   const obj = raw as Record<string, unknown>

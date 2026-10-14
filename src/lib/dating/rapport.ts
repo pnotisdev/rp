@@ -1,12 +1,4 @@
-/**
- * 10b's "live feedback during the scene" — a rapport-trajectory read shown while a live date is
- * running. Per-turn relationship *scoring* is deliberately suppressed for the whole date (its
- * outcome is judged once at the end); this is the qualitative counterpart, so the player can feel
- * how a scene is trending without a number moving or the end result being spoiled.
- *
- * `assessRapport` is a cheap, stateless judge call: it reads the last few turns of the date and
- * returns one label, nothing else. It never touches affection or the tracked dimensions.
- */
+/** 10b's "live feedback during the scene" — a rapport-trajectory read shown while a live date is running. */
 
 import type { ChatBackend } from '@/lib/api/chatBackend'
 import { generateWithTimeout, type AssistShaping } from '@/lib/api/generateWithTimeout'
@@ -70,16 +62,12 @@ const RAPPORT_PARAMS = {
   rep_pen: 1.05,
   rep_pen_range: 512,
   rep_pen_slope: 0,
-  // `\n\n\n` (not `\n\n`) matches the other judge calls — a model that opens with a stray blank
-  // line shouldn't have its whole answer swallowed by the stop sequence.
+  // `\n\n\n` (not `\n\n`) matches the other judge calls
   stop_sequence: ['\n\n\n', '```'],
   trim_stop: true,
 }
 
-/**
- * Reads how the date is trending from its last few turns. Returns null on any parse/connection
- * failure — the caller just keeps showing the previous read rather than flashing an error mid-scene.
- */
+/** Reads how the date is trending from its last few turns. */
 export async function assessRapport(
   client: ChatBackend,
   params: {
@@ -114,10 +102,7 @@ export async function assessRapport(
 
   let text: string
   try {
-    // A hang here (a slow/rate-limited backend that never responds) used to mean this promise
-    // never settled either way — `generateWithTimeout` turns that into an ordinary error after
-    // 45s, which the catch below already treats the same as any other read failure: keep showing
-    // the previous rapport read rather than spending a whole live date stuck on "Reading the room…".
+    // A hang here (a slow/rate-limited backend that never responds) used to mean this promise never settled either way
     text = await generateWithTimeout(
       client,
       { ...RAPPORT_PARAMS, max_context_length: await client.getEffectiveMaxContext(), prompt },

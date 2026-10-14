@@ -1,8 +1,4 @@
-/**
- * Folds aging messages into a running summary via the connected model itself — the actual
- * long-term memory mechanism: once messages age out of the context window, their substance
- * survives here instead of being silently dropped.
- */
+/** Folds aging messages into a running summary via the connected model itself */
 
 import type { ChatMessage } from './builder'
 import type { VoiceFingerprint } from '@/lib/characters/cardSpec'

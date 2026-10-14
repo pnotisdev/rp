@@ -1,18 +1,11 @@
 export type WorldTemplateId = 'freeform' | 'visual_novel' | 'dating_sim'
 
-/** Template ids retired from the picker but that may still be sitting on a world/chat created
- *  before the retirement — mapped to whichever still-offered template it now behaves as, so old
- *  data keeps working with no migration step. Slice of Life merged into Freeform (Tier 3a): it kept
- *  the world clock but never grew a distinct loop of its own, and Freeform's "no romance mechanics"
- *  plain-roleplay framing already covers what it was for. */
+/** Template ids retired from the picker but that may still be sitting on a world/chat created before the retirement */
 const RETIRED_TEMPLATE_ALIASES: Record<string, WorldTemplateId> = {
   slice_of_life: 'freeform',
 }
 
-/** Turns any stored `WorldCard.template`/`Chat.mode` value — including a retired id from before a
- *  template was merged away, or unset — into a live `WorldTemplateId`. The one place that decides
- *  what old data means now; anything reading a stored value for display or logic (not just this
- *  module's own functions) should go through this rather than re-deriving the fallback by hand. */
+/** Turns any stored `WorldCard.template`/`Chat.mode` value */
 export function normalizeWorldTemplateId(id: string | undefined): WorldTemplateId {
   if (!id) return 'dating_sim'
   return RETIRED_TEMPLATE_ALIASES[id] ?? (id as WorldTemplateId)
@@ -37,14 +30,9 @@ export interface WorldTemplateDef {
   /** Pre-filled into the new world's description field — a starting point, not locked in. */
   description: string
   rules: string
-  /** Whether a new chat for a character bound to this world should default `Chat.assistOverrides`
-   *  to turn off relationship tracking/choice suggestions — the templates whose own blurb says
-   *  "no romance mechanics," not merely "no gift economy" (Visual Novel keeps relationship
-   *  tracking on by default; plenty of VN stories are romance-driven even without a gift shop). */
+  /** Whether a new chat for a character bound to this world should default `Chat.assistOverrides` to turn off relationship… */
   disablesRelationshipAssists: boolean
-  /** A `SystemPromptPreset.id` (`src/lib/prompt/systemPrompts.ts`) this template seeds new chats
-   *  with — unset for a template with no particular opinion on prose style (Visual Novel, Dating
-   *  Sim: still just whatever the global Settings default already says). */
+  /** A `SystemPromptPreset.id` (`src/lib/prompt/systemPrompts.ts`) this template seeds new chats with */
   systemPromptId?: string
 }
 
@@ -93,16 +81,11 @@ export function assistOverridesForTemplate(template: WorldTemplateId | undefined
   showDateEventButton?: boolean
 } {
   const def = getWorldTemplate(template)
-  // Every one of these four rides on the same "no romance mechanics" opinion the template's own
-  // blurb already states — slow-burn pacing, intent chips (Flirt/Tease/…), and the date/event
-  // button are all romance-flavored surface, same reasoning as the relationship-assist pair.
+  // Every one of these four rides on the same "no romance mechanics" opinion the template's own blurb already states
   const relationshipOverride = def.disablesRelationshipAssists
     ? { autoTrackRelationship: false, autoSuggestChoices: false, slowBurnPacing: false, showIntentChips: false, showDateEventButton: false }
     : {}
-  // Only Visual Novel forces a *display mode* opinion — its whole premise is scene-background
-  // presentation, unlike the other templates, where VN mode is a legitimate but unrelated choice
-  // the user's own global default should keep deciding. `'auto'` rather than a hard `true`: it
-  // still shouldn't force a blank void on a character/world with no art yet (`isVnReady`).
+  // Only Visual Novel forces a *display mode* opinion
   const vnOverride = normalizeWorldTemplateId(template) === 'visual_novel' ? { visualNovelMode: 'auto' as const } : {}
   const systemPromptOverride = def.systemPromptId ? { systemPromptId: def.systemPromptId } : {}
   return { ...relationshipOverride, ...vnOverride, ...systemPromptOverride }

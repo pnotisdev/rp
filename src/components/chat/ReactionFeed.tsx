@@ -23,7 +23,7 @@ function ReactionChip({ reaction, variant }: { reaction: Reaction; variant: 'def
   const entries = Object.entries(reaction.deltas).filter(([, d]) => d)
   const net = entries.reduce((sum, [k, d]) => sum + (k === 'tension' ? -d : d), 0)
   const tone = net > 0 ? 'text-romance' : net < 0 ? 'text-danger' : 'text-text-muted'
-  const surface = variant === 'vn' ? 'vn-glass text-white/90' : 'bg-bg-elevated text-text themed-shadow'
+  const surface = variant === 'vn' ? 'vn-glass text-white/90' : 'bg-bg-elevated text-text'
   return (
     <div className={`animate-toast-in max-w-[18rem] rounded-2xl px-3.5 py-2 text-xs ${surface}`} role="status">
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 font-medium">

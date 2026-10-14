@@ -3,25 +3,13 @@ import type { IntimacyDetailLevel } from '@/lib/store/useSettingsStore'
 import type { IntimacyCategory } from '@/lib/dating/intimacyCatalog'
 import { conditionHolds, type TriggerCondition, type TriggerContext } from '@/lib/world/triggers'
 
-/**
- * What is physically happening in a scene, as a node in a per-scenario directed graph — the axis
- * `arousal.ts` is not. Intensity is the continuous meter; this is the discrete shape of the scene,
- * and the engine owns both. The model never names a stage, never picks an edge, and cannot reach one
- * the graph won't route to.
- *
- * Same constraint as `world/triggers.ts`, deliberately: a closed condition vocabulary over state the
- * app already computes, not a scripting language. A scenario can decide *when* something happens; it
- * can never express a state the engine has no way to reason about. `StageCondition` is a literal
- * superset of `TriggerCondition` so the two share this module's evaluator rather than drifting apart.
- */
+/** What is physically happening in a scene, as a node in a per-scenario directed graph — the axis `arousal.ts` is not. */
 
 /** Structural role of a stage, for engine logic only — the content lives in the authored catalog entries.
  *  There is deliberately no `aftercare` kind: aftercare is not a stage (see `RESOLVE_STAGE`). */
 export type IntimacyStageKind = 'opening' | 'foreplay' | 'oral' | 'penetrative' | 'climax'
 
-/** Reserved edge target that ends the scene. Traversing it returns `null` from the scene machine, and
- *  `aftercare.ts`'s already-open window carries the aftermath — modelling that as a node would give two
- *  systems a say in when a scene ended. */
+/** Reserved edge target that ends the scene. */
 export const RESOLVE_STAGE = 'resolve'
 
 export type StageCondition =
@@ -45,12 +33,7 @@ export interface StageEdge {
   entryId?: string
   /** Fires on its own if the player leaves a choice sitting. One per stage; the first eligible option is used when none is marked. */
   isDefault?: boolean
-  /**
-   * A scene flag recorded when this edge is taken (`Chat.sceneFlags`, the same store a `flag_set`
-   * trigger condition reads). This is what makes a branch consequential rather than decorative: two
-   * edges can lead to the same place ("finish inside" and "pull out" both end the scene), and
-   * without a flag the engine keeps no record of which the player actually chose.
-   */
+  /** A scene flag recorded when this edge is taken (`Chat.sceneFlags`, the same store a `flag_set` trigger condition reads). */
   setsFlag?: string
   /** Every condition must hold. Empty/absent means the edge is gated only by its stage's own floors. */
   conditions?: StageCondition[]
@@ -66,11 +49,7 @@ export interface PendingChoiceOption {
   setsFlag?: string
 }
 
-/**
- * A branch the scene has reached and will not cross on its own. While one of these is open the stage
- * cannot advance — the player picks, or the default fires after a few turns so a scene can never
- * deadlock waiting on someone who has moved on to something else.
- */
+/** A branch the scene has reached and will not cross on its own. */
 export interface PendingChoice {
   fromStage: string
   /** Only edges whose conditions currently hold — a limit or an unmet gate simply doesn't appear. */
@@ -169,23 +148,12 @@ function edgesOfMode(stage: IntimacyStage, mode: StageEdge['mode'], ctx: StageCo
   return stage.edges.filter((edge) => edge.mode === mode && stageConditionsMet(edge.conditions, ctx))
 }
 
-/**
- * The auto edge to take, or `undefined` to stay put. An edge to `RESOLVE_STAGE` is never taken on its
- * own: ending a scene needs the judge to have observed it actually finishing, which the caller weighs
- * separately. Everything else transitions on thresholds and floors alone.
- */
+/** The auto edge to take, or `undefined` to stay put. */
 export function nextAutoEdge(stage: IntimacyStage, ctx: StageContext): StageEdge | undefined {
   return edgesOfMode(stage, 'auto', ctx).find((edge) => edge.to !== RESOLVE_STAGE)
 }
 
-/**
- * The resolve edge an observed finish is allowed to take, if this stage has one whose conditions
- * currently hold. Deliberately `auto`-only: a `choice`-mode resolve edge is a decision the player
- * owns (how a scene ends, with consequences attached), so it is offered through `buildPendingChoice`
- * and traversed only by an actual answer. Without the mode filter here, a judge reporting
- * `stageCompleteSignalled` on a closing stage would end the scene before the branch was ever raised
- * — the model drifting past a gate, which is the one thing gating it was for.
- */
+/** The resolve edge an observed finish is allowed to take, if this stage has one whose conditions currently hold. */
 export function resolveEdge(stage: IntimacyStage, ctx: StageContext): StageEdge | undefined {
   return stage.edges.find(
     (edge) => edge.to === RESOLVE_STAGE && edge.mode === 'auto' && stageConditionsMet(edge.conditions, ctx),
@@ -204,8 +172,7 @@ export function stageEdgeId(stage: IntimacyStage, index: number): string {
 
 /** The branch to raise at this stage, or `undefined` when there's nothing to ask. */
 export function buildPendingChoice(stage: IntimacyStage, ctx: StageContext, charReplyCount: number): PendingChoice | undefined {
-  // Mapped over the stage's own edge list rather than the filtered result, so an option's id is its
-  // real position and stays put as gates open and close around it.
+  // Mapped over the stage's own edge list rather than the filtered result
   const eligible = stage.edges
     .map((edge, index) => ({ edge, index }))
     .filter(({ edge }) => edge.mode === 'choice' && stageConditionsMet(edge.conditions, ctx))
@@ -227,10 +194,7 @@ export function buildPendingChoice(stage: IntimacyStage, ctx: StageContext, char
   }
 }
 
-/**
- * The option an answer names. Falls back to matching a target, so a branch persisted before options
- * carried ids can still be answered instead of deadlocking across an upgrade.
- */
+/** The option an answer names. */
 export function pendingChoiceOption(choice: PendingChoice, optionId: string): PendingChoiceOption | undefined {
   return choice.options.find((option) => option.id === optionId) ?? choice.options.find((option) => option.edgeTo === optionId)
 }
@@ -268,11 +232,7 @@ const KNOWN_CONDITION_KINDS = new Set([
   'kink_at_least',
 ])
 
-/**
- * Everything wrong with a graph, as messages — `[]` for a valid one. A malformed scenario has to fail
- * loudly at import rather than mid-scene, so this is deliberately strict about the things that would
- * strand a live scene: a missing entry, an edge to nowhere, a stage nothing can reach, a dead end.
- */
+/** Everything wrong with a graph, as messages — `[]` for a valid one. */
 export function validateScenarioGraph(graph: ScenarioGraph): string[] {
   const problems: string[] = []
   const ids = new Set<string>()
@@ -295,9 +255,7 @@ export function validateScenarioGraph(graph: ScenarioGraph): string[] {
 
   for (const stage of graph.stages) {
     if (!stage.edges.length) problems.push(`stage "${stage.id}" is a dead end, it has no exit edges`)
-    // One option is not a decision, so `buildPendingChoice` never raises a lone choice edge. A stage
-    // with no auto edge and exactly one choice edge therefore has no way out at all at runtime, which
-    // reads as a valid graph on paper and traps a live scene.
+    // One option is not a decision, so `buildPendingChoice` never raises a lone choice edge.
     if (!stage.edges.some((edge) => edge.mode === 'auto') && stage.edges.filter((edge) => edge.mode === 'choice').length === 1) {
       problems.push(`stage "${stage.id}" can never be left, a single choice edge is not a decision, so it is never offered`)
     }
@@ -324,8 +282,7 @@ export function validateScenarioGraph(graph: ScenarioGraph): string[] {
   }
   for (const stage of graph.stages) {
     if (!reached.has(stage.id)) problems.push(`stage "${stage.id}" is unreachable from "${graph.entryStage}"`)
-    // Two choice edges with the same label are two identical buttons: the player cannot tell them
-    // apart, so whichever they meant, one of them was unpickable in practice.
+    // Two choice edges with the same label are two identical buttons
     const labels = stage.edges.filter((edge) => edge.mode === 'choice').map((edge) => edge.label?.trim())
     const dupe = labels.find((label, i) => label && labels.indexOf(label) !== i)
     if (dupe) problems.push(`stage "${stage.id}" offers two choices labelled "${dupe}"`)
@@ -337,12 +294,7 @@ export function validateScenarioGraph(graph: ScenarioGraph): string[] {
   return problems
 }
 
-/**
- * The graph every scene runs on until scenarios are loadable content. Two stages reproducing the
- * behaviour that came before it exactly: a scene builds, crosses into its peak at the same arousal
- * band the phase used to be read from, cools back out if it stops going anywhere, and resolves only
- * on an observed completion after a turn actually spent at the top.
- */
+/** The graph every scene runs on until scenarios are loadable content. */
 export const DEFAULT_SCENARIO: ScenarioGraph = {
   id: 'default',
   version: 1,

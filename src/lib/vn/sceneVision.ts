@@ -1,11 +1,4 @@
-/**
- * Corrects the model's own blind `<<scene:>>` self-tag (`sceneTag.ts`) after the fact, two ways:
- * vision passes (`detectExpressionFromSprites`, `classifyAttachedImageScene`) that look at actual
- * sprite/attached images when a vision-capable model is loaded, and a text-only pass
- * (`detectExpressionTextMismatch`) for when it isn't. All non-blocking best-effort assists —
- * they only override the tag on a valid, allowed-set-validated answer; otherwise the original
- * tag (or no change) stands.
- */
+/** Corrects the model's own blind `<<scene:>>` self-tag (`sceneTag.ts`) after the fact, two ways */
 
 import type { ChatBackend } from '@/lib/api/chatBackend'
 import { generateWithTimeout, type AssistShaping } from '@/lib/api/generateWithTimeout'
@@ -226,14 +219,7 @@ const GREETING_SCENE_PARAMS = {
   stop_sequence: ['\n\n', '```'],
 }
 
-/**
- * Text-only correction for the common case where no vision-capable model is loaded: the model can
- * be lazy and repeat last turn's expression tag out of habit even when the prose it just wrote
- * clearly shows something else. Expression-only, never outfit (outfit is sticky by design and must
- * not auto-change from suggestive-reading text) or background. Strongly biased toward "no change" —
- * only flags a *clear, obvious* mismatch; returns `null` (keep current tag) on no signal, an
- * invalid/unparseable answer, or a client error.
- */
+/** Text-only correction for the common case where no vision-capable model is loaded */
 export async function detectExpressionTextMismatch(
   client: ChatBackend,
   params: {

@@ -7,6 +7,18 @@
       "runtimeArgs": ["run", "dev"],
       "port": 5173,
       "autoPort": true
+    },
+    {
+      "name": "rp-sandbox",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["scripts/dev-sandbox.mjs"],
+      "port": 5273
+    },
+    {
+      "name": "rp-mock-llm",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["scripts/mock-llm.mjs"],
+      "port": 5555
     }
   ]
 }

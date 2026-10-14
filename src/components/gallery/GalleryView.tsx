@@ -37,7 +37,6 @@ export function GalleryView() {
   return (
     <ViewShell
       title="Gallery"
-      width="wide"
       description="CG art unlocks as a relationship deepens: by raising affection and hitting key story beats in chat events."
       actions={
         <label className="flex items-center gap-2 text-xs text-text-muted">
@@ -45,7 +44,7 @@ export function GalleryView() {
           <select
             value={personaFilter}
             onChange={(e) => setPersonaFilter(e.target.value)}
-            className="rounded-lg bg-bg-sunken px-2.5 py-1.5 text-xs text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40"
+            className="rounded-lg border border-border bg-bg-elevated px-2.5 py-1.5 text-xs text-text outline-none focus:border-accent/70"
           >
             <option value="all">All personas</option>
             {personas.map((p) => (
@@ -108,13 +107,12 @@ export function GalleryView() {
                   <div className="mb-2.5 text-xs font-semibold uppercase tracking-wide text-romance">Endings</div>
                   <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
                     {endings.map((entry) => {
-                      // Endings unlock only via reaching Sweethearts (see `unlockedEndingIds`) — never
-                      // through `unlockAffection`, which is unused/ignored for `isEnding` entries.
+                      // Endings unlock only via reaching Sweethearts (see `unlockedEndingIds`)
                       const isUnlocked = unlocked.has(entry.id)
                       return (
                         <div
                           key={entry.id}
-                          className={`group relative overflow-hidden rounded-2xl border bg-bg-elevated ${isUnlocked ? 'border-romance themed-shadow' : 'border-border'}`}
+                          className={`group relative overflow-hidden rounded-2xl border bg-bg-elevated ${isUnlocked ? 'border-romance' : 'border-border'}`}
                         >
                           {entry.imageUrl ? (
                             <img

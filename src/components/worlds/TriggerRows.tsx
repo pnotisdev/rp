@@ -3,14 +3,7 @@ import type { CommitmentStatus } from '@/lib/types'
 import { COMMITMENT_ORDER, formatCommitmentStatus } from '@/lib/dating/stage'
 import type { TriggerAction, TriggerCondition, TriggerStat } from '@/lib/world/triggers'
 
-/**
- * The condition and action row editors for one world rule (`lib/world/triggers.ts`).
- *
- * Their own file rather than more of `WorldsView`, which is already among the largest components
- * here — and a rule needs two of these lists, each with a per-kind form that changes shape as the
- * kind changes. Both are controlled and stateless: the world editor owns the rule array, these
- * only ever hand back a new one.
- */
+/** The condition and action row editors for one world rule (`lib/world/triggers.ts`). */
 
 const TRIGGER_STATS: TriggerStat[] = ['affection', 'warmth', 'trust', 'chemistry', 'comfort', 'respect', 'curiosity', 'tension']
 
@@ -46,8 +39,7 @@ export function TriggerConditionRows({
 }) {
   const set = (i: number, c: TriggerCondition) => onChange(conditions.map((x, j) => (j === i ? c : x)))
 
-  // Switching kind replaces the whole condition rather than merging: the shapes don't overlap, and
-  // carrying a stale `stat` onto a `flag_set` would be invalid data the server would then drop.
+  // Switching kind replaces the whole condition rather than merging
   const changeKind = (i: number, kind: TriggerCondition['kind']) => {
     if (kind === 'stat_at_least' || kind === 'stat_below') set(i, { kind, stat: 'affection', value: 50 })
     else if (kind === 'flag_set') set(i, { kind, flag: knownFlags[0]?.id ?? 'first_date' })

@@ -4,6 +4,8 @@ export interface ConfirmOptions {
   title: string
   /** Optional supporting line under the title — the "this can't be undone" explanation. */
   body?: string
+  /** Preformatted detail shown in a scrollable block (a command, a diff, the text about to be written). */
+  detail?: string
   confirmLabel?: string
   cancelLabel?: string
   /** 'danger' (default for a destructive action) paints the confirm button red. */
@@ -27,8 +29,7 @@ export const useConfirmStore = create<ConfirmState>((set, get) => ({
   pending: null,
   request: (opts) =>
     new Promise<boolean>((resolve) => {
-      // If a confirm is somehow already open, treat the older one as cancelled rather than
-      // stacking two dialogs — the newer request is the one the user is actually looking at.
+      // If a confirm is somehow already open, treat the older one as cancelled rather than stacking two dialogs
       const existing = get().pending
       if (existing) existing.resolve(false)
       set({ pending: { ...opts, id: ++counter, resolve } })
@@ -40,11 +41,7 @@ export const useConfirmStore = create<ConfirmState>((set, get) => ({
   },
 }))
 
-/**
- * Promise-based, theme-aware replacement for `window.confirm` — a styled dialog on the app's own
- * surface tokens instead of the browser's OS-native popup, with Escape / backdrop-click to cancel.
- * `await confirmDialog({ title, body, tone: 'danger' })` resolves `true` only if the user confirms.
- */
+/** Promise-based, theme-aware replacement for `window.confirm` */
 export function confirmDialog(opts: ConfirmOptions): Promise<boolean> {
   return useConfirmStore.getState().request(opts)
 }

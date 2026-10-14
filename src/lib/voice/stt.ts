@@ -1,5 +1,4 @@
-// Speech-to-text via KoboldCpp's own OpenAI-compatible Whisper endpoint — reuses the
-// app's existing connection, no separate provider/config needed for the "Ears".
+// Speech-to-text via KoboldCpp's own OpenAI-compatible Whisper endpoint
 
 export async function transcribeAudio(koboldBaseUrl: string, audio: Blob): Promise<string> {
   const form = new FormData()

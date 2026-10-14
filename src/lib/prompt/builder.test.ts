@@ -78,8 +78,7 @@ describe('buildPrompt — group chat (multiple speaking characters)', () => {
       { id: '3', role: 'user', name: 'You', text: 'Kestrel, say hi.' },
       { id: '4', role: 'char', name: 'Kestrel', text: 'Hm.' },
     ]
-    // Kestrel is the active speaker for this turn (their card is `character`), but Aria's earlier
-    // line must still be attributed to Aria in the rendered history, not silently relabeled.
+    // Kestrel is the active speaker for this turn (their card is `character`)
     const result = await buildPrompt(baseInput({ character: character({ name: 'Kestrel' }), history }))
     expect(result.prompt).toContain('Aria: Hey there!')
     expect(result.prompt).toContain('Kestrel: Hm.')
@@ -551,8 +550,7 @@ describe('buildPrompt — history trimming stops once the budget is spent', () =
   }
 
   it('keeps a contiguous window — never drops a long turn but keeps shorter ones behind it', async () => {
-    // The failure this guards: turn 5 is far too big to fit, but turns 0-4 are tiny. Skipping 5
-    // and keeping 0-4 would hand the model a transcript with a beat missing from the middle.
+    // The failure this guards: turn 5 is far too big to fit, but turns 0-4 are tiny.
     const msgs: ChatMessage[] = [
       { id: '0', role: 'user', name: 'You', text: 'a' },
       { id: '1', role: 'char', name: 'Aria', text: 'b' },
@@ -585,8 +583,7 @@ describe('buildPrompt — history trimming stops once the budget is spent', () =
     // Every turn is either kept or dropped — the accounting stays exact despite the early exit.
     expect(result.includedMessageCount + result.excludedMessageCount).toBe(40)
     expect(result.includedMessageCount).toBeGreaterThan(0)
-    // The whole point: the 30-odd turns past the budget never reached the tokenizer. Counting is
-    // one HTTP round-trip per call against a real backend, so this is the cost being avoided.
+    // The whole point: the 30-odd turns past the budget never reached the tokenizer.
     const historyCalls = counted.filter((t) => t.includes('Turn number'))
     expect(historyCalls.length).toBeLessThan(10)
   })
@@ -666,9 +663,7 @@ describe('buildPrompt — worldMoment sits after the history, not in the cacheab
 })
 
 describe('styleGuidanceItems — graceful degradation under a tight budget', () => {
-  // Zeroes every fixed section so `fixedTokens` is 0 and the only thing competing for the budget
-  // besides history is the postHistory block itself — makes the token math in these tests exact
-  // rather than approximate.
+  // Zeroes every fixed section so `fixedTokens` is 0 and the only thing competing for the budget besides history is the postHistory block itself
   const noFixedSections: Partial<PromptBuildInput> = {
     promptSections: { system: false, summary: false, world: false, description: false, participants: false, persona: false, examples: false },
   }
@@ -690,21 +685,16 @@ describe('styleGuidanceItems — graceful degradation under a tight budget', () 
   it('drops the item nearest the end of the non-essential run first, keeping an earlier one as long as it can', async () => {
     const essential: StyleGuidanceItem = { text: 'ESSENTIAL_MARKER', essential: true }
     const flavorKept: StyleGuidanceItem = { text: 'KEPT_MARKER', essential: false }
-    // ~104 tokens (estimator: ceil(len/4)) vs KEPT_MARKER's ~3 — a gap wide enough that the exact
-    // value of buildPrompt's internal history-reserve floor can't accidentally make this flaky.
+    // ~104 tokens (estimator: ceil(len/4)) vs KEPT_MARKER's ~3
     const flavorDropped: StyleGuidanceItem = { text: `DROPPED_MARKER_${'x'.repeat(400)}`, essential: false }
 
-    // Calibrate against the real function rather than hand-computing token counts: build once with
-    // only the item that's expected to survive, and read off exactly how much room it and the
-    // generation cue actually cost.
+    // Calibrate against the real function rather than hand-computing token counts
     const keptOnly = await buildPrompt(
       baseInput({ ...noFixedSections, styleGuidanceItems: [essential, flavorKept], contextBudget: 4000, includeSectionBreakdown: true }),
     )
     const keptOnlyPostHistoryTokens = keptOnly.sectionBreakdown!.find((s) => s.id === 'postHistory')!.tokens
     const genCueTokens = keptOnly.sectionBreakdown!.find((s) => s.id === 'generationCue')!.tokens
-    // Exactly enough for the kept-only block plus a 320-token cushion: comfortably above the 300
-    // reserve `buildPrompt` holds back for history once nothing more is worth dropping, but well
-    // short of the ~104 extra tokens the long item would add back in if it were still there.
+    // Exactly enough for the kept-only block plus a 320-token cushion
     const contextBudget = keptOnlyPostHistoryTokens + genCueTokens + 320
 
     const result = await buildPrompt(

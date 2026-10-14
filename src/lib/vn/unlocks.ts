@@ -3,13 +3,7 @@ import type { WorldCard } from '@/lib/types'
 import { DEFAULT_EXPRESSION_IDS } from '@/lib/vn/expressions'
 import { DEFAULT_BACKGROUND_IDS } from '@/lib/vn/backgrounds'
 
-/**
- * Which expression sprite ids the model is allowed to pick for this character right now, gated by
- * `Character.spriteUnlocks` at the given affection — a card with no custom sprites at all just
- * offers the built-in default set (nothing to gate). Shared by the live per-turn scene tag
- * instruction (`useChatSession.ts`) and `detectGreetingScene`'s one-shot pass over the static
- * opening greeting, so both ever offer the same ids.
- */
+/** Which expression sprite ids the model is allowed to pick for this character right now, gated by `Character.spriteUnlocks` at the… */
 export function getUnlockedExpressionIds(character: Character, affection: number): string[] {
   const spriteIds = Object.keys(character.sprites ?? {})
   if (spriteIds.length === 0) return DEFAULT_EXPRESSION_IDS

@@ -13,23 +13,11 @@ export interface ChatToolbarAction {
   disabled?: boolean
   /** Not rendered at all (e.g. an author opted a whole feature out) — distinct from `disabled`. */
   hidden?: boolean
-  /**
-   * 'primary' stays an icon in the bar at every width. 'primary-desktop' is an icon on `sm`+ but
-   * folds into the overflow menu on a phone, where bar space is scarce. Anything else (the default)
-   * is always in the overflow menu.
-   */
+  /** 'primary' stays an icon in the bar at every width. */
   priority?: 'primary' | 'primary-desktop' | 'secondary'
 }
 
-/**
- * The chat header's action row. Built once in `ChatWindow` and rendered in two places — the
- * ordinary header (`tone="chrome"`) and VN mode's floating glass pill (`tone="glass"`) — so the
- * two modes can never drift into different feature sets.
- *
- * Only the handful of `priority: 'primary'` actions render as bare icons; the rest fold into a
- * single "•••" overflow menu with real text labels, which is both calmer at rest and *more*
- * discoverable than the old ten-icon wall of tooltips-only glyphs.
- */
+/** The chat header's action row. */
 export function ChatToolbar({ tone, actions }: { tone: 'chrome' | 'glass'; actions: ChatToolbarAction[] }) {
   const [open, setOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -50,8 +38,7 @@ export function ChatToolbar({ tone, actions }: { tone: 'chrome' | 'glass'; actio
 
   const visible = actions.filter((a) => !a.hidden)
   const primary = visible.filter((a) => a.priority === 'primary')
-  // Icon on desktop, menu row on mobile — rendered in both places, shown/hidden by breakpoint so
-  // no JS media query is needed and the two never disagree about what exists.
+  // Icon on desktop, menu row on mobile
   const primaryDesktop = visible.filter((a) => a.priority === 'primary-desktop')
   const overflow = visible.filter((a) => a.priority !== 'primary' && a.priority !== 'primary-desktop')
   const menuItems = [...primaryDesktop, ...overflow]
@@ -60,7 +47,7 @@ export function ChatToolbar({ tone, actions }: { tone: 'chrome' | 'glass'; actio
   const glass = tone === 'glass'
   const menuClass = glass
     ? 'border-white/10 bg-black/80 text-white backdrop-blur-md'
-    : 'border-border bg-bg-elevated text-text themed-shadow'
+    : 'border-border bg-bg-elevated text-text'
   const itemHover = glass ? 'hover:bg-white/10' : 'hover:bg-bg-sunken'
 
   return (

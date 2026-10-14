@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { Sidebar, type ViewId } from '@/components/layout/Sidebar'
 import { CommandPalette } from '@/components/layout/CommandPalette'
 import { KeyboardShortcutsSheet } from '@/components/layout/KeyboardShortcutsSheet'
-import { ChatsPanel } from '@/components/chat/ChatsPanel'
+import { ChatList } from '@/components/chat/ChatList'
+import { NewChatDialog } from '@/components/chat/NewChatDialog'
 import { ChatWindow } from '@/components/chat/ChatWindow'
 import { GlobalBgm } from '@/components/chat/GlobalBgm'
 import { WelcomeView } from '@/components/chat/WelcomeView'
@@ -12,15 +13,18 @@ import { WorldsView } from '@/components/worlds/WorldsView'
 import { PersonasView } from '@/components/personas/PersonasView'
 import { WorldInfoView } from '@/components/worldinfo/WorldInfoView'
 import { GalleryView } from '@/components/gallery/GalleryView'
+import { ExtensionsView } from '@/components/extensions/ExtensionsView'
 import { SettingsView } from '@/components/settings/SettingsView'
 import { ToastViewport } from '@/components/ui/ToastViewport'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { Button } from '@/components/ui/Button'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { chatsApi } from '@/lib/api/client'
 import { useApplyTheme } from '@/lib/hooks/useApplyTheme'
 import { useOutreachTick } from '@/lib/hooks/useOutreachTick'
 import { useAutoContextLength } from '@/lib/hooks/useAutoContextLength'
 import { useAutoInstructTemplate } from '@/lib/hooks/useAutoInstructTemplate'
+import { useExtensionRuntime } from '@/lib/extensions/useExtensions'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 
 /** The chat tab: the full-screen Welcome screen on a fresh install, otherwise the panel + window. */
@@ -29,16 +33,16 @@ function ChatSurface({
   onSelect,
   onNavigate,
   onNavigateToWorld,
+  onNewChat,
 }: {
   activeChatId: string | null
   onSelect: (id: string | null) => void
   onNavigate: (view: ViewId) => void
+  onNewChat: () => void
   onNavigateToWorld: (worldId: string, tab?: string) => void
 }) {
   const chats = useApiQuery('chats', () => chatsApi.list(), [])
-  // Below `md` there's only room for one of the chat list / the active chat at a time — this is
-  // purely which one a phone-width viewport is currently showing, never touched at `md` and up,
-  // where both render side by side regardless of it (see the responsive classes below).
+  // Below `md` only one of the chat list / the active chat fits; at `md` and up the list lives in the sidebar.
   const [mobileListOpen, setMobileListOpen] = useState(!activeChatId)
 
   if (chats === undefined) return <div className="flex-1" />
@@ -48,8 +52,14 @@ function ChatSurface({
 
   return (
     <>
-      <div className={`${mobileListOpen ? 'flex' : 'hidden'} w-full md:flex md:w-auto`}>
-        <ChatsPanel
+      <div className={`${mobileListOpen ? 'flex' : 'hidden'} w-full flex-col pt-2 md:hidden`}>
+        <div className="flex items-center justify-between px-4 pb-2">
+          <h2 className="text-sm font-semibold text-text">Chats</h2>
+          <Button variant="primary" onClick={onNewChat}>
+            New chat
+          </Button>
+        </div>
+        <ChatList
           activeChatId={activeChatId}
           onSelect={(id) => {
             onSelect(id)
@@ -62,6 +72,7 @@ function ChatSurface({
           chatId={activeChatId}
           onBack={() => setMobileListOpen(true)}
           onOpenSettings={() => onNavigate('settings')}
+          onOpenExtensions={() => onNavigate('extensions')}
           onNavigateToWorld={onNavigateToWorld}
         />
       </div>
@@ -74,19 +85,18 @@ export default function App() {
   useOutreachTick()
   useAutoContextLength()
   useAutoInstructTemplate()
+  useExtensionRuntime()
   const [view, setView] = useState<ViewId>('chat')
   const activeChatId = useSettingsStore((s) => s.activeChatId)
   const setActiveChatId = useSettingsStore((s) => s.setActiveChatId)
   const [showPalette, setShowPalette] = useState(false)
+  const [showNewChat, setShowNewChat] = useState(false)
   const [showShortcuts, setShowShortcuts] = useState(false)
-  // Deep-link targets for the command palette's "jump to a character/world" — consumed (cleared)
-  // by the view itself once it's actually opened that item's editor, not re-armed on every render.
+  // Deep-link targets for the command palette's "jump to a character/world"
   const [pendingCharacterId, setPendingCharacterId] = useState<string | null>(null)
   const [pendingWorldId, setPendingWorldId] = useState<string | null>(null)
   const [pendingWorldTab, setPendingWorldTab] = useState<string | null>(null)
-  // The Relationship panel's "Customize in World editor" link — same deep-link shape as the
-  // command palette's `onSelectWorld` below, just also landing on a specific tab (e.g. 'dating'
-  // for the gift/intimacy catalogs) instead of always the world's overview.
+  // The Relationship panel's "Customize in World editor" link
   const navigateToWorld = (worldId: string, tab?: string) => {
     setPendingWorldId(worldId)
     setPendingWorldTab(tab ?? null)
@@ -100,9 +110,7 @@ export default function App() {
         setShowPalette((v) => !v)
         return
       }
-      // `?` is a real character people type constantly — only treat it as the shortcuts-sheet
-      // shortcut when focus isn't in a text field, the same guard section 15's other new
-      // shortcut (arrow-key swipe, in ChatWindow) uses.
+      // `?` is a real character people type constantly
       const target = e.target as HTMLElement | null
       const typing = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable
       if (e.key === '?' && !typing) {
@@ -116,20 +124,21 @@ export default function App() {
 
   return (
     <div className="flex h-full w-full flex-col md:flex-row">
-      <Sidebar view={view} onChange={setView} onOpenPalette={() => setShowPalette(true)} />
-      {/* The mobile bottom nav is `fixed`, out of normal flow — this padding keeps it from
-          covering the last bit of content. No-op at `md` and up, where the rail is a sibling
-          taking its own column width instead.
-          `min-h-0` matters here: a flex item's default `min-height: auto` refuses to shrink
-          below its content's natural height, so on a short mobile viewport a tall VN scene (a
-          long reply plus a wrapped choice row) was measured growing this wrapper to 951px inside
-          an 812px-tall parent — pushing the composer below the actual screen, unreachable, not
-          just visually cramped. The same flexbox bug class already fixed once for the VN sprite
-          itself; this is the wrapper one level up that the earlier mobile pass didn't happen to
-          stress with tall-enough content to catch. */}
+      <Sidebar
+        view={view}
+        onChange={setView}
+        onOpenPalette={() => setShowPalette(true)}
+        onNewChat={() => setShowNewChat(true)}
+        activeChatId={activeChatId}
+        onSelectChat={(id) => {
+          setActiveChatId(id)
+          if (id) setView('chat')
+        }}
+      />
+      {/* pb-14 clears the fixed mobile bottom nav; min-h-0 lets a tall VN scene shrink instead of pushing the composer off-screen. */}
       <div className="flex min-h-0 flex-1 min-w-0 pb-14 md:pb-0">
         {view === 'chat' && (
-          <ChatSurface activeChatId={activeChatId} onSelect={setActiveChatId} onNavigate={setView} onNavigateToWorld={navigateToWorld} />
+          <ChatSurface activeChatId={activeChatId} onSelect={setActiveChatId} onNavigate={setView} onNavigateToWorld={navigateToWorld} onNewChat={() => setShowNewChat(true)} />
         )}
         {view === 'assistant' && <AssistantView />}
         {view === 'characters' && (
@@ -148,6 +157,7 @@ export default function App() {
         {view === 'personas' && <PersonasView />}
         {view === 'worldinfo' && <WorldInfoView />}
         {view === 'gallery' && <GalleryView />}
+        {view === 'extensions' && <ExtensionsView />}
         {view === 'settings' && <SettingsView />}
       </div>
       {/* App-level so a world's music keeps playing across view switches. Mounted in every view:
@@ -170,6 +180,16 @@ export default function App() {
           onSelectWorld={(id) => {
             setPendingWorldId(id)
             setView('worlds')
+          }}
+        />
+      )}
+      {showNewChat && (
+        <NewChatDialog
+          onClose={() => setShowNewChat(false)}
+          onCreated={(id) => {
+            setShowNewChat(false)
+            setActiveChatId(id)
+            setView('chat')
           }}
         />
       )}

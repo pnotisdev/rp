@@ -1,9 +1,4 @@
-/**
- * "Maximum Immersion" — a single opinionated bundle over settings this app already has, applied by
- * `CharacterEditor.tsx`'s "Apply Maximum Immersion" button. Pure curation: system prompt, sampler
- * preset, slow-burn pacing, and VN mode, all already-existing pieces from `systemPrompts.ts`,
- * `builtinPresets.ts`, and the settings store — nothing new is invented.
- */
+/** "Maximum Immersion" — a single opinionated bundle over settings this app already has, applied by `CharacterEditor.tsx`'s "Apply… */
 
 import { BUILTIN_PRESETS } from './builtinPresets'
 import { BUILTIN_SYSTEM_PROMPTS } from './systemPrompts'

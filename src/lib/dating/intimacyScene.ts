@@ -47,18 +47,11 @@ export { BODY_REGIONS }
 export type { BodyRegion }
 export { RESOLVE_STAGE }
 
-// Persisted state machine for where an active intimate scene stands (building/peak) and what's
-// physically happening, so the model is told rather than left to infer it from scrollback. Sits
-// before `aftercare.ts`'s Afterglow in a scene's lifecycle — once a scene resolves here, the
-// already-open aftercare window carries the emotional aftermath.
+// Persisted state machine for where an active intimate scene stands (building/peak) and what's physically happening
 
 export type IntimacyPhase = 'building' | 'peak'
 
-/**
- * What the judge reports about the turn that just happened — bounded observations, never a phase
- * choice. The model is a sensor here; `advanceIntimacyScene` below is the only thing that decides
- * what state the scene moves to, so a judge that wants to leap to the end can't.
- */
+/** What the judge reports about the turn that just happened — bounded observations, never a phase choice. */
 export interface IntimacyTurnObservation {
   /** Did the reply engage the current activity at all, or drift/stall? */
   engagement: 'engaged' | 'stalled' | 'drifted'
@@ -72,11 +65,7 @@ export interface IntimacyTurnObservation {
   regionsTouched: BodyRegion[]
   /** Clothing the reply actually described coming off, per side — the engine keeps the running total. */
   clothingRemoved: ClothingRemoval[]
-  /**
-   * Who touched whom, where, when more than two people are in the scene and `regionsTouched` can no
-   * longer say whose body it means. Only asked for in a multi-participant scene; empty everywhere
-   * else, where the two-party fields above carry the same information more cheaply.
-   */
+  /** Who touched whom, where, when more than two people are in the scene and `regionsTouched` can no longer say whose body it means. */
   contact?: ObservedContact[]
   /** Clothing coming off, keyed by character id, for participants `clothingRemoved`'s `char`/`user` sides cannot name. */
   participantClothingRemoved?: { who: string; layer: ClothingRemoval['layer'] }[]
@@ -107,11 +96,7 @@ export function parseIntimacyObservation(raw: unknown): IntimacyTurnObservation 
   }
 }
 
-/**
- * The per-character half of the clothing read. Same validation as `parseClothingRemovals`, except
- * `who` is a character id rather than one of the two fixed sides, so it can only be checked for
- * being a non-empty string here and is filtered against the actual roster at advance time.
- */
+/** The per-character half of the clothing read. */
 function parseParticipantClothingRemovals(raw: unknown): IntimacyTurnObservation['participantClothingRemoved'] {
   if (!Array.isArray(raw)) return []
   const seen = new Set<string>()
@@ -144,21 +129,13 @@ export interface IntimacyScene {
   phaseSinceTurn?: number
   /** Ordered catalog categories this scene has moved through so far, e.g. `['kissing_spot', 'position', 'toy']`. */
   categoryHistory?: IntimacyCategory[]
-  /**
-   * The scene's arousal meter (`arousal.ts`) — engine-computed from each turn's observation, and the
-   * sole input to the derived `phase`. Absent on scenes persisted before it existed; `arousalOf`
-   * seeds those from whatever phase they were already in.
-   */
+  /** The scene's arousal meter (`arousal.ts`) — engine-computed from each turn's observation, and the sole input to the derived `phase`. */
   arousal?: ArousalState
   /** `arousalWeight` of the catalog entry currently driving the scene — how much this activity can deliver per turn. */
   activityWeight?: number
   /** The scene owner's stance on the active entry's kinks (`kinks.ts`), frozen at the click — a per-character multiplier on every gain. */
   activityValence?: KinkValence
-  /**
-   * The active entry's own kink ids. Stored because `activityValence` is one character's feelings
-   * about the content, and in a shared scene every other participant has their own — the caller
-   * scores these against each of their profiles rather than applying the owner's stance to everyone.
-   */
+  /** The active entry's own kink ids. */
   activityKinks?: string[]
   /** Turn this scene first started, surviving a mid-scene re-centering — the state block's "turn N of this scene". */
   startedAtTurn?: number
@@ -176,12 +153,7 @@ export interface IntimacyScene {
   clothing?: ClothingState
   /** Regions in contact as of the last turn — the state block's continuity anchor against hands silently relocating. */
   contactRegions?: BodyRegion[]
-  /**
-   * Every character in this scene, its owner first (`sceneParticipants.ts`). One scene is shared by
-   * all of them rather than each keeping their own, so they can never disagree about what is
-   * happening. Absent, or one entry, is the single-character scene: the owner's own arousal and
-   * clothing stay in the fields above and the maps below are untouched.
-   */
+  /** Every character in this scene, its owner first (`sceneParticipants.ts`). */
   participants?: string[]
   /** Every non-owner participant's own meter. Asymmetry is a feature here — one at the edge while another is warming is a scene beat. */
   participantArousal?: Record<string, ArousalState>
@@ -193,11 +165,7 @@ export interface IntimacyScene {
   sceneFlags?: string[]
 }
 
-/**
- * The stage the scene is on, seeding a scene persisted before stages existed from the phase it was
- * already in: the first stage of the graph whose structural kind reads as that phase, and the entry
- * stage failing that. Never returns undefined, so a scene can't be stranded off the graph.
- */
+/** The stage the scene is on, seeding a scene persisted before stages existed from the phase it was already in */
 export function stageOf(scene: IntimacyScene, graph: ScenarioGraph = DEFAULT_SCENARIO): IntimacyStage {
   const known = stageById(graph, scene.stageId)
   if (known) return known
@@ -217,11 +185,7 @@ export function turnsInStage(scene: IntimacyScene, charReplyCount: number): numb
   return charReplyCount - (scene.stageSinceTurn ?? scene.startedAtTurn ?? scene.updatedAtTurn)
 }
 
-/**
- * What a scene looked like as it ended, for `aftercare.ts`'s earned-vs-rushed read. Taken from the
- * scene the caller still holds on the turn `advanceIntimacyScene` returns `null`, since the scene
- * state itself is discarded at that point.
- */
+/** What a scene looked like as it ended, for `aftercare.ts`'s earned-vs-rushed read. */
 export function sceneResolveSnapshot(scene: IntimacyScene, charReplyCount: number): SceneResolveSnapshot {
   return {
     turns: Math.max(0, charReplyCount - (scene.startedAtTurn ?? scene.updatedAtTurn)),
@@ -231,12 +195,7 @@ export function sceneResolveSnapshot(scene: IntimacyScene, charReplyCount: numbe
   }
 }
 
-/**
- * A meter from the scene, seeding a scene persisted before arousal existed from the phase it was
- * already in. With no `charId` — or with the owner's — this is the scene's original single-character
- * meter, unchanged. With another participant's it is their own slot in the map, since two people in
- * one scene are not at the same place in it.
- */
+/** A meter from the scene, seeding a scene persisted before arousal existed from the phase it was already in. */
 export function arousalOf(scene: IntimacyScene, charId?: string): ArousalState {
   if (charId && !isSceneOwner(scene, charId)) {
     return participantArousal(scene, charId) ?? emptyArousalState(scene.startedAtTurn ?? scene.updatedAtTurn)
@@ -252,12 +211,7 @@ export function clothingOf(scene: IntimacyScene, charId?: string): ClothingState
   return scene.clothing
 }
 
-/**
- * The reading the engine gates on: the *least* aroused participant. Escalation is held to whoever in
- * the scene is furthest from ready, so nobody is carried past their own pace by someone else's — the
- * multi-participant form of the same principle that makes consent load-bearing for one. Identical to
- * the single meter when there is only one participant, so nothing about a solo scene changes.
- */
+/** The reading the engine gates on: the *least* aroused participant. */
 export function sceneArousalFloorValue(scene: IntimacyScene): number {
   const roster = sceneParticipants(scene)
   if (roster.length < 2) return arousalOf(scene).value
@@ -284,11 +238,7 @@ export function isIntimacySceneActive(scene: IntimacyScene | undefined | null, c
   return !!scene && !isIntimacySceneStale(scene, charReplyCount)
 }
 
-/**
- * Starts or re-centers a scene at `building` — a click mid-scene is the consent/renegotiation
- * checkpoint, so a new activity doesn't inherit the old one's intensity. `priorScene` (pass only
- * when live) extends its `categoryHistory` instead of resetting it.
- */
+/** Starts or re-centers a scene at `building` */
 export function startOrShiftIntimacyScene(
   activityLabel: string,
   category: IntimacyCategory,
@@ -304,8 +254,7 @@ export function startOrShiftIntimacyScene(
 ): IntimacyScene {
   const categoryHistory = priorScene ? [...(priorScene.categoryHistory ?? [priorScene.category]), category] : [category]
   const prior = priorScene ? arousalOf(priorScene) : undefined
-  // A mid-scene click keeps whoever is already in the scene unless the caller names a new roster —
-  // adding a third person is a deliberate act, never a side effect of choosing a different activity.
+  // A mid-scene click keeps whoever is already in the scene unless the caller names a new roster
   const roster = participants?.length ? participants : priorScene?.participants
   return {
     phase: 'building',
@@ -327,19 +276,15 @@ export function startOrShiftIntimacyScene(
     clothing: priorScene?.clothing,
     contactRegions: priorScene?.contactRegions,
     ...(roster ? { participants: roster } : {}),
-    // The contact graph and everyone else's clothing carry across a re-centering for the same reason
-    // the owner's do: it is one scene, and the same bodies are still in the same room.
+    // The contact graph and everyone else's clothing carry across a re-centering for the same reason the owner's do
     contact: priorScene?.contact,
     participantClothing: priorScene?.participantClothing,
     sceneFlags: priorScene?.sceneFlags,
-    // A meter that reset to zero on every click would make a mid-scene choice read as amnesia, so it
-    // carries — but capped back under the peak floor, since re-centering is the consent checkpoint
-    // and the new activity has to earn its own way up again. Exposure carries whole: same bodies.
+    // A meter that reset to zero on every click would make a mid-scene choice read as amnesia
     arousal: prior
       ? { ...prior, value: Math.min(prior.value, BAND_FLOORS.edge - 1), bandSinceTurn: charReplyCount }
       : emptyArousalState(charReplyCount),
-    // Every other participant's meter is capped back the same way the owner's is — the consent
-    // checkpoint applies to all of them, not only to whoever's track happens to hold the scene.
+    // Every other participant's meter is capped back the same way the owner's is
     ...(priorScene?.participantArousal
       ? {
           participantArousal: Object.fromEntries(
@@ -369,11 +314,7 @@ export function intimacyPaceFor(mood: CharacterMood | undefined, isHoldingBackBy
   return 'neutral'
 }
 
-/**
- * Everything the engine knows about this character and scene going into a turn. The top-level
- * arousal fields are the scene owner's; `participants` carries the same per-turn inputs for everyone
- * else, since sensitivity, pace, and how each of them feels about the content are all per-character.
- */
+/** Everything the engine knows about this character and scene going into a turn. */
 export interface IntimacySceneContext extends ArousalContext {
   /** The scenario the scene is running on. Defaults to the built-in open-scene graph. */
   graph?: ScenarioGraph
@@ -395,18 +336,7 @@ function stageContextFor(scene: IntimacyScene, arousalValue: number, ctx: Intima
   }
 }
 
-/**
- * Runs the scene's transition from one turn's observation. The engine owns every decision: arousal
- * accumulates from what the reply actually did (`arousal.ts`), the stage moves only along an edge the
- * scenario graph actually has, and `phase` is derived from whichever stage the scene ends up on. A
- * stage's `minTurns`/`minArousal` floors are checked *before* `stageCompleteSignalled` is honoured, so
- * the judge's vote can never override them — it can neither jump a scene to its climax nor conclude
- * one that never got there. `null` = resolved, and `aftercare.ts`'s already-open window takes over.
- * A missing or unreadable observation holds the scene where it is.
- *
- * `choice`-mode edges are never traversed here: they wait to be offered to the player, and until that
- * surface exists the scene simply holds its stage rather than deadlocking.
- */
+/** Runs the scene's transition from one turn's observation. */
 export function advanceIntimacyScene(
   scene: IntimacyScene,
   obs: IntimacyTurnObservation | undefined,
@@ -424,27 +354,18 @@ export function advanceIntimacyScene(
   const stageCtx = stageContextFor(scene, arousal.floor, ctx)
   const floorsMet = stageFloorsMet(stage, turnsInStage(scene, charReplyCount), arousal.floor)
 
-  // A branch already raised holds everything until it's answered. The meter still moves — the scene
-  // is still being played — but the stage does not, which is the whole point of gating a branch here
-  // rather than asking the model nicely not to cross it.
+  // A branch already raised holds everything until it's answered.
   if (scene.pendingChoice) {
-    // Re-derived against the state as it stands now, keeping the branch's own timer. A branch is a
-    // snapshot of what was eligible when it went up, and it then sits there for turns while the meter
-    // moves under it — so without this an option whose gate has since closed stays on screen and
-    // `resolveIntimacyChoice`, which trusts the stored list, would happily take it.
+    // Re-derived against the state as it stands now, keeping the branch's own timer.
     const refreshed = buildPendingChoice(stage, stageCtx, scene.pendingChoice.sinceTurn)
-    const stillOffered = !!refreshed
     if (refreshed && !choiceDefaultDue(refreshed, charReplyCount)) {
       return { ...heldScene(scene, arousal, obs, contact, charReplyCount), pendingChoice: refreshed }
     }
     // Either the branch stopped being answerable (state moved under it) or nobody answered in time.
     const fallback = refreshed ? defaultChoiceOption(refreshed) : undefined
-    // The flag lands even on a default: "nobody answered, so it went the usual way" is still a thing
-    // that happened, and a world rule reading the flag should not be able to tell the difference.
+    // The flag lands even on a default: "nobody answered
     const held = withSceneFlag(heldScene(scene, arousal, obs, contact, charReplyCount), fallback?.setsFlag)
-    // A default that ends the scene is the ordinary case at a closing branch, and `resolve` is not a
-    // stage in the graph — without this it reads as a target that doesn't exist, the branch is merely
-    // cleared, and the same decision is re-raised a few turns later forever.
+    // A default that ends the scene is the ordinary case at a closing branch
     if (fallback?.edgeTo === RESOLVE_STAGE) return null
     const taken = fallback ? stageById(graph, fallback.edgeTo) : undefined
     return taken ? enterStage(held, stage, taken, charReplyCount) : { ...held, pendingChoice: undefined }
@@ -478,11 +399,7 @@ function observationFor(obs: IntimacyTurnObservation, regions: BodyRegion[]): In
   return { ...obs, regionsTouched: regions }
 }
 
-/**
- * Runs every participant's meter over the same turn. Each gets their own inputs — sensitivity, pace,
- * how they feel about the content — and their own body's share of the contact graph, so the same turn
- * is worth genuinely different amounts to each of them and the scene develops asymmetrically.
- */
+/** Runs every participant's meter over the same turn. */
 function advanceMeters(
   scene: IntimacyScene,
   obs: IntimacyTurnObservation,
@@ -494,10 +411,7 @@ function advanceMeters(
   const roster = sceneParticipants(scene)
   const ownerId = roster[0]
   const shared = roster.length > 1
-  // `regionsTouched` is the two-party shorthand, and the judge is prompted with the *speaker's* name,
-  // so it describes whoever spoke. That is unambiguous with one character in the scene and meaningless
-  // with several — folding it into the owner would credit them for touches on somebody else's body.
-  // A shared scene is therefore attributed from the contact graph alone, which names both sides.
+  // `regionsTouched` is the two-party shorthand, and the judge is prompted with the *speaker's* name, so it describes whoever spoke.
   const ownerRegions = shared
     ? contactRegionsFor(contact, ownerId)
     : ownerId
@@ -521,15 +435,12 @@ function advanceMeters(
     const own = ctx.participants?.[id] ?? {}
     participants[id] = advanceArousal(
       arousalOf(scene, id),
-      // Only what the graph says is happening to *them* — a participant nobody is touching this turn
-      // gains nothing from contact, which is what lets one of them lag behind on purpose.
+      // Only what the graph says is happening to *them*
       observationFor(obs, contactRegionsFor(contact, id)),
       {
         ...own,
         activityWeight: own.activityWeight ?? scene.activityWeight,
-        // Deliberately no fallback to `scene.activityValence`: that is the *owner's* stance on the
-        // content, and applying it to someone else would make one character's enthusiasm speed up a
-        // participant who does not share it. Unsupplied means neutral, not "feels the same".
+        // Deliberately no fallback to `scene.activityValence`
         passiveGain: stage.passiveGain ?? own.passiveGain,
       },
       charReplyCount,
@@ -551,9 +462,7 @@ function nextClothing(
   for (const { who, layer } of obs.participantClothingRemoved ?? []) {
     // A character who isn't in the scene has no ledger to write to at all.
     if (!roster.includes(who)) continue
-    // The owner has exactly one place their layers live. A judge that named them by id rather than
-    // using the `char` side still gets the removal recorded — dropping it would lose real state and
-    // then let `continuityGuard.ts` wave through a reply undressing them a second time.
+    // The owner has exactly one place their layers live.
     if (isSceneOwner(scene, who)) {
       own = applyClothingRemovals(own, [{ who: 'char', layer }])
       continue
@@ -616,16 +525,7 @@ function withSceneFlag(scene: IntimacyScene, flag: string | undefined): Intimacy
   return { ...scene, sceneFlags: [...(scene.sceneFlags ?? []), flag] }
 }
 
-/**
- * The player answering a branch, by the option's own id rather than by where it leads — two options
- * can share a target ("finish inside" and "pull out" both end the scene), so the target alone cannot
- * say which was chosen. Returns the scene on the chosen stage with the branch cleared, or `null` when
- * the choice was to end it. An unknown option leaves the scene exactly where it is rather than
- * jumping it somewhere the graph never offered.
- *
- * When the answer ends the scene the returned `null` carries nothing, so a caller that needs the
- * flag reads `resolvedSceneFlags` first — see its own note.
- */
+/** The player answering a branch, by the option's own id rather than by where it leads */
 export function resolveIntimacyChoice(
   scene: IntimacyScene,
   optionId: string,
@@ -642,12 +542,7 @@ export function resolveIntimacyChoice(
   return enterStage(flagged, from, to, charReplyCount)
 }
 
-/**
- * The scene flags this scene would end with if `optionId` were taken now. Needed because a resolving
- * answer returns `null` — the scene object is gone, and the flag it set is the one durable trace the
- * player's decision leaves. Callers fold this into `Chat.sceneFlags`, where a `flag_set` trigger
- * condition can read it turns or days later.
- */
+/** The scene flags this scene would end with if `optionId` were taken now. */
 export function resolvedSceneFlags(scene: IntimacyScene, optionId: string): string[] {
   const option = scene.pendingChoice ? pendingChoiceOption(scene.pendingChoice, optionId) : undefined
   return withSceneFlag(scene, option?.setsFlag).sceneFlags ?? []
@@ -671,11 +566,7 @@ function paceClauseFor(pace: IntimacyPace, phase: IntimacyPhase): string {
 /** How many turns in one arousal band before the scene reads as going nowhere. */
 const PROLONGED_BAND_TURNS = 3
 
-/**
- * The variety nudge, now driven by what the scene actually did rather than a bare turn counter: a
- * region the scene has worn out is named specifically, and a meter that has sat in one band for a
- * few turns running is the general case underneath it.
- */
+/** The variety nudge, now driven by what the scene actually did rather than a bare turn counter */
 function repetitionClause(scene: IntimacyScene): string {
   const arousal = arousalOf(scene)
   const worn = habituatedRegion(arousal)
@@ -686,12 +577,7 @@ function repetitionClause(scene: IntimacyScene): string {
   return ` This has held at the same level for a few turns running now, let something actually shift (pace, depth, a brief pause, a change of angle) rather than repeating the same beat over again.`
 }
 
-/**
- * How this character feels about what's currently happening (`kinks.ts`). The arousal meter already
- * carries the mechanical half; this is the half that has to reach the writing, because a reluctance
- * that never shows in the prose is one the judge can't observe either — and `hesitationSignalled` is
- * an observation, never something the engine invents on a character's behalf.
- */
+/** How this character feels about what's currently happening (`kinks.ts`). */
 function stanceClause(scene: IntimacyScene): string {
   const valence = scene.activityValence ?? 0
   if (valence <= -1) {
@@ -717,12 +603,7 @@ function overstayClause(scene: IntimacyScene, graph: ScenarioGraph): string {
     : ''
 }
 
-/**
- * Physical continuity + phase-scaled pacing for the active scene. What is physically happening is
- * stated once, by `prompt/sceneStateBlock.ts`, which renders on exactly the same condition as this
- * line; the instruction about it lives here. Two copies of the same fact in one prompt is noise, and
- * the copies can drift apart.
- */
+/** Physical continuity + phase-scaled pacing for the active scene. */
 export function intimacySceneGuidance(
   charName: string,
   scene: IntimacyScene,
@@ -737,9 +618,7 @@ export function intimacySceneGuidance(
   return `${continuity} ${pacing}${paceClauseFor(pace, scene.phase)}${stanceClause(scene)}${repetitionClause(scene)}${overstayClause(scene, graph)}${pendingChoiceClause(scene)}`
 }
 
-/** Nudges toward hesitation/checking-in when comfort trails well behind chemistry mid-scene. The same
- *  condition mechanically slows arousal and deepens a hesitation's cost (`arousal.ts`), so the nudge
- *  and the meter can never disagree about whether the gap is real. */
+/** Nudges toward hesitation/checking-in when comfort trails well behind chemistry mid-scene. */
 export function intimacyConsentTensionGuidance(charName: string, comfort: number, chemistry: number): string | undefined {
   if (!isConsentTension(comfort, chemistry)) return undefined
   return `Right now ${charName}'s comfort is trailing well behind the physical chemistry in this scene, the spark is real, but ease and readiness aren't fully there yet. That's worth letting show: a beat of hesitation, an unprompted check-in, or ${charName} naming the mismatch out loud is the right call here, not something to override just because the moment has its own momentum.`
@@ -804,8 +683,7 @@ export function explicitSceneGuidance(
     pace === 'reserved'
       ? ` Given who ${charName} is right now, this still shows through even here: more checking in, smaller and less certain reactions, a real chance they need a moment or a full pause rather than just riding the momentum, dirty talk or a confident running commentary would read false for them unless that's genuinely who they are underneath it.`
       : ''
-  // The POV guard is carried once, canonically, by `mindGuidance.ts`'s `agencyGuardNote`, which
-  // fires on every romantic/intimate moment (this scene included) — not repeated here.
+  // The POV guard is carried once, canonically, by `mindGuidance.ts`'s `agencyGuardNote`
   return [mechanics, antiPatterns, voice + reservedClause].join(' ')
 }
 

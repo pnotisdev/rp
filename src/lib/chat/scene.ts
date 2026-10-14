@@ -2,13 +2,8 @@ import type { ChatBackend } from '@/lib/api/chatBackend'
 import { generateWithTimeout, type AssistShaping } from '@/lib/api/generateWithTimeout'
 import type { Character } from '@/lib/characters/cardSpec'
 import type { ChatMessage } from '@/lib/prompt/builder'
-import type { Scene } from '@/lib/types'
 
-/**
- * The roster a turn policy chooses among, in a fixed order — the primary first, then participants
- * in whatever order `Chat.participants` lists them. Every policy function below takes this exact
- * shape so none of them need to know how it was assembled.
- */
+/** The roster a turn policy chooses among, in a fixed order — the primary first, then participants in whatever order `Chat.participants` lists them. */
 export type SceneRoster = { id: string; name: string }[]
 
 export function rosterFrom(character: Character | undefined, participantCharacters: Character[]): SceneRoster {
@@ -16,22 +11,14 @@ export function rosterFrom(character: Character | undefined, participantCharacte
   return [...primary, ...participantCharacters.map((c) => ({ id: c.id, name: c.card.name }))]
 }
 
-/**
- * Round-robin's own bookkeeping is a plain array index, which the roster can silently outgrow or
- * shrink past (a participant removed, or the character list re-ordered) — modulo rather than
- * trusting it keeps this from ever producing an out-of-range pick or throwing.
- */
+/** Round-robin's own bookkeeping is a plain array index */
 export function nextRoundRobinSpeaker(roster: SceneRoster, index: number | undefined): { id: string; nextIndex: number } | undefined {
   if (roster.length === 0) return undefined
   const i = ((index ?? 0) % roster.length + roster.length) % roster.length
   return { id: roster[i].id, nextIndex: (i + 1) % roster.length }
 }
 
-/**
- * SillyTavern's own group-chat convention: `@Name` in the player's own message routes the reply to
- * that character. Longest-name-first so "Aria" doesn't shadow a match for "Aria Kestrel" mentioned
- * in full, and a name is only matched at a word boundary so "@Ari" doesn't accidentally hit "Aria".
- */
+/** SillyTavern's own group-chat convention: `@Name` in the player's own message routes the reply to that character. */
 export function parseMention(text: string, roster: SceneRoster): SceneRoster[number] | undefined {
   const sorted = [...roster].sort((a, b) => b.name.length - a.name.length)
   for (const entry of sorted) {
@@ -55,13 +42,7 @@ const DIRECTOR_PARAMS = {
   trim_stop: true,
 }
 
-/**
- * The `'director'` turn policy: a cheap classification call (same "model plays the character,
- * plain code decides what to do with it" shape as `assessRelationshipMoment`) picks who in the
- * roster would naturally respond to what the player just said. Deliberately tiny — a name, nothing
- * else — and never blocks or fails the actual reply: any parse/network failure resolves to
- * `undefined`, which every call site treats as "fall back to the primary."
- */
+/** The `'director'` turn policy: a cheap classification call (same "model plays the character, plain code decides what to do with… */
 export async function pickDirectorSpeaker(
   client: ChatBackend,
   params: {
@@ -94,10 +75,7 @@ export async function pickDirectorSpeaker(
     .join('\n')
 
   try {
-    // A hang here (backend never responds) used to block the whole group-scene turn forever,
-    // since this pick has to land before anyone's reply can be generated — `generateWithTimeout`
-    // bounds it to 45s, after which the catch below falls back to the primary, same as any other
-    // parse/network failure.
+    // A hang here (backend never responds) used to block the whole group-scene turn forever
     const text = await generateWithTimeout(
       client,
       { ...DIRECTOR_PARAMS, max_context_length: await client.getEffectiveMaxContext(4096), prompt },
@@ -106,8 +84,7 @@ export async function pickDirectorSpeaker(
       assist,
     )
     const answer = text.trim().toLowerCase()
-    // Exact match first, then "the answer starts with/contains a real name" as a looser fallback
-    // for a model that adds punctuation or a stray word despite the instruction.
+    // Exact match first, then "the answer starts with/contains a real name" as a looser fallback for a model that adds punctuation or a…
     const exact = params.roster.find((r) => r.name.toLowerCase() === answer)
     if (exact) return exact.id
     const loose = params.roster.find((r) => answer.includes(r.name.toLowerCase()))

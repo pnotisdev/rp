@@ -19,27 +19,38 @@ import {
   worldInfoBookStore,
   worldStore,
   avatarsDir,
+  extensionStore,
+  extensionFileStore,
+  extensionDataStore,
 } from './db.ts'
+import { cloneScopeData, extensionsRouter, purgeScopeData } from './extensions.ts'
+import { mcpRouter, mcpSettingsRouter } from './mcp.ts'
+import { agentRouter } from './agentTools.ts'
+import { mcpServersRouter } from './mcpClient.ts'
 import { removeAvatar, resolveAvatar, resolveAvatarMap, resolveAvatarMapVariants, resolveWorldBackgroundsNightMap, resolveWorldMusicMap } from './avatars.ts'
 import { encodeTokens, tokenizerForModel } from './novelaiTokenizer.ts'
 import { originGuard } from './originCheck.ts'
+import { imageProxyRouter } from './imageProxies.ts'
 import { openMayhemRouter } from './openMayhem.ts'
 import { normalizeItemEffect } from './itemEffects.ts'
 
-/**
- * Express app: REST routes for characters, personas, chats/messages, world info books, sampler
- * presets, themes, instruct templates, worlds, objectives, relationship events, chat facts, full
- * backup/restore, and the NovelAI tokenize endpoint — plus the request-body normalization helpers
- * that validate client-authored JSON before it's persisted.
- */
+/** Express app: REST routes for characters, personas, chats/messages, world info books, sampler presets, themes, instruct templates… */
 export const app = express()
 
 // Rejects a request whose Origin is another website; any loopback origin is allowed. See originCheck.ts.
 app.use(originGuard)
 
+// MCP for AI agents: token-gated, with its own small body limit, so it sits ahead of the global parser.
+app.use(mcpRouter({ apiBase: (req) => `http://127.0.0.1:${req.socket.localPort}` }))
+
 // Raised generously (a bulk sprite upload easily clears 25MB) — local-only app, no untrusted-request concern.
 app.use(express.json({ limit: '150mb' }))
+app.use(mcpSettingsRouter())
+app.use(mcpServersRouter())
+app.use(agentRouter())
 app.use('/api/openmayhem', openMayhemRouter())
+app.use(imageProxyRouter())
+app.use('/api/extensions', extensionsRouter())
 app.use('/avatars', express.static(avatarsDir))
 
 function notFound(res: express.Response) {
@@ -70,8 +81,7 @@ function normalizeOutfits(raw: unknown) {
         ? Math.max(0, Math.min(100, Math.round(Number(e.unlockAffection))))
         : undefined,
       requiredFlags: normalizeStringArray(e.requiredFlags),
-      // Wardrobe shop. Clamped rather than trusted, same as `unlockAffection` above — this is a
-      // price the client sends, and it is the whole gate on a purchasable outfit.
+      // Wardrobe shop.
       price: Number.isFinite(Number(e.price)) ? Math.max(0, Math.min(999, Math.round(Number(e.price)))) : undefined,
       manualOnly: e.manualOnly === true,
       intimate: e.intimate === true,
@@ -384,6 +394,47 @@ function normalizeOutreach(raw: unknown): { frequency: string } | undefined {
   return typeof frequency === 'string' && OUTREACH_FREQUENCIES.has(frequency) ? { frequency } : undefined
 }
 
+/** `Character.drive` (src/lib/persona/drive.ts): clamped numbers, string lists, known keys only. */
+function normalizeDrive(raw: unknown): Record<string, unknown> | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const r = raw as Record<string, unknown>
+  const num = (v: unknown, lo: number, hi: number, fallback: number) =>
+    typeof v === 'number' && Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : fallback
+  const idle = r.idle && typeof r.idle === 'object' ? (r.idle as Record<string, unknown>) : undefined
+  const deck = (raw: unknown) =>
+    Array.isArray(raw)
+      ? raw
+          .filter((i): i is Record<string, unknown> => !!i && typeof i === 'object' && typeof (i as Record<string, unknown>).id === 'string' && typeof (i as Record<string, unknown>).line === 'string')
+          .map((i) => ({
+            id: i.id,
+            line: i.line,
+            weight: num(i.weight, 0, 10, 1),
+            cooldown: Math.round(num(i.cooldown, 0, 50, 5)),
+            ...(i.needsFact === true ? { needsFact: true } : {}),
+            ...(i.needsBit === true ? { needsBit: true } : {}),
+          }))
+      : undefined
+  const impulses = deck(r.impulses)
+  const idleImpulses = deck(r.idleImpulses)
+  return {
+    enabled: r.enabled === true,
+    chaosBase: num(r.chaosBase, 0, 0.4, 0.12),
+    energyBase: num(r.energyBase, 0, 10, 6),
+    fixations: normalizeStringArray(r.fixations) ?? [],
+    loves: normalizeStringArray(r.loves) ?? [],
+    boredBy: normalizeStringArray(r.boredBy) ?? [],
+    ...(impulses?.length ? { impulses } : {}),
+    ...(idleImpulses?.length ? { idleImpulses } : {}),
+    ...(r.human === true ? { human: true } : {}),
+    ...(idle
+      ? { idle: { enabled: idle.enabled === true, patienceSec: Math.round(num(idle.patienceSec, 10, 3600, 60)), maxInARow: Math.round(num(idle.maxInARow, 1, 5, 2)) } }
+      : {}),
+    telemetry: r.telemetry !== false,
+    moodSampling: r.moodSampling !== false,
+    ...(normalizeStringArray(r.motifs)?.length ? { motifs: normalizeStringArray(r.motifs) } : {}),
+  }
+}
+
 /** `Character.birthday` — a day-of-year (world/calendar.ts's 112-day year), clamped/rounded rather
  *  than rejected outright so a stray out-of-range value from the client still lands somewhere sane. */
 function normalizeDayOfYear(raw: unknown): number | undefined {
@@ -393,6 +444,10 @@ function normalizeDayOfYear(raw: unknown): number | undefined {
 const REPLY_LENGTHS = new Set(['auto', 'brief', 'moderate', 'detailed'])
 
 /** 'auto' and unset both mean "measure the card"; only the three explicit bands are stored. */
+function normalizeReplyFormat(raw: unknown): string | undefined {
+  return raw === 'texting' ? raw : undefined
+}
+
 function normalizeReplyLength(raw: unknown): string | undefined {
   return typeof raw === 'string' && REPLY_LENGTHS.has(raw) && raw !== 'auto' ? raw : undefined
 }
@@ -464,6 +519,8 @@ app.post('/api/characters', (req, res) => {
     frequentedLocations: normalizeStringArray(req.body.frequentedLocations),
     dateModeOptOut: req.body.dateModeOptOut === true,
     outreach: normalizeOutreach(req.body.outreach),
+    drive: normalizeDrive(req.body.drive),
+    replyFormat: normalizeReplyFormat(req.body.replyFormat),
     createdAt: now,
     updatedAt: now,
   })
@@ -510,6 +567,8 @@ app.put('/api/characters/:id', (req, res) => {
   if ('frequentedLocations' in req.body) patch.frequentedLocations = normalizeStringArray(req.body.frequentedLocations)
   if ('dateModeOptOut' in req.body) patch.dateModeOptOut = req.body.dateModeOptOut === true
   if ('outreach' in req.body) patch.outreach = normalizeOutreach(req.body.outreach)
+  if ('drive' in req.body) patch.drive = normalizeDrive(req.body.drive)
+  if ('replyFormat' in req.body) patch.replyFormat = normalizeReplyFormat(req.body.replyFormat)
   const updated = characterStore.update(id, patch)
   res.json(updated)
 })
@@ -519,8 +578,7 @@ app.delete('/api/characters/:id', (req, res) => {
   // The character is gone for good, so there's no useful "trash" state — purge its chats directly.
   const chats = chatStore.list({ where: 'characterId = ?', params: [characterId] })
   for (const chat of chats) purgeChat(chat.id as string)
-  // A character can also appear as a group-chat participant (a full scan — `participants` isn't an
-  // indexed column); drop the dangling id and any tracked relationship for it instead of deleting the chat.
+  // A character can also appear as a group-chat participant (a full scan
   for (const chat of chatStore.list()) {
     const participants = chat.participants as string[] | undefined
     const participantRelationships = chat.participantRelationships as Record<string, unknown> | undefined
@@ -534,6 +592,7 @@ app.delete('/api/characters/:id', (req, res) => {
   }
   // Removes the whole per-character folder in one shot (avatar, sprites, gallery — see avatars.ts).
   removeAvatar('characters', characterId)
+  purgeScopeData('character', characterId)
   characterStore.remove(characterId)
   res.status(204).end()
 })
@@ -597,6 +656,7 @@ function purgeChat(chatId: string): void {
   for (const o of objectiveStore.list({ where: 'chatId = ?', params: [chatId] })) objectiveStore.remove(o.id as string)
   for (const e of relationshipEventStore.list({ where: 'chatId = ?', params: [chatId] })) relationshipEventStore.remove(e.id as string)
   for (const f of chatFactStore.list({ where: 'chatId = ?', params: [chatId] })) chatFactStore.remove(f.id as string)
+  purgeScopeData('chat', chatId)
   // Un-parent any chat forked from this one (parentChatId isn't indexed, so a full scan).
   for (const chat of chatStore.list()) {
     if (chat.parentChatId !== chatId) continue
@@ -663,9 +723,7 @@ app.post('/api/chats', (req, res) => {
 })
 
 app.put('/api/chats/:id', (req, res) => {
-  // skipTouch: 10f's outreach tick writes lastOutreachCheckedAt on every chat it evaluates,
-  // whether or not a message actually landed — without this, that bookkeeping-only write would
-  // bump updatedAt and reorder ChatsPanel (sorted by updatedAt DESC) for a chat nothing happened in.
+  // skipTouch: 10f's outreach tick writes lastOutreachCheckedAt on every chat it evaluates, whether or not a message actually landed
   const { characterId: _c, id: _id, createdAt: _ca, skipTouch, ...patch } = req.body
   const updated = chatStore.update(req.params.id, {
     ...patch,
@@ -732,6 +790,8 @@ app.post('/api/chats/:id/fork', (req, res) => {
     const { id: _fid, chatId: _fcid, ...fRest } = f
     chatFactStore.insert({ ...fRest, id: newId(), chatId: newChatId })
   }
+
+  cloneScopeData('chat', sourceChatId, newChatId)
 
   res.status(201).json(forkedChat)
 })
@@ -863,10 +923,7 @@ app.delete('/api/themes/:id', (req, res) => {
   res.status(204).end()
 })
 
-// ---- Assistant threads ----
-//
-// Plain model conversations, with no character and no relationship state. One row per thread with
-// its messages inside, so the whole feature is a single resource (see `db.ts` for why).
+// ---- Assistant threads ---- Plain model conversations, with no character and no relationship state.
 
 app.get('/api/assistant-threads', (_req, res) => {
   // Newest first: the list is a recency list, and a thread is picked up where it was left.
@@ -1009,8 +1066,7 @@ app.put('/api/worlds/:id', (req, res) => {
   if ('triggers' in req.body) patch.triggers = normalizeTriggers(req.body.triggers)
   if ('customBackgrounds' in req.body) patch.customBackgrounds = normalizeCustomBackgrounds(req.body.customBackgrounds)
   if ('items' in req.body) {
-    // Validate against whichever custom flags are in effect after this same request, so an item
-    // referencing a flag saved in the same request isn't wrongly rejected.
+    // Validate against whichever custom flags are in effect after this same request
     const customFlags = (
       'customSceneFlags' in patch ? patch.customSceneFlags : existing.customSceneFlags
     ) as { id: string }[] | undefined
@@ -1029,6 +1085,7 @@ app.delete('/api/worlds/:id', (req, res) => {
     characterStore.update(c.id as string, { worldId: undefined })
   }
   removeAvatar('worlds', worldId)
+  purgeScopeData('world', worldId)
   worldStore.remove(worldId)
   res.status(204).end()
 })
@@ -1096,9 +1153,7 @@ app.put('/api/chat-facts/:id', (req, res) => {
   res.json(updated)
 })
 
-// ---- Full backup / restore ----
-// One self-contained JSON snapshot of every table plus every avatar/sprite/background file (base64),
-// preserving original ids — unlike character packs (importExport.ts / pack.ts), which mint new ones.
+// ---- Full backup / restore ---- One self-contained JSON snapshot of every table plus every avatar/sprite/background file…
 
 const BACKUP_VERSION = 1
 const BACKUP_STORES = {
@@ -1115,7 +1170,13 @@ const BACKUP_STORES = {
   objectives: objectiveStore,
   relationshipEvents: relationshipEventStore,
   chatFacts: chatFactStore,
+  extensions: extensionStore,
+  extensionFiles: extensionFileStore,
+  extensionData: extensionDataStore,
 } as const
+
+// Backups made before extensions existed lack these keys; restoring one must leave these tables alone.
+const OPTIONAL_BACKUP_KEYS = new Set(['extensions', 'extensionFiles', 'extensionData'])
 
 function listAvatarFiles(): { relPath: string; base64: string }[] {
   const results: { relPath: string; base64: string }[] = []
@@ -1138,8 +1199,7 @@ app.get('/api/backup', (_req, res) => {
   res.json({ version: BACKUP_VERSION, exportedAt: Date.now(), data, avatarFiles: listAvatarFiles() })
 })
 
-// A full backup with many/large images can exceed the app's normal 25mb JSON ceiling — this
-// route alone accepts a much larger body instead of raising the limit for every other endpoint.
+// A full backup with many/large images can exceed the app's normal 25mb JSON ceiling
 app.post('/api/restore', express.json({ limit: '1gb' }), (req, res) => {
   const body = req.body as Record<string, unknown>
   if (!body || typeof body !== 'object' || body.version !== BACKUP_VERSION || !body.data || typeof body.data !== 'object') {
@@ -1150,6 +1210,7 @@ app.post('/api/restore', express.json({ limit: '1gb' }), (req, res) => {
   db.exec('BEGIN')
   try {
     for (const [key, store] of Object.entries(BACKUP_STORES)) {
+      if (OPTIONAL_BACKUP_KEYS.has(key) && !Array.isArray(data[key])) continue
       store.clear()
       const rows = Array.isArray(data[key]) ? (data[key] as Record<string, unknown>[]) : []
       for (const row of rows) store.insert(row)
@@ -1160,8 +1221,7 @@ app.post('/api/restore', express.json({ limit: '1gb' }), (req, res) => {
     throw e
   }
   if (Array.isArray(body.avatarFiles)) {
-    // Write into a fresh temp directory and only swap it in once every file succeeds, so a failure
-    // partway through can't leave avatarsDir wiped with nothing restored.
+    // Write into a fresh temp directory and only swap it in once every file succeeds
     const tmpDir = `${avatarsDir}.restore-tmp`
     fs.rmSync(tmpDir, { recursive: true, force: true })
     fs.mkdirSync(tmpDir, { recursive: true })
@@ -1200,10 +1260,7 @@ app.post('/api/novelai/tokenize', async (req, res) => {
   res.json({ ids })
 })
 
-// Serve the built client (Docker, or `npm run build` && `npm start`). In dev this is Vite's job and
-// `dist/` doesn't exist, so the whole block is skipped and `npm run dev` is untouched. Registered
-// after every `/api` route so those still win; the SPA fallback then hands any other GET the app
-// shell so a deep-link reload works, while unknown `/api` paths fall through to the 404 below.
+// Serve the built client (Docker, or `npm run build` && `npm start`).
 const clientDir = path.resolve(fileURLToPath(import.meta.url), '..', '..', 'dist')
 if (fs.existsSync(path.join(clientDir, 'index.html'))) {
   app.use(express.static(clientDir))

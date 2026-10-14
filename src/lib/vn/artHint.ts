@@ -1,17 +1,7 @@
 import type { Character } from '@/lib/characters/cardSpec'
 import type { WorldCard } from '@/lib/types'
 
-/**
- * "VN mode reads as broken before art exists" — a bare gradient plus a full-bleed avatar looks like
- * a bug, not a "you haven't added art yet" state. This names the *one specific* missing piece so the
- * hint in `VNStage` is actionable: sprites are a character concept and backgrounds a world one, and
- * a user often doesn't realise those are set up separately.
- *
- * Order matters — a character with no sprites gets told that first (it's the bigger gap and the
- * thing most under their control), then the world/background chain. Returns `null` once there's
- * enough art for VN mode to look intentional, or when the user has dismissed the hint for this
- * character.
- */
+/** "VN mode reads as broken before art exists" — a bare gradient plus a full-bleed avatar looks like a bug, not a "you haven't added art yet" state. */
 export function vnArtHint(
   character: Pick<Character, 'id' | 'card' | 'sprites'> | undefined,
   world: Pick<WorldCard, 'name' | 'backgrounds'> | undefined,
@@ -35,15 +25,12 @@ export function vnArtHint(
   return null
 }
 
-/** Same "is there enough art for VN mode to look intentional" check `vnArtHint` makes, as a plain
- *  boolean — backs `visualNovelMode: 'auto'` (`ChatWindow.tsx`): VN mode only turns itself on once
- *  this is true, so it's never a blank gradient plus a floating sprite. */
+/** Same "is there enough art for VN mode to look intentional" check `vnArtHint` makes, as a plain boolean */
 export function isVnReady(
   character: Pick<Character, 'id' | 'card' | 'sprites'> | undefined,
   world: Pick<WorldCard, 'name' | 'backgrounds'> | undefined,
 ): boolean {
-  // `vnArtHint` itself returns null for "no character yet" too (nothing to hint about) — 'auto'
-  // mode needs the stricter reading: no character selected is never VN-ready.
+  // `vnArtHint` itself returns null for "no character yet" too (nothing to hint about)
   if (!character) return false
   return vnArtHint(character, world, []) === null
 }

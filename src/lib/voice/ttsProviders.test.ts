@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { listKoboldSpeakers, synthesizeSpeech, TTS_PROVIDER_LABELS } from './ttsProviders'
+import { listKoboldSpeakers, supportsAudioTags, synthesizeSpeech, TTS_PROVIDER_LABELS } from './ttsProviders'
 
 function okBlobResponse(): Response {
   return { ok: true, status: 200, blob: async () => new Blob(['audio']) } as unknown as Response
@@ -83,9 +83,17 @@ describe('synthesizeSpeech', () => {
     vi.stubGlobal('fetch', fetchMock)
     await synthesizeSpeech({ provider: 'elevenlabs', apiKey: 'k123', voice: 'voice/1' }, 'Hi', 'x')
     const [url, init] = fetchMock.mock.calls[0]
-    expect(url).toBe('https://api.elevenlabs.io/v1/text-to-speech/voice%2F1')
+    expect(url).toBe('https://api.elevenlabs.io/v1/text-to-speech/voice%2F1?output_format=mp3_44100_64')
     expect(init.headers['xi-api-key']).toBe('k123')
-    expect(JSON.parse(init.body)).toEqual({ text: 'Hi', model_id: 'eleven_multilingual_v2' })
+    expect(JSON.parse(init.body)).toEqual({ text: 'Hi', model_id: 'eleven_flash_v2_5' })
+    await synthesizeSpeech({ provider: 'elevenlabs', apiKey: 'k123', voice: 'v', model: 'eleven_v4_turbo' }, 'Hi', 'x')
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body).model_id).toBe('eleven_v4_turbo')
+  })
+
+  it('knows which ElevenLabs models read audio tags', () => {
+    expect(supportsAudioTags('elevenlabs', 'eleven_v4_turbo')).toBe(true)
+    expect(supportsAudioTags('elevenlabs', 'eleven_flash_v2_5')).toBe(false)
+    expect(supportsAudioTags('azure', 'eleven_v4_turbo')).toBe(false)
   })
 
   it('azure requires a subscription key and region', async () => {

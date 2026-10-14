@@ -4,14 +4,7 @@ import { Slider } from '@/components/ui/Slider'
 import { SelectField } from '@/components/ui/Field'
 import { Section } from '@/components/ui/Section'
 
-/**
- * The chat-completion-native counterpart to the "Generation" section's KoboldCpp sampler — the
- * user's own framing after live-testing section 8: "text completion and chat completion presets
- * are different" (matching SillyTavern's own split between the two). Shown instead of (not
- * alongside) the KoboldCpp sampler whenever `chatBackend` is `'openai-compatible'` — see
- * `SamplingControls.tsx`. Reply length stays on the shared "Context & length" section above either
- * way; it's a universal "how long should a reply be" concept, not a sampler internal.
- */
+/** The chat-completion-native counterpart to the "Generation" section's KoboldCpp sampler */
 export function ChatCompletionSamplerSection() {
   const chatCompletionSampler = useSettingsStore((s) => s.chatCompletionSampler)
   const setChatCompletionSampler = useSettingsStore((s) => s.setChatCompletionSampler)
@@ -22,7 +15,7 @@ export function ChatCompletionSamplerSection() {
       description="Real OpenAI Chat Completions parameters for the backend configured in Settings → Connection. Kept separate from the KoboldCpp sampler above so switching backends never overwrites either one's tuning."
       surface="bare"
     >
-      <div className="rounded-xl bg-bg-elevated p-5">
+      <div className="rounded-lg border border-border bg-bg-elevated p-5">
         <Slider
           label="Temperature"
           min={0}

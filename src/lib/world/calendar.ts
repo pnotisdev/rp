@@ -1,9 +1,4 @@
-/**
- * A deterministic, shared "living world" clock. Everything here is a pure function of an absolute
- * day number (plus a seed id for weather/mood) — only `WorldCard.currentDay`/`currentPhaseIndex`
- * are actually stored; season, weekday, holiday, weather, and mood-of-day are all recomputed on
- * demand and always reproducible for the same inputs.
- */
+/** A deterministic, shared "living world" clock. */
 
 export const SEASONS = ['spring', 'summer', 'autumn', 'winter'] as const
 export type Season = (typeof SEASONS)[number]
@@ -53,9 +48,7 @@ export const ALL_HOLIDAYS: { name: string; dayOfYear: number }[] = SEASONS.map((
   dayOfYear: i * DAYS_PER_SEASON + (HOLIDAYS[season].dayOfSeason - 1),
 }))
 
-/** Days from `day` until the next occurrence of `targetDayOfYear` (a day-of-year, 0–111) — `0`
- *  means today, wrapping forward through the year otherwise. Shared by birthdays, commitment
- *  anniversaries, and holidays alike — each is just "a day-of-year to count down to." */
+/** Days from `day` until the next occurrence of `targetDayOfYear` (a day-of-year, 0–111) — `0` means today, wrapping forward through the year otherwise. */
 export function daysUntilAnnualDate(day: number, targetDayOfYear: number): number {
   const todayOfYear = getCalendarInfo(day).day
   return (targetDayOfYear - todayOfYear + DAYS_PER_YEAR) % DAYS_PER_YEAR
@@ -119,15 +112,13 @@ const MOODS = [
   'unusually cheerful',
 ]
 
-/** Deterministic per-character-per-day mood — nudges tone, never dictates it (see ROADMAP.md 10a). */
+/** Deterministic per-character-per-day mood — nudges tone, never dictates it (see docs/history/changelog.md 10a). */
 export function getMoodOfDay(characterId: string, day: number): string {
   const info = getCalendarInfo(day)
   return pickFrom(MOODS, `mood:${characterId}:${info.day}`)
 }
 
-/** Whether a phase index reads as "night" for lighting purposes (evening counts as night too — dusk
- *  is closer to a night scene than a daylit one). Undefined/out-of-range defaults to day, matching a
- *  world that's never advanced its clock. */
+/** Whether a phase index reads as "night" for lighting purposes (evening counts as night too — dusk is closer to a night scene than a daylit one). */
 export function isNightPhase(phaseIndex: number | undefined): boolean {
   const phase = PHASES[phaseIndex ?? -1]
   return phase === 'evening' || phase === 'night'
@@ -249,9 +240,7 @@ const PHASE_CUES: { re: RegExp; phase: DayPhase }[] = [
   { re: /\bafter (?:dark|midnight)\b/i, phase: 'night' },
 ]
 
-/** A time-of-day the text explicitly narrates ("the next morning", "at lunch", "that night"), or
- *  undefined when nothing time-anchoring is said. First-match wins on the ordered list above, so a
- *  message that only mentions time once resolves cleanly; a rambling one takes its earliest cue. */
+/** A time-of-day the text explicitly narrates ("the next morning", "at lunch", "that night"), or undefined when nothing time-anchoring is said. */
 export function detectNarratedPhase(text: string | null | undefined): DayPhase | undefined {
   if (!text?.trim()) return undefined
   let earliest: { index: number; phase: DayPhase } | undefined
@@ -271,18 +260,7 @@ function locationsOverlap(a: string, b: string): boolean {
   return x === y || x.includes(y) || y.includes(x)
 }
 
-/**
- * Presence for the prompt, reconciling the frozen world clock against an already-established scene.
- * `WorldCard.currentDay`/`currentPhaseIndex` only ever advance by explicit user action, so a chat
- * that opens with a greeting placing the character somewhere would otherwise be prompted the whole
- * session with a schedule slot ("busy — in class", or "free at her apartment") that contradicts the
- * scene the greeting set. The established scene owns *where* the character is; the schedule only
- * still owns their status/activity, and only when it doesn't fight the scene:
- *  - clock slot's own location matches the scene → keep it wholesale (its activity is real colour)
- *  - scene sits at a spot some other `available` slot covers → use that slot instead
- *  - scene is somewhere the schedule doesn't describe → keep only the status, drop the stale
- *    activity/location (a genuine busy/asleep/traveling conflict still surfaces as friction)
- */
+/** Presence for the prompt, reconciling the frozen world clock against an already-established scene. */
 export function resolveScheduledPresence(
   schedule: ScheduleEntry[] | undefined,
   day: number,

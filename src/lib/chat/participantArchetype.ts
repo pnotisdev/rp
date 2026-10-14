@@ -1,10 +1,4 @@
-/**
- * Relationship-flavor prompt guidance for non-primary participants in a group chat, who otherwise
- * read as generic bystanders even though they have their own tracked affection/stats. Classifies an
- * authored `Character.socialConnections` entry into a closed set of non-romantic archetypes (rival,
- * found family, mentor/mentee, power-imbalanced) and turns that into a model-facing guidance line;
- * falls back to a plain warmth-based baseline when nothing is authored.
- */
+/** Relationship-flavor prompt guidance for non-primary participants in a group chat, who otherwise read as generic bystanders even… */
 
 import type { CommitmentStatus } from '@/lib/types'
 

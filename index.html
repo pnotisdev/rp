@@ -3,7 +3,23 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>rp — KoboldCpp frontend</title>
+    <title>Hakoniwa</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <script>
+      // Apply the saved colour mode, palette and backdrop before first paint (dark is the default) so there is no flash of another look.
+      try {
+        var st = JSON.parse(localStorage.getItem('rp-settings')).state
+        var root = document.documentElement
+        var dark = st.colorMode !== 'light'
+        if (dark) root.classList.add('dark')
+        var tokens = (dark ? st.themeTokensDark : st.themeTokensLight) || {}
+        for (var key in tokens) root.style.setProperty(key, tokens[key])
+        if (st.backdrop) root.dataset.backdrop = st.backdrop
+        if (st.glass) root.dataset.glass = 'on'
+      } catch (e) {
+        document.documentElement.classList.add('dark')
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

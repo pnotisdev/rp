@@ -1,26 +1,17 @@
-// The starter content bundled with the app — one world, one standalone World Info book, and one
-// character. Kept as real, type-checked data (not a JSON blob) so it stays in sync with the
-// schemas it's shaped against. Applied once, on first run, by seed.ts.
+// The starter content bundled with the app — one world, one standalone World Info book, and one character.
 import type { GiftItem, ItemDef, Persona, WorldCard, WorldInfoBook } from '../src/lib/types.ts'
 import type { Character, CharacterCardData } from '../src/lib/characters/cardSpec.ts'
 
-// Fixed, well-known ids rather than crypto.randomUUID() — so seeding is idempotent (seed.ts checks
-// whether this exact world id already exists before doing anything) and so the three pieces of
-// content can reference each other (the character's worldId) without a chicken-and-egg ordering
-// problem.
+// Fixed, well-known ids rather than crypto.randomUUID()
 export const SEED_WORLD_ID = 'a0000000-0000-4000-8000-000000000001'
 export const SEED_CHARACTER_ID = 'a0000000-0000-4000-8000-000000000002'
 export const SEED_WORLD_INFO_ID = 'a0000000-0000-4000-8000-000000000003'
 export const SEED_PERSONA_ID = 'a0000000-0000-4000-8000-000000000004'
-// A second, differently-templated seed (Tier 3a: "the concept should be visible from first run") —
-// Freeform rather than the first world's Dating Sim, and deliberately art-less (no backgrounds, no
-// sprites): this template's whole pitch is "plain roleplay or lore reference", so a text-only world
-// and NPC are the honest, in-character amount of art for it, not a corner cut.
+// A second, differently-templated seed (Tier 3a
 export const SEED_WORLD_2_ID = 'a0000000-0000-4000-8000-000000000005'
 export const SEED_CHARACTER_2_ID = 'a0000000-0000-4000-8000-000000000006'
 
-// Background image files this seed expects to find (and copy into the world's own avatars
-// folder) under seed/backgrounds/<key>.png at the repo root — see seed.ts.
+// Background image files this seed expects to find (and copy into the world's own avatars folder) under seed/backgrounds/<key>.png…
 export const SEED_BACKGROUND_KEYS = [
   'classroom',
   'school-hallway',
@@ -55,14 +46,10 @@ export const SEED_BACKGROUND_KEYS = [
   'office',
 ] as const
 
-// Night-lighting variants for `SEED_BACKGROUND_KEYS`, under seed/backgrounds-night/<key>.png — a
-// subset (no night art exists for the two carried-over pre-existing locations, `cafe`/`rooftop`,
-// which just show their day art at night like any world with a partial set).
+// Night-lighting variants for `SEED_BACKGROUND_KEYS`, under seed/backgrounds-night/<key>.png
 export const SEED_BACKGROUND_NIGHT_KEYS = SEED_BACKGROUND_KEYS.filter((k) => k !== 'cafe' && k !== 'rooftop')
 
-// Sumire's expression sprites + portrait, committed under seed/sprites/sumire/<key>.png at the
-// repo root and copied into her own avatars folder on first run — see seed.ts. Keys are rp
-// expression ids (src/lib/vn/expressions.ts); seed/sprites/sumire/avatar.png becomes her portrait.
+// Sumire's expression sprites + portrait, committed under seed/sprites/sumire/<key>.png at the repo root and copied into her own…
 export const SEED_SPRITE_KEYS = [
   'neutral',
   'happy',
@@ -256,8 +243,7 @@ export const seedWorld: WorldCard = {
   backgroundsNight: Object.fromEntries(
     SEED_BACKGROUND_NIGHT_KEYS.map((key) => [key, `/avatars/worlds/${SEED_WORLD_ID}/backgrounds-night/${key}.png`]),
   ),
-  // A few locations gated behind affection, purely to demonstrate the feature — the rest are open
-  // from the very first scene. Roughly ordered by how "invited in" a location implies you are.
+  // A few locations gated behind affection, purely to demonstrate the feature — the rest are open from the very first scene.
   backgroundUnlocks: {
     forest: 20,
     rooftop: 35,
@@ -271,9 +257,6 @@ export const seedWorld: WorldCard = {
   currentDay: 0,
   currentPhaseIndex: 0,
   // Explicit rather than left to the "unset behaves like dating_sim" fallback (`worldTemplates.ts`)
-  // — this is *the* full-mechanic-set demo world, so the template picker should show that plainly
-  // rather than a technically-equivalent blank, especially now a second, differently-templated
-  // seed world exists to compare it against.
   template: 'dating_sim',
   createdAt: now,
   updatedAt: now,
@@ -283,10 +266,7 @@ export const seedWorldInfoBook: WorldInfoBook = {
   id: SEED_WORLD_INFO_ID,
   name: 'Sakura Hill: School Life',
   createdAt: now,
-  // Bound to Sakura Hill so its school facts do not leak into unrelated worlds, while still
-  // immediately visible from World Info. Deliberately varied to show off the mechanics: always-on, plain
-  // keyword, selective (needs a primary AND a secondary key), a mutually-exclusive group, an
-  // after_char insertion position, and a probability roll.
+  // Bound to Sakura Hill so its school facts do not leak into unrelated worlds, while still immediately visible from World Info.
   boundChatIds: [],
   boundWorldIds: [SEED_WORLD_ID],
   book: {
@@ -581,8 +561,7 @@ export const seedCharacter: Character = {
   id: SEED_CHARACTER_ID,
   card: sumireCard,
   worldId: SEED_WORLD_ID,
-  // Portrait + 21 expression sprites, copied from seed/sprites/sumire/ into her avatars folder on
-  // first run (seed.ts). Same URL shape as seedWorld.backgrounds.
+  // Portrait + 21 expression sprites, copied from seed/sprites/sumire/ into her avatars folder on first run (seed.ts).
   avatarDataUrl: `/avatars/characters/${SEED_CHARACTER_ID}/avatar.png`,
   sprites: Object.fromEntries(
     SEED_SPRITE_KEYS.map((key) => [
@@ -695,12 +674,7 @@ export const seedCharacter: Character = {
   updatedAt: now,
 }
 
-/**
- * A starter persona so a fresh install isn't stuck telling the model the player is named "You".
- * Deliberately thin and gender-neutral: a second-year at the seed world's school with a weekend
- * job, enough to anchor a scene without boxing in whoever the player actually wants to be.
- * Edit or delete freely; the inline "who are you" capture in NewChatDialog still works if it's gone.
- */
+/** A starter persona so a fresh install isn't stuck telling the model the player is named "You". */
 export const seedPersona: Persona = {
   id: SEED_PERSONA_ID,
   name: 'Kai',

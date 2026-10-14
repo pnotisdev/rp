@@ -1,10 +1,6 @@
 import type { IntimacyDetailLevel } from '@/lib/store/useSettingsStore'
 
-/**
- * User-controlled dial over how explicit the connected model gets once a scene turns intimate —
- * deterministic code sets the knob, the model writes the words. Separate from `slowBurnPacing`
- * (how fast affection is earned) — this is about register, not pace.
- */
+/** User-controlled dial over how explicit the connected model gets once a scene turns intimate */
 
 /** The content rating in force for a chat: the world's own level, if set, else the global Settings value — the world wins outright either direction, not just the stricter one. */
 export function resolveIntimacyLevel(
@@ -29,12 +25,7 @@ export function intimacyGuidance(level: IntimacyDetailLevel): string {
   }
 }
 
-/**
- * Freeform player prose is not limited to catalog actions, so the catalog's warmth gates alone
- * cannot prevent an unearned kiss from reading as automatically welcome. This stays lexical and
- * deliberately narrow: it adds no prompt text unless a low-warmth player turn actually attempts
- * physical escalation.
- */
+/** Freeform player prose is not limited to catalog actions */
 const EARLY_PHYSICAL_ESCALATION = /\b(?:kiss(?:es|ed|ing)?|make(?:\s|-)?out|touch(?:es|ed|ing)?|caress(?:es|ed|ing)?|grope(?:s|d|ing)?|undress(?:es|ed|ing)?|strip(?:s|ped|ping)?|hold(?:s|ing)?\s+(?:her|him|them|you)|pull(?:s|ed|ing)?\s+(?:her|him|them|you)\s+close)\b/i
 
 /** A late, state-based cue for freeform physical escalation before even light kissing is unlocked. */

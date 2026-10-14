@@ -3,15 +3,7 @@ import { generateWithTimeout } from '@/lib/api/generateWithTimeout'
 import { parseLenientJson } from '@/lib/jsonRepair'
 import type { GeneratedStory, GeneratedStoryChapter } from '@/lib/assistant/thread'
 
-/**
- * Long-form story writing, in two phases: plan the whole thing, then write it a chapter at a time.
- *
- * One generation cannot hold a complete multi-chapter story — it runs out of context and, well
- * before that, out of shape: a model asked for "a whole novel" writes a synopsis that accelerates
- * until it is summarising its own ending. Planning first and then writing each chapter against a
- * running account of what has already happened is what keeps chapter nine a chapter rather than a
- * recap, and it is the same "structure first, prose within it" split the scene engine uses.
- */
+/** Long-form story writing, in two phases: plan the whole thing, then write it a chapter at a time. */
 
 const OUTLINE_PARAMS = {
   max_length: 900,

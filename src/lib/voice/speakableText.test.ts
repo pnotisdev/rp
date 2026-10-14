@@ -11,7 +11,11 @@ describe('toSpeakableText', () => {
   })
 
   it('removes stray markdown characters without removing their letters', () => {
-    expect(toSpeakableText('_hello_ ~world~ `code` #tag')).toBe('hello world code tag')
+    expect(toSpeakableText('_hello_ ~world~ #tag')).toBe('hello world tag')
+  })
+
+  it('drops backticked spans, which carry meta like a persona log line', () => {
+    expect(toSpeakableText('"Hi." `tess.log: patience at 4%` "Anyway."')).toBe('"Hi." "Anyway."')
   })
 
   it('collapses internal whitespace runs to a single space and trims the ends', () => {

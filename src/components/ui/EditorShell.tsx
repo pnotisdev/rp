@@ -8,12 +8,7 @@ export interface EditorTab {
   badge?: number
 }
 
-/**
- * The shared frame for a full-page editor (world, character): a fixed header with a back button,
- * an eyebrow + title, and optional right-aligned actions; an optional horizontal tab strip; a
- * scrolling content column; and a sticky footer for the save/delete bar. Replaces the ad-hoc
- * "back button + mx-auto max-w-2xl + border-t footer" each editor rolled by hand.
- */
+/** The shared frame for a full-page editor (world, character) */
 export function EditorShell({
   onBack,
   backLabel = 'Back',
@@ -39,20 +34,20 @@ export function EditorShell({
 }) {
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col">
-      <header className="shrink-0 border-b border-border bg-bg-elevated">
+      <header className="shrink-0 border-b border-border">
         <div className="mx-auto flex w-full max-w-3xl items-center gap-3 px-4 py-3 sm:px-6">
           <button
             onClick={onBack}
-            className="flex shrink-0 items-center gap-1 rounded-lg py-1 pr-2 text-sm text-text-muted transition-colors hover:text-text"
+            className="flex shrink-0 items-center gap-1 rounded-md py-1 pr-2 text-[13px] text-text-muted transition-colors hover:text-text"
           >
             <ChevronLeft size={16} strokeWidth={2} />
             {backLabel}
           </button>
           <div className="min-w-0 flex-1">
             {eyebrow && (
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">{eyebrow}</div>
+              <div className="font-mono text-[10px] uppercase tracking-wider text-text-muted">{eyebrow}</div>
             )}
-            <div className="truncate font-display text-base text-text">{title}</div>
+            <div className="truncate text-[15px] font-semibold text-text">{title}</div>
           </div>
           {headerActions && <div className="flex shrink-0 items-center gap-2">{headerActions}</div>}
         </div>
@@ -64,7 +59,7 @@ export function EditorShell({
             <select
               value={activeTab}
               onChange={(e) => onTabChange?.(e.target.value)}
-              className="mb-2 mt-1 w-full cursor-pointer rounded-xl bg-bg-sunken px-3 py-2.5 text-base text-text outline-none ring-1 ring-transparent focus:ring-accent/40 sm:hidden"
+              className="mb-2 mt-1 w-full cursor-pointer rounded-md border border-border bg-bg-elevated px-3 py-2 text-base text-text outline-none focus:border-accent/70 sm:hidden"
             >
               {tabs.map((t) => (
                 <option key={t.id} value={t.id}>
@@ -78,7 +73,7 @@ export function EditorShell({
                 <button
                   key={t.id}
                   onClick={() => onTabChange?.(t.id)}
-                  className={`flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm transition-colors ${
+                  className={`flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2 text-[13px] transition-colors ${
                     activeTab === t.id
                       ? 'border-accent text-accent'
                       : 'border-transparent text-text-muted hover:text-text'
@@ -106,7 +101,7 @@ export function EditorShell({
       </div>
 
       {footer && (
-        <div className="shrink-0 border-t border-border bg-bg-elevated">
+        <div className="shrink-0 border-t border-border">
           <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3 px-4 py-3 sm:px-6">{footer}</div>
         </div>
       )}

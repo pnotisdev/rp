@@ -1,19 +1,6 @@
 import type { ReactNode } from 'react'
 
-/**
- * The visual-novel HUD's own idiom, extracted so the rest of the app can speak it too: a glassy
- * translucent card, quiet uppercase micro-labels, and a thin pill meter.
- *
- * `variant` follows the convention `LiveRapport` already set. `'vn'` renders over the stage art, so
- * it is white-on-translucent-black and hardcoded on purpose (there is a photograph behind it, not a
- * theme surface). `'default'` renders inside a panel and is built entirely from theme tokens, since
- * the app ships a light theme *and* a live ThemeEditor that rewrites every colour at runtime, so
- * white-on-black would be unreadable half the time.
- *
- * What actually carries the VN feel across both is the shape rather than the colour: the same label
- * treatment, the same meter geometry, ring edges instead of solid borders, and `font-display` on
- * names. Sharing them here means the two can't drift the way two copies of a look always do.
- */
+/** The visual-novel HUD's own idiom, extracted so the rest of the app can speak it too */
 
 export type StageVariant = 'default' | 'vn'
 
@@ -42,10 +29,7 @@ const METER_FILL: Record<string, string> = {
 
 export type StageMeterTone = keyof typeof METER_FILL
 
-/**
- * The VN warmth bar's exact geometry, reusable. Deliberately thin and unlabelled: the number, when
- * there is one worth showing, belongs on the row above it rather than inside the track.
- */
+/** The VN warmth bar's exact geometry, reusable. */
 export function StageMeter({
   value,
   max = 100,
@@ -60,9 +44,7 @@ export function StageMeter({
   className?: string
 }) {
   const pct = max <= 0 ? 0 : Math.max(0, Math.min(100, (value / max) * 100))
-  // An alpha of the muted foreground rather than a surface token: the surface behind a meter varies
-  // (sunken card, elevated card, bare page) and a fixed surface colour disappears against one of
-  // them, while this stays a visible track on every theme the ThemeEditor can produce.
+  // An alpha of the muted foreground rather than a surface token
   const track = variant === 'vn' ? 'bg-white/20' : 'bg-text-muted/25'
   return (
     <div
@@ -90,16 +72,12 @@ export function StageCard({
   className?: string
   children: ReactNode
 }) {
-  // `vn-glass` is the stage's own material (globals.css) — shared so a card rendered here and one
-  // rendered by VNStage itself can't drift into two different translucencies.
+  // `vn-glass` is the stage's own material (globals.css)
   const surface = variant === 'vn' ? 'vn-glass text-white' : 'bg-bg-sunken/80 ring-1 ring-border/70 backdrop-blur-sm'
   return <div className={`min-w-0 overflow-hidden rounded-2xl ${surface} ${className}`}>{children}</div>
 }
 
-/**
- * One row of a `StageCard`, hairline-separated from the row above it. `label` gets the micro-label
- * treatment; everything else is the row's own content.
- */
+/** One row of a `StageCard`, hairline-separated from the row above it. */
 export function StageRow({
   label,
   variant = 'default',

@@ -1,10 +1,4 @@
-/**
- * Detection and cleanup of "AI slop" — recognisable tells of machine-written RP prose.
- * `cleanModelOutput` rewrites a completion before storage, stripping things that are never
- * legitimate character speech (echoed prefixes, OOC asides, meta lines). `findSlop` /
- * `buildSlopAvoidanceNote` instead detect clichéd phrasing and build a steering note naming
- * back to the model the specific tells it has already used, rather than editing prose in place.
- */
+/** Detection and cleanup of "AI slop" — recognisable tells of machine-written RP prose. */
 
 import { normalizeRpMarkup } from '@/lib/text/messageSegments'
 import { EXPLICIT_ANTI_PATTERNS } from '@/lib/dating/intimacyScene'
@@ -17,10 +11,7 @@ export interface SlopPattern {
   re: RegExp
 }
 
-/**
- * The corpus, read by `findSlop` for steering only (never rewritten in place). Excludes plain
- * wording ("she said"), frequency-dependent patterns, and anything a character might say aloud.
- */
+/** The corpus, read by `findSlop` for steering only (never rewritten in place). */
 export const SLOP_PATTERNS: SlopPattern[] = [
   // --- Stock emotional shorthand: naming a feeling instead of showing it ---
   { id: 'couldnt-help', label: "couldn't help but", re: /\bcould ?n['’]?t help but\b/gi },
@@ -76,17 +67,13 @@ export const EXPLICIT_ANTI_PATTERN_ENTRIES: SlopPattern[] = EXPLICIT_ANTI_PATTER
   re: new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'),
 }))
 
-/**
- * Text that is never part of a character's actual turn, only the model slipping out of the
- * roleplay. Handled by `cleanModelOutput` as whole-line removals, not steering.
- */
+/** Text that is never part of a character's actual turn, only the model slipping out of the roleplay. */
 const META_LINE_PATTERNS: RegExp[] = [
   // An OOC aside in any of the conventional wrappers.
   /^\s*[([{]{1,2}\s*ooc\b[^\n]*$/i,
   /^\s*ooc\s*[:\-][^\n]*$/i,
   /^\s*[([{]{2}[^\n]*[)\]}]{2}\s*$/,
-  // Guards against the model echoing the injected relationship-guidance prompt text verbatim
-  // (see dating/relationshipDescription.ts's buildRelationshipDescription).
+  // Guards against the model echoing the injected relationship-guidance prompt text verbatim (see dating/relationshipDescription.ts's…
   /^\s*relationship:\s*.+\bare at the ["“'].+["”'] stage\b.*$/i,
   /^\s*\(let this colour tone, warmth, and what feels earned right now\.[^)]*\)\s*$/i,
   // An assistant addressing the user about the text it just wrote.
@@ -107,17 +94,7 @@ const MD_HEADING_RE = /^[ \t]*#{1,6}[ \t]+/gm
 /** Three or more blank lines collapse to one blank line. */
 const EXCESS_BLANKS_RE = /\n{3,}/g
 
-/**
- * A thinking/reasoning model's hidden reasoning phase (DeepSeek R1, Qwen3, GPT-OSS, and similar
- * local GGUF thinking models), wrapped in `<think>`/`<thinking>` tags when a server streams it
- * inline rather than splitting it into its own `reasoning_content` field. Stripped whole — tag and
- * contents together — before anything else runs: `normalizeRpMarkup` below only strips bare tag
- * markup, which would otherwise leave the reasoning prose itself merged straight into the visible
- * reply with no separation at all. Only matches a *closed* block, so it's never tempted to guess
- * where an unclosed one (generation cut off mid-thought) would have ended; that rarer case falls
- * through to `normalizeRpMarkup`, which still strips the bare `<think>` marker itself but leaves
- * the reasoning prose after it as visible (if odd-looking) text rather than deleting it unseen.
- */
+/** A thinking/reasoning model's hidden reasoning phase (DeepSeek R1, Qwen3, GPT-OSS */
 const THINK_BLOCK_RE = /<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>|<\|channel>[\s\S]*?<channel\|>/gi
 
 /** Removes closed reasoning blocks (`<think>…</think>` and Gemma 4's `<|channel>thought …<channel|>`) from a completed generation. */
@@ -143,11 +120,7 @@ export interface CleanModelOutputOptions {
   personaName?: string
 }
 
-/**
- * Cuts off a stray turn marker — the model narrating a whole back-and-forth (or a `<START>`-style
- * scene break) instead of one turn. Backstop for when stop sequences (`useChatSession.ts`'s
- * `dynamicStops`) don't get honoured by the server/template.
- */
+/** Cuts off a stray turn marker — the model narrating a whole back-and-forth (or a `<START>`-style scene break) instead of one turn. */
 export function truncateAtStrayTurnMarker(text: string, charName: string, personaName: string): string {
   const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   const markers: RegExp[] = [/<START>/i]
@@ -165,11 +138,7 @@ export function truncateAtStrayTurnMarker(text: string, charName: string, person
  *  words right before a colon) to not strip a real sentence's opening clause. */
 const LEADING_SPEAKER_LABEL_RE = /^\s*[A-Z][A-Za-z'-]*(?:\s[A-Z][A-Za-z'-]*)?\s*:\s*/
 
-/**
- * True when `text` is nothing but the immediately-preceding message played back, bare or with a
- * stray speaker-label glued on. Only checks the ONE prior message — a short line ("Oh." "Fine.")
- * recurring later in real dialogue is common, but an exact *immediate* repeat never is.
- */
+/** True when `text` is nothing but the immediately-preceding message played back, bare or with a stray speaker-label glued on. */
 export function isVerbatimEcho(text: string, priorText: string | undefined): boolean {
   const prior = priorText?.trim()
   if (!prior) return false
@@ -185,11 +154,7 @@ function normalizeForDuplicateCheck(text: string): string {
   return text.trim().replace(/\s+/g, ' ')
 }
 
-/**
- * Broader than `isVerbatimEcho`: catches a reply that's a tail-end repeat, a concatenation of
- * recent turns, or a copy of the player's own earlier line — via a bidirectional substring check
- * against both roles' recent messages.
- */
+/** Broader than `isVerbatimEcho`: catches a reply that's a tail-end repeat, a concatenation of recent turns, or a copy of the… */
 export function isDuplicateOfRecentText(candidate: string, recentTexts: (string | undefined)[]): boolean {
   const normalizedCandidate = normalizeForDuplicateCheck(candidate)
   if (normalizedCandidate.length < DUPLICATE_MIN_LENGTH) return false
@@ -215,7 +180,7 @@ export function endsCleanly(text: string): boolean {
 /** Closes markup a stop sequence cut off mid-beat (`*She says it` → `*She says it*`); drops a bare trailing mark with nothing inside it. */
 export function balanceTrailingMarkup(text: string): string {
   let out = text.trimEnd()
-  for (const mark of ['"', '*']) {
+  for (const mark of ['"', '*', '`']) {
     if (!oddCount(out, mark)) continue
     out = new RegExp(`\\${mark}\\s*$`).test(out)
       ? out.replace(new RegExp(`\\s*\\${mark}\\s*$`), '').trimEnd()
@@ -224,10 +189,7 @@ export function balanceTrailingMarkup(text: string): string {
   return out
 }
 
-/**
- * Trims a reply back to its last complete sentence, for a generation cut off mid-word. Bails
- * (returns input unchanged) if the trim would lose more than `maxLossRatio` of the text.
- */
+/** Trims a reply back to its last complete sentence, for a generation cut off mid-word. */
 export function trimToLastSentence(text: string, maxLossRatio = 0.35): string {
   const trimmed = text.trimEnd()
   if (!trimmed) return text
@@ -240,11 +202,7 @@ export function trimToLastSentence(text: string, maxLossRatio = 0.35): string {
   return cut
 }
 
-/**
- * The deterministic scrub applied once to a completed generation before it's stored. Order
- * matters: closed `<think>` blocks stripped first, then turn markers, then whole-line meta
- * removals, then cosmetic collapses. Idempotent.
- */
+/** The deterministic scrub applied once to a completed generation before it's stored. */
 export function cleanModelOutput(text: string, opts: CleanModelOutputOptions = {}): string {
   if (!text) return text
   let out = text.replace(THINK_BLOCK_RE, '')
@@ -267,11 +225,7 @@ export function cleanModelOutput(text: string, opts: CleanModelOutputOptions = {
   // against a single consistent character.
   out = out.replace(/[‘’]/g, "'").replace(/[“”]/g, '"')
 
-  // A model sometimes italicizes an entire line of spoken dialogue outright; this app keeps
-  // dialogue plain and reserves italics for actions/thoughts. Only strips when a `*` sits directly
-  // against the quote mark on both sides, with no nested quote/star in between — so a genuine
-  // action beat next to the quote (`"Hey." *She turns.*`) or emphasis on one word inside otherwise
-  // plain dialogue (`"I *really* mean it."`) is left alone.
+  // A model sometimes italicizes an entire line of spoken dialogue outright; this app keeps dialogue plain and reserves italics for actions/thoughts.
   out = out.replace(/\*"([^"*\n]+)"\*/g, '"$1"')
   out = out.replace(/"\*([^"*\n]+)\*"/g, '"$1"')
 
@@ -287,6 +241,8 @@ export function cleanModelOutput(text: string, opts: CleanModelOutputOptions = {
   // A lone trailing asterisk with no partner is a half-written action beat, not emphasis.
   const stars = (out.match(/\*/g) ?? []).length
   if (stars % 2 === 1 && /\*\s*$/.test(out)) out = out.replace(/\*\s*$/, '')
+  // An inline code span (a persona's log line) left open by the stop gets closed.
+  if ((out.match(/`/g) ?? []).length % 2 === 1 && !/```/.test(out)) out = `${out.trimEnd()}\``
 
   return out.trim()
 }
@@ -340,11 +296,7 @@ export interface RepeatedPhrase {
   count: number
 }
 
-/**
- * Word sequences a character has used more than once across `texts` — catches repetition no
- * sampler-level penalty reaches. Only returns the longest form of each repeat (sub-phrases of a
- * reported match are dropped); all-stopword sequences are skipped.
- */
+/** Word sequences a character has used more than once across `texts` — catches repetition no sampler-level penalty reaches. */
 export function findRepeatedPhrases(
   texts: string[],
   opts: { minWords?: number; maxWords?: number; minCount?: number; limit?: number } = {},
@@ -398,10 +350,7 @@ export interface SlopAvoidanceOptions {
   extraPatterns?: SlopPattern[]
 }
 
-/**
- * The steering line naming back to the model the specific tells it has just used. Returns
- * undefined when clean (the common case). Pass the character's own recent turns only.
- */
+/** The steering line naming back to the model the specific tells it has just used. */
 export function buildSlopAvoidanceNote(recentCharTurns: string[], opts: SlopAvoidanceOptions = {}): string | undefined {
   const texts = recentCharTurns.filter((t) => t?.trim()).slice(-SLOP_SCAN_TURNS)
   if (texts.length === 0) return undefined

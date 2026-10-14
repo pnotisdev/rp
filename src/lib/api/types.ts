@@ -19,6 +19,8 @@ export interface GenerationParams {
   dry_base?: number
   dry_allowed_length?: number
   dry_sequence_breakers?: string[]
+  xtc_threshold?: number
+  xtc_probability?: number
   mirostat?: number
   mirostat_tau?: number
   mirostat_eta?: number
@@ -32,8 +34,11 @@ export interface GenerationParams {
 /** One turn in a native chat-completion request — see `GenerateRequest.messages`. */
 export interface ChatCompletionMessage {
   role: 'system' | 'user' | 'assistant'
-  content: string
+  /** A plain string, or text plus pictures for a vision model. */
+  content: string | ChatContentPart[]
 }
+
+export type ChatContentPart = { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }
 
 /** Chat-completion-native counterpart to `GenerationParams` — real OpenAI Chat Completions fields instead of KoboldCpp sampler internals. Stored separately from `sampler` so switching backends never fights over one shared params object. */
 export interface ChatCompletionSamplerParams {

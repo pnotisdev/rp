@@ -124,8 +124,7 @@ const TRANSCRIPT: ChatMessage[] = [
 
 const currentStats: RelationshipDeltas = deltas({ affection: 40, trust: 40, chemistry: 40, comfort: 40, respect: 40, curiosity: 40 })
 
-// Section 9(c)'s (a) item: task-completion detection folded into this same judge call when
-// `pendingTasks` is passed, instead of `detectAndMarkTasks` firing its own separate request.
+// Section 9(c)'s (a) item: task-completion detection folded into this same judge call when `pendingTasks` is passed, instead of…
 describe('assessRelationshipMoment: task-detection merge', () => {
   const baseParams = { history: TRANSCRIPT, latestReply: 'Thanks for helping me pack up.', charName: 'Sumire', userName: 'Kai', current: currentStats }
   const REPLY_NO_TASKS = '{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[]}'
@@ -142,6 +141,25 @@ describe('assessRelationshipMoment: task-detection merge', () => {
     expect(sentPrompt).not.toContain('Pending objective tasks')
     expect(sentPrompt).not.toContain('completedTaskIndices')
     expect(moment.completedTaskIndices).toEqual([])
+  })
+
+  it("asks for the character's own stated takes only when ownTakes is set", async () => {
+    const prompts: string[] = []
+    const client = stubClient(REPLY_NO_TASKS, (p) => prompts.push(p.prompt as string))
+    await assessRelationshipMoment(client, baseParams)
+    await assessRelationshipMoment(client, { ...baseParams, ownTakes: true })
+    expect(prompts[0]).not.toContain('herTake')
+    expect(prompts[1]).toContain('herTake')
+  })
+
+  it('turns a stated take into a fact', async () => {
+    const moment = await assessRelationshipMoment(
+      stubClient('{"deltas":{"curiosity":1},"herTake":"hot dogs: a taco, not a sandwich","newFacts":[{"text":"Classifies hot dogs as a taco","importance":0.3}]}'),
+      { ...baseParams, ownTakes: true },
+    )
+    expect(moment.newFacts).toEqual([{ text: "Sumire's take: hot dogs: a taco, not a sandwich", importance: 0.4, valence: 0, unresolved: false }])
+    const ignored = await assessRelationshipMoment(stubClient('{"deltas":{},"herTake":"x"}'), baseParams)
+    expect(ignored.newFacts).toEqual([])
   })
 
   it('lists the pending tasks and asks for completedTaskIndices when pendingTasks is passed', async () => {
@@ -189,9 +207,7 @@ describe('assessRelationshipMoment: task-detection merge', () => {
   })
 })
 
-// Gap 1: `first_kiss` covers a kiss written out in freeform roleplay, not sent through the
-// Relationship panel's deterministic kissing_spot button (that path is `useChatSession.ts`'s own
-// `sendUserMessage`, not this classifier).
+// Gap 1: `first_kiss` covers a kiss written out in freeform roleplay, not sent through the Relationship panel's deterministic…
 describe('assessRelationshipMoment: first_kiss flag', () => {
   const baseParams = { history: TRANSCRIPT, latestReply: 'He kissed her, soft and unhurried.', charName: 'Sumire', userName: 'Kai', current: currentStats }
 
@@ -412,9 +428,7 @@ describe('assessRelationshipMoment: persistent plans', () => {
   })
 })
 
-// Standing impressions of/expectations of the player (`dating/beliefs.ts`/`dating/expectations.ts`)
-// plus the character's own private fear (`prompt/mindGuidance.ts`'s fearGuidance) — all three ride
-// along in this same judge call, same shape as plans/mood/need/intent above.
+// Standing impressions of/expectations of the player (`dating/beliefs.ts`/`dating/expectations.ts`) plus the character's own…
 describe('assessRelationshipMoment: beliefs, expectations, and fear', () => {
   const baseParams = { history: TRANSCRIPT, latestReply: 'Thanks for helping me pack up.', charName: 'Sumire', userName: 'Kai', current: currentStats }
   const EMPTY_REPLY =
@@ -507,9 +521,7 @@ describe('assessRelationshipMoment: beliefs, expectations, and fear', () => {
   })
 })
 
-// Item 2(b)'s "earned vs. rushed" read (`dating/aftercare.ts`'s `aftercarePaceContext`) — extra
-// context for the aftercare verdict only, never a replacement for the judge's own read of the turns
-// since.
+// Item 2(b)'s "earned vs. rushed" read (`dating/aftercare.ts`'s `aftercarePaceContext`)
 describe('assessRelationshipMoment: aftercare pace context', () => {
   const baseParams = { history: TRANSCRIPT, latestReply: 'Thanks for helping me pack up.', charName: 'Sumire', userName: 'Kai', current: currentStats }
   const AFTERCARE_TURNS = [{ id: 'a1', role: 'user' as const, name: 'Kai', text: 'Hey, you okay?' }]
@@ -559,9 +571,7 @@ describe('assessRelationshipMoment: aftercare pace context', () => {
   })
 })
 
-// The user's own direct follow-up to the intimacy catalog: a deliberate "first time together" ask,
-// same three-outcome shape as assessCommitmentAsk (untested itself, so this establishes the
-// pattern for both).
+// The user's own direct follow-up to the intimacy catalog
 describe('assessIntimacyMilestone', () => {
   const baseParams = { history: TRANSCRIPT, charName: 'Sumire', userName: 'Kai', current: currentStats }
 
@@ -671,8 +681,7 @@ describe('assessDateOutcome', () => {
   })
 
   it('drops a first_date a hangout returned anyway, and keeps its other flags', async () => {
-    // The live failure this gate exists for: `first_date` fired on a scene explicitly started and
-    // scored as a hangout, against a glossary line that already said a hangout doesn't qualify.
+    // The live failure this gate exists for
     const outcome = await assessDateOutcome(
       stubClient(
         '{"deltas":{"affection":1,"trust":1,"chemistry":0,"comfort":1,"respect":0,"curiosity":0,"tension":0},"newFlags":["first_date","promise"],"recap":"nice","newFacts":[]}',
@@ -741,8 +750,7 @@ describe('suggestDateEvent', () => {
   })
 
   it('tells the model when the two are officially together', async () => {
-    // Before this, the call only ever saw `affection` — so an established couple kept being
-    // handed tentative "hangout" cards long after "ask to be dating" was accepted.
+    // Before this, the call only ever saw `affection`
     let sentPrompt = ''
     await suggestDateEvent(
       stubClient('{"title":"Dinner","objectiveTitle":"Celebrate","kind":"date"}', (p) => {
@@ -788,10 +796,7 @@ describe('suggestDateEvent', () => {
     expect(sentPrompt).toContain('not officially together')
   })
 
-  // Gap 2's "auto-draft a real milestone event" ask: `askForCommitment` (`useChatSession.ts`) calls
-  // this with `milestoneOccasion` set right after a married/living_together accept, wanting an
-  // actual wedding-day/moving-in-day scene rather than a generic date the commitment-status framing
-  // alone would produce.
+  // Gap 2's "auto-draft a real milestone event" ask
   describe('milestoneOccasion', () => {
     it('asks specifically for a wedding, not the generic officially-together framing', async () => {
       let sentPrompt = ''
@@ -897,8 +902,7 @@ describe('assessRelationshipMoment — aftercare', () => {
       ),
       { ...base, aftercareTurns: HISTORY },
     )
-    // The caller reads undefined as "awkward" and closes the window regardless, rather than
-    // leaving the aftermath running forever waiting for a usable answer.
+    // The caller reads undefined as "awkward" and closes the window regardless, rather than leaving the aftermath running forever…
     expect(moment.aftercareVerdict).toBeUndefined()
   })
 
@@ -1048,11 +1052,7 @@ describe('assessRelationshipMoment — intimacy scene phase (item 1)', () => {
 })
 
 describe('generateWithTimeout', () => {
-  // The live repro this exists for: "End hangout"/"End date" awaits `assessDateOutcome` (which
-  // calls this) directly, with no timeout of its own — a provider response that simply never
-  // resolves (confirmed against a rate-limited free OpenRouter model) left the button reading
-  // "Ending…" forever, with no error and no way to retry, because the awaited promise never
-  // settled either way.
+  // The live repro this exists for: "End hangout"/"End date" awaits `assessDateOutcome` (which calls this) directly, with no timeout of its own
   beforeEach(() => {
     vi.useFakeTimers()
   })
@@ -1079,9 +1079,7 @@ describe('generateWithTimeout', () => {
     } as unknown as ChatBackend
 
     const pending = generateWithTimeout(client, { prompt: 'x' } as never, 'Test call')
-    // Attach the rejection assertion before advancing any timers, so the promise never has a tick
-    // where it's rejected but nothing is listening yet (fake timers otherwise make that window
-    // land as a real unhandled-rejection warning even though the test itself is correct).
+    // Attach the rejection assertion before advancing any timers
     const assertion = expect(pending).rejects.toThrow(/Test call timed out after 45s/)
 
     // Nothing has happened yet — still well within the timeout window.
@@ -1105,9 +1103,6 @@ describe('generateWithTimeout', () => {
 })
 
 // Item 6: a rival (or anyone else) genuinely present and speaking in the scene, not just discussed
-// — the missing half of `chat/participantArchetype.ts`'s `rivalJealousyIntensifier`, which deepens
-// the tone once a jealousy flag is set but had no way to influence the classifier's own decision to
-// set one in the first place.
 describe('assessRelationshipMoment: present participants', () => {
   const baseParams = { history: TRANSCRIPT, latestReply: 'Thanks for helping me pack up.', charName: 'Sumire', userName: 'Kai', current: currentStats }
   const EMPTY_REPLY = '{"deltas":{"affection":0,"trust":0,"chemistry":0,"comfort":0,"respect":0,"curiosity":0,"tension":0},"newFlags":[],"reason":"","newFacts":[]}'

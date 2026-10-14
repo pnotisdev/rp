@@ -1,12 +1,7 @@
 import { RAPPORT_READS } from '@/lib/dating/rapport'
 import type { RapportRead } from '@/lib/types'
 
-/**
- * 10b's live rapport indicator — shown in place of the frozen warmth readout while a live scene
- * (date or hangout) is running (the number can't move mid-scene; this is the qualitative read
- * instead). A dot in a trend colour plus a short phrase; the judge's one-line observation is the
- * tooltip. Never shows a number.
- */
+/** 10b's live rapport indicator — shown in place of the frozen warmth readout while a live scene (date or hangout) is running (the… */
 const TONE: Record<string, string> = {
   'up-strong': 'bg-accent',
   up: 'bg-accent/70',

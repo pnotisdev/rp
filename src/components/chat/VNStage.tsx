@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   ArrowLeft,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
   ChevronsRight,
@@ -64,18 +63,7 @@ import { vnArtHint } from '@/lib/vn/artHint'
 import { getWorldTemplate } from '@/lib/world/worldTemplates'
 import { getEnergyRemaining, getMaxEnergyForDay, isNightPhase } from '@/lib/world/calendar'
 
-/**
- * Visual-novel presentation of a chat: full-bleed scene background, each cast member's sprite
- * standing at full height, and one floating glass dialogue box of fixed height over their feet.
- * The ordinary transcript is available as a collapsible log.
- *
- * The composition rule everything here follows: **the art is the subject, the UI is furniture.**
- * Only the dialogue lives inside the box; choices, quick replies, the assist strip and the
- * per-line utilities all float outside it, so the box's height is a constant and the scene behind
- * it never resizes turn to turn. Under `vnInputMode: 'inline'` the box is also where the player
- * writes — the same frame, in the same place, with the nameplate and the accent rail switched over
- * to their persona so it is never ambiguous whose line is being composed.
- */
+/** Visual-novel presentation of a chat */
 
 // Petals only make sense outdoors.
 const OUTDOOR_BACKGROUNDS = new Set([
@@ -83,13 +71,7 @@ const OUTDOOR_BACKGROUNDS = new Set([
   'school-rooftop', 'school-gate', 'school-courtyard', 'shrine', 'festival', 'fireworks-viewing', 'onsen',
 ])
 
-/**
- * Horizontal width per cast slot; height is set separately so sprites of any source resolution
- * normalize to the same on-screen height. The cap matters more than it looks: `object-contain`
- * takes whichever of width/height binds first, so a narrow cap on a bust-cropped sprite (the common
- * case — most cards ship a portrait, not a full-body VN sprite) shrinks it vertically too and
- * leaves the head sitting low with dead scene above it.
- */
+/** Horizontal width per cast slot; height is set separately so sprites of any source resolution normalize to the same on-screen height. */
 function slotWidthClass(castSize: number): string {
   if (castSize <= 1) return 'basis-[72%] max-w-[620px]'
   if (castSize === 2) return 'basis-[52%] max-w-[470px]'
@@ -153,7 +135,7 @@ function VNCharacterSprite({
         style={{ background: `linear-gradient(to bottom, hsl(${hue} 32% 52% / 0.3), hsl(${hue} 30% 42% / 0.12) 55%, transparent)` }}
       >
         <span
-          className="flex h-14 w-14 items-center justify-center rounded-full font-display text-lg text-white shadow-xl ring-1 ring-white/15 sm:h-20 sm:w-20 sm:text-2xl"
+          className="flex h-14 w-14 items-center justify-center rounded-full font-display text-lg text-white ring-1 ring-white/15 sm:h-20 sm:w-20 sm:text-2xl"
           style={{ backgroundColor: `hsl(${hue} 48% 50%)` }}
         >
           {initialsOf(name)}
@@ -227,9 +209,7 @@ interface VNStageProps {
   /** Quick-reply pills (variant="vn"), shown when there's no active AI-suggested choice — always
    *  docked regardless of `vnChoiceStyle`, since a casual quick reply isn't a real decision point. */
   choiceListSlot?: ReactNode
-  /** AI-suggested choices — VNStage renders these itself (docked pills or a centered choice screen,
-   *  per Settings → Appearance's `vnChoiceStyle`) rather than taking a pre-rendered node, since which
-   *  one it picks is its own presentation call. Omitted when there's nothing to choose from. */
+  /** AI-suggested choices — VNStage renders these itself (docked pills or a centered choice screen, per Settings → Appearance's… */
   activeChoiceData?: {
     choices: ChoiceOption[]
     onPick: (choice: ChoiceOption) => void
@@ -241,14 +221,9 @@ interface VNStageProps {
   /** Message composer (variant="vn"). Under `vnInputMode: 'inline'` this is rendered *inside* the
    *  dialogue box while the player is writing; under 'docked' it sits in its own bar below it. */
   composerSlot: ReactNode
-  /** Whether the composer currently holds text. Keeps the inline box open for a draft the player
-   *  didn't type themselves (an impersonation suggestion, a prefilled intimacy action), which would
-   *  otherwise be composed somewhere they can't see. */
+  /** Whether the composer currently holds text. */
   composerHasDraft?: boolean
-  /** Off by default; the quick menu's Auto toggle. Once a reply finishes typing, waits a beat scaled
-   *  to its length and calls `onAutoAdvanceFire` — real VN autoplay, so `ChatWindow` owns the actual
-   *  "what to send" + safety-cap decision (never picks an AI-suggested choice, stops on a live date,
-   *  a failed generation, chat switch, or its own turn/time cap). */
+  /** Off by default; the quick menu's Auto toggle. */
   autoAdvance?: boolean
   onToggleAutoAdvance?: () => void
   onAutoAdvanceFire?: () => void
@@ -286,9 +261,7 @@ export function VNStage({
   onAutoAdvanceFire,
 }: VNStageProps) {
   const [showLog, setShowLog] = useState(false)
-  // Universal VN convention: hides everything but the background/sprites/CG, restored by clicking
-  // anywhere on the scene (see the root `onClick` below) — same discoverability contract as every
-  // other VN's hide-UI, so no on-screen hint is needed to find your way back.
+  // Universal VN convention: hides everything but the background/sprites/CG, restored by clicking anywhere on the scene (see the root…
   const [hideUI, setHideUI] = useState(false)
   const logRef = useRef<HTMLDivElement>(null)
 
@@ -311,9 +284,7 @@ export function VNStage({
   const lastCharMsg = [...messages].reverse().find((m) => m.role === 'char')
   const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user')
   const isStreamingThis = !!lastCharMsg && generatingMessageId === lastCharMsg.id
-  // A failed generation leaves no real character line to show — fall back to the player's own last
-  // line as "current" instead of putting an error banner in Sumire's mouth. Same textbox, same
-  // nameplate slot, just attributed to whoever actually has something to say right now.
+  // A failed generation leaves no real character line to show
   const showUserAsCurrent = !!lastCharMsg?.failed && !isStreamingThis && !!lastUserMsg
   // A failed generation keeps empty text (see useChatSession.ts); show a message instead of going blank.
   const displayText = isStreamingThis
@@ -328,20 +299,15 @@ export function VNStage({
   const scene = lastCharMsg?.swipeScenes?.[activeSwipe] ?? lastCharMsg?.scene
   const cast = character ? [character, ...(participantCharacters ?? [])] : (participantCharacters ?? [])
   // The Bond HUD follows whoever's actually speaking in a group scene, not always the primary.
-  // Falls back to the primary if the stored speaker id isn't in the current cast (roster can
-  // shrink after they last spoke).
   const rawActiveSpeakerId = lastCharMsg ? (lastCharMsg.speakerId ?? character?.id) : character?.id
   const activeSpeakerId = cast.some((m) => m.id === rawActiveSpeakerId) ? rawActiveSpeakerId : character?.id
   const activeTrack = activeSpeakerId ? getRelationshipTrack(chat, activeSpeakerId) : {}
   const affection = Math.max(0, Math.min(100, activeTrack.affection ?? 0))
   const warmth = computeWarmth(affection, getRelationshipStats(activeTrack))
   const relationshipStage = relationshipStageForWarmth(warmth, relationshipMilestonesFor(world?.relationshipThresholds))
-  // Item 10: a gallery CG whose author-set trigger condition is met right now, surfaced full-bleed
-  // in place of the ordinary background+sprite composition below.
+  // Item 10: a gallery CG whose author-set trigger condition is met right now, surfaced full-bleed in place of the ordinary…
   const activeCgSource = cast.find((m) => m.id === activeSpeakerId)
-  // Chat-wide, not off the active speaker's own track: a shared scene lives on its owner's
-  // (`sceneParticipants.ts`), so reading `activeTrack` here would show nothing for anyone who joined
-  // one. The speaker still has to actually be *in* it, since standing in the room is not being in it.
+  // Chat-wide, not off the active speaker's own track
   const charRepliesNow = countCharReplies(messages)
   const liveScene = findActiveIntimacyScene(chat, (sc: IntimacyScene) => isIntimacySceneActive(sc, charRepliesNow))
   const activeIntimacyScene =
@@ -359,10 +325,7 @@ export function VNStage({
   const triggeredCgImageUrl = triggeredCgEntry
     ? pickVariant([triggeredCgEntry.imageUrl, ...(triggeredCgEntry.variants ?? [])].filter(Boolean), lastCharMsg?.id ?? triggeredCgEntry.id)
     : undefined
-  // CG reveal ceremony: a brief full-screen beat (see `.vn-cg-reveal` — the `key` below already
-  // remounts the <img> per distinct CG, which is what makes the enter animation replay each time)
-  // plus a one-time "new in Gallery" toast, fired the first time this component instance sees a
-  // given CG id trigger — never again for the same id, even as it keeps showing across re-renders.
+  // CG reveal ceremony: a brief full-screen beat (see `.vn-cg-reveal`
   const cgToastedIdsRef = useRef<Set<string>>(new Set())
   useEffect(() => {
     if (!triggeredCgEntry || cgToastedIdsRef.current.has(triggeredCgEntry.id)) return
@@ -373,12 +336,10 @@ export function VNStage({
   const isHangoutEvent = chat.activeEvent?.kind === 'hangout'
   const expression = scene?.expression || 'neutral'
   // Sprite resolution degrades unlocked tag -> same-family expression -> avatar (see resolveExpressionSprite).
-  // Outfits are sticky across turns, read from the last message that set one.
   const outfitId = currentOutfitFrom(messages)
   // Same stable-per-message seed as the CG pick above, so a sprite variant doesn't flicker mid-turn.
   const spriteVariantSeed = lastCharMsg?.id ?? 'no-message'
-  // Everyone in the roster is shown at once (a two/three-shot); the active speaker gets the live
-  // expression and full prominence, everyone else rests dimmed at neutral.
+  // Everyone in the roster is shown at once (a two/three-shot)
   const canPickSpeaker = !!onSelectSpeaker && cast.length > 1
   const isGroupScene = cast.length > 1
   const castMembers = cast.map((member) => {
@@ -400,9 +361,7 @@ export function VNStage({
     }
   })
 
-  // Sprite staging: slide+fade a cast member in the first time they appear (including a chat's very
-  // first render — opening a chat is itself a "first appearance"), and keep someone who just left
-  // the roster around briefly for a matching exit, instead of a hard cut either way.
+  // Sprite staging: slide+fade a cast member in the first time they appear (including a chat's very first render
   const ENTER_EXIT_MS = 450
   const [enteringIds, setEnteringIds] = useState<Set<string>>(new Set())
   const [departedMembers, setDepartedMembers] = useState<typeof castMembers>([])
@@ -432,26 +391,18 @@ export function VNStage({
 
   const slotClass = slotWidthClass(castMembers.length)
   const activeMember = castMembers.find((m) => m.isActive) ?? castMembers[0]
-  // Nameplate follows whoever's line is actually showing — the player's own persona while
-  // `showUserAsCurrent`, the speaking cast member otherwise. Same slot, same styling either way.
+  // Nameplate follows whoever's line is actually showing — the player's own persona while `showUserAsCurrent`, the speaking cast member otherwise.
   const speakerName = showUserAsCurrent ? persona?.name || 'You' : (lastCharMsg?.name ?? activeMember?.name ?? character?.card.name ?? '')
   const speakerAvatarUrl = showUserAsCurrent ? persona?.avatarDataUrl : activeMember?.avatarUrl
   // Group scenes get a per-speaker identity hue; solo chats keep the usual relationship-pink.
   const plateHue = activeMember?.hue ?? 320
-  // The name is set *on* the box's dark glass now, not on a filled romance-coloured tab, so it
-  // takes the accent colour itself — `--c-romance-text` is the colour authored to contrast against
-  // that fill, which in the dark theme is near-black and disappeared here.
+  // The name is set *on* the box's dark glass now, not on a filled romance-coloured tab
   const plate = isGroupScene
     ? { name: `hsl(${plateHue} 82% 82%)`, chip: `hsl(${plateHue} 44% 44%)` }
     : { name: 'rgb(var(--c-romance))', chip: 'rgb(var(--c-romance))' }
-  // Every fallback for "where is this scene" lives in `resolveSceneBackground` — including reading
-  // the narration itself, which is what stops a chat's opening messages (a static greeting carries
-  // no `<<scene:>>` tag at all) from landing on an unplaced void.
+  // Every fallback for "where is this scene" lives in `resolveSceneBackground`
   const night = isNightPhase(world?.currentPhaseIndex)
-  // The day-planner's action budget, surfaced here too — it used to live only inside the "Plan your
-  // day" modal, so knowing whether there was still room for another activity today meant actually
-  // opening it. Same visibility gate `ChatWindow`'s own day-planner toolbar button uses, so the
-  // readout never claims a budget exists for a mode/character that has opted the whole mechanic out.
+  // The day-planner's action budget, surfaced here too
   const showEnergy = !!world && !character?.dateModeOptOut && chat.assistOverrides?.showDateEventButton !== false
   const energyRemaining = showEnergy ? getEnergyRemaining(world!.currentDay ?? 0, world!.currentPhaseIndex ?? 0) : 0
   const energyMax = showEnergy ? getMaxEnergyForDay(world!.currentDay ?? 0) : 0
@@ -495,9 +446,7 @@ export function VNStage({
   const vnChoiceStyle = useSettingsStore((s) => s.vnChoiceStyle)
   const vnInputMode = useSettingsStore((s) => s.vnInputMode)
 
-  // Inline input: the dialogue box is handed over to the player rather than a composer bar living
-  // permanently under it. `composerHasDraft` forces it open for text that arrived some other way,
-  // so a suggestion or a prefilled action is never composed off-screen.
+  // Inline input: the dialogue box is handed over to the player rather than a composer bar living permanently under it.
   const inlineInput = vnInputMode === 'inline'
   const [writing, setWriting] = useState(false)
   const isWriting = inlineInput && (writing || composerHasDraft)
@@ -505,8 +454,7 @@ export function VNStage({
   useEffect(() => {
     setWriting(false)
   }, [lastCharMsg?.id])
-  // Enter takes the box, the way Enter sends from it. Ignored while a dialog is open, while the
-  // caret is already in a field, and while the backlog/hide-UI have the screen.
+  // Enter takes the box, the way Enter sends from it.
   useEffect(() => {
     if (!inlineInput || isWriting || showLog || hideUI) return
     const onKey = (e: KeyboardEvent) => {
@@ -521,9 +469,7 @@ export function VNStage({
     return () => window.removeEventListener('keydown', onKey)
   }, [inlineInput, isWriting, showLog, hideUI])
 
-  // Per-line voice: "read this line aloud" via the shared TTS stack (`lib/voice`). Manual and
-  // one line at a time only — no auto-voice-on-every-reply, unlike Auto above; that's a
-  // recurring-cost surface this pass intentionally doesn't take on.
+  // Per-line voice: "read this line aloud" via the shared TTS stack (`lib/voice`).
   const koboldBaseUrl = useSettingsStore((s) => s.baseUrl)
   const ttsProvider = useSettingsStore((s) => s.ttsProvider)
   const ttsApiKey = useSettingsStore((s) => s.ttsApiKey)
@@ -544,9 +490,7 @@ export function VNStage({
     speakAudioRef.current = null
     setSpeakState('idle')
   }
-  // Always starts fresh (cancelling anything already playing) — shared by the manual button's
-  // "start" half and by auto-voice, which must never be subject to the button's own toggle-to-stop
-  // semantics (a second reply arriving mid-playback should cut in, not silently no-op as a "stop").
+  // Always starts fresh (cancelling anything already playing)
   const startSpeaking = async (rawText: string) => {
     stopSpeaking()
     const text = toSpeakableText(rawText)
@@ -609,11 +553,7 @@ export function VNStage({
   useEffect(() => stopSpeaking, [lastCharMsg?.id, activeSwipe, ttsProvider, ttsModel, ttsVoice, openMayhemApiKey, ttsApiKey, ttsBaseUrl, ttsRegion, character?.voice?.provider, character?.voice?.voiceId])
   const [autoVoice, setAutoVoice] = useState(false)
 
-  // Every message id this component instance has watched stream in live — its text already
-  // appeared token-by-token, so re-running the typewriter over it (e.g. once `isStreamingThis`
-  // flips false, or on a later swipe back to it) would just replay content the player already
-  // watched arrive. Only a line that shows up already-complete (a static greeting, an
-  // alternate-greeting swipe, or reopening a chat) gets the reveal treatment.
+  // Every message id this component instance has watched stream in live
   const streamedIdsRef = useRef<Set<string>>(new Set())
   useEffect(() => {
     if (isStreamingThis && lastCharMsg) streamedIdsRef.current.add(lastCharMsg.id)
@@ -628,11 +568,7 @@ export function VNStage({
   // The ADV "done typing" glyph — only for an actual, complete character line, never the empty-chat
   // placeholder or a still-in-flight stream.
   const dialogueComplete = !isStreamingThis && !!lastCharMsg?.text && !lastCharMsg?.failed && dialogueRevealDone
-  // Auto-voice: speaks each new reply once it finishes typing, unprompted — opt-in, off by
-  // default, never persisted (resets with everything else on a chat switch, same as Auto-advance).
-  // Unlike Auto-advance this can't chain into extra generations on its own: it only ever narrates a
-  // reply that already happened, so it carries none of Auto-advance's runaway-cost risk and needs
-  // none of its safety caps.
+  // Auto-voice: speaks each new reply once it finishes typing, unprompted
   const autoVoiceSpokenIdRef = useRef<string | null>(null)
   useEffect(() => {
     if (!autoVoice || !dialogueComplete || !lastCharMsg) return
@@ -641,19 +577,13 @@ export function VNStage({
     startSpeaking(lastCharMsg.text)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoVoice, dialogueComplete, lastCharMsg?.id])
-  // Keeps the growing edge of the reveal (and, once done, the glyph right after it) in view instead
-  // of leaving a long reply scrolled to its own top inside the capped-height box.
+  // Keeps the growing edge of the reveal (and, once done, the glyph right after it) in view instead of leaving a long reply scrolled…
   const dialogueBoxRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     dialogueBoxRef.current?.scrollTo({ top: dialogueBoxRef.current.scrollHeight })
   }, [shownDialogueText])
 
-  // Auto mode: once a reply's typewriter finishes, wait a beat scaled to its length, then hand off
-  // to `onAutoAdvanceFire` — real VN autoplay. Keyed on the message id + completion flag so this
-  // schedules exactly once per newly-completed reply, not on every unrelated re-render while it
-  // stays complete. A "latest callback" ref means the fire, whenever it lands, always sees
-  // `ChatWindow`'s current guards (isGenerating/activeChoices/live-date/etc.), not a stale closure
-  // from the moment the timer was scheduled.
+  // Auto mode: once a reply's typewriter finishes, wait a beat scaled to its length, then hand off to `onAutoAdvanceFire` — real VN autoplay.
   const onAutoAdvanceFireRef = useRef(onAutoAdvanceFire)
   useEffect(() => {
     onAutoAdvanceFireRef.current = onAutoAdvanceFire
@@ -679,8 +609,7 @@ export function VNStage({
     : undefined
   const showPetals = !reducedMotion && !!sceneBackground && OUTDOOR_BACKGROUNDS.has(sceneBackground)
 
-  // Per-line controls, floated above the box's top-right corner and faded until hover — they act on
-  // the line being shown, but they aren't part of reading it, so they don't get a row inside the frame.
+  // Per-line controls, floated above the box's top-right corner and faded until hover
   const utilities =
     !isWriting && (canSwipe || (lastCharMsg && !isStreamingThis && !showUserAsCurrent)) ? (
       <>
@@ -790,10 +719,7 @@ export function VNStage({
   return (
     <div
       className="relative flex flex-1 flex-col overflow-hidden"
-      // Click-anywhere-on-scene: brings the UI back first if it's hidden (the universal way back —
-      // no on-screen hint needed), otherwise skips an in-progress typewriter reveal. Both are
-      // harmless no-ops the rest of the time; nested buttons/inputs still get their own click first,
-      // this never blocks or duplicates their own action.
+      // Click-anywhere-on-scene: brings the UI back first if it's hidden (the universal way back
       onClick={() => {
         if (hideUI) {
           setHideUI(false)
@@ -807,8 +733,7 @@ export function VNStage({
       {outgoingBgStyle && <div className="absolute inset-0" style={outgoingBgStyle} />}
       <div key={bgKey} className="vn-backdrop-in absolute inset-0" style={bgStyle} />
       {triggeredCgEntry && triggeredCgImageUrl && (
-        // Full-bleed CG in place of the ordinary background — sprites are skipped below while one's
-        // showing. `key` remounts per distinct CG, which is what replays `.vn-cg-reveal` each time.
+        // Full-bleed CG in place of the ordinary background — sprites are skipped below while one's showing.
         <img
           key={triggeredCgEntry.id}
           src={triggeredCgImageUrl}
@@ -816,9 +741,7 @@ export function VNStage({
           className="vn-cg-reveal absolute inset-0 h-full w-full object-cover"
         />
       )}
-      {/* Lighter than it used to be: the dialogue box now carries its own glass backdrop, so the
-          page-wide scrim only has to keep the top HUD legible and give the box's blur something to
-          sit on. Any more and the art stops being the subject. */}
+      {/* Lighter than it used to be: the dialogue box now carries its own glass backdrop */}
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/55 via-black/[0.04] to-black/25" />
       {/* Cinematic vignette rather than a flat scrim. */}
       <div
@@ -864,9 +787,7 @@ export function VNStage({
             <StageMeter value={warmth} variant="vn" className="w-28 max-w-full" />
           </StageRow>
           {showEnergy && (
-            // Same "N/M actions" budget the Day Planner modal shows, surfaced here too — knowing
-            // whether there's still room for another activity today used to mean actually opening
-            // that modal to find out.
+            // Same "N/M actions" budget the Day Planner modal shows, surfaced here too
             <div
               className="flex items-center gap-1.5 truncate border-t border-white/10 px-3 py-1.5 text-xs"
               title="Today's day-planner action budget. Opens in Plan your day."
@@ -897,8 +818,7 @@ export function VNStage({
             </div>
           )}
           {activeIntimacyScene && activeSpeakerId && (
-            // Compact on purpose: the stage HUD says what's happening and roughly how far along,
-            // and the Relationship panel carries the full readout (meters, clothing, contact).
+            // Compact on purpose: the stage HUD says what's happening and roughly how far along
             <div className="border-t border-white/10">
               <SceneStateCard
                 scene={activeIntimacyScene}
@@ -931,9 +851,7 @@ export function VNStage({
           )}
           {topBarExtra}
           <span className="h-4 w-px bg-white/15" />
-          {/* Minimal VN quick menu — History (the log below), Auto, Skip, Hide-UI. Icon-only; each
-              has its own tooltip/aria-label rather than a text chip, so the row stays compact
-              enough to sit beside the title block down to phone width. */}
+          {/* Minimal VN quick menu — History (the log below), Auto, Skip, Hide-UI. */}
           {onToggleAutoAdvance && (
             <button
               onClick={onToggleAutoAdvance}
@@ -983,8 +901,7 @@ export function VNStage({
       )}
 
       {showLog ? (
-        // Top padding clears the floating HUD card, which stays up over the backlog; the width cap
-        // keeps a long transcript readable on a wide monitor instead of running the full stage.
+        // Top padding clears the floating HUD card
         <div ref={logRef} className="relative z-10 flex-1 overflow-y-auto bg-bg/95 px-6 pb-6 pt-24 backdrop-blur">
           <div className="mx-auto w-full max-w-3xl">
           <MessageLog
@@ -1008,13 +925,9 @@ export function VNStage({
         </div>
       ) : (
         <>
-          {/* The cast fills the whole stage and the dialogue box floats over their feet, the way a
-              real VN composes a shot — rather than the two splitting the available height between
-              them, which is what kept the character small. */}
+          {/* The cast fills the whole stage and the dialogue box floats over their feet, the way a real VN composes a shot */}
           <div
-            // On a phone the sprite is width-bound long before it is height-bound, so standing it on
-            // the stage floor left almost all of it behind the dialogue box. There it stands on the
-            // box's top edge instead; from `sm` up it goes back to the floor (and a little below it).
+            // On a phone the sprite is width-bound long before it is height-bound, so standing it on the stage floor left almost all of it behind the dialogue box.
             className={`absolute inset-x-0 bottom-0 top-0 z-0 flex items-end justify-center px-4 pb-[24vh] sm:-bottom-[4%] sm:px-6 sm:pb-0 ${
               // Extra top padding for group scenes so the outer figure clears the HUD card.
               isGroupScene ? 'pt-10 sm:pt-16 md:pt-20' : 'pt-2 sm:pt-4 md:pt-6'
@@ -1070,9 +983,7 @@ export function VNStage({
           {/* Hidden under Hide-UI too — only the background/sprites/CG stay up, full-scene. */}
           {!hideUI && (
           <>
-          {/* Everything that isn't dialogue floats above the box instead of stacking inside it.
-              That separation is what lets the box hold one fixed height while choices, quick
-              replies and the assist strip come and go underneath the scene's own composition. */}
+          {/* Everything that isn't dialogue floats above the box instead of stacking inside it. */}
           <div className="vn-stack relative z-10 mt-auto pb-2">
             <div className="flex flex-col gap-2">
               {locationCaption && (
@@ -1126,10 +1037,7 @@ export function VNStage({
           </>
           )}
 
-          {/* The 'centered' choice style: a full-stage, scene-dimmed decision moment instead of the
-              docked pills above — a real VN choice screen. Sits outside the Hide-UI gate above on
-              purpose in the sense that it's its own conditional, but still never shows while
-              Hide-UI is on (a pending choice just waits; clicking the scene restores the UI first). */}
+          {/* The 'centered' choice style: a full-stage, scene-dimmed decision moment instead of the docked pills above — a real VN choice screen. */}
           {activeChoiceData && vnChoiceStyle === 'centered' && !hideUI && (
             <VNCenteredChoices
               choices={activeChoiceData.choices}

@@ -5,13 +5,7 @@ import { SentencePieceProcessor } from '@agnai/sentencepiece-js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
-/**
- * Tokenizes text server-side for NovelAI's backend: its `input` field wants the prompt pre-tokenized
- * and base64-packed (see `novelaiTokens.ts`). Clio and Kayra both use "NerdStash", a SentencePiece
- * model bundled as `.model` files in `server/tokenizers/`. Runs server-side rather than in the
- * browser bundle since the WASM tokenizer + model files are large for a niche, opt-in backend.
- * Erato isn't supported (different tokenizer family) — `tokenizerForModel` returns `null` for it.
- */
+/** Tokenizes text server-side for NovelAI's backend: its `input` field wants the prompt pre-tokenized and base64-packed (see `novelaiTokens.ts`). */
 export type NovelAITokenizerId = 'nerdstash_v1' | 'nerdstash_v2'
 
 const MODEL_FILES: Record<NovelAITokenizerId, string> = {

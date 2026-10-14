@@ -1,13 +1,4 @@
-/**
- * 10b's "intent chips" — an optional tag the player attaches to a message to say how a line is
- * *meant*, distinct from what it literally says. "You look nice tonight" reads very differently as
- * a flirt versus gentle teasing versus an olive branch after an argument.
- *
- * An intent never moves a stat by itself. It's handed to the relationship judge
- * (`assessRelationshipMoment` / `assessDateOutcome`) as context for interpreting the exchange — and
- * it can backfire: a flirt that's mistimed, or an apology that reads as insincere given how things
- * have actually been going, lands worse than an untagged line would have.
- */
+/** 10b's "intent chips" — an optional tag the player attaches to a message to say how a line is *meant*, distinct from what it literally says. */
 
 import type { MessageIntent, RelationshipDimension } from '@/lib/types'
 
@@ -21,10 +12,7 @@ export interface IntentSpec {
   hint: string
   /** How the judge is told to read a line carrying this tag. Phrased so a good read helps and a bad one costs. */
   judgeLine: string
-  /**
-   * Only offered once this dimension is elevated — reassure and apologize don't make sense to
-   * surface until there's friction to address. `null` = always available.
-   */
+  /** Only offered once this dimension is elevated — reassure and apologize don't make sense to surface until there's friction to address. */
   gatedBy: { dimension: RelationshipDimension; atLeast: number } | null
 }
 
@@ -95,12 +83,7 @@ export function describeIntentForJudge(id: string | undefined): string | undefin
   return `The player tagged their latest line as ${spec.judgeLine} Weigh {{char}}'s honest reaction to that; do not just reward the attempt.`
 }
 
-/**
- * How many turns running the player has now played the same intent chip — the trailing run of
- * identical values at the end of `userIntents` (oldest-first). `0` when the newest is untagged.
- * Feeds "repeated same interaction → diminishing returns" (`dampenRepeatedDeltas` +
- * `repeatedIntentNudge`).
- */
+/** How many turns running the player has now played the same intent chip */
 export function trailingIntentRun(userIntents: (string | undefined)[]): number {
   const last = userIntents[userIntents.length - 1]
   if (!last) return 0
@@ -109,11 +92,7 @@ export function trailingIntentRun(userIntents: (string | undefined)[]): number {
   return n
 }
 
-/**
- * The prompt nudge once the player has leaned on the same intent 3+ turns running, so the character
- * notices the repetition instead of being moved by it forever. Real names — `styleGuidance` strings
- * aren't macro-substituted. `undefined` below the threshold.
- */
+/** The prompt nudge once the player has leaned on the same intent 3+ turns running */
 export function repeatedIntentNudge(streak: number, charName: string, userName: string): string | undefined {
   if (streak < 3) return undefined
   return `${userName} has now played the same kind of move several turns in a row. The novelty has worn off for ${charName}: it lands with much less weight than the first time, and ${charName} might get wry about it, gently point it out, or simply be less visibly affected. Don't keep rewarding the repetition as if it were fresh.`

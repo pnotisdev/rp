@@ -4,7 +4,7 @@ import type { ReactNode } from 'react'
 type SectionSurface = 'elevated' | 'sunken' | 'bare'
 
 const SURFACE_CLASSES: Record<Exclude<SectionSurface, 'bare'>, string> = {
-  elevated: 'bg-bg-elevated',
+  elevated: 'border border-border bg-bg-elevated',
   sunken: 'bg-bg-sunken',
 }
 
@@ -39,17 +39,17 @@ export function Section({
       <div className="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <div className="min-w-0">
           <h3 className="flex items-center gap-2 text-sm font-semibold text-text">
-            {Icon && <Icon size={14} strokeWidth={2} className="shrink-0 text-text-muted" />}
+            {Icon && <Icon size={15} strokeWidth={1.6} className="shrink-0 text-text-muted" />}
             {title}
           </h3>
-          {description && <p className="mt-1 text-xs text-text-muted">{description}</p>}
+          {description && <p className="mt-1 max-w-prose text-[13px] leading-relaxed text-text-muted">{description}</p>}
         </div>
         {action}
       </div>
       {surface === 'bare' ? (
         children
       ) : (
-        <div className={`rounded-xl p-4 sm:p-5 ${SURFACE_CLASSES[surface]} ${contentClassName}`}>{children}</div>
+        <div className={`rounded-lg p-4 sm:p-5 ${SURFACE_CLASSES[surface]} ${contentClassName}`}>{children}</div>
       )}
     </section>
   )

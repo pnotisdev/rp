@@ -26,6 +26,8 @@ interface MessageLogProps {
   onSwipe: (id: string, dir: 'left' | 'right') => void
   onFork: (id: string) => void
   onTogglePin: (id: string) => void
+  /** A texting bubble just appeared. */
+  onBubbleShown?: (id: string, text: string) => void
 }
 
 /** The classic scrolling transcript — shared by the default chat view and the VN mode backlog drawer. */
@@ -45,17 +47,13 @@ export function MessageLog({
   onSwipe,
   onFork,
   onTogglePin,
+  onBubbleShown,
 }: MessageLogProps) {
   const sfxEnabled = useSettingsStore((s) => s.sfxBursts)
   const sfxWords = useSettingsStore((s) => s.sfxWords)
   const globalSfxWords = useMemo(() => parseSfxWordList(sfxWords), [sfxWords])
 
-  // Precomputed once per real change to any of these deps, not once per message per render — the
-  // per-message counterpart of `globalSfxWords` above, and the other half of what makes `memo` on
-  // `MessageBubble` actually skip work: a per-token `streamingText` update leaves `messages`,
-  // `character`, `participantCharacters`, `sfxEnabled`, and `globalSfxWords` all unchanged, so this
-  // whole map is skipped and every bubble but the one actually streaming gets the exact same
-  // `avatarDataUrl`/`sfx` object it had last render.
+  // Precomputed once per real change to any of these deps, not once per message per render
   const perMessage = useMemo(
     () =>
       new Map(
@@ -67,7 +65,9 @@ export function MessageLog({
                 ? character?.avatarDataUrl
                 : (participantCharacters.find((c) => c.id === m.speakerId)?.avatarDataUrl ?? character?.avatarDataUrl)
           const sfx = sfxConfigFor(m, { enabled: sfxEnabled, globalWords: globalSfxWords, primary: character, participants: participantCharacters })
-          return [m.id, { avatarDataUrl, sfx }]
+          const speaker = m.role === 'char' && m.speakerId ? participantCharacters.find((c) => c.id === m.speakerId) : character
+          const texting = (speaker ?? character)?.replyFormat === 'texting'
+          return [m.id, { avatarDataUrl, sfx, texting }]
         }),
       ),
     [messages, persona, character, participantCharacters, sfxEnabled, globalSfxWords],
@@ -82,10 +82,7 @@ export function MessageLog({
           avatarDataUrl={perMessage.get(m.id)?.avatarDataUrl}
           sfx={perMessage.get(m.id)?.sfx}
           isStreaming={generatingMessageId === m.id}
-          // Only the bubble actually streaming needs the live text — handing every other bubble
-          // the same ever-changing string would force all of them to re-render on every token
-          // even though their own content never moved. `''` is a primitive literal, so it's
-          // trivially the same value across renders for every non-streaming bubble.
+          // Only the bubble actually streaming needs the live text
           streamingText={generatingMessageId === m.id ? streamingText : ''}
           isHighlighted={highlightedMessageId === m.id}
           onEdit={onEdit}
@@ -96,6 +93,8 @@ export function MessageLog({
           onSwipe={onSwipe}
           onFork={onFork}
           onTogglePin={onTogglePin}
+          texting={perMessage.get(m.id)?.texting}
+          onBubbleShown={onBubbleShown}
         />
       ))}
       {messages.length === 0 && (

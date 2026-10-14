@@ -8,22 +8,13 @@ import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import type { Character } from '@/lib/characters/cardSpec'
 import type { Chat, WorldCard } from '@/lib/types'
 
-/**
- * ROADMAP.md 10f's "world tick" — the once-per-session check for whether any character should
- * text the player first, unprompted. There's no polling/cron infrastructure anywhere in this
- * codebase (by design, nothing here adds one): a character won't text while the app is closed,
- * only once enough real time has passed AND the app is reopened, so this runs exactly once per
- * mount from `App.tsx`, the one component guaranteed to mount once per session regardless of
- * which view opens first.
- */
+/** docs/history/changelog.md 10f's "world tick" — the once-per-session check for whether any character should text the player first, unprompted. */
 export function useOutreachTick() {
   const hasRunRef = useRef(false)
   const baseUrl = useSettingsStore((s) => s.baseUrl)
 
   useEffect(() => {
-    // React StrictMode double-invokes effects in dev; the ref (not a `[]`-dep effect alone)
-    // survives that double-invoke on the same mounted instance, so the tick body only ever
-    // actually runs once per real session.
+    // React StrictMode double-invokes effects in dev
     if (hasRunRef.current) return
     hasRunRef.current = true
     void runTick(baseUrl)
@@ -42,9 +33,7 @@ async function runTick(baseUrl: string) {
   }
   const charactersById = new Map(characters.map((c) => [c.id, c]))
 
-  // Cheap in-memory pre-filter — the same conditions `evaluateOutreach` itself gates on, checked
-  // here first purely to skip a per-chat network round trip (fetching last message/world/persona)
-  // for a chat that's already fully determined to be ineligible from data already in hand.
+  // Cheap in-memory pre-filter — the same conditions `evaluateOutreach` itself gates on, checked here first purely to skip a per-chat…
   const candidates = chats
     .map((chat) => ({ chat, character: charactersById.get(chat.characterId) }))
     .filter(
@@ -64,8 +53,7 @@ async function runTick(baseUrl: string) {
   const worldsById = new Map<string, WorldCard | undefined>()
   const customTemplates = await instructTemplatesApi.list().catch(() => [])
 
-  // Sequential, not parallel — this codebase already avoids concurrent generation calls against a
-  // local single-GPU KoboldCpp server (see relationshipAssist.ts / useChatSession.ts's runAssist).
+  // Sequential, not parallel — this codebase already avoids concurrent generation calls against a local single-GPU KoboldCpp server…
   for (const { chat, character } of candidates) {
     let world: WorldCard | undefined
     if (character.worldId) {
@@ -81,9 +69,7 @@ async function runTick(baseUrl: string) {
 
     const check = evaluateOutreach({ character, chat, lastMessage, world, now })
     if (check.status === 'skip') continue
-    // A roll was attempted either way — persist the bookkeeping so a "no" doesn't get re-rolled
-    // again inside the cooldown floor. skipTouch avoids bumping `updatedAt`/reordering ChatsPanel
-    // for a chat nothing actually happened in.
+    // A roll was attempted either way — persist the bookkeeping so a "no" doesn't get re-rolled again inside the cooldown floor.
     await chatsApi.update(chat.id, { lastOutreachCheckedAt: now, skipTouch: true }).catch(() => {})
     if (!check.eligible || !check.reason) continue
 
@@ -113,14 +99,11 @@ async function runTick(baseUrl: string) {
         createdAt: Date.now(),
         initiatedBy: 'character',
       })
-      // Read fresh at insert time, not captured at tick-start — the tick is long-running and
-      // async across many chats, so the player could open exactly this chat mid-tick.
+      // Read fresh at insert time, not captured at tick-start
       const isOpen = useSettingsStore.getState().activeChatId === chat.id
       await chatsApi.update(chat.id, { hasUnreadOutreach: !isOpen })
     } catch {
-      // Best-effort background feature (e.g. koboldcpp happened to be off) — fail silently per
-      // chat, no toast spam. lastOutreachCheckedAt is already written above, so this won't retry
-      // instantly next mount.
+      // Best-effort background feature (e.g. koboldcpp happened to be off) — fail silently per chat, no toast spam.
     }
   }
 }

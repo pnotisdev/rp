@@ -6,12 +6,7 @@ import type { CharacterCardData } from '@/lib/characters/cardSpec'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import { Button } from '@/components/ui/Button'
 
-/**
- * The per-field "rewrite with AI" control in the character editor. Clicking opens a small popover
- * with an optional steer ("colder, ex-military", "less mystery, more specifics") — the fastest fix
- * when the plain rewrite still comes back generic — then runs `regenerateCardField`, which grounds
- * the rewrite in the current text and the rest of the card rather than inventing from scratch.
- */
+/** The per-field "rewrite with AI" control in the character editor. */
 export function RegenerateFieldButton({
   character,
   fieldKey,
@@ -65,7 +60,7 @@ export function RegenerateFieldButton({
       {open && (
         // Not a <label>-based Field here: this popover renders inside the parent field's own <label>
         // (the `actions` slot), and nesting labels misroutes focus.
-        <div className="absolute right-0 top-6 z-20 w-64 rounded-xl border border-border bg-bg-elevated p-3 text-left shadow-xl">
+        <div className="absolute right-0 top-6 z-20 w-64 rounded-xl border border-border bg-bg-elevated p-3 text-left">
           <span className="mb-1 block text-xs font-medium text-text-muted">Rewrite with AI</span>
           <textarea
             rows={2}
@@ -77,7 +72,7 @@ export function RegenerateFieldButton({
             placeholder="Optional: what to change, e.g. colder, ex-military"
             disabled={busy}
             autoFocus
-            className="w-full resize-y rounded-xl bg-bg-sunken px-3 py-2 text-sm leading-relaxed text-text outline-none ring-1 ring-transparent transition-shadow placeholder:text-text-muted/55 focus:ring-accent/40"
+            className="w-full resize-y rounded-xl border border-border bg-bg-elevated px-3 py-2 text-sm leading-relaxed text-text outline-none placeholder:text-text-muted/55 focus:border-accent/70"
           />
           <p className="mt-1 text-[11px] text-text-muted">
             Leave blank for a straight pass. It keeps the facts and reworks the prose.

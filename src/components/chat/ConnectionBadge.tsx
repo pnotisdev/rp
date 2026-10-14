@@ -10,11 +10,7 @@ export function ConnectionBadge() {
   const chatBackendApiKey = useSettingsStore((s) => s.chatBackendApiKey)
   const chatBackendModel = useSettingsStore((s) => s.chatBackendModel)
 
-  // Both hooks are always called (hook rules), but only one's result is ever shown — the
-  // KoboldCpp poll already ran unconditionally before this fix, so leaving it running costs
-  // nothing (local, free); the hosted check is the one gated by `enabled`, since firing it in the
-  // background on every render regardless of which backend is actually active would mean quietly
-  // spending calls against a metered external API for a result nobody sees.
+  // Both hooks are always called (hook rules)
   const kobold = useConnectionStatus(baseUrl)
   const hostedBackend = chatBackend === 'novelai' ? 'novelai' : 'openai-compatible'
   const hosted = useHostedBackendStatus(chatBackend !== 'koboldcpp', hostedBackend, chatBackendBaseUrl, chatBackendApiKey, chatBackendModel)

@@ -1,6 +1,7 @@
 import { extractCardAssets, normalizeCardJson, wrapCardV2, type CharacterCardData } from './cardSpec'
 import type { CustomExpression } from '@/lib/vn/expressions'
 import { readCharacterFromPng, writeCharacterToPng } from './png'
+import { downloadBlob, safeFilename } from '@/lib/io/transfer'
 
 export async function fileToDataUrl(file: File | Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -44,28 +45,24 @@ export async function importCharacterFile(file: File): Promise<ImportResult> {
 
 export function downloadJson(card: CharacterCardData) {
   const blob = new Blob([JSON.stringify(wrapCardV2(card), null, 2)], { type: 'application/json' })
-  triggerDownload(blob, `${sanitizeFilename(card.name)}.json`)
+  downloadBlob(blob, `${safeFilename(card.name, 'character')}.json`)
 }
 
 export async function downloadPng(card: CharacterCardData, avatarDataUrl?: string) {
-  const avatarBlob = avatarDataUrl
-    ? await (await fetch(avatarDataUrl)).blob()
-    : await blankAvatarBlob()
+  const avatarBlob = avatarDataUrl ? await toPngBlob(await (await fetch(avatarDataUrl)).blob()) : await blankAvatarBlob()
   const pngBlob = await writeCharacterToPng(avatarBlob, wrapCardV2(card))
-  triggerDownload(pngBlob, `${sanitizeFilename(card.name)}.png`)
+  downloadBlob(pngBlob, `${safeFilename(card.name, 'character')}.png`)
 }
 
-function sanitizeFilename(name: string): string {
-  return (name || 'character').replace(/[^a-z0-9-_ ]/gi, '').trim() || 'character'
-}
-
-function triggerDownload(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
+/** Card PNGs must carry PNG bytes; re-encodes a JPEG/WebP avatar. */
+async function toPngBlob(blob: Blob): Promise<Blob> {
+  if (blob.type === 'image/png') return blob
+  const bitmap = await createImageBitmap(blob)
+  const canvas = document.createElement('canvas')
+  canvas.width = bitmap.width
+  canvas.height = bitmap.height
+  canvas.getContext('2d')!.drawImage(bitmap, 0, 0)
+  return new Promise((resolve) => canvas.toBlob((b) => resolve(b!), 'image/png'))
 }
 
 async function blankAvatarBlob(): Promise<Blob> {

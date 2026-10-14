@@ -2,13 +2,7 @@ import type { Lorebook, LorebookEntry } from '@/lib/characters/cardSpec'
 import { estimateTokens } from '@/lib/tokenEstimate'
 import { MAX_REGEX_HAYSTACK_LENGTH } from '@/lib/text/regexSafety'
 
-/**
- * Keyword/always/manual lorebook-entry activation: scans recent chat text, applies affection/delay
- * gates, resolves inclusion groups and per-book token budgets, and (when a runtime is passed)
- * chains recursive scanning and persists sticky/cooldown state across turns. Mirrors SillyTavern's
- * "always / when relevant (keyword) / manual" activation modes; `manual` here is just an
- * author-toggled `enabled` flag, with no in-chat per-turn activation control.
- */
+/** Keyword/always/manual lorebook-entry activation */
 
 export interface ActivationOptions {
   /** How many recent messages (rendered as plain text) to scan for keyword hits. */
@@ -71,8 +65,7 @@ export function activateWorldInfo(
     let matched: LorebookEntry[] = []
     const matchedIds = new Set<number>()
     const keywordEntries: LorebookEntry[] = []
-    // Always-on ('always'/constant) entries are a book's baseline lore — they get first claim on
-    // the token budget below so a burst of keyword hits can't silently starve them out.
+    // Always-on ('always'/constant) entries are a book's baseline lore
     const alwaysEntries = new Set<LorebookEntry>()
 
     for (const entry of book.entries) {
@@ -117,8 +110,7 @@ export function activateWorldInfo(
       }
     }
 
-    // Recursive scanning: a just-activated entry's own content can introduce keywords that trigger
-    // further keyword-mode entries (depth-capped against reference cycles).
+    // Recursive scanning: a just-activated entry's own content can introduce keywords that trigger further keyword-mode entries…
     if (book.recursive_scanning) {
       let frontier = matched.filter((e) => keywordEntries.includes(e))
       for (let depth = 0; depth < MAX_RECURSION_DEPTH && frontier.length > 0; depth++) {

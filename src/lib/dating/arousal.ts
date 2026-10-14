@@ -1,15 +1,7 @@
 import { kinkResponsiveness, type KinkValence } from '@/lib/dating/kinks'
 import type { IntimacyPace, IntimacyTurnObservation } from '@/lib/dating/intimacyScene'
 
-// Scene-scoped physical arousal: the continuous meter `intimacyScene.ts` derives its phase from,
-// and the reason climax timing is deterministic rather than a model whim. Deliberately never
-// LLM-scored — every input is something the engine already knows (the catalog entry the player
-// clicked, the regions the judge observed contact with, the turn's own engagement read) run through
-// pure arithmetic here. Discarded with the scene; the durable emotional half stays in the seven
-// relationship stats, which modulate `responsivenessFor` below but are never written back to.
-//
-// Imports from `intimacyScene.ts` are type-only by design: the value dependency runs the other way
-// (that module imports this one), so the two never form a runtime cycle.
+// Scene-scoped physical arousal: the continuous meter `intimacyScene.ts` derives its phase from
 
 /** Body regions a reply can describe contact with. Closed vocabulary so the judge's read is validatable. */
 export const BODY_REGIONS = [
@@ -33,11 +25,7 @@ export const BAND_FLOORS: Record<ArousalBand, number> = {
 
 const BANDS_HIGH_TO_LOW: ArousalBand[] = ['over', 'edge', 'engaged', 'warming', 'baseline']
 
-/**
- * How each band reads in plain language. Shared by the prompt's scene-state block and the panel UI
- * on purpose: a band the model is told is "close to the edge" should not be labelled anything else
- * on screen, and two copies of five strings drift.
- */
+/** How each band reads in plain language. */
 export const AROUSAL_BAND_PHRASE: Record<ArousalBand, string> = {
   baseline: 'not yet worked up',
   warming: 'warming up',
@@ -46,11 +34,7 @@ export const AROUSAL_BAND_PHRASE: Record<ArousalBand, string> = {
   over: 'right at the edge',
 }
 
-/**
- * Stored on the active scene. `responsiveness` is deliberately absent — it's derived per turn from
- * mood/pace/stats by `responsivenessFor`, so a character who has calmed down since doesn't keep an
- * old multiplier baked into their scene state.
- */
+/** Stored on the active scene. */
 export interface ArousalState {
   /** 0-100. Scene-scoped; discarded when the scene resolves. */
   value: number
@@ -94,11 +78,7 @@ function sensitivityOf(region: BodyRegion, sensitivity?: RegionSensitivity): num
   return sensitivity?.[region] ?? DEFAULT_REGION_SENSITIVITY[region]
 }
 
-/**
- * Diminishing return on the nth touch of the same region — 1, 0.71, 0.56, 0.45... The thing that
- * makes a scene stuck on one spot mechanically stall instead of climbing forever, and the data
- * `habituatedRegion` reads to say so specifically.
- */
+/** Diminishing return on the nth touch of the same region — 1, 0.71, 0.56, 0.45... */
 export function habituationFactor(touchCount: number): number {
   return 1 / (1 + 0.4 * Math.max(0, touchCount - 1))
 }
@@ -112,11 +92,7 @@ const PASSIVE_GAIN = 2
 /** Passive per-turn loss, applied unconditionally — the reason a scene left alone cools off. */
 const DECAY_PER_TURN = 1.5
 
-/**
- * How much of the current activity's own weight a turn delivers, by the direction the judge observed.
- * A pullback is negative rather than merely zero: a reply that eased off should cool the scene, not
- * coast upward on the passive drift alone.
- */
+/** How much of the current activity's own weight a turn delivers, by the direction the judge observed. */
 const DELTA_MULTIPLIER: Record<string, number> = { '-1': -0.5, '0': 0.5, '1': 1, '2': 1.75 }
 
 const STALL_PENALTY = -6
@@ -154,11 +130,7 @@ export interface ArousalContext {
   kinkValence?: KinkValence
 }
 
-/**
- * Per-character multiplier on all gains. Two characters at the same point in the same scene move at
- * genuinely different speeds: how forward they're playing, how much chemistry is actually there, and
- * a real damper when they're not comfortable enough for the pace the scene is running at.
- */
+/** Per-character multiplier on all gains. */
 export function responsivenessFor(ctx: ArousalContext): number {
   const chemistryFactor = ctx.chemistry === undefined ? 1 : 0.8 + ctx.chemistry / 250
   const tensionFactor = isConsentTension(ctx.comfort, ctx.chemistry) ? 0.75 : 1
@@ -188,8 +160,7 @@ export function advanceArousal(
   ctx: ArousalContext,
   charReplyCount: number,
 ): ArousalState {
-  // A turn that stalled or drifted delivers nothing at all — the activity only pays out while it's
-  // actually being engaged with, which is what stops a scene coasting upward on prose that went nowhere.
+  // A turn that stalled or drifted delivers nothing at all
   const engaged = obs.engagement === 'engaged'
   const activityGain = (ctx.activityWeight ?? 0) * (DELTA_MULTIPLIER[String(obs.intensityDelta)] ?? 0)
   const touchGain = regionGain(obs.regionsTouched, state.regionExposure, ctx.sensitivity)

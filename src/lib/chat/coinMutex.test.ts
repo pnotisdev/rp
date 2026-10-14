@@ -8,8 +8,7 @@ describe('createCoinMutex', () => {
   })
 
   it('serializes two overlapping callers so the second only starts once the first finishes', async () => {
-    // The regression this exists for: two `GET`-compute-`PUT` critical sections racing so the
-    // second's read observes the first's *pre*-write state, silently dropping the first's delta.
+    // The regression this exists for: two `GET`-compute-`PUT` critical sections racing so the second's read observes the first's…
     const mutex = createCoinMutex()
     const order: string[] = []
     let release!: () => void

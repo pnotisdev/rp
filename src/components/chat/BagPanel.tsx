@@ -18,16 +18,7 @@ interface BagPanelProps {
   onUseItem: (item: ItemDef) => void
 }
 
-/**
- * 10d's "Bag/inventory view" — distinct from the shops in `RelationshipPanel` (buying), this is
- * for using what you already own. Gifts here were previously only ever given through an AI
- * choice card, with no manual "give this now" control at all; giving still lands through the
- * exact same `sendUserMessage` gift-choice path a suggested choice uses. Items are a separate,
- * simpler case — an authored effect (10d's item catalog) applied immediately and deterministically,
- * no in-scene reaction needed, so "Use" doesn't touch the chat at all.
- *
- * Shares `CatalogCard` with the shop, so an item looks the same wherever you meet it.
- */
+/** 10d's "Bag/inventory view" — distinct from the shops in `RelationshipPanel` (buying), this is for using what you already own. */
 export function BagPanel({
   giftCatalog,
   giftInventory,

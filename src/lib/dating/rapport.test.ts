@@ -131,8 +131,7 @@ describe('assessRapport', () => {
   })
 
   describe('when the backend never responds', () => {
-    // Before `generateWithTimeout` was wired in here, this awaited promise never settled either
-    // way — a live date stuck on "Reading the room…" forever under a slow/rate-limited backend.
+    // Before `generateWithTimeout` was wired in here, this awaited promise never settled either way
     beforeEach(() => vi.useFakeTimers())
     afterEach(() => vi.useRealTimers())
 

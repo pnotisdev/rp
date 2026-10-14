@@ -1,9 +1,6 @@
 import type { CharacterBelief } from '@/lib/types'
 
-// Tracks a character's standing impressions of the player as a person — separate from `mood`/
-// `currentNeed`/`characterIntent` (mindGuidance.ts, the character's own inner state) and `plans`
-// (plans.ts, what she intends to do). Lifecycle mirrors plans.ts: the per-turn judge call
-// forms/revises/drops entries, no extra AI cost.
+// Tracks a character's standing impressions of the player as a person
 
 /** Never more than this many live at once. */
 export const MAX_ACTIVE_BELIEFS = 4

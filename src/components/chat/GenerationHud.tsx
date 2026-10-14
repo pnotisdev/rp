@@ -1,11 +1,7 @@
 import type { GenerationStats } from '@/lib/hooks/useChatSession'
+import type { DriveState } from '@/lib/persona/drive'
 
-/**
- * Section 15's "Generation HUD" — live feedback while (and just after) the model is working,
- * distinct from `showTokenCounts`' per-message-after-the-fact count. Gated behind the
- * `showGenerationHud` setting (Settings → Appearance, next to `showTokenCounts`), since not every
- * user wants a stats strip competing for attention next to the composer.
- */
+/** Section 15's "Generation HUD" — live feedback while (and just after) the model is working, distinct from `showTokenCounts`'… */
 // Slowest ms per prompt token seen this session (a cold read); a much faster first token means the cache was reused.
 let coldMsPerToken = 0
 const labelled = new WeakMap<GenerationStats, string | null>()
@@ -41,6 +37,26 @@ export function GenerationHud({ stats, variant = 'default' }: { stats: Generatio
       </span>
       {cache && <span title="Whether the model reused its cache or re-read the whole prompt. A slow first token can also be queueing behind background checks.">{cache}</span>}
       {!stats.measured && <span className="italic opacity-70">streaming…</span>}
+    </div>
+  )
+}
+
+/** Live persona engine readout: what the code side decided for her last turn. */
+export function DriveReadout({ state, variant = 'default' }: { state: DriveState | undefined; variant?: 'default' | 'vn' }) {
+  if (!state || state.turn === 0) return null
+  const tone = variant === 'vn' ? 'text-white/55' : 'text-text-muted'
+  const scored = (state.hits ?? 0) + (state.misses ?? 0)
+  return (
+    <div
+      className={`flex flex-wrap items-center gap-x-3 gap-y-0.5 py-0.5 text-[11px] ${tone} ${variant === 'vn' ? 'px-4' : 'mx-auto w-full max-w-chat px-4'}`}
+      title="Live persona engine: rolled in code each turn, then handed to the model as a short status note."
+    >
+      <span>energy {Math.round(state.energy)}</span>
+      <span>bored {state.boredom}</span>
+      {state.fixation && <span>on her mind: {state.fixation.topic}</span>}
+      {state.lastImpulseId && <span>last bit: {state.lastImpulseId.replace(/^idle_/, 'idle ').replace(/_/g, ' ')}</span>}
+      {scored > 0 && <span>landed {state.hits ?? 0}/{scored}</span>}
+      {state.gateUntilTurn !== undefined && state.turn < state.gateUntilTurn && <span>bits paused</span>}
     </div>
   )
 }

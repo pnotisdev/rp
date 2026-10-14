@@ -3,12 +3,7 @@ import { Button } from '@/components/ui/Button'
 import { useConfirmStore } from '@/lib/store/useConfirmStore'
 import { useVnChromeClass } from '@/lib/store/useVnChromeStore'
 
-/**
- * The single mount point for `confirmDialog(...)` — sits next to `<ToastViewport />` in `App.tsx`.
- * Renders nothing until something awaits a confirmation, then shows one styled dialog built on the
- * same surface/radius/shadow as `<Modal>`. Escape or a backdrop click resolves the promise `false`,
- * exactly like dismissing `window.confirm`.
- */
+/** The single mount point for `confirmDialog(...)` — sits next to `<ToastViewport />` in `App.tsx`. */
 export function ConfirmDialog() {
   // Matches the stage when this opens over a VN scene — see `Modal`'s own note and `.vn-chrome`.
   const vnChrome = useVnChromeClass()
@@ -20,7 +15,8 @@ export function ConfirmDialog() {
     if (!pending) return
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') settle(false)
-      if (e.key === 'Enter') settle(true)
+      // A dialog with detail is a real decision (a command, an edit): Enter must not approve it by accident.
+      if (e.key === 'Enter' && !pending.detail) settle(true)
     }
     window.addEventListener('keydown', onKeyDown)
     // Focus the confirm button so Enter/Space works and the ring lands somewhere sensible.
@@ -34,7 +30,7 @@ export function ConfirmDialog() {
 
   return (
     <div
-      className="animate-overlay-in fixed inset-0 z-[150] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+      className="animate-overlay-in fixed inset-0 z-[150] flex items-center justify-center bg-black/50 p-4"
       onClick={() => settle(false)}
     >
       <div
@@ -42,10 +38,13 @@ export function ConfirmDialog() {
         aria-modal="true"
         aria-label={pending.title}
         onClick={(e) => e.stopPropagation()}
-        className={`animate-panel-in flex w-full max-w-sm flex-col rounded-2xl border border-border bg-bg-elevated p-6 themed-shadow ${vnChrome}`}
+        className={`animate-panel-in flex w-full ${pending.detail ? 'max-w-lg' : 'max-w-sm'} flex-col rounded-xl border border-border bg-bg-elevated p-5 max-h-[90vh] overflow-y-auto ${vnChrome}`}
       >
         <h2 className="text-sm font-semibold text-text">{pending.title}</h2>
-        {pending.body && <p className="mt-2 text-sm leading-relaxed text-text-muted">{pending.body}</p>}
+        {pending.body && <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-text-muted">{pending.body}</p>}
+        {pending.detail && (
+          <pre className="mt-3 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-bg p-2.5 font-mono text-[11px] leading-relaxed text-text">{pending.detail}</pre>
+        )}
         <div className="mt-5 flex items-center justify-end gap-2">
           <Button variant="ghost" onClick={() => settle(false)}>
             {pending.cancelLabel ?? 'Cancel'}

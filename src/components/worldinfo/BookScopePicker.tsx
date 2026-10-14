@@ -6,12 +6,7 @@ import type { WorldInfoBook } from '@/lib/types'
 
 export type BookScope = Pick<WorldInfoBook, 'boundChatIds' | 'boundCharacterIds' | 'boundWorldIds'>
 
-/**
- * "Available in" control for a standalone World Info book. Nothing selected = the book is global
- * (every chat). Select characters and/or worlds to limit it to chats whose primary character —
- * or that character's world — matches. Chat-level bindings exist in the data model but aren't
- * surfaced here; a chat is a transient unit, a character or world is the natural thing to scope to.
- */
+/** "Available in" control for a standalone World Info book. Nothing selected = the book is global (every chat). */
 export function BookScopePicker({
   scope,
   onChange,

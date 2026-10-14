@@ -9,8 +9,7 @@ describe('coalesceKey', () => {
   })
 
   it('gives a different key for a differently-shaped fetcher even with the same deps', () => {
-    // The exact real-world collision this guards against: `chatsApi.list()` and `chatsApi.trash()`
-    // both live under the 'chats' invalidation channel with deps: [] — coalescing must not merge them.
+    // The exact real-world collision this guards against
     const list = () => Promise.resolve('list')
     const trash = () => Promise.resolve('trash')
     expect(coalesceKey(list, [])).not.toBe(coalesceKey(trash, []))

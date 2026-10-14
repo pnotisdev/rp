@@ -5,31 +5,19 @@ import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
-export const dataDir = path.resolve(__dirname, '..', 'data')
+// RP_DATA_DIR points the whole server at a throwaway data folder (see scripts/dev-sandbox.mjs).
+export const dataDir = process.env.RP_DATA_DIR ? path.resolve(process.env.RP_DATA_DIR) : path.resolve(__dirname, '..', 'data')
 export const avatarsDir = path.join(dataDir, 'avatars')
 fs.mkdirSync(avatarsDir, { recursive: true })
 
-// Node's built-in SQLite (stable API since v22.5, run behind --experimental-sqlite until it's
-// unflagged) — replaces better-sqlite3, whose prebuilt native binary crashed the process outright
-// (STATUS_ACCESS_VIOLATION) on some Windows/Node combinations, this one included. Being built
-// into Node itself instead of a separately-downloaded .node binary avoids that whole class of bug.
+// Node's built-in SQLite (stable API since v22.5, run behind --experimental-sqlite until it's unflagged)
 export const db = new DatabaseSync(path.join(dataDir, 'rp.db'))
 // Must be the very first statement on this connection, before anything else touches the file.
-// `tsx watch` restarting this process on every source save can start the new process before
-// Windows has fully released the previous one's lock on rp.db — without this, that shows up as an
-// immediate, uncaught `Error: database is locked` crash on the very next pragma below, sometimes
-// leaving the server down until something manually kills the stuck old process. This tells SQLite
-// to retry quietly for up to 5s instead of failing the instant it meets a lock that's already about
-// to clear on its own — the standard fix for exactly this transient-contention class of "locked".
 db.exec('PRAGMA busy_timeout = 5000')
 db.exec('PRAGMA journal_mode = WAL')
 db.exec('PRAGMA foreign_keys = ON')
 
-/**
- * Fold the write-ahead log back into rp.db so the main database file is self-contained and
- * current. WAL writes are already durable on disk (in rp.db-wal); this just means the primary
- * file alone is enough for a manual copy/backup. Called on clean server shutdown.
- */
+/** Fold the write-ahead log back into rp.db so the main database file is self-contained and current. */
 export function checkpointDb(): void {
   db.exec('PRAGMA wal_checkpoint(TRUNCATE)')
 }
@@ -136,12 +124,44 @@ db.exec(`
     data TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_chat_facts_chatId_createdAt ON chat_facts(chatId, createdAt);
+
+  -- Machine-local app state (agent access token and switches). Deliberately outside backup/restore.
+  CREATE TABLE IF NOT EXISTS app_settings (
+    id TEXT PRIMARY KEY,
+    updatedAt INTEGER NOT NULL,
+    data TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS extensions (
+    id TEXT PRIMARY KEY,
+    createdAt INTEGER NOT NULL,
+    updatedAt INTEGER NOT NULL,
+    data TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS extension_files (
+    id TEXT PRIMARY KEY,
+    extId TEXT NOT NULL,
+    updatedAt INTEGER NOT NULL,
+    data TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_extension_files_extId ON extension_files(extId);
+
+  CREATE TABLE IF NOT EXISTS extension_data (
+    id TEXT PRIMARY KEY,
+    extId TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    scopeId TEXT NOT NULL,
+    updatedAt INTEGER NOT NULL,
+    data TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_extension_data_ext ON extension_data(extId, scope, scopeId);
+  CREATE INDEX IF NOT EXISTS idx_extension_data_scope ON extension_data(scope, scopeId);
 `)
 
 type Row = Record<string, unknown>
 
-// Every value that actually reaches a bind site here is a string, number, or null (ids,
-// timestamps, a JSON blob) — this is a type-only cast, not a runtime coercion.
+// Every value that actually reaches a bind site here is a string, number, or null (ids, timestamps, a JSON blob)
 function bind(v: unknown): SQLInputValue {
   return v as SQLInputValue
 }
@@ -150,22 +170,10 @@ interface ColumnSpec {
   name: string
 }
 
-/**
- * A table where a few fields get real (indexed/queryable) SQLite columns and
- * everything else rides along as one JSON blob column. This mirrors exactly what
- * the old IndexedDB store already did (whole objects, a couple of indexed keys) — a
- * full relational schema isn't warranted for a single-user local app, but plain
- * flat files can't be queried or sorted, which is why this sits in between.
- */
+/** A table where a few fields get real (indexed/queryable) SQLite columns and everything else rides along as one JSON blob column. */
 const SQL_CLAUSE_KEYWORDS = new Set(['AND', 'OR', 'NOT', 'IS', 'NULL', 'ASC', 'DESC', 'IN', 'LIKE'])
 
-/**
- * Every current where/orderBy call site is a hardcoded literal, so this isn't exploitable
- * today — but nothing stops a future call site from building one out of a request field,
- * and column/clause identifiers can't be parameterized with `?` placeholders. Reject any
- * identifier-shaped token that isn't one of this table's own columns or a known-safe
- * SQL keyword, so that class of bug can't become a real SQL injection later.
- */
+/** Every current where/orderBy call site is a hardcoded literal */
 function assertSafeClause(kind: 'where' | 'orderBy', clause: string, columnNames: string[]): void {
   const allowedIdentifiers = new Set(['id', ...columnNames])
   const tokens = clause.match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? []
@@ -254,6 +262,28 @@ export const objectiveStore = createStore('objectives', [
 ])
 export const relationshipEventStore = createStore('relationship_events', [{ name: 'chatId' }, { name: 'createdAt' }])
 export const chatFactStore = createStore('chat_facts', [{ name: 'chatId' }, { name: 'createdAt' }])
+export const appSettingsStore = createStore('app_settings', [{ name: 'updatedAt' }])
+export const extensionStore = createStore('extensions', [{ name: 'createdAt' }, { name: 'updatedAt' }])
+export const extensionFileStore = createStore('extension_files', [{ name: 'extId' }, { name: 'updatedAt' }])
+export const extensionDataStore = createStore('extension_data', [
+  { name: 'extId' },
+  { name: 'scope' },
+  { name: 'scopeId' },
+  { name: 'updatedAt' },
+])
+
+/** Runs `fn` inside one SQLite transaction; rolls back and rethrows on failure. */
+export function transaction<T>(fn: () => T): T {
+  db.exec('BEGIN')
+  try {
+    const result = fn()
+    db.exec('COMMIT')
+    return result
+  } catch (e) {
+    db.exec('ROLLBACK')
+    throw e
+  }
+}
 
 export function newId(): string {
   return crypto.randomUUID()

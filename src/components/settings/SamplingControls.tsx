@@ -85,8 +85,7 @@ export function SamplingControls() {
   const [presetName, setPresetName] = useState('My preset')
   const fileRef = useRef<HTMLInputElement>(null)
 
-  // Which built-in preset the current sampler exactly matches on every field that preset sets
-  // (fields it leaves alone don't count), or null once anything's been hand-tuned.
+  // Which built-in preset the current sampler exactly matches on every field that preset sets (fields it leaves alone don't count)…
   const current = sampler as unknown as Record<string, number>
   const activeBuiltin = BUILTIN_PRESETS.find((p) =>
     Object.entries(p.params).every(([k, v]) => current[k] === v),
@@ -111,13 +110,7 @@ export function SamplingControls() {
     setSampler(data)
   }
 
-  // Section 9(c)'s "one-switch minimal assists profile": four toggles, scattered across the
-  // Sections below (each is its own model call, so each has its own honest cost description
-  // right where it lives), get one batch-set pair here instead of a fifth persisted field to keep
-  // in sync with them — "derive from current state, don't duplicate it" is the same idiom the
-  // sampler-preset/instruct-template selects elsewhere in Settings already use. A chat with all
-  // four already on/off highlights the matching preset; anything in between (most setups, since
-  // these are independent toggles by design) highlights neither, which is correct, not a bug.
+  // Section 9(c)'s "one-switch minimal assists profile"
   const allAssists = [autoSummarize, autoDetectTasks, autoTrackRelationship, autoSuggestChoices]
   const allAssistsOn = allAssists.every(Boolean)
   const allAssistsOff = allAssists.every((v) => !v)
@@ -382,10 +375,7 @@ export function SamplingControls() {
 
       <PromptSectionsSection />
 
-      {/* A chat-completion backend formats its own turns — an instruct template (ChatML, Llama 3,
-          ...) is a text-completion-only concept and would be actively misleading to show here.
-          NovelAI is a raw text-completion API too (just its own hosted one), so it still wants a
-          real instruct template exactly like KoboldCpp does. */}
+      {/* A chat-completion backend formats its own turns */}
       {chatBackend !== 'openai-compatible' && <InstructTemplateSection />}
 
       <SettingsEyebrow>Power user</SettingsEyebrow>
@@ -405,7 +395,7 @@ export function SamplingControls() {
               const preset = BUILTIN_PRESETS.find((p) => p.id === e.target.value)
               if (preset) setSampler(preset.params)
             }}
-            className="w-full rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40"
+            className="w-full rounded-xl border border-border bg-bg-elevated px-3 py-2 text-sm text-text outline-none focus:border-accent/70"
           >
             {BUILTIN_PRESETS.map((p) => (
               <option key={p.id} value={p.id}>
@@ -418,7 +408,7 @@ export function SamplingControls() {
           {!activeBuiltinPresetUse && <div className="mb-3" />}
 
           {!advancedSamplerMode ? (
-            <div className="rounded-xl bg-bg-elevated p-5">
+            <div className="rounded-lg border border-border bg-bg-elevated p-5">
               <Slider
                 label="Creativity"
                 min={0}
@@ -445,7 +435,7 @@ export function SamplingControls() {
               />
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1 rounded-xl bg-bg-elevated p-5 sm:grid-cols-3">
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1 rounded-lg border border-border bg-bg-elevated p-5 sm:grid-cols-3">
               {ADVANCED_FIELDS.map((f) => (
                 <TextField
                   key={f.key}
@@ -471,10 +461,7 @@ export function SamplingControls() {
         </Section>
       )}
 
-      {/* Saves/loads the KoboldCpp `sampler` shape specifically — meaningless while a
-          chat-completion backend (its own separate settings, no saved-preset library yet) is
-          active, so hidden rather than shown greyed-out or silently no-op. NovelAI reuses this
-          same `sampler` shape (see novelai.ts), so its presets stay meaningful there too. */}
+      {/* Saves/loads the KoboldCpp `sampler` shape specifically */}
       {chatBackend !== 'openai-compatible' && (
         <Section title="Presets" surface="bare">
           <TextField label="Preset name" value={presetName} onChange={(e) => setPresetName(e.target.value)} />

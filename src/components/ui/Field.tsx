@@ -1,9 +1,8 @@
 import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react'
 
-// `text-base sm:text-sm`: 16px on mobile keeps iOS Safari from auto-zooming the page on focus;
-// desktop stays at the denser 14px. `py-2.5 sm:py-2` gives a slightly taller touch target on phones.
+// `text-base sm:text-sm`: 16px on mobile keeps iOS Safari from auto-zooming the page on focus; desktop stays denser.
 const CONTROL_CLASS =
-  'w-full rounded-xl bg-bg-sunken px-3 py-2.5 text-base text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40 placeholder:text-text-muted/55 sm:py-2 sm:text-sm'
+  'w-full rounded-md border border-border bg-bg-elevated px-3 py-2.5 text-base text-text outline-none transition-colors hover:border-text-muted/40 focus:border-accent/70 placeholder:text-text-muted/55 sm:py-1.5 sm:text-[13px]'
 
 /** A label + optional hint wrapper shared by every field control here, so spacing/typography stay identical. */
 function FieldFrame({

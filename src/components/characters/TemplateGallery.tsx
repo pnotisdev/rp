@@ -21,7 +21,7 @@ export function TemplateGallery({
           <button
             key={t.id}
             onClick={() => onChoose(t.card)}
-            className="w-full rounded-xl bg-bg-sunken p-4 text-left transition-transform hover:-translate-y-0.5"
+            className="w-full rounded-xl bg-bg-sunken p-4 text-left transition-colors hover:bg-bg-sunken/60"
           >
             <div className="text-sm font-semibold text-text">{t.card.name}</div>
             <div className="mt-0.5 text-xs text-text-muted">{t.blurb}</div>

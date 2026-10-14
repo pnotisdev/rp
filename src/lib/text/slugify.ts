@@ -1,10 +1,4 @@
-/**
- * Turns a free-typed label into a safe, filename/prompt-token-safe id: lowercase, hyphenated,
- * deduplicated against `existingIds` with a numeric suffix on collision. Shared by custom
- * expressions (`vn/expressions.ts`) and custom scene backgrounds (`vn/backgrounds.ts`) — both need
- * exactly the same guarantee, since the id becomes an uploaded-art filename key and (for
- * expressions) a literal token in the model's own prompt.
- */
+/** Turns a free-typed label into a safe, filename/prompt-token-safe id */
 export function slugifyId(label: string, existingIds: string[], fallback = 'item'): string {
   const base =
     label

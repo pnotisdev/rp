@@ -9,15 +9,9 @@ export interface SfxConfig {
 }
 
 // Non-newline so an unterminated asterisk/quote mid-stream doesn't swallow the rest of the message.
-// `\*{1,3}` on each side so `**bold**`/`***both***` narration reads the same as plain `*action*`.
 const SEGMENT_RE = /(\*{1,3}[^*\n]+\*{1,3}|"[^"\n]+")/g
 
-/**
- * Normalizes RP text drift toward this app's one convention (`*action*` / `"speech"`): HTML tags
- * (`<i>`/`<b>`, including broken tag salad) become asterisks or are stripped; `**`/`***` markdown
- * weight collapses to a single `*` (the app renders them identically). Shared by `cleanModelOutput`,
- * `sendUserMessage`, and `splitMessageSegments`. Idempotent.
- */
+/** Normalizes RP text drift toward this app's one convention (`*action*` / `"speech"`) */
 export function normalizeRpMarkup(text: string): string {
   let out = text
   if (out.includes('<')) {
@@ -92,9 +86,7 @@ function isSfxRun(clause: string, wordSet: Set<string>): boolean {
   return tokens.every((t) => isSfxToken(t, wordSet))
 }
 
-// Clause boundaries an SFX burst can stand between: line breaks, periods/ellipses, dashes. `!`/`?`
-// are left out since they're also the punctuation a burst itself trails ("BOOM!") — `isSfxToken`
-// strips those from a token instead.
+// Clause boundaries an SFX burst can stand between: line breaks, periods/ellipses, dashes.
 const CLAUSE_SPLIT_RE = /([\n.…—–]+)/
 
 function splitSfx(seg: MessageSegment, wordSet: Set<string>): MessageSegment[] {
@@ -127,13 +119,7 @@ function coalesce(segments: MessageSegment[]): MessageSegment[] {
   return out
 }
 
-/**
- * Splits RP message text into plain/action/quote/sfx segments — one source of truth for both the
- * live chat UI and the HTML transcript export. Asterisks are stripped; quote marks are kept.
- * Walks actual `matchAll` matches rather than `String.split`, so an unterminated `*action` (whose
- * leftover text coincidentally starts/ends with `*`) isn't misclassified as a real match.
- * SFX detection is opt-in and only runs over plain/action segments, never inside `"quotes"`.
- */
+/** Splits RP message text into plain/action/quote/sfx segments — one source of truth for both the live chat UI and the HTML transcript export. */
 export function splitMessageSegments(text: string, sfx?: SfxConfig): MessageSegment[] {
   const normalized = normalizeRpMarkup(text)
   const base: MessageSegment[] = []

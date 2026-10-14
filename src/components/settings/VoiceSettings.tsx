@@ -1,12 +1,21 @@
 import { useOpenMayhemModels } from '@/lib/hooks/useOpenMayhemModels'
+import { BRAND } from '@/lib/brand'
 import { OpenMayhemVoiceField } from './OpenMayhemVoiceField'
 import { OpenMayhemModelSelect } from './OpenMayhemModelSelect'
 import { OpenMayhemMediaKey } from './OpenMayhemMediaKey'
 import { useEffect, useRef, useState } from 'react'
 import { CheckCircle2, Loader2, XCircle } from 'lucide-react'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
-import { listKoboldSpeakers, synthesizeSpeech, TTS_PROVIDER_LABELS, type TtsProviderId } from '@/lib/voice/ttsProviders'
-import { TextField } from '@/components/ui/Field'
+import {
+  DEFAULT_ELEVENLABS_MODEL,
+  ELEVENLABS_MODELS,
+  listElevenLabsVoices,
+  listKoboldSpeakers,
+  synthesizeSpeech,
+  TTS_PROVIDER_LABELS,
+  type TtsProviderId,
+} from '@/lib/voice/ttsProviders'
+import { SelectField, TextField } from '@/components/ui/Field'
 import { Button } from '@/components/ui/Button'
 import { Section } from '@/components/ui/Section'
 import { SettingsPage } from '@/components/ui/SettingsPage'
@@ -30,6 +39,30 @@ export function VoiceSettings() {
   const [testState, setTestState] = useState<'idle' | 'loading' | 'ok' | 'error'>('idle')
   const [testError, setTestError] = useState('')
   const testAudioRef = useRef<HTMLAudioElement | null>(null)
+  const [elevenVoices, setElevenVoices] = useState<{ id: string; name: string }[]>([])
+  const [elevenVoicesError, setElevenVoicesError] = useState('')
+
+  // Lists the account's voices so the picker can show names instead of raw IDs.
+  useEffect(() => {
+    if (ttsProvider !== 'elevenlabs' || !ttsApiKey.trim()) {
+      setElevenVoices([])
+      return
+    }
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      listElevenLabsVoices(ttsApiKey)
+        .then((voices) => {
+          if (cancelled) return
+          setElevenVoices(voices)
+          setElevenVoicesError(voices.length ? '' : 'No voices found on this account.')
+        })
+        .catch((e) => !cancelled && setElevenVoicesError(errorMessage(e)))
+    }, 400)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [ttsProvider, ttsApiKey])
 
   const testControllerRef = useRef<AbortController | null>(null)
   const testUrlRef = useRef<string | null>(null)
@@ -48,9 +81,7 @@ export function VoiceSettings() {
     setLoadingSpeakers(false)
   }
 
-  // Round-trips a short line through whichever provider is configured right now and plays the
-  // result back — a real synthesis + playback, not just a ping, so a wrong voice ID or a key with
-  // no quota left surfaces here instead of the first time a line is read aloud in a scene.
+  // Round-trips a short line through whichever provider is configured right now and plays the result back
   const testConnection = async () => {
     testAudioRef.current?.pause()
     if (testUrlRef.current) URL.revokeObjectURL(testUrlRef.current)
@@ -93,7 +124,7 @@ export function VoiceSettings() {
     <SettingsPage>
       <Section
         title="Voice (text-to-speech)"
-        description="Read a character's lines aloud from Visual Novel mode. Keys are stored in this browser. OpenMayhem uses RP Suite's local relay; other providers are contacted directly."
+        description={`Read a character's lines aloud from Visual Novel mode. Keys are stored in this browser. OpenMayhem uses ${BRAND.name}'s local relay; other providers are contacted directly.`}
       >
           <label className="mb-3 block">
             <span className="mb-1 block text-xs font-medium text-text-muted">Provider</span>
@@ -103,7 +134,7 @@ export function VoiceSettings() {
                 setVoiceConfig({ ttsProvider: e.target.value as TtsProviderId })
                 setTestState('idle')
               }}
-              className="w-full rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40"
+              className="w-full rounded-xl border border-border bg-bg-elevated px-3 py-2 text-sm text-text outline-none focus:border-accent/70"
             >
               {PROVIDERS.map((p) => (
                 <option key={p} value={p}>
@@ -180,12 +211,36 @@ export function VoiceSettings() {
                 value={ttsApiKey}
                 onChange={(e) => setVoiceConfig({ ttsApiKey: e.target.value })}
               />
-              <TextField
-                label="Voice ID"
-                value={ttsVoice}
-                onChange={(e) => setVoiceConfig({ ttsVoice: e.target.value })}
-                placeholder="from your ElevenLabs voice library"
-              />
+              <SelectField
+                label="Model"
+                value={ttsModel || DEFAULT_ELEVENLABS_MODEL}
+                onChange={(e) => setVoiceConfig({ ttsModel: e.target.value })}
+                hint="Flash answers fastest. v4 Turbo turns laughs into real laughter."
+              >
+                {ELEVENLABS_MODELS.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                  </option>
+                ))}
+              </SelectField>
+              {elevenVoices.length > 0 ? (
+                <SelectField label="Voice" value={ttsVoice} onChange={(e) => setVoiceConfig({ ttsVoice: e.target.value })}>
+                  <option value="">Choose a voice…</option>
+                  {elevenVoices.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.name}
+                    </option>
+                  ))}
+                </SelectField>
+              ) : (
+                <TextField
+                  label="Voice ID"
+                  value={ttsVoice}
+                  onChange={(e) => setVoiceConfig({ ttsVoice: e.target.value })}
+                  placeholder="from your ElevenLabs voice library"
+                  hint={elevenVoicesError || (ttsApiKey ? 'Loading your voices…' : undefined)}
+                />
+              )}
             </>
           )}
 

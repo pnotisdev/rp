@@ -47,9 +47,7 @@ describe('countStaticSceneTurns', () => {
   })
 
   it('an untagged character turn in between is simply skipped, not treated as a break', () => {
-    // An untagged turn (no VN mode ever used for it, or an edge case with no tag emitted) says
-    // nothing about whether the location actually changed — ignoring it and looking only at the
-    // turns that *do* say something is more honest than guessing it broke the streak.
+    // An untagged turn (no VN mode ever used for it, or an edge case with no tag emitted) says nothing about whether the location actually changed
     const messages = [
       { role: 'char', scene: { background: 'library' } },
       { role: 'char', scene: undefined },

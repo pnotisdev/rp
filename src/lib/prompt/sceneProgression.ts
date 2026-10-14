@@ -1,9 +1,6 @@
 import type { SceneTag } from '@/lib/vn/sceneTag'
 
-/**
- * Nudges the model to move the scene along once it's stayed in the same background for too long
- * — ordinary chat has no other push to do this, unlike a hangout/date event.
- */
+/** Nudges the model to move the scene along once it's stayed in the same background for too long */
 const STATIC_SCENE_THRESHOLD = 6
 
 /** Counts consecutive trailing char turns sharing the latest scene background. `count: 0` if untagged. */
@@ -21,13 +18,7 @@ export function countStaticSceneTurns(
   return { count, currentBackground: current }
 }
 
-/**
- * A `styleGuidance` line prompting a scene change past the threshold; `''` otherwise.
- *
- * Written as a *transition* rather than a topic change, because that is what it actually is here: a
- * new background, and in VN mode a visible cut. Naming the character keeps it from reading as an
- * instruction to the author rather than a beat in the story.
- */
+/** A `styleGuidance` line prompting a scene change past the threshold; `''` otherwise. */
 export function sceneProgressionNudge(
   staticTurns: number,
   opts: { scheduleLocation?: string; alternateBackgroundLabels?: string[]; charName?: string },

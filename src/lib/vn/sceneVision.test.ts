@@ -441,10 +441,7 @@ describe('detectExpressionTextMismatch', () => {
 })
 
 describe('when the backend never responds', () => {
-  // Every pass in this file is documented as a non-blocking backup (see the file header) — before
-  // `generateWithTimeout` was wired in, a hang here meant the caller waited forever for what was
-  // supposed to be a cheap, best-effort assist. Each one now falls back the same as any other
-  // read/parse failure after 45s instead of hanging indefinitely.
+  // Every pass in this file is documented as a non-blocking backup (see the file header)
   beforeEach(() => vi.useFakeTimers())
   afterEach(() => vi.useRealTimers())
 

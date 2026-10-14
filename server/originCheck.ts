@@ -1,20 +1,10 @@
-/**
- * Cross-site guard for the API (no auth otherwise — see README threat model: local-only).
- * Allows any loopback origin (any port), rejects any other Origin, and passes requests
- * with no Origin at all (curl, same-origin requests that omit it).
- */
+/** Cross-site guard for the API (no auth otherwise — see README threat model: local-only). */
 
 import type { RequestHandler } from 'express'
 
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]'])
 
-/**
- * Extra origins to accept beyond loopback, for a deployment reached over a network — Docker on a
- * home server, a reverse proxy, another device on the LAN. Set `RP_ALLOWED_ORIGINS` to a
- * comma-separated list (`http://192.168.1.9:8080,https://rp.example.com`); a single `*` turns the
- * check off entirely, which only makes sense when something in front is doing auth. Read fresh
- * each call so tests (and a restart-free env change) take effect.
- */
+/** Extra origins to accept beyond loopback, for a deployment reached over a network */
 function extraAllowedOrigins(): string[] {
   return (process.env.RP_ALLOWED_ORIGINS ?? '')
     .split(',')

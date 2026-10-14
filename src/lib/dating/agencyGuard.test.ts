@@ -73,8 +73,7 @@ describe('detectPersonaAgencyViolation — feeling/thought/realization (broadene
   })
 
   it('does NOT flag the persona as merely the object of a preposition immediately before the verb', () => {
-    // The exact collision this was designed to avoid: "Kai" precedes the verb, but only as the
-    // object of "to" — the subject of "felt" is really "she", carried over from the main clause.
+    // The exact collision this was designed to avoid
     expect(detectPersonaAgencyViolation('Kai', 'She turned to Kai and felt a wave of relief.')).toBeUndefined()
     expect(detectPersonaAgencyViolation('Kai', 'Sumire looked at Kai and wondered what he was thinking.')).toBeUndefined()
   })

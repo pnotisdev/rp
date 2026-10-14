@@ -74,12 +74,7 @@ describe('detectInstructTemplateId', () => {
 })
 
 describe('wrapAssistPrompt', () => {
-  // rp#7: a background judge call (relationship tracker, objectives, ...) used to send its raw
-  // prompt straight to KoboldCpp's raw-completion endpoint with no turn markers at all — a strict,
-  // turn-trained model (Gemma) reads that as already-finished text and answers with EOS instead of
-  // the JSON it was asked for. This wraps the same flat prompt the way `builder.ts` wraps the real
-  // reply: the fixed context inside the template's opening turn, ending with the model's own turn
-  // already open.
+  // rp#7: a background judge call (relationship tracker, objectives, ...) used to send its raw prompt straight to KoboldCpp's…
   it('wraps the prompt in Gemma turn markers, ending with the model turn open and no fake name', () => {
     const gemma = getInstructTemplate('gemma')
     const wrapped = wrapAssistPrompt('Return ONLY JSON.\n\nJSON:', gemma)

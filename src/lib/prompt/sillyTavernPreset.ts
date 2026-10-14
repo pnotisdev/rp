@@ -1,19 +1,4 @@
-/**
- * Import SillyTavern's own preset files. ST ships (and its community trades) two kinds this app can
- * use directly:
- *
- *  - **instruct** presets (`input_sequence`, `output_sequence`, `wrap`, `names_behavior`, …) — the
- *    turn-format definition, mapped onto this app's `InstructTemplate`.
- *  - **system-prompt** presets (`content`, `post_history`) — the instruction block text.
- *
- * ST's context, textgen-sampler, NovelAI, and chat-completion presets are a different enough model
- * that they aren't converted here; `parseSillyTavernPreset` returns `{ kind: 'unsupported' }` for
- * them so the caller can say so rather than silently doing nothing.
- *
- * The conversion is intentionally lossy-but-safe: it produces a working template the user can then
- * tweak in the editor, not a byte-perfect replica of ST's prompt assembly (which has first-turn
- * special-casing and alignment messages this app has no equivalent for).
- */
+/** Import SillyTavern's own preset files. */
 
 import type { InstructTemplate } from './instructTemplates'
 
@@ -45,8 +30,7 @@ function convertInstruct(o: Obj): { name: string; template: Omit<InstructTemplat
   const build = (seqRaw: string, isTurn: boolean): { prefix: string; names: boolean } => {
     const { text, hadName } = toAppMacros(seqRaw)
     const base = text ? text + wrap : ''
-    // ST's force-names prepends `{{char}}: ` to the turn *content*; a sequence that already carries
-    // `{{name}}` is doing it inside the marker instead. Only one or the other.
+    // ST's force-names prepends `{{char}}: ` to the turn *content*; a sequence that already carries `{{name}}` is doing it inside the marker instead.
     if (isTurn && force && !hadName) return { prefix: `${base}{name}: `, names: true }
     return { prefix: base, names: hadName }
   }

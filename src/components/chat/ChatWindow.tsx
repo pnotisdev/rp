@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ArrowLeft,
   Backpack,
@@ -11,16 +11,21 @@ import {
   Heart,
   MessageCircle,
   NotebookPen,
+  Puzzle,
   ScrollText,
   Search,
   SlidersHorizontal,
   Star,
   Sunrise,
   Target,
+  Volume2,
+  VolumeX,
   Wrench,
   X,
 } from 'lucide-react'
 import { effectiveAssistFlag, useChatSession } from '@/lib/hooks/useChatSession'
+import { useIdleChatter } from '@/lib/persona/useIdleChatter'
+import { useBubbleVoice } from '@/lib/voice/useBubbleVoice'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { charactersApi, chatsApi } from '@/lib/api/client'
 import { IconButton } from '@/components/ui/IconButton'
@@ -50,7 +55,7 @@ import { IntentChips } from './IntentChips'
 import { LiveRapport } from './LiveRapport'
 import { StageMeter } from '@/components/ui/Stage'
 import type { MessageIntent } from '@/lib/dating/intent'
-import { GenerationHud } from './GenerationHud'
+import { DriveReadout, GenerationHud } from './GenerationHud'
 import { ReactionFeed } from './ReactionFeed'
 import { Composer } from './Composer'
 import { ConnectionBadge } from './ConnectionBadge'
@@ -69,6 +74,11 @@ import { DirectorPanel } from './DirectorPanel'
 import { TuningPanel } from './TuningPanel'
 import { ReactivePortrait } from './ReactivePortrait'
 import { ScenePanel } from './ScenePanel'
+import { ExtensionDock, chatPanels } from '@/components/extensions/ExtensionDock'
+import { HudLayer } from '@/components/extensions/HudLayer'
+import { setChatSession } from '@/lib/extensions/chatSessionRegistry'
+import { emitHostEvent } from '@/lib/extensions/events'
+import { useExtensions } from '@/lib/extensions/useExtensions'
 import { nextRoundRobinSpeaker, rosterFrom } from '@/lib/chat/scene'
 import { resolveExpressionSprite } from '@/lib/vn/expressions'
 import { currentOutfitFrom } from '@/lib/vn/outfits'
@@ -78,21 +88,20 @@ import { getGiftCatalog } from '@/lib/dating/gifts'
 import { getItemCatalog } from '@/lib/dating/items'
 import { composeIntimacyActionText, intimacyItemById, type IntimacyUnlockable } from '@/lib/dating/intimacyCatalog'
 
-/**
- * The main chat screen: header, toolbar, and either the default message-log layout or VNStage's
- * visual-novel layout, plus every side panel (relationship, objective, scene, inspector, etc.)
- * they share. Wires `useChatSession`'s state/actions together with settings and display state.
- */
+/** The main chat screen: header, toolbar */
 export function ChatWindow({
   chatId,
   onBack,
   onOpenSettings,
+  onOpenExtensions,
   onNavigateToWorld,
 }: {
   chatId: string | null
   onBack?: () => void
   /** Deep link from the Quick tuning panel's "Open full Generation settings" — optional so ChatWindow stays usable without a view-switcher in scope. */
   onOpenSettings?: () => void
+  /** The extension dock's "Open Extensions" link. */
+  onOpenExtensions?: () => void
   /** The Relationship panel's "Customize in World editor" link — optional for the same reason as `onOpenSettings`. */
   onNavigateToWorld?: (worldId: string, tab?: string) => void
 }) {
@@ -119,6 +128,10 @@ export function ChatWindow({
     rewindToMessage,
     togglePinMessage,
     abortGeneration,
+    idleTurn,
+    interruptIdle,
+    isIdleGenerating,
+    replyToPending,
     previewPrompt,
     updateAuthorNote,
     updateScene,
@@ -161,6 +174,8 @@ export function ChatWindow({
   const quickReplies = useSettingsStore((s) => s.quickReplies)
   const autoSuggestChoicesGlobal = useSettingsStore((s) => s.autoSuggestChoices)
   const showGenerationHud = useSettingsStore((s) => s.showGenerationHud)
+  const autoVoiceTexting = useSettingsStore((s) => s.autoVoiceTexting)
+  const toggleFlag = useSettingsStore((s) => s.toggleFlag)
   const regexScripts = useSettingsStore((s) => s.regexScripts)
   const sfxBursts = useSettingsStore((s) => s.sfxBursts)
   const sfxWords = useSettingsStore((s) => s.sfxWords)
@@ -184,6 +199,25 @@ export function ChatWindow({
   const [showBag, setShowBag] = useState(false)
   const [showDirector, setShowDirector] = useState(false)
   const [showTuning, setShowTuning] = useState(false)
+  const [showDock, setShowDock] = useState(false)
+  const extensions = useExtensions()
+  const hasChatPanels = chatPanels(extensions).length > 0
+  // Lets extensions send messages through this live session, and tells them when a reply starts and ends.
+  const sendRef = useRef(sendUserMessage)
+  sendRef.current = sendUserMessage
+  const generatingRef = useRef(isGenerating)
+  generatingRef.current = isGenerating
+  useEffect(() => {
+    if (!chatId) return
+    setChatSession({ chatId, sendUserMessage: (text) => sendRef.current(text), isGenerating: () => generatingRef.current })
+    return () => setChatSession(null)
+  }, [chatId])
+  const wasGenerating = useRef(false)
+  useEffect(() => {
+    if (wasGenerating.current === isGenerating) return
+    wasGenerating.current = isGenerating
+    if (chatId) emitHostEvent('turn', { phase: isGenerating ? 'start' : 'end', chatId })
+  }, [isGenerating, chatId])
   const [highlightedId, setHighlightedId] = useState<string | null>(null)
   const highlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [draft, setDraft] = useState('')
@@ -192,9 +226,7 @@ export function ChatWindow({
   const [armedIntimacyOptionId, setArmedIntimacyOptionId] = useState<string | null>(null)
   const [refreshingChoices, setRefreshingChoices] = useState(false)
   const [exporting, setExporting] = useState(false)
-  // VN quick menu's Auto toggle — off by default, never persisted, and reset below on every chat
-  // switch, so it can never silently keep running somewhere the user forgot about. See
-  // `handleAutoAdvanceFire`'s own doc comment for the rest of the safety rails.
+  // VN quick menu's Auto toggle — off by default, never persisted
   const [autoAdvance, setAutoAdvance] = useState(false)
   const autoAdvanceCountRef = useRef(0)
   const autoAdvanceStartRef = useRef<number | null>(null)
@@ -224,10 +256,7 @@ export function ChatWindow({
     setBgmScene(lastCharScene)
   }, [lastCharScene?.mood, lastCharScene?.background, setBgmScene])
 
-  // A failed reply never re-arms `handleAutoAdvanceFire` on its own — `dialogueComplete` in
-  // `VNStage` requires `!failed`, so its schedule effect just never fires again for this message.
-  // That's already safe (no retry storm), but the toggle would otherwise sit there still showing
-  // "on" and pulsing while actually dormant — this turns it off outright so the UI doesn't lie.
+  // A failed reply never re-arms `handleAutoAdvanceFire` on its own
   useEffect(() => {
     if (autoAdvance && lastChar?.failed) setAutoAdvance(false)
   }, [autoAdvance, lastChar?.failed])
@@ -235,6 +264,36 @@ export function ChatWindow({
   useEffect(() => {
     setDraft('')
   }, [chatId])
+
+  const { speakBubble, stopSpeech } = useBubbleVoice(character)
+  const textingChat = character?.replyFormat === 'texting' && participantCharacters.length === 0
+  // Answers an unanswered burst ~1.6 s after the last send, or 6 s after the last keystroke while still typing.
+  const lastIsUnansweredUser = messages[messages.length - 1]?.role === 'user'
+  useEffect(() => {
+    if (!textingChat || !lastIsUnansweredUser || isGenerating) return
+    const timer = window.setTimeout(() => replyToPending(), draft.trim() ? 6000 : 1600)
+    return () => window.clearTimeout(timer)
+  }, [textingChat, lastIsUnansweredUser, isGenerating, draft, messages.length, replyToPending])
+  // Each texting bubble that appears is read aloud (when voice is on) and kept in view.
+  const onBubbleShown = useCallback(
+    (_id: string, text: string) => {
+      speakBubble(text)
+      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
+    },
+    [speakBubble],
+  )
+
+  useIdleChatter({
+    chat,
+    character,
+    messages,
+    isGenerating,
+    isIdleGenerating,
+    draft,
+    allowed: !autoAdvance,
+    idleTurn,
+    interruptIdle,
+  })
 
   useEffect(() => {
     if (highlightedId) scrollToMessage(scrollRef.current, highlightedId)
@@ -308,14 +367,10 @@ export function ChatWindow({
     }
   }
 
-  // Chat-level override wins over the global Settings → Appearance default. Either can be `'auto'`
-  // — resolved to a real boolean via `isVnReady` (character has sprites, world has scene art) so
-  // 'auto' never shows a blank void, and everything past this point reads the resolved boolean.
-  // Computed here, above the early return below, because the effect that publishes it is a hook.
+  // Chat-level override wins over the global Settings → Appearance default.
   const vnModeSetting = chat?.assistOverrides?.visualNovelMode ?? globalVisualNovelMode
   const resolvedVisualNovelMode = !!chat && (vnModeSetting === 'auto' ? isVnReady(character, world) : vnModeSetting)
-  // Panels opened over the stage wear its glass rather than the app's own surface — see
-  // `useVnChromeStore`. Cleared on unmount so leaving the chat can't strand a dialog in VN dress.
+  // Panels opened over the stage wear its glass rather than the app's own surface — see `useVnChromeStore`.
   const setVnChrome = useVnChromeStore((s) => s.setActive)
   useEffect(() => {
     setVnChrome(resolvedVisualNovelMode)
@@ -332,9 +387,7 @@ export function ChatWindow({
     )
   }
 
-  // In-chat VN toggle: writes an explicit per-chat override (never 'auto' — that's only reachable
-  // from Settings/RelationshipPanel), clearing back to "inherit" when the new value would just
-  // match the global default. Same precedence contract as RelationshipPanel's own override selects.
+  // In-chat VN toggle: writes an explicit per-chat override (never 'auto'
   const toggleVnForChat = () => {
     const next = { ...(chat.assistOverrides ?? {}) }
     const target = !resolvedVisualNovelMode
@@ -342,10 +395,7 @@ export function ChatWindow({
     else next.visualNovelMode = target
     chatsApi.update(chat.id, { assistOverrides: next }).catch((e) => toastError(errorMessage(e)))
   }
-  // Post-first-reply tip: a one-time nudge toward the two changes that most alter the experience,
-  // once there's an actual completed reply to react to and at least one of them still applies.
-  // Dismissing it is permanent (`firstReplyTipDismissed`) — this is a first-run orientation, not a
-  // recurring reminder.
+  // Post-first-reply tip: a one-time nudge toward the two changes that most alter the experience, once there's an actual completed…
   const showFirstReplyTip =
     !firstReplyTipDismissed && !isGenerating && !!lastChar?.text && !lastChar.failed && (!resolvedVisualNovelMode || !character?.worldId)
   const pinnedCount = messages.filter((m) => m.pinned).length
@@ -362,8 +412,6 @@ export function ChatWindow({
     { variants: character?.spriteVariants, seed: lastChar?.id ?? 'no-message' },
   )
   // Only meaningful for a world-bound character with an authored schedule; most stay unbadged.
-  // Uses the same scene-reconciled presence the prompt does (per-chat time-of-day override, an
-  // established scene location) so the badge can't say "in class" while the scene is elsewhere.
   const presence =
     world && character?.schedule?.length
       ? resolveScheduledPresence(
@@ -389,10 +437,19 @@ export function ChatWindow({
       onClick: () => setShowRelationship(true),
     },
     {
+      key: 'voice',
+      icon: autoVoiceTexting ? Volume2 : VolumeX,
+      label: autoVoiceTexting ? 'Voice: on. Reads each text aloud' : 'Voice: off',
+      priority: 'primary',
+      active: autoVoiceTexting,
+      hidden: character?.replyFormat !== 'texting',
+      onClick: () => toggleFlag('autoVoiceTexting'),
+    },
+    {
       key: 'tuning',
       icon: SlidersHorizontal,
       label: 'Quick tuning: sampler & system prompt',
-      priority: 'primary',
+      priority: 'primary-desktop',
       active: showTuning,
       onClick: () => setShowTuning((v) => !v),
     },
@@ -408,11 +465,8 @@ export function ChatWindow({
       key: 'event',
       icon: CalendarHeart,
       label: chat.activeEvent?.title ? `Event: ${chat.activeEvent.title}` : 'Start a date or event',
-      priority: 'primary-desktop',
       active: !!chat.activeEvent,
-      // An author-level opt-out, or this chat's own mode saying "no romance mechanics" — either
-      // way hidden entirely rather than just disabled. Never hides a genuinely active event,
-      // though, even if the mode override would otherwise say no — nothing to strand the user with.
+      // An author-level opt-out, or this chat's own mode saying "no romance mechanics" — either way hidden entirely rather than just disabled.
       hidden: !!character?.dateModeOptOut || (chat.assistOverrides?.showDateEventButton === false && !chat.activeEvent),
       onClick: () => setShowEvent(true),
     },
@@ -420,10 +474,7 @@ export function ChatWindow({
       key: 'day-planner',
       icon: Sunrise,
       label: 'Plan your day',
-      priority: 'primary-desktop',
-      // Same "romance-flavored surface" bucket the event button already opts out of — this just
-      // leads into the same scored-hangout machinery through a different door — plus no bound
-      // world at all, since there's no clock/energy to plan around without one.
+      // Same "romance-flavored surface" bucket the event button already opts out of
       hidden: !world || !!character?.dateModeOptOut || chat.assistOverrides?.showDateEventButton === false,
       onClick: () => setShowDayPlanner(true),
     },
@@ -431,7 +482,6 @@ export function ChatWindow({
       key: 'objective',
       icon: Target,
       label: activeObjective ? `Objective: ${activeObjective.title}` : 'Set an objective',
-      priority: 'primary-desktop',
       active: !!activeObjective,
       onClick: () => setShowObjective(true),
     },
@@ -439,9 +489,7 @@ export function ChatWindow({
       key: 'calendar',
       icon: CalendarDays,
       label: 'Key dates',
-      // An occasional-reference view, not a per-turn action — stays in the overflow menu rather
-      // than competing for primary space with the day planner/event buttons. No bound world means
-      // no clock at all to plan a birthday or anniversary against.
+      // An occasional-reference view, not a per-turn action
       hidden: !world,
       onClick: () => setShowCalendar(true),
     },
@@ -476,6 +524,14 @@ export function ChatWindow({
       icon: Wrench,
       label: 'Director: adjust world & relationship state',
       onClick: () => setShowDirector(true),
+    },
+    {
+      key: 'extensions',
+      icon: Puzzle,
+      label: 'Extensions',
+      priority: hasChatPanels ? 'primary-desktop' : undefined,
+      active: showDock,
+      onClick: () => setShowDock((v) => !v),
     },
     {
       key: 'export',
@@ -534,13 +590,13 @@ export function ChatWindow({
             regenerateChoices(lastMessage.id).finally(() => setRefreshingChoices(false))
           }}
           disabled={refreshingChoices}
-          className={`rounded-full px-3.5 py-1.5 text-sm transition-colors disabled:opacity-50 ${
+          className={`rounded-md px-3.5 py-1.5 text-sm transition-colors disabled:opacity-50 ${
             variant === 'default'
               ? 'bg-bg-elevated text-text-muted hover:bg-accent/10 hover:text-accent'
               : 'vn-glass text-white/80 hover:bg-white/20 hover:text-white'
           }`}
         >
-          {refreshingChoices ? 'Thinking…' : '✦ Suggest replies'}
+          {refreshingChoices ? 'Thinking…' : 'Suggest replies'}
         </button>
       </div>
     )
@@ -554,23 +610,14 @@ export function ChatWindow({
       </>
     )
 
-  // Intent chips: offered while relationship tracking is on for this chat (its override, else the
-  // global default) — unless the mode itself has its own opinion (`showIntentChips`), which wins
-  // either way (e.g. a Freeform chat where the player later turned relationship tracking back on
-  // for some other reason still doesn't want "Flirt/Tease" chips; that vocabulary is genre, not tracking).
+  // Intent chips: offered while relationship tracking is on for this chat (its override, else the global default)
   const relationshipTrackingActive = chat?.assistOverrides?.autoTrackRelationship ?? autoTrackRelationship
   const showIntentChips = (chat?.assistOverrides?.showIntentChips ?? relationshipTrackingActive) && !isGenerating && !!character
   const liveDateActive = isLiveScene(chat?.activeEvent)
 
   const AUTO_ADVANCE_MAX_TURNS = 5
   const AUTO_ADVANCE_MAX_MS = 10 * 60 * 1000
-  /**
-   * Real VN autoplay: called once per completed reply while Auto is on (`VNStage` owns the "when",
-   * timed to that reply's length). Never auto-picks an AI-suggested choice — a real decision point
-   * always waits for the player, same as autoplay pausing at a branch in any other VN. Stops itself
-   * on a live date/event, a failed generation, or a capped number of turns/wall-clock time, so
-   * leaving it on by accident can't run away unattended.
-   */
+  /** Real VN autoplay: called once per completed reply while Auto is on (`VNStage` owns the "when", timed to that reply's length). */
   const handleAutoAdvanceFire = () => {
     if (!autoAdvance || isGenerating) return
     if (activeChoices) return
@@ -603,7 +650,10 @@ export function ChatWindow({
       armedIntent || armedIntimacyOptionId
         ? { ...(armedIntent ? { intent: armedIntent } : {}), ...(armedIntimacyOptionId ? { intimacyOptionId: armedIntimacyOptionId } : {}) }
         : undefined
-    sendUserMessage(text, attachments, opts)
+    // Texting with one character: the reply waits until the player stops sending (see the effect below).
+    const deferReply = textingChat && !opts
+    stopSpeech()
+    sendUserMessage(text, attachments, deferReply ? { deferReply: true } : opts)
     setArmedIntent(null)
     setArmedIntimacyOptionId(null)
   }
@@ -621,9 +671,7 @@ export function ChatWindow({
     setShowRelationship(false)
   }
 
-  // Answering a branch the scene is blocked on: the stage moves in the hook, and an option that names a
-  // catalog entry then goes through the ordinary clicked-action path so it lands in the composer for
-  // review like any other deliberate move.
+  // Answering a branch the scene is blocked on
   const onIntimacyChoice = async (characterId: string, optionId: string) => {
     const entryId = await chooseIntimacyBranch(characterId, optionId)
     const entry = entryId ? intimacyItemById(entryId, world) : undefined
@@ -645,8 +693,7 @@ export function ChatWindow({
           ? 'AI director picks who replies'
           : 'Type @Name to address them'
 
-  // `fillHeight` only in VN's inline input mode, where the composer *is* the dialogue box's body
-  // and has to hold its fixed height rather than hug its content.
+  // `fillHeight` only in VN's inline input mode
   const composerNode = (variant: 'default' | 'vn') => (
     <Composer
       variant={variant}
@@ -682,16 +729,14 @@ export function ChatWindow({
   )
 
   return (
-    // overflow-hidden is load-bearing: TuningPanel's closed (translate-x-full) state still counts
-    // toward scrollWidth without it, causing a permanent horizontal scrollbar. Panels that need to
-    // escape this box use position: fixed instead, which plain overflow doesn't clip.
+    // overflow-hidden is load-bearing: TuningPanel's closed (translate-x-full) state still counts toward scrollWidth without it…
     <div className="relative flex flex-1 flex-col min-w-0 overflow-hidden">
+      <HudLayer />
+      {showDock && <ExtensionDock onClose={() => setShowDock(false)} onOpenExtensions={onOpenExtensions} />}
       {chat && <ReactionFeed chatId={chat.id} variant={resolvedVisualNovelMode ? 'vn' : 'default'} />}
       {showFirstReplyTip && (
-        // `fixed` (not `absolute`) so it floats consistently above whichever layout is active
-        // (VNStage is full-bleed and doesn't otherwise have a slot for this) — same reasoning the
-        // comment above gives for TuningPanel. One-time orientation nudge, not a recurring one.
-        <div className="fixed inset-x-4 bottom-6 z-40 mx-auto max-w-sm rounded-2xl border border-border bg-bg-elevated p-4 shadow-lg sm:inset-x-auto sm:right-6">
+        // `fixed` (not `absolute`) so it floats consistently above whichever layout is active (VNStage is full-bleed and doesn't otherwise…
+        <div className="fixed inset-x-4 bottom-6 z-40 mx-auto max-w-sm rounded-xl border border-border bg-bg-elevated p-4 sm:inset-x-auto sm:right-6">
           <button
             onClick={dismissFirstReplyTip}
             aria-label="Dismiss tip"
@@ -719,68 +764,57 @@ export function ChatWindow({
         </div>
       )}
       {!resolvedVisualNovelMode && (
-        <header className="flex items-center justify-between gap-4 border-b border-border bg-bg-elevated px-5 py-3">
+        <header data-rp-part="chat-header" className="flex items-center justify-between gap-4 border-b border-border px-4 py-2">
           <div className="flex min-w-0 items-center gap-3">
             {onBack && (
               <IconButton tone="chrome" icon={ArrowLeft} title="Back to chats" onClick={onBack} className="md:hidden" />
             )}
             {character?.avatarDataUrl && (
-              <img src={character.avatarDataUrl} className="h-10 w-10 shrink-0 rounded-xl object-cover" />
+              <img src={character.avatarDataUrl} className="h-8 w-8 shrink-0 rounded-md object-cover" />
             )}
-            {/* Three tiers, deliberately unequal: who you're talking to, then the one stat that
-                moves while you play, then the standing context. The third is the first to
-                truncate — and the first to disappear entirely on a phone. */}
             <div className="min-w-0">
-              <div className="flex min-w-0 items-center gap-2 text-base font-display text-text">
+              <div className="flex min-w-0 items-center gap-2 text-[14px] font-semibold text-text">
                 <span className="truncate">{character?.card.name ?? '…'}</span>
                 {parentChatLink && <span className="shrink-0 text-xs font-normal text-text-muted">{parentChatLink}</span>}
               </div>
-              <div className="flex min-w-0 items-center gap-2 text-xs text-text-muted">
+              <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-text-muted">
                 {liveDateActive && chat.rapport ? (
                   // Warmth is frozen during a live scene, so show the qualitative rapport read instead.
                   <LiveRapport read={chat.rapport} label={chat?.activeEvent?.kind === 'hangout' ? 'Live hangout' : 'Live date'} />
                 ) : (
                   <>
-                    <StageMeter value={warmth} className="w-16 shrink-0" />
-                    {/* Stage label truncates first on a narrow header; the warmth number never does. */}
+                    <StageMeter value={warmth} className="w-12 shrink-0" />
                     <span className="truncate first-letter:uppercase">{formatRelationshipStage(relationshipStage)}</span>
                     <span className="shrink-0 tabular-nums text-text">{warmth}</span>
                   </>
                 )}
-              </div>
-              <div className="hidden min-w-0 items-center gap-1.5 text-[11px] text-text-muted/80 sm:flex">
-                <span className="shrink-0">as {persona?.name ?? 'You'}</span>
+                <span className="hidden shrink-0 text-border sm:inline">·</span>
+                <span className="hidden shrink-0 sm:inline">as {persona?.name ?? 'You'}</span>
                 {chat.mode && (
                   <>
-                    <span className="shrink-0 text-border">·</span>
-                    <span className="shrink-0">{getWorldTemplate(chat.mode).label}</span>
+                    <span className="hidden shrink-0 text-border sm:inline">·</span>
+                    <span className="hidden shrink-0 sm:inline">{getWorldTemplate(chat.mode).label}</span>
                   </>
                 )}
                 {presence && (
-                  <>
-                    <span className="shrink-0 text-border">·</span>
-                    <span
-                      className="flex min-w-0 items-center gap-1.5"
-                      title={presence.activity ? `${presence.activity}${presence.location ? ` @ ${presence.location}` : ''}` : undefined}
-                    >
-                      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${presence.status === 'available' ? 'bg-accent' : 'bg-text-muted'}`} />
-                      {/* `first-letter:uppercase`, not `capitalize`: the activity is a whole clause
-                          ("at her table on the library's second floor"), and CSS `capitalize` was
-                          Title Casing every word of it — including the "S" after an apostrophe. */}
-                      <span className="truncate first-letter:uppercase">
-                        {presenceLabel(presence.status)}
-                        {presence.activity && `. ${presence.activity}`}
-                      </span>
+                  <span
+                    className="hidden min-w-0 items-center gap-1.5 sm:flex"
+                    title={presence.activity ? `${presence.activity}${presence.location ? ` @ ${presence.location}` : ''}` : undefined}
+                  >
+                    <span className="text-border">·</span>
+                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${presence.status === 'available' ? 'bg-success' : 'bg-text-muted'}`} />
+                    <span className="truncate first-letter:uppercase">
+                      {presenceLabel(presence.status)}
+                      {presence.activity && `. ${presence.activity}`}
                     </span>
-                  </>
+                  </span>
                 )}
               </div>
             </div>
           </div>
-          {/* Primary actions plus a "•••" overflow, so the row fits beside the title block at 375px. */}
-          <div className="flex shrink-0 items-center gap-1">
+          <div className="flex shrink-0 items-center gap-0.5">
             {toolbar}
-            <div className="mx-1.5 h-5 w-px bg-border" />
+            <div className="mx-1.5 h-4 w-px bg-border" />
             <ConnectionBadge />
           </div>
         </header>
@@ -987,6 +1021,7 @@ export function ChatWindow({
           assistSlot={
             <>
               {showGenerationHud && <GenerationHud stats={genStats} variant="vn" />}
+              {showGenerationHud && character?.drive?.enabled && <DriveReadout state={chat?.driveStates?.[character.id]} variant="vn" />}
               <AssistActivityBar items={assistActivity} variant="vn" />
             </>
           }
@@ -999,7 +1034,7 @@ export function ChatWindow({
       ) : (
         <>
           <div className="relative min-h-0 flex-1">
-            <div ref={scrollRef} className="h-full overflow-y-auto px-6 py-6">
+            <div ref={scrollRef} className="h-full overflow-y-auto px-4 py-4 sm:px-6">
               <MessageLog
                 messages={messages}
                 character={character}
@@ -1016,6 +1051,7 @@ export function ChatWindow({
                 onSwipe={swipe}
                 onFork={forkChat}
                 onTogglePin={togglePinMessage}
+                onBubbleShown={onBubbleShown}
               />
             </div>
             {/* Live scenes only — an ordinary chat stays text-focused with no portrait. */}
@@ -1025,6 +1061,7 @@ export function ChatWindow({
           </div>
           {choiceListNode('default') || quickReplyNode('default')}
           {showGenerationHud && <GenerationHud stats={genStats} />}
+          {showGenerationHud && character?.drive?.enabled && <DriveReadout state={chat?.driveStates?.[character.id]} />}
           <AssistActivityBar items={assistActivity} />
           {composerNode('default')}
         </>

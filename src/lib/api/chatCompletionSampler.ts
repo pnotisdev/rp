@@ -15,14 +15,7 @@ export const VERBOSITY_OPTIONS: { value: ChatCompletionSamplerParams['verbosity'
   { value: 'high', label: 'High' },
 ]
 
-/**
- * Maps the chat-completion-native sampler onto the fields of `GenerateRequest` that
- * `OpenAICompatibleClient` actually reads — the counterpart to spreading `sampler`
- * (`GenerationParams`) directly for the KoboldCpp path. `'auto'` omits `reasoning_effort`/
- * `verbosity` entirely rather than sending the literal string `"auto"`, since most providers
- * treat an absent field as their own default and `"auto"` isn't itself a documented value for
- * either field on every provider.
- */
+/** Maps the chat-completion-native sampler onto the fields of `GenerateRequest` that `OpenAICompatibleClient` actually reads */
 export function chatCompletionSamplerToRequest(
   params: ChatCompletionSamplerParams,
 ): Pick<GenerateRequest, 'temperature' | 'top_p' | 'presence_penalty' | 'frequency_penalty' | 'reasoning_effort' | 'verbosity'> {

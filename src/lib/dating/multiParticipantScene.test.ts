@@ -18,10 +18,7 @@ import { BAND_FLOORS } from './arousal'
 import { buildPendingChoice, defaultChoiceOption, DEFAULT_SCENARIO, RESOLVE_STAGE, type ScenarioGraph } from './intimacyStages'
 import { BRANCHING_SCENARIO } from './scenarios'
 
-// One scene shared by two characters, rather than two scenes that will eventually disagree. What
-// these cover is the part no single-character test can: that the engine runs every participant's own
-// meter over the same turn, gates the stage on the *least* ready of them, and keeps each of their
-// bodies' state apart.
+// One scene shared by two characters, rather than two scenes that will eventually disagree.
 
 const OWNER = 'sumire'
 const OTHER = 'aoi'
@@ -103,8 +100,7 @@ describe('a scene shared by two characters', () => {
   })
 
   it("never applies the owner's feelings about the content to anyone else", () => {
-    // The owner is eager for this; the other participant has no stance on record. The unsupplied one
-    // must read as neutral, not as sharing the owner's enthusiasm.
+    // The owner is eager for this; the other participant has no stance on record.
     const eagerOwner = { ...shared(), activityValence: 2 as const }
     const both = turn([
       { actor: SCENE_PLAYER, target: OWNER, region: 'neck' },
@@ -173,9 +169,7 @@ describe('per-participant bodies', () => {
   it("routes a removal aimed at the owner's id into the scene's own field rather than a second ledger", () => {
     const owned: IntimacyTurnObservation = { ...turn(), participantClothingRemoved: [{ who: OWNER, layer: 'top' }] }
     const next = play(shared(), 1, owned)!
-    // The owner has exactly one place their layers live; a duplicate ledger is the two-sources-of-truth
-    // failure this whole arrangement exists to avoid. Recorded, not dropped — losing it would let the
-    // continuity check wave through a reply undressing them a second time.
+    // The owner has exactly one place their layers live; a duplicate ledger is the two-sources-of-truth failure this whole arrangement exists to avoid.
     expect(clothingOf(next, OWNER)).toEqual({ char: ['top'] })
     expect(next.participantClothing?.[OWNER]).toBeUndefined()
   })
@@ -216,9 +210,7 @@ describe('what a resolved shared scene hands aftercare', () => {
 })
 
 describe('a branch whose options lead to the same place', () => {
-  // The closing branch of `BRANCHING_SCENARIO` offers "Finish together, inside" and "Pull out
-  // first". Both end the scene, so both edges point at `resolve` — which means the option's target
-  // cannot be what identifies it. These pin the two things that broke as a result.
+  // The closing branch of `BRANCHING_SCENARIO` offers "Finish together, inside" and "Pull out first".
   const closing = () => {
     const stage = BRANCHING_SCENARIO.stages.find((st) => st.id === 'finish')!
     return buildPendingChoice(stage, { arousal: 100 }, 5)!
@@ -303,8 +295,7 @@ describe('what a branch flag survives as', () => {
 })
 
 describe('a branch whose options stop being eligible while it is open', () => {
-  // A branch is raised from the state at that moment, then sits there for turns. If the state moves
-  // under it — a gate closing as arousal falls — the stored options must not stay pickable.
+  // A branch is raised from the state at that moment, then sits there for turns.
   const gated: ScenarioGraph = {
     id: 'gated',
     version: 1,
@@ -342,14 +333,12 @@ describe('a branch whose options stop being eligible while it is open', () => {
   })
 
   it('stops offering the gated option once the meter falls back under it', () => {
-    // Two cooling turns: enough for arousal to drop under the gate, still short of the turns the
-    // branch's own default needs, so nothing here is the timeout doing the work.
+    // Two cooling turns: enough for arousal to drop under the gate, still short of the turns the branch's own default needs
     const cooling: IntimacyTurnObservation = { ...turn(), engagement: 'stalled', intensityDelta: -1 }
     let scene: IntimacyScene = raisedHot()
     for (let i = 1; i <= 2; i += 1) scene = advanceIntimacyScene(scene, cooling, i, { graph: gated })!
     expect(arousalOf(scene).value).toBeLessThan(60)
-    // With the gate shut only one option is left, and one option is not a decision — so the branch
-    // closes rather than sitting there offering a single button.
+    // With the gate shut only one option is left
     expect(scene.pendingChoice).toBeUndefined()
   })
 
@@ -366,10 +355,7 @@ describe('a branch whose options stop being eligible while it is open', () => {
 })
 
 describe('whose body a region read belongs to', () => {
-  // The judge is prompted with the *speaker's* name, so `regionsTouched` describes the speaker. In a
-  // shared scene the speaker is often not the owner, and the flat list cannot say whose body it
-  // means at all — which is exactly why `contact` exists. So a shared scene must attribute from the
-  // graph and never fold the flat list into one particular participant.
+  // The judge is prompted with the *speaker's* name, so `regionsTouched` describes the speaker.
   const flatOnly: IntimacyTurnObservation = { ...turn(), regionsTouched: ['genitals'] }
 
   it('never credits the owner from a flat region list once the scene is shared', () => {

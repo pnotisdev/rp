@@ -12,11 +12,7 @@ export { DEFAULT_SYSTEM_PROMPT }
 export type { SystemPromptPreset } from './systemPrompts'
 export { BUILTIN_SYSTEM_PROMPTS } from './systemPrompts'
 
-/**
- * Builds the final KoboldCpp prompt string from a character, history, world info, and settings —
- * assembling fixed sections (system/description/persona/etc.), trimming history to fit the token
- * budget, and injecting depth-positioned notes and lorebook entries.
- */
+/** Builds the final KoboldCpp prompt string from a character, history, world info */
 
 /** One line of `styleGuidanceItems` — see that field's doc comment for what `essential` gates. */
 export interface StyleGuidanceItem {
@@ -65,30 +61,16 @@ export interface PromptBuildInput {
   personaDescription: string
   /** Fallback system prompt used only when the character has none of its own. */
   globalSystemPrompt?: string
-  /** A mode-bundled system-prompt preset (`Chat.assistOverrides.systemPromptId`, resolved by the
-   *  caller) — wins over `globalSystemPrompt` but still loses to the character's own, same
-   *  precedence spot every other per-chat override sits in relative to a character-level setting. */
+  /** A mode-bundled system-prompt preset (`Chat.assistOverrides.systemPromptId`, resolved by the caller) */
   chatSystemPrompt?: string
   /** Global steering line appended after any character `post_history_instructions`. */
   globalPostHistory?: string
   history: ChatMessage[]
   /** Running long-term memory log for everything older than what's in `history`. */
   chatSummary?: string
-  /** The world the character lives in, if any. Always included, not keyword-triggered like a lorebook.
-   *  Stable identity only — the setting and its rules. Anything that changes as the story moves
-   *  belongs in `worldMoment` instead; see the note there for why the split matters. */
+  /** The world the character lives in, if any. Always included, not keyword-triggered like a lorebook. */
   worldDescription?: string
-  /**
-   * The volatile half of the world block: what time it is, the weather, what the character is doing
-   * right now, the active event, the scene's location and atmosphere.
-   *
-   * Kept out of the fixed region and injected after the history for two reasons. The practical one
-   * is KV cache reuse: a backend reuses the cache for the longest common *prefix*, so a line as
-   * changeable as "it is now raining" sitting ahead of the history means advancing the clock or
-   * moving the scene re-ingests every history token behind it. The second is that recency helps —
-   * where and when a scene is set steers the next reply harder next to the generation cue than it
-   * does several thousand tokens earlier. Shares the `world` section toggle with `worldDescription`.
-   */
+  /** The volatile half of the world block */
   worldMoment?: string
   lorebooks: Lorebook[]
   template: InstructTemplate
@@ -106,31 +88,9 @@ export interface PromptBuildInput {
   activeObjective?: { title: string; description?: string; pendingTasks: string[] }
   /** Short natural-language relationship-stage nudge, same late placement as activeObjective. */
   relationshipDescription?: string
-  /**
-   * Global writing-style steering (e.g. "avoid em dashes"), same late placement. Plain-string form:
-   * always included in full, at whatever token cost. Prefer `styleGuidanceItems` below for anything
-   * assembled from several independent lines — it degrades gracefully under a tight budget instead
-   * of silently eating into the history window.
-   */
+  /** Global writing-style steering (e.g. "avoid em dashes"), same late placement. */
   styleGuidance?: string
-  /**
-   * The prioritized alternative to `styleGuidance`. `useChatSession.ts` builds VN mode's ~30-line
-   * steer (mood/need/intent/fear/desire, agency guard, scene state, intimacy guidance, and the
-   * rest) from this array instead of a pre-joined string, because that whole block used to be
-   * unconditional: every line went in regardless of `contextBudget`, and only `history` ever paid
-   * for a small context window being small. A model running at 4k-8k context with an active VN
-   * scene could lose most of its history to a "steering" block bigger than the reply it was steering.
-   *
-   * `essential: true` items are never dropped (content policy, format rules, the user's own global
-   * style setting, and anything stating concrete engine state like the scene ledger or an active
-   * event — dropping those would make the model contradict what the UI is showing). Everything else
-   * is "character mind" texture (mood/need/fear/desire/plans/beliefs, stock-phrasing/rebuff/
-   * reciprocity nudges) that thins a reply's colour if it's missing but never breaks it, and is
-   * dropped lowest-value-first — see the doc comment on the drop loop in `buildPrompt` — only once
-   * dropping it is what keeps the history window from collapsing. Wins over `styleGuidance` when
-   * both are given; when omitted, `styleGuidance` is used unchanged (every existing caller keeps
-   * working exactly as before).
-   */
+  /** The prioritized alternative to `styleGuidance`. */
   styleGuidanceItems?: StyleGuidanceItem[]
   /** SillyTavern-style Author's Note. `at_depth` is injected into history `depth` turns up from the latest; `before_char`/`after_char` sit in the fixed identity region. */
   authorNote?: { text: string; position: 'before_char' | 'after_char' | 'at_depth'; depth: number }
@@ -311,8 +271,7 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
   )
   const worldAtDepthTokens = worldAtDepthItems.reduce((sum, i) => sum + i.tokens, 0)
 
-  // Computed ahead of postHistoryBlock below — genCue doesn't depend on it, and the drop loop needs
-  // genCueTokens to know how much room history actually has left.
+  // Computed ahead of postHistoryBlock below
   const continuing = !!input.continueLastTurn && history.length > 0
   const continuedTurn = continuing ? history[history.length - 1] : null
   const historyForTrimming = continuing ? history.slice(0, -1) : history
@@ -326,12 +285,10 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
   const genCue = continuing ? genCueRaw : genCueRaw.replace(/[ 	]+$/, '')
   const genCueTokens = await countTokens(genCue)
 
-  // Injected right before generation, same late placement as post-history-instructions. Impersonation
-  // suppresses the character-reply steers, since the card's post-history note and scene tag assume {{char}} is speaking.
+  // Injected right before generation, same late placement as post-history-instructions.
   const imp = !!input.impersonateAsUser
 
-  // `styleGuidanceItems` wins when given; the plain string becomes a single essential item so the
-  // rest of this function never has to branch on which form the caller used.
+  // `styleGuidanceItems` wins when given
   let styleItems: StyleGuidanceItem[] = input.styleGuidanceItems
     ? input.styleGuidanceItems.filter((i) => i.text.trim())
     : input.styleGuidance?.trim()
@@ -359,23 +316,14 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
   let postHistoryBlock = buildPostHistory(styleItems)
   let postHistoryTokens = postHistoryBlock ? await countTokens(postHistoryBlock) : 0
 
-  // Below this many tokens, history has essentially nothing left to work with — the model would be
-  // answering off a single truncated turn or none at all. VN mode's steering block used to be
-  // unconditional (every mood/need/fear/plan line, every turn, whatever the budget), so on a small
-  // context window it was this floor collapsing to zero that first exposed the problem: the fixed
-  // "how to write this reply" text was crowding out the "what has actually happened" text it was
-  // supposed to be steering. Chosen as comfortably more than one ordinary turn, not a measured
-  // science — the point is having *a* floor, not this exact number.
+  // Below this many tokens, history has essentially nothing left to work with — the model would be answering off a single truncated turn or none at all.
   const HISTORY_FLOOR_TOKENS = 300
   let styleGuidanceDroppedCount = 0
   while (
     contextBudget - fixedTokens - postHistoryTokens - genCueTokens - authorNoteAtDepthTokens - worldAtDepthTokens - lateLoreTokens <
     HISTORY_FLOOR_TOKENS
   ) {
-    // Drop the least-essential item still standing. Items are dropped from the end of the
-    // non-essential run first — `useChatSession.ts` orders its flavor lines least-valuable-last
-    // (mood, the line most central to a character's voice, drops last of all of them) — so this is
-    // "lowest-value first" without this function needing to know what any individual line means.
+    // Drop the least-essential item still standing.
     const dropIndex = findLastIndex(styleItems, (i) => !i.essential)
     if (dropIndex === -1) break // Nothing left that's safe to drop; let history do what it can.
     styleItems = styleItems.filter((_, i) => i !== dropIndex)
@@ -391,14 +339,6 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
   let excludedCount = 0
 
   // Walk newest -> oldest, keeping turns until one doesn't fit; always keep at least the latest.
-  //
-  // Stopping at the first turn that doesn't fit — rather than skipping it and carrying on down the
-  // history looking for smaller ones that still would — is what makes the kept window *contiguous*.
-  // The old "keep whatever fits" walk left holes: one long turn gets dropped for being over budget
-  // while the shorter turns either side of it survive, so the model is handed a transcript with a
-  // beat silently missing from the middle and no indication anything was removed. It also meant a
-  // full-length history walk every build, one tokenizer round-trip per turn (an HTTP POST on
-  // KoboldCpp), to count hundreds of turns that were never going to be included.
   for (let i = historyForTrimming.length - 1; i >= 0; i--) {
     const msg = historyForTrimming[i]
     const rendered = renderHistoryTurn(msg, template, macroCtx, input.regexScripts)
@@ -424,8 +364,7 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
 
   const historyTokens = includedTurns.reduce((sum, t) => sum + t.tokens, 0)
 
-  // "At depth" injection: each item drops in `depth` turns up from the latest (0 = right before the
-  // generation cue). Sorted farthest-back first so each insertion point accounts for earlier ones.
+  // "At depth" injection: each item drops in `depth` turns up from the latest (0 = right before the generation cue).
   const depthInjections = worldAtDepthItems.map((i) => ({ text: `${i.text}\n\n`, tokens: i.tokens, depth: i.depth }))
   if (authorNoteAtDepthTokens > 0) {
     depthInjections.push({ text: `${authorNoteText}\n\n`, tokens: authorNoteAtDepthTokens, depth: authorNoteDepth })

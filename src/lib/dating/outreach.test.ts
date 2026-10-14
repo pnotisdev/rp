@@ -96,9 +96,7 @@ describe('evaluateOutreach — probability roll', () => {
   })
 
   it('higher relationship warmth never lowers the chance of an eligible roll (same silence hour bucket)', () => {
-    // Sweep enough character ids to find at least one hour bucket where the roll sits strictly
-    // between the low-warmth and high-warmth chance — proving the warmth bonus actually shifts
-    // eligibility for some seed, without depending on any single seed's exact roll value.
+    // Sweep enough character ids to find at least one hour bucket where the roll sits strictly between the low-warmth and high-warmth chance
     let sawEligibleFlip = false
     for (let i = 0; i < 200; i++) {
       const character = { id: `char-${i}`, outreach: { frequency: 'eager' as const }, schedule: undefined }
@@ -190,10 +188,7 @@ describe('evaluateOutreach — reason categorization', () => {
 })
 
 describe('truncateAtStrayTurnMarker', () => {
-  // Regression coverage for a real bug caught during live verification: a local model, when
-  // uncertain about turn boundaries, imitated the SillyTavern `<START>`/name-prefix example-
-  // dialogue delimiters from the character card's `mes_example` instead of stopping after one
-  // message — producing a reply that trailed into a fabricated persona turn.
+  // Regression coverage for a real bug caught during live verification
 
   it('returns clean text unchanged when there is no stray marker', () => {
     expect(truncateAtStrayTurnMarker('Hey, are you free later?', 'Sumire', 'You')).toBe('Hey, are you free later?')

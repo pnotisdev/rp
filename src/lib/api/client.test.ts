@@ -2,14 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { __resetUnreachableStateForTests, personasApi } from './client'
 import { useToastStore } from '@/lib/store/useToastStore'
 
-/**
- * `request()` (the one function every call in this file funnels through) used to leave a dead
- * local server completely invisible: `useApiQuery`'s background refetches swallow rejections into
- * `undefined` with no toast at all, and generation itself never touches this server (it talks to
- * the model backend directly), so nothing on screen ever hinted that saves were failing. These
- * tests lock in the fix — one sticky (non-auto-dismissing) error toast per outage, not one per
- * failed call, cleared and followed by a "reconnected" toast the moment a request gets through.
- */
+/** `request()` (the one function every call in this file funnels through) used to leave a dead local server completely invisible */
 
 function okResponse<T>(body: T): Response {
   return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) } as Response
@@ -44,8 +37,7 @@ describe('request(): local-server-unreachable toast', () => {
   it("doesn't auto-dismiss the unreachable toast (it's meant to survive looking away)", async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')))
     await expect(personasApi.list()).rejects.toThrow()
-    // AUTO_DISMISS_MS.error is null in ToastViewport.tsx — nothing to assert on a timer here since
-    // this test only checks the toast itself carries variant: 'error', which is what that map keys on.
+    // AUTO_DISMISS_MS.error is null in ToastViewport.tsx
     expect(useToastStore.getState().toasts[0].variant).toBe('error')
   })
 
@@ -77,11 +69,7 @@ describe('request(): local-server-unreachable toast', () => {
     await expect(personasApi.list()).resolves.toEqual([]) // back up, toast clears
     await expect(personasApi.list()).rejects.toThrow() // down again
 
-    // Not asserting total toast count here: the "Reconnected" success toast from the recovery step
-    // is still sitting in the store (nothing in this test mounts <ToastViewport>, so nothing ever
-    // runs its auto-dismiss timer) — that's expected and fine. What matters is that the fresh outage
-    // actually raised a new sticky error toast rather than staying silent because one already fired
-    // earlier in the test.
+    // Not asserting total toast count here
     const toasts = useToastStore.getState().toasts
     const latest = toasts[toasts.length - 1]
     expect(latest.variant).toBe('error')
@@ -93,6 +81,14 @@ describe('request(): local-server-unreachable toast', () => {
 
     await expect(personasApi.list()).rejects.toThrow('failed (500)')
     expect(useToastStore.getState().toasts).toHaveLength(0)
+  })
+
+  it('shows just the server message for a 4xx validation error, and the full detail for anything else', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(errorResponse(400, '{"error":"That folder does not exist."}')))
+    await expect(personasApi.list()).rejects.toThrow(/^That folder does not exist\.$/)
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(errorResponse(400, 'not json')))
+    await expect(personasApi.list()).rejects.toThrow('failed (400): not json')
   })
 
   it('a request timeout does not trigger the unreachable toast (separate, already-distinct error path)', async () => {

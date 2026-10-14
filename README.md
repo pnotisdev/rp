@@ -1,6 +1,8 @@
-# RP Suite
+# Hakoniwa 箱庭
 
-A roleplay client that runs entirely on your own machine, built around a dating sim rather than bolted onto one.
+*A little world of your own.*
+
+A roleplay client that runs entirely on your own machine, built around a dating sim rather than bolted onto one. The name is the Japanese word for a miniature garden in a tray: a small world you build, tend and watch.
 
 <p align="center">
   <img src="screenshots/rp-visual-novel-chat.png" alt="Visual novel style chat with a character sprite over a classroom background" width="820">
@@ -12,7 +14,11 @@ The catch with letting a model score its own relationship is that it will happil
 
 The interface stays out of the way: one accent colour, a lot of empty space, and the dense settings hidden until you go looking for them.
 
-Characters, chats, worlds and personas live in a SQLite file under `data/`, alongside the real image and audio files they reference. Local model inference can stay on your machine; choosing a hosted provider sends prompts to that provider. RP Suite itself requires no account and has no telemetry.
+Characters, chats, worlds and personas live in a SQLite file under `data/`, alongside the real image and audio files they reference. Local model inference can stay on your machine; choosing a hosted provider sends prompts to that provider. Hakoniwa itself requires no account and has no telemetry.
+
+## Documentation
+
+Guides, design notes and the full changelog are indexed in [docs/README.md](docs/README.md); how the code is laid out is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Setup
 
@@ -39,7 +45,7 @@ npm run test:watch  # watch mode
 
 Launch KoboldCpp with `--smartcache 6` so background checks stop erasing the chat's cache, and leave Settings → Generation →
 "Reuse the model's cache between turns" on. Measured numbers, what did and didn't help, and how to check it are in
-[EFFICIENCY.md](EFFICIENCY.md).
+[EFFICIENCY.md](docs/guides/efficiency.md).
 
 ### Docker
 
@@ -48,7 +54,7 @@ docker compose up -d --build
 ```
 
 Serves the API and the built client together on `http://localhost:3001`, with your data in
-`./data`. Your model backend still runs wherever it already does. See [DOCKER.md](DOCKER.md) for
+`./data`. Your model backend still runs wherever it already does. See [DOCKER.md](docs/guides/docker.md) for
 environment variables and exposing it beyond localhost.
 
 ## What's in it
@@ -61,19 +67,19 @@ Each chat backend reports its connection state in the header. The chat connectio
 
 ### OpenMayhem
 
-Choose **OpenAI-compatible → OpenMayhem** in Settings → Connection, or select OpenMayhem in the welcome screen's cloud provider list. The setup links take you to account creation, the current free-credit offer when available, and API key creation. Claim credits on OpenMayhem, create a key with Chat permission, paste it into RP Suite, and choose a model from the live catalog.
+Choose **OpenAI-compatible → OpenMayhem** in Settings → Connection, or select OpenMayhem in the welcome screen's cloud provider list. The setup links take you to account creation, the current free-credit offer when available, and API key creation. Claim credits on OpenMayhem, create a key with Chat permission, paste it into Hakoniwa, and choose a model from the live catalog.
 
-OpenMayhem uses `https://api.openmayhem.ai/v1`. Requests pass through RP Suite's local server because the hosted API currently restricts browser origins. The server forwards your key without storing it. Replies and background scoring both use your credit. The free-credit amount and availability come from OpenMayhem, and eligibility/verification are handled there.
+OpenMayhem uses `https://api.openmayhem.ai/v1`. Requests pass through Hakoniwa's local server because the hosted API currently restricts browser origins. The server forwards your key without storing it. Replies and background scoring both use your credit. The free-credit amount and availability come from OpenMayhem, and eligibility/verification are handled there.
 
-The connection check reads the public catalog without spending credit; it does **not** validate your key or balance. Those are checked on your first inference request. See [OpenMayhem integration notes](OPENMAYHEM.md) for behavior, research, and validation limits.
+The connection check reads the public catalog without spending credit; it does **not** validate your key or balance. Those are checked on your first inference request. See [OpenMayhem integration notes](docs/guides/openmayhem.md) for behavior, research, and validation limits.
 
-For images and speech, choose **OpenMayhem** in **Settings > Images** and **Settings > Voice**. One OpenMayhem key is shared across chat, images and voice. Enable Chat, Images, Audio Speech and Workflows permissions for the features you use. The image picker includes **Z-Image Turbo**, **Krea 2 Turbo** and **Krea 2 Quality** when available. Krea uses its base model and published preset without additional LoRAs; RP Suite handles the workflow automatically. Voice options also come from the selected model. The image preview and voice test perform real, billed generation.
+For images and speech, choose **OpenMayhem** in **Settings > Images** and **Settings > Voice**. One OpenMayhem key is shared across chat, images and voice. Enable Chat, Images, Audio Speech and Workflows permissions for the features you use. The image picker includes **Z-Image Turbo**, **Krea 2 Turbo** and **Krea 2 Quality** when available. Krea uses its base model and published preset without additional LoRAs; Hakoniwa handles the workflow automatically. Voice options also come from the selected model. The image preview and voice test perform real, billed generation.
 
 All three model lists load every catalog page and refresh every 30 seconds and on window focus. Only compatible models with available, non-stale providers are selectable. New models using supported image/chat/speech interfaces or supported Krea base-image workflow metadata appear automatically; other workflow families need an adapter. Images use model sampling defaults and slot dimensions adapted to its limits. Stop requests media-job cancellation; completed work may still cost credit. Generated assets saved to a character or world remain stored locally.
 
 ### Characters
 
-Cards import and export in the SillyTavern V2/V3 format, as JSON or PNG, so the existing card ecosystem works unchanged. There's also a `.rppack` bundle that carries sprites, gallery art, gift preferences and the bound world in one file.
+Cards import and export in the SillyTavern V1/V2/V3 format, as JSON or PNG, so the existing card ecosystem works unchanged. Drop a pile of card images onto the Characters page (or use Import) and each becomes a character; an embedded lorebook and V3 expression art come along. Export from the editor as a card JSON, a card PNG, or a `.rppack` bundle that also carries sprites, gallery art, gift preferences and the bound world.
 
 The editor covers seven tabbed sections, and every field can be AI-generated individually or the whole card written from a one-line premise. Beyond the card spec, a character carries a voice, a reply length, an instruct template, sound-effect words, likes, goals, boundaries, an occupation, a home, and named connections to other characters.
 
@@ -121,7 +127,9 @@ Worlds own their own catalogs: relationship thresholds, gifts, usable items, sce
 
 A gift shop with per-character taste, both as a numeric preference and as authored likes and dislikes, plus a love language. Usable items with authored effects, and a bag to keep them in. CG gallery entries unlock from affection, story flags, or a story beat the app notices on its own, and dedicated ending entries unlock at the top stage.
 
-### World Info
+### Lorebooks (World Info)
+
+A world and a lorebook are different things. A **world** is a setting: rules, clock, scene art and catalogs, and it carries its own lorebook. A **lorebook** (the Lorebooks page, SillyTavern's World Info) is a reusable set of keyword-triggered entries you can scope to chosen characters, worlds or chats. Lorebooks import SillyTavern World Info JSON or a card's embedded book, and export back to it; worlds and personas export as JSON too.
 
 Full lorebook support: probability, inclusion groups with weighted selection, regex keys, recursive scanning, token budgets, sticky and cooldown and delay, and injection at a chat depth. A synthetic "Remembered facts" book collects durable facts from play, capped by token budget and prioritised by recency.
 
@@ -141,11 +149,15 @@ Give a character a weekly schedule and they'll message you first when they'd pla
 
 ### Image generation
 
-Optional, for sprites, backgrounds and CGs, through AUTOMATIC1111, ComfyUI, SwarmUI or NovelAI.
+Optional, for sprites, backgrounds and CGs, through AUTOMATIC1111, ComfyUI, SwarmUI or NovelAI. ComfyUI is built in: no launch flags, dropdowns read from your install, and you can bring your own API-format workflow.
+
+### The Assistant
+
+A plain chat with optional tools. It can see pictures you attach, read and (after you approve each change) edit files in one folder you choose, search the web, make pictures with your image backend, and keep short notes about you across conversations. Details in [the Assistant guide](docs/guides/assistant.md).
 
 ### The rest
 
-Command palette on Ctrl/Cmd-K, a shortcuts sheet on `?`, a theme editor, a layout that survives phone width, and reduced-motion and reduced-audio options. Everything backs up and restores from a single file, media included.
+Command palette on Ctrl/Cmd-K, a shortcuts sheet on `?`, eight built-in Looks (whole-interface designs with their own colours, type, shape and atmosphere), a one-colour palette generator and a theme editor, a layout that survives phone width, and reduced-motion and reduced-audio options. Everything backs up and restores from a single file, media included.
 
 ## Screenshots
 

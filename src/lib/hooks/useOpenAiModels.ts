@@ -2,13 +2,7 @@ import { useEffect, useState } from 'react'
 import { listOpenAiModels } from '@/lib/api/detectBackend'
 import { isOpenMayhem } from '@/lib/api/openMayhem'
 
-/**
- * Model ids from an OpenAI-compatible provider's `/models`, for a real dropdown instead of a
- * free-text box. `null` while loading or if the endpoint didn't answer (private `/models`, a
- * provider that doesn't expose it) — the caller falls back to a text field. Refetched only when
- * the base URL or key changes, plus on demand via `reload()`. OpenMayhem's public availability
- * is refreshed every 30 seconds and on window focus while the picker is mounted.
- */
+/** Model ids from an OpenAI-compatible provider's `/models`, for a real dropdown instead of a free-text box. */
 export function useOpenAiModels(baseUrl: string, apiKey: string, enabled: boolean) {
   const [models, setModels] = useState<string[] | null>(null)
   const [loading, setLoading] = useState(false)

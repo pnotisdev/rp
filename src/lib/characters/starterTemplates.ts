@@ -6,12 +6,7 @@ export interface StarterTemplate {
   card: CharacterCardData
 }
 
-/**
- * Bundled character cards so a first-time user has something good to try
- * immediately, before writing one from scratch. Deliberately spans different
- * registers (cozy, adventure, technical) to show the range of what a card
- * can do — voice, lore hooks, example dialogue — not just fill space.
- */
+/** Bundled character cards so a first-time user has something good to try immediately, before writing one from scratch. */
 export const STARTER_TEMPLATES: StarterTemplate[] = [
   {
     id: 'wren-the-archivist',

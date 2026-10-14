@@ -1,17 +1,15 @@
 import { normalizeCardJson, type CharacterCardData, type LorebookEntry, type RelationshipStarter } from './cardSpec'
 import { TRAIT_AXIS_META, extractTraitOptionsPositionally, type TraitOptionSet } from './traitPresets'
 import type { ChatBackend } from '@/lib/api/chatBackend'
-import { generateWithTimeout } from '@/lib/api/generateWithTimeout'
+import { generateWithTimeout, type AssistShaping } from '@/lib/api/generateWithTimeout'
 import { parseLenientJson } from '@/lib/jsonRepair'
 import { WEATHER_KINDS, type WeatherKind } from '@/lib/world/calendar'
 import { slugifyOutfitId, type Outfit } from '@/lib/vn/outfits'
 import { findSlop } from '@/lib/text/slop'
 import { newId } from '@/lib/id'
 
-/** Shared sampler settings for the JSON-drafting assist calls — steady, low-surprise decoding so the
- *  output actually parses. `regenerateCardField` keeps its own slightly hotter values on purpose
- *  (prose rewrite, not structured output). */
-const ASSIST_SAMPLER = {
+/** Shared sampler settings for the JSON-drafting assist calls — steady, low-surprise decoding so the output actually parses. */
+export const ASSIST_SAMPLER = {
   temperature: 0.8,
   top_p: 0.95,
   top_k: 0,
@@ -64,41 +62,22 @@ function contextSummary(subject: AiLoreSubject, omitField?: string): string {
   return lines.join('\n')
 }
 
-/**
- * The user's global "Writing style" setting (Settings → Generation → Writing style) folded into an
- * authoring prompt, so a generated or rewritten card matches the prose they've asked for in every
- * chat. Placed right after the built-in style block and told to win on any conflict — the same
- * "closest to generation wins" placement `buildPrompt` gives it in the live chat prompt. `''` when
- * unset, so it costs nothing for the common case.
- */
-function writerStyleNote(styleGuidance: string | undefined): string {
+/** The user's global "Writing style" setting (Settings → Generation → Writing style) folded into an authoring prompt */
+export function writerStyleNote(styleGuidance: string | undefined): string {
   const s = styleGuidance?.trim()
   return s
     ? `The writer keeps these style notes for everything they make in this app. Follow them, and where they conflict with the guidance above, they take priority:\n${s}`
     : ''
 }
 
-// Every `client.generate` call in this file goes through `generateWithTimeout` rather than a bare
-// call — a slow/rate-limited backend that simply never responds otherwise leaves the caller (the
-// "Regenerate" field button, `GenerateCharacterDialog`, the lore-entry suggester) stuck forever:
-// its `busy` state is only ever cleared in a `finally` after the awaited call settles, so a hang
-// reads as the button stuck spinning with no error and no way to retry.
+// Every `client.generate` call in this file goes through `generateWithTimeout` rather than a bare call
 
-/**
- * Rewrites a single card field, keeping it consistent with the rest. The old version of this prompt
- * just said "rewrite this field so it fits" with no notion of what good looks like and no style
- * steering, so it reliably produced generic AI prose. Now it: shows the current text and asks for a
- * rewrite that keeps its facts (not a fresh invention that drifts off-character), states what a good
- * version of that specific field is (`FIELD_GUIDANCE`), carries the same `PROSE_STYLE_CORE` anti-slop
- * block the chat prompts use, `writerStyleNote` for the user's global writing-style setting, and —
- * the concrete-beats-abstract trick from `slop.ts` — names the exact tells the current text leans on
- * so the model has something real to avoid.
- */
+/** Rewrites a single card field, keeping it consistent with the rest. */
 export async function regenerateCardField(
   client: ChatBackend,
   character: CharacterCardData,
   fieldKey: CardTextField,
-  opts?: { hint?: string; styleGuidance?: string },
+  opts?: { hint?: string; styleGuidance?: string; shaping?: AssistShaping },
 ): Promise<string> {
   const hint = opts?.hint
   const label = FIELD_LABELS[fieldKey]
@@ -153,6 +132,8 @@ export async function regenerateCardField(
       trim_stop: true,
     },
     'Regenerate field',
+    undefined,
+    opts?.shaping,
   )
   return text.trim()
 }
@@ -171,7 +152,7 @@ const CARD_FIELD_SPEC = `Output ONLY a single JSON object. No markdown fences, n
 
 /** The core anti-slop guidance, verbatim house style from `systemPrompts.ts`. Reused by the
  *  whole-card prompts and by the single-field `regenerateCardField` rewrite. */
-const PROSE_STYLE_CORE = `Write like a person, not like an AI. Plain, specific language with a real point of view. No em dashes. Drop the habits of machine-written roleplay: hedging, naming a feeling instead of showing it, "a mix of X and Y", "not just X but Y", tidy lists of three, "voice barely above a whisper", "a shiver down her spine", any sentence that tells the reader how to feel.`
+export const PROSE_STYLE_CORE = `Write like a person, not like an AI. Plain, specific language with a real point of view. No em dashes. Drop the habits of machine-written roleplay: hedging, naming a feeling instead of showing it, "a mix of X and Y", "not just X but Y", tidy lists of three, "voice barely above a whisper", "a shiver down her spine", any sentence that tells the reader how to feel.`
 
 /** Whole-card version: the core plus the cross-field consistency point, aimed at the two fields
  *  that are actual fiction (`first_mes`, `mes_example`) rather than metadata. */
@@ -187,19 +168,11 @@ ${CARD_PROSE_STYLE}
 
 ${CARD_JSON_RULES}`
 
-/**
- * Section 10's "AI-assisted authoring... draft an entire character from an uploaded portrait" —
- * image-to-text only (an existing vision-capable model describing a picture into card fields),
- * not image *generation*; that's section 11's separate, already-shipped `ImageBackend` work.
- * Reuses the exact same `images: [base64]` shape `sceneVision.ts` already established for vision
- * calls in this app. `worldTone` (a selected world's own description, when the character is being
- * created under one) steers the invented backstory/setting to fit rather than contradict it —
- * the "fitted to the world's tone" half of this item's own wording.
- */
+/** Section 10's "AI-assisted authoring... */
 export async function draftCharacterFromPortrait(
   client: ChatBackend,
   portraitBase64: string,
-  opts?: { brief?: string; worldTone?: string; styleGuidance?: string; signal?: AbortSignal },
+  opts?: { brief?: string; worldTone?: string; styleGuidance?: string; signal?: AbortSignal; shaping?: AssistShaping },
 ): Promise<{ card: CharacterCardData; rawOutput: string }> {
   const prompt = [
     PORTRAIT_SYSTEM_INSTRUCTION,
@@ -224,6 +197,7 @@ export async function draftCharacterFromPortrait(
     },
     'Draft character from portrait',
     opts?.signal,
+    opts?.shaping,
   )
   const card = normalizeCardJson(parseLenientJson(text))
   return { card, rawOutput: text }
@@ -237,17 +211,11 @@ ${CARD_PROSE_STYLE}
 
 ${CARD_JSON_RULES}`
 
-/**
- * The text-brief counterpart to `draftCharacterFromPortrait` — the same review-before-save draft, from
- * a written brief instead of an image. The prompt lived inline in `GenerateCharacterDialog` until the
- * "generate a full character" orchestrator (`generateFullCharacter.ts`) needed to call the same thing
- * headlessly; it now lives here next to the portrait path, and — like that path — folds in `worldTone`
- * so a brief-drafted character fits a selected world instead of contradicting it.
- */
+/** The text-brief counterpart to `draftCharacterFromPortrait` — the same review-before-save draft, from a written brief instead of an image. */
 export async function draftCharacterFromBrief(
   client: ChatBackend,
   brief: string,
-  opts?: { worldTone?: string; styleGuidance?: string; signal?: AbortSignal },
+  opts?: { worldTone?: string; styleGuidance?: string; signal?: AbortSignal; shaping?: AssistShaping },
 ): Promise<{ card: CharacterCardData; rawOutput: string }> {
   const prompt = [
     BRIEF_SYSTEM_INSTRUCTION,
@@ -271,22 +239,16 @@ export async function draftCharacterFromBrief(
     },
     'Generate character',
     opts?.signal,
+    opts?.shaping,
   )
   const card = normalizeCardJson(parseLenientJson(text))
   return { card, rawOutput: text }
 }
 
-/**
- * The option pool behind "combinatorial" character creation (`GenerateCharacterDialog`'s "From
- * traits" mode) — asks the connected model for a fresh batch of short trait phrases across the four
- * fixed axes (`TRAIT_AXIS_META`), rather than shipping a static list that never changes and eventually
- * repeats. The picker then composes whichever options the user picks into a brief, which goes through
- * `draftCharacterFromBrief` exactly like a hand-typed one — this call only supplies the menu, not the
- * card.
- */
+/** The option pool behind "combinatorial" character creation (`GenerateCharacterDialog`'s "From traits" mode) */
 export async function generateTraitOptions(
   client: ChatBackend,
-  opts?: { worldTone?: string; styleGuidance?: string; count?: number; signal?: AbortSignal },
+  opts?: { worldTone?: string; styleGuidance?: string; count?: number; signal?: AbortSignal; shaping?: AssistShaping },
 ): Promise<TraitOptionSet> {
   const count = opts?.count ?? 10
   const prompt = [
@@ -317,6 +279,7 @@ export async function generateTraitOptions(
     },
     'Generate trait options',
     opts?.signal,
+    opts?.shaping,
   )
 
   let parsed: unknown = null
@@ -326,22 +289,14 @@ export async function generateTraitOptions(
   } catch {
     parseFailed = true
   }
-  // A wrong-shaped but successfully-parsed response (e.g. a bare array) means something other
-  // than the bracket-dropping glitch below — not something the positional fallback can help
-  // with either, since it has no key markers to find — so it still fails fast and clearly.
+  // A wrong-shaped but successfully-parsed response (e.g. a bare array) means something other than the bracket-dropping glitch below
   if (!parseFailed && (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))) {
     throw new Error('Model did not return a JSON object of trait options')
   }
   const obj = (parsed as Record<string, unknown> | null) ?? {}
   let result = Object.fromEntries(TRAIT_AXIS_META.map((axis) => [axis.id, strList(obj[axis.id], count)])) as TraitOptionSet
 
-  // A free/weaker model sometimes drops the array brackets for one or more keys entirely,
-  // which breaks JSON.parse for the *whole* object even though the other keys were fine —
-  // recover positionally instead of giving up the whole batch over one malformed key (see
-  // extractTraitOptionsPositionally's own comment for the exact shape). Only reached when
-  // parsing genuinely failed: a well-formed object with one wrong-typed field (e.g. a bare
-  // string instead of an array) still just leaves that one axis an empty list, not silently
-  // reinterpreted as a single-item option list.
+  // A free/weaker model sometimes drops the array brackets for one or more keys entirely
   if (parseFailed) {
     const positional = extractTraitOptionsPositionally(text)
     result = Object.fromEntries(TRAIT_AXIS_META.map((axis) => [axis.id, strList(positional[axis.id], count)])) as TraitOptionSet
@@ -372,15 +327,11 @@ function strList(v: unknown, max: number): string[] {
     .slice(0, max)
 }
 
-/**
- * Stage 2 of `generateFullCharacter.ts` — given a drafted card, invent the character's day-to-day
- * life. Deliberately best-effort: the caller treats a parse failure here as "skip this stage", not a
- * hard error, since a character with an empty occupation is still perfectly usable.
- */
+/** Stage 2 of `generateFullCharacter.ts` — given a drafted card, invent the character's day-to-day life. */
 export async function draftCharacterProfile(
   client: ChatBackend,
   subject: AiLoreSubject,
-  opts?: { worldTone?: string; styleGuidance?: string; signal?: AbortSignal },
+  opts?: { worldTone?: string; styleGuidance?: string; signal?: AbortSignal; shaping?: AssistShaping },
 ): Promise<DraftedProfile> {
   const prompt = [
     'You are fleshing out a character profile for a roleplay app. Given the character so far, invent the practical details of their everyday life so they stay consistent with who they already are.',
@@ -416,6 +367,7 @@ export async function draftCharacterProfile(
     },
     'Draft character profile',
     opts?.signal,
+    opts?.shaping,
   )
   const parsed = parseLenientJson(text)
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
@@ -455,15 +407,11 @@ function weatherList(v: unknown): WeatherKind[] {
   return [...seen]
 }
 
-/**
- * Stage 3 of `generateFullCharacter.ts` — the dating/relationship traits. Same best-effort contract
- * as `draftCharacterProfile`. `relationshipStarters` get a fresh `id` here (the model only supplies
- * label/blurb/affection) and `startingAffection` is clamped to the 0-100 affection scale.
- */
+/** Stage 3 of `generateFullCharacter.ts` — the dating/relationship traits. */
 export async function draftCharacterBonds(
   client: ChatBackend,
   subject: AiLoreSubject,
-  opts?: { worldTone?: string; styleGuidance?: string; signal?: AbortSignal },
+  opts?: { worldTone?: string; styleGuidance?: string; signal?: AbortSignal; shaping?: AssistShaping },
 ): Promise<DraftedBonds> {
   const prompt = [
     'You are writing the relationship details for a character in a roleplay/dating-sim app, given who they already are.',
@@ -496,6 +444,7 @@ export async function draftCharacterBonds(
     },
     'Draft character bonds',
     opts?.signal,
+    opts?.shaping,
   )
   const parsed = parseLenientJson(text)
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
@@ -521,17 +470,11 @@ export async function draftCharacterBonds(
   }
 }
 
-/**
- * Stage 4 of `generateFullCharacter.ts` — wardrobe states for the Visual novel → Expressions grid.
- * Labels and unlock gates only, no art: the editor picks these up as outfits the user then draws (or
- * generates) sprites for. Same best-effort contract as the profile/bonds stages. `id`s are minted
- * here with `slugifyOutfitId` (deduped as we go); an `intimate` outfit is also flagged `manualOnly`
- * so the model can't drop the character into it just because a reply read as suggestive.
- */
+/** Stage 4 of `generateFullCharacter.ts` — wardrobe states for the Visual novel → Expressions grid. */
 export async function draftCharacterOutfits(
   client: ChatBackend,
   subject: AiLoreSubject,
-  opts?: { worldTone?: string; signal?: AbortSignal },
+  opts?: { worldTone?: string; signal?: AbortSignal; shaping?: AssistShaping },
 ): Promise<Outfit[]> {
   const prompt = [
     'You are proposing wardrobe states ("outfits") for a character in a visual-novel roleplay app, alternate looks the story can switch them into. No images: just a name for each and the affection level at which it becomes available.',
@@ -559,6 +502,7 @@ export async function draftCharacterOutfits(
     },
     'Draft character outfits',
     opts?.signal,
+    opts?.shaping,
   )
   const parsed = parseLenientJson(text)
   if (!Array.isArray(parsed)) throw new Error('Model did not return a JSON array of outfits')
@@ -587,15 +531,18 @@ export async function draftCharacterOutfits(
 export interface SuggestedLoreEntry {
   keys: string[]
   content: string
+  title?: string
 }
 
-/** Proposes new world-info entries grounded in a character or world card, avoiding whatever's already in the book. */
+/** Proposes new world-info entries grounded in a character or world card, avoiding whatever's already in the book. `focus` steers them toward a topic. */
 export async function suggestLoreEntries(
   client: ChatBackend,
   subject: AiLoreSubject,
   existingEntries: LorebookEntry[],
   count = 3,
   signal?: AbortSignal,
+  focus?: string,
+  shaping?: AssistShaping,
 ): Promise<SuggestedLoreEntry[]> {
   const context = contextSummary(subject)
   const existingKeys = existingEntries.flatMap((e) => e.keys).join(', ')
@@ -603,8 +550,10 @@ export async function suggestLoreEntries(
     'You are helping write World Info / lorebook entries for a roleplay app.',
     `Subject:\n${context}`,
     existingKeys ? `Lore already covered (don't repeat these): ${existingKeys}` : '',
-    `Propose ${count} new lore entries: relationships, locations, important past events, or rules that would help an AI stay consistent when roleplaying in this context.`,
-    `Output ONLY a minified JSON array of ${count} objects, each shaped exactly {"keys": ["keyword1","keyword2"], "content": "1-3 sentences of plain prose"}. 2-3 keywords per entry that would plausibly come up in conversation. No markdown fences, no commentary.`,
+    focus?.trim()
+      ? `Propose ${count} new lore entries about: ${focus.trim()}. Make each one something that would help an AI stay consistent when roleplaying in this context.`
+      : `Propose ${count} new lore entries: relationships, locations, important past events, or rules that would help an AI stay consistent when roleplaying in this context.`,
+    `Output ONLY a minified JSON array of ${count} objects, each shaped exactly {"title": "short label", "keys": ["keyword1","keyword2"], "content": "1-3 sentences of plain prose"}. 2-3 keywords per entry that would plausibly come up in conversation. No markdown fences, no commentary.`,
     'JSON:',
   ]
     .filter(Boolean)
@@ -614,7 +563,7 @@ export async function suggestLoreEntries(
     client,
     {
       prompt,
-      max_length: 600,
+      max_length: Math.max(600, count * 150 + 150),
       max_context_length: await client.getEffectiveMaxContext(),
       ...ASSIST_SAMPLER,
       stop_sequence: ['\n\n\n', '```'],
@@ -622,6 +571,7 @@ export async function suggestLoreEntries(
     },
     'Suggest lore entries',
     signal,
+    shaping,
   )
 
   const parsed = parseLenientJson(text)
@@ -631,6 +581,7 @@ export async function suggestLoreEntries(
     .map((e) => ({
       keys: Array.isArray(e.keys) ? e.keys.filter((k): k is string => typeof k === 'string') : [],
       content: typeof e.content === 'string' ? e.content : '',
+      ...(typeof e.title === 'string' && e.title.trim() ? { title: e.title.trim() } : {}),
     }))
     .filter((e) => e.keys.length > 0 && e.content.trim())
 }

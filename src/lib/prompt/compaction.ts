@@ -1,4 +1,4 @@
-// Decides when the verbatim chat window is folded into the rolling summary: wait until nearly full, then drop to a low-water mark, so the cached prefix is rewritten rarely.
+// Decides when the verbatim chat window is folded into the rolling summary
 
 export interface CompactionTurn {
   role: 'user' | 'char'

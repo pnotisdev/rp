@@ -13,16 +13,7 @@ interface ExpressionOption {
   hasSprite: boolean
 }
 
-/**
- * Section 11's own headline item: "generate a full expression set from one description in a
- * single pass instead of one-off images." One base appearance description, a pick of which
- * expressions to fill in (defaults to whatever doesn't already have art — a bulk regenerate is
- * an explicit opt-in, not the default), then one generation call per expression, sequential
- * rather than parallel — the same reasoning this codebase already applies to a local single-GPU
- * KoboldCpp server extends just as much to a local Stable Diffusion one. Applies each sprite the
- * moment it lands rather than waiting for the whole batch, so a stopped or partially-failed run
- * still keeps everything that did succeed.
- */
+/** Section 11's own headline item: "generate a full expression set from one description in a single pass instead of one-off images."… */
 export function GenerateExpressionSetDialog({
   expressions,
   initialPrompt,
@@ -38,11 +29,7 @@ export function GenerateExpressionSetDialog({
   const [selected, setSelected] = useState<Set<string>>(() => new Set(expressions.filter((e) => !e.hasSprite).map((e) => e.id)))
   const [busy, setBusy] = useState(false)
   const [stopRequested, setStopRequested] = useState(false)
-  // A ref, not just the state above: `generate()` runs as one long-lived async closure, and a
-  // `setStopRequested(true)` from the Stop button re-renders the component but can't change what
-  // that already-running closure sees for a plain state variable — checking `stopRequested`
-  // itself in the loop below would silently never actually stop anything. The ref is mutated
-  // in-place and read fresh every iteration, so the check below always sees the current value.
+  // A ref, not just the state above: `generate()` runs as one long-lived async closure
   const stopRef = useRef(false)
   const controllerRef = useRef<AbortController | null>(null)
   useEffect(() => () => { stopRef.current = true; controllerRef.current?.abort() }, [])
@@ -53,11 +40,7 @@ export function GenerateExpressionSetDialog({
   })
   const [results, setResults] = useState<{ succeeded: string[]; failed: string[] } | null>(null)
 
-  const openMayhemApiKey = useSettingsStore((s) => s.openMayhemApiKey)
   const imageBackend = useSettingsStore((s) => s.imageBackend)
-  const imageBackendBaseUrl = useSettingsStore((s) => s.imageBackendBaseUrl)
-  const imageBackendUsername = useSettingsStore((s) => s.imageBackendUsername)
-  const imageBackendPassword = useSettingsStore((s) => s.imageBackendPassword)
   const imageBackendModel = useSettingsStore((s) => s.imageBackendModel)
 
   const toggle = (id: string) =>
@@ -78,7 +61,7 @@ export function GenerateExpressionSetDialog({
     setResults(null)
     setProgress({ done: 0, total: targets.length, currentLabel: targets[0].label })
 
-    const backend = createImageBackend({ openMayhemApiKey, imageBackend, imageBackendBaseUrl, imageBackendUsername, imageBackendPassword, imageBackendModel })
+    const backend = createImageBackend(useSettingsStore.getState())
     const succeeded: string[] = []
     const failed: string[] = []
 
@@ -151,7 +134,7 @@ export function GenerateExpressionSetDialog({
       </div>
 
       {busy && (
-        <div className="mt-4 rounded-xl bg-bg-elevated p-4 text-sm">
+        <div className="mt-4 rounded-lg border border-border bg-bg-elevated p-4 text-sm">
           <div className="flex items-center justify-between">
             <span className="text-text">
               Generating {progress.currentLabel} ({progress.done + 1} of {progress.total})…
@@ -175,7 +158,7 @@ export function GenerateExpressionSetDialog({
       )}
 
       {results && (
-        <div className="mt-4 rounded-xl bg-bg-elevated p-4 text-xs">
+        <div className="mt-4 rounded-lg border border-border bg-bg-elevated p-4 text-xs">
           {results.succeeded.length > 0 && <p className="text-text">Generated: {results.succeeded.join(', ')}</p>}
           {results.failed.length > 0 && <p className="mt-1 text-danger">Failed: {results.failed.join('; ')}</p>}
         </div>

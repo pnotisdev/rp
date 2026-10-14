@@ -1,12 +1,14 @@
 import { useState } from 'react'
-import { ChevronDown, Plus, Sparkles, X } from 'lucide-react'
+import { importLorebookFile, downloadLorebook } from '@/lib/worldinfo/lorebookIo'
+import { FileButton } from '@/components/ui/FileButton'
+import { errorMessage, toastError, toastSuccess } from '@/lib/store/useToastStore'
+import { ChevronDown, Plus, X } from 'lucide-react'
 import type { Lorebook, LorebookEntry, WorldInfoActivationMode } from '@/lib/characters/cardSpec'
-import { suggestLoreEntries, type AiLoreSubject } from '@/lib/characters/aiAssist'
-import { useChatBackendClient } from '@/lib/hooks/useChatBackendClient'
-import { errorMessage, toastError } from '@/lib/store/useToastStore'
+import type { AiLoreSubject } from '@/lib/characters/aiAssist'
 import { anyKeyIsRisky } from '@/lib/text/regexSafety'
 import { Button } from '@/components/ui/Button'
 import { Toggle } from '@/components/ui/Toggle'
+import { SuggestLoreDialog } from './SuggestLoreDialog'
 import { NumberField, SelectField, TextAreaField, TextField } from '@/components/ui/Field'
 
 function nextId(entries: LorebookEntry[]): number {
@@ -41,12 +43,21 @@ export function LorebookEditor({
   /** When editing a character's or world's own lore, pass it so "Suggest with AI" can ground its proposals. */
   aiContext?: AiLoreSubject
 }) {
-  const client = useChatBackendClient()
   const [suggesting, setSuggesting] = useState(false)
   const [expanded, setExpanded] = useState<Set<number>>(new Set())
 
   const updateEntry = (id: number, patch: Partial<LorebookEntry>) => {
     onChange({ ...book, entries: book.entries.map((e) => (e.id === id ? { ...e, ...patch } : e)) })
+  }
+  const importEntries = async (file: File) => {
+    try {
+      const incoming = await importLorebookFile(file)
+      let id = nextId(book.entries)
+      onChange({ ...book, name: book.name || incoming.name, entries: [...book.entries, ...incoming.entries.map((e) => ({ ...e, id: id++ }))] })
+      toastSuccess(`Added ${incoming.entries.length} entries from ${file.name}.`)
+    } catch (e) {
+      toastError(errorMessage(e))
+    }
   }
   const addEntry = () => onChange({ ...book, entries: [...book.entries, BLANK_ENTRY(nextId(book.entries))] })
   const removeEntry = (id: number) => onChange({ ...book, entries: book.entries.filter((e) => e.id !== id) })
@@ -56,27 +67,6 @@ export function LorebookEditor({
       next.has(id) ? next.delete(id) : next.add(id)
       return next
     })
-
-  const suggestWithAi = async () => {
-    if (!aiContext || suggesting) return
-    setSuggesting(true)
-    try {
-      const suggestions = await suggestLoreEntries(client, aiContext, book.entries)
-      if (suggestions.length === 0) throw new Error("The model didn't propose any usable entries. Try again.")
-      let nextBook = book
-      for (const s of suggestions) {
-        nextBook = {
-          ...nextBook,
-          entries: [...nextBook.entries, { ...BLANK_ENTRY(nextId(nextBook.entries)), keys: s.keys, content: s.content }],
-        }
-      }
-      onChange(nextBook)
-    } catch (e) {
-      toastError(errorMessage(e))
-    } finally {
-      setSuggesting(false)
-    }
-  }
 
   return (
     <div>
@@ -95,6 +85,15 @@ export function LorebookEditor({
             description="Activated entries are re-scanned for further keyword matches, so one entry can pull in another it mentions."
           />
         </div>
+      </div>
+
+      <div className="mb-3 flex items-center gap-2">
+        <FileButton onPick={(f) => importEntries(f[0])} accept=".json,.png" title="Add entries from a SillyTavern World Info file, a lorebook JSON, or a card PNG">
+          Import entries
+        </FileButton>
+        <Button onClick={() => downloadLorebook(book)} disabled={book.entries.length === 0}>
+          Export
+        </Button>
       </div>
 
       <div className="space-y-3">
@@ -138,7 +137,7 @@ export function LorebookEditor({
               />
 
               <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                <div className="inline-flex rounded-lg bg-bg-elevated p-0.5">
+                <div className="inline-flex rounded-lg border border-border bg-bg-elevated p-0.5">
                   {ACTIVATION_MODES.map((m) => (
                     <button
                       key={m.id}
@@ -348,12 +347,19 @@ export function LorebookEditor({
           Add entry
         </Button>
         {aiContext && (
-          <Button onClick={suggestWithAi} disabled={suggesting} className="flex items-center gap-1.5">
-            <Sparkles size={14} strokeWidth={2} />
-            {suggesting ? 'Suggesting…' : 'Suggest with AI'}
+          <Button onClick={() => setSuggesting(true)} className="flex items-center gap-1.5">
+            Suggest with AI
           </Button>
         )}
       </div>
+      {suggesting && aiContext && (
+        <SuggestLoreDialog
+          subject={aiContext}
+          existing={book.entries}
+          onAdd={(added) => onChange({ ...book, entries: [...book.entries, ...added] })}
+          onClose={() => setSuggesting(false)}
+        />
+      )}
     </div>
   )
 }

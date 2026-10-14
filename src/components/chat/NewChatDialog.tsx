@@ -29,14 +29,12 @@ export function NewChatDialog({
   const [greetingIndex, setGreetingIndex] = useState(0)
   const [starterId, setStarterId] = useState<string>('')
   const [participantIds, setParticipantIds] = useState<string[]>([])
-  // Defaults to the bound world's own template (falling back to 'dating_sim'); picking a chip
-  // by hand latches `modeTouched` so a later character switch doesn't clobber a deliberate choice.
+  // Defaults to the bound world's own template (falling back to 'dating_sim')
   const [mode, setMode] = useState<WorldTemplateId>('dating_sim')
   const [modeTouched, setModeTouched] = useState(false)
   const [busy, setBusy] = useState(false)
 
-  // `initialCharacterId` arrives before `characters`/`worlds` have loaded (same reason WorldsView's
-  // deep-link effect exists) — pick up the bound world's template as soon as they resolve.
+  // `initialCharacterId` arrives before `characters`/`worlds` have loaded (same reason WorldsView's deep-link effect exists)
   useEffect(() => {
     if (modeTouched || !initialCharacterId) return
     const initialCharacter = characters.find((c) => c.id === initialCharacterId)
@@ -46,8 +44,7 @@ export function NewChatDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [characters.length, worlds.length, initialCharacterId])
 
-  // A first-ever chat has no personas to pick from — offer a one-line "who you are" inline instead
-  // of sending the model a bare hardcoded "You" (see ROADMAP §13 / the persona-get-route bug, #41).
+  // A first-ever chat has no personas to pick from
   const noPersonas = personas.length === 0
 
   const toggleParticipant = (id: string) => {
@@ -115,7 +112,7 @@ export function NewChatDialog({
               setMode(normalizeWorldTemplateId(newWorld?.template))
             }
           }}
-          className="mb-3 w-full rounded-xl bg-bg-sunken px-3 py-2.5 text-base text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40 sm:py-2 sm:text-sm"
+          className="mb-3 w-full rounded-xl border border-border bg-bg-elevated px-3 py-2.5 text-base text-text outline-none focus:border-accent/70 sm:py-2 sm:text-sm"
         >
           <option value="">Select a character…</option>
           {characters.map((c) => (
@@ -180,13 +177,13 @@ export function NewChatDialog({
               value={personaName}
               onChange={(e) => setPersonaName(e.target.value)}
               placeholder="Your name (optional)"
-              className="mb-2 w-full rounded-xl bg-bg-sunken px-3 py-2.5 text-base text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40 sm:py-2 sm:text-sm"
+              className="mb-2 w-full rounded-xl border border-border bg-bg-elevated px-3 py-2.5 text-base text-text outline-none focus:border-accent/70 sm:py-2 sm:text-sm"
             />
             <input
               value={personaDescription}
               onChange={(e) => setPersonaDescription(e.target.value)}
               placeholder="A line about who you are (optional)"
-              className="w-full rounded-xl bg-bg-sunken px-3 py-2.5 text-base text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40 sm:py-2 sm:text-sm"
+              className="w-full rounded-xl border border-border bg-bg-elevated px-3 py-2.5 text-base text-text outline-none focus:border-accent/70 sm:py-2 sm:text-sm"
             />
             <p className="mt-1.5 text-[11px] text-text-muted">
               {personaName.trim()
@@ -200,7 +197,7 @@ export function NewChatDialog({
             <select
               value={personaId}
               onChange={(e) => setPersonaId(e.target.value)}
-              className="mb-4 w-full rounded-xl bg-bg-sunken px-3 py-2.5 text-base text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40 sm:py-2 sm:text-sm"
+              className="mb-4 w-full rounded-xl border border-border bg-bg-elevated px-3 py-2.5 text-base text-text outline-none focus:border-accent/70 sm:py-2 sm:text-sm"
             >
               <option value="">Default (You)</option>
               {personas.map((p) => (
@@ -218,7 +215,7 @@ export function NewChatDialog({
             <select
               value={starterId}
               onChange={(e) => setStarterId(e.target.value)}
-              className="w-full rounded-xl bg-bg-sunken px-3 py-2.5 text-base text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40 sm:py-2 sm:text-sm"
+              className="w-full rounded-xl border border-border bg-bg-elevated px-3 py-2.5 text-base text-text outline-none focus:border-accent/70 sm:py-2 sm:text-sm"
             >
               <option value="">Blank slate (near strangers, 0 affection)</option>
               {starters.map((s) => (

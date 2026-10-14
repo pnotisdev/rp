@@ -18,9 +18,7 @@ import type { IntimacyPhase, IntimacyTurnObservation } from '@/lib/dating/intima
 import { parseBeliefUpdates, type BeliefUpdate } from '@/lib/dating/beliefs'
 import { parseExpectationUpdates, type ExpectationUpdate } from '@/lib/dating/expectations'
 
-// Builds the relationship-judge prompts/schemas: per-turn deltas, scene flags, durable facts,
-// date/hangout outcomes, and the commitment/intimacy-milestone asks. Each exported function
-// assembles a prompt, calls the model with a timeout, and parses+validates the JSON reply.
+// Builds the relationship-judge prompts/schemas
 
 // max_context_length omitted — callers fetch the server's actual context via `client.getEffectiveMaxContext()`.
 const REL_PARAMS = {
@@ -45,9 +43,7 @@ const EVENT_PARAMS = {
   min_p: 0.05,
 }
 
-// Aborts a hung `generate` call instead of leaving the caller stuck forever (e.g. a rate-limited
-// provider that never resolves). Every assist call below shares this shape — re-exported so existing
-// importers of this module don't need to switch to `@/lib/api/generateWithTimeout` directly.
+// Aborts a hung `generate` call instead of leaving the caller stuck forever (e.g. a rate-limited provider that never resolves).
 export { ASSIST_TIMEOUT_MS, generateWithTimeout } from '@/lib/api/generateWithTimeout'
 
 function recentText(history: ChatMessage[], charName: string, userName: string, depth = 6): string {
@@ -204,13 +200,7 @@ export interface RelationshipMoment {
   currentDesire?: string
 }
 
-/**
- * Conservative classifier estimating whether the latest exchange moved relationship tone (seven
- * dimensions), established any romance-route flags, and surfaced any durable fact — combined into
- * one call, since every background classifier call is serialized behind the model on a local
- * server and this one fires every turn. Most dimensions/flags/facts stay unchanged on most turns.
- * `pendingTasks`, when passed, folds `objectiveAssist.ts`'s task-completion check in too.
- */
+/** Conservative classifier estimating whether the latest exchange moved relationship tone (seven dimensions), established any… */
 export async function assessRelationshipMoment(
   client: ChatBackend,
   params: {
@@ -253,13 +243,10 @@ export async function assessRelationshipMoment(
     aftercarePaceContext?: AftercarePace
     /** Names of anyone else present and speaking in this scene, so the jealousy flag classifier can weigh a rival's live presence. Omit for an ordinary single-character chat. */
     presentParticipants?: string[]
-    /**
-     * Everyone in the *intimate scene*, when more than one character is (`sceneParticipants.ts`) —
-     * distinct from `presentParticipants`, which is merely who else is in the room. Only when this
-     * is set does the two-party `regionsTouched`/`clothingRemoved` read become ambiguous, so only
-     * then is the contact graph asked for.
-     */
+    /** Everyone in the *intimate scene*, when more than one character is (`sceneParticipants.ts`) */
     sceneParticipants?: { id: string; name: string }[]
+    /** Also record firm opinions the character commits to, so a live-persona character stays consistent (persona/drive.ts). */
+    ownTakes?: boolean
   },
   assist?: AssistShaping,
 ): Promise<RelationshipMoment> {
@@ -280,10 +267,13 @@ export async function assessRelationshipMoment(
     'You are scoring relationship momentum, tracking high-level romance route flags, noting durable facts worth remembering long-term, AND (separately) reading the character\'s own current emotional state, an underlying need, and private intentions, in an in-character roleplay.',
     `Dimension meanings: ${DELTA_KEYS.map((k) => `${k} = ${DIMENSION_GLOSSARY[k]}`).join('; ')}.`,
     `Known route flags: ${describeFlags(params.customFlags)}.`,
-    `Return ONLY a minified JSON object: {"deltas":{ one integer -2..2 per dimension key },"newFlags":[ any newly-established flags from the known set, or [] ],"reason":"...","newFacts":[ any new durable facts, or [] ]${hasOpenThreads ? ',"resolvedFactIndices":[ open-thread index numbers this exchange clearly closed, or [] ]' : ''}${hasTasks ? ',"completedTaskIndices":[ pending task index numbers this exchange clearly and unambiguously accomplished, or [] ]' : ''}${hasAftercare ? `,"aftercareVerdict":"exactly one of [${AFTERCARE_VERDICTS.join(', ')}]"` : ''}${hasIntimacyScene ? `,"intimacyObservation":{"engagement":"one of [engaged, stalled, drifted]","intensityDelta":-1|0|1|2,"hesitationSignalled":true/false,"stageCompleteSignalled":true/false,"regionsTouched":[ zero or more of the region names listed below ],"clothingRemoved":[ zero or more {"who":"char"|"user","layer":"one of the layer names listed below"} ]${hasSharedScene ? ',"contact":[ zero or more {"actor":"...","target":"...","region":"..."} ],"participantClothingRemoved":[ zero or more {"who":"a character id","layer":"..."} ]' : ''}}` : ''},"mood":"one of [${MOOD_VOCAB.join(', ')}], only if this exchange gives a clear enough read to state one, omit entirely otherwise","currentNeed":"one of [${NEED_VOCAB.join(', ')}], only if this stretch of the story clearly shows this need going unmet, omit entirely otherwise, and don't change it lightly","characterIntent":"a short (under 12 words) private thing ${params.charName} now wants, only if something concrete and new became clear this exchange, omit entirely otherwise","currentDesire":"a short (under 12 words) deeper, steadier underlying drive of ${params.charName}'s, only if this exchange makes one genuinely clear, omit entirely otherwise, and don't change it lightly","currentFear":"a short (under 12 words) private fear ${params.charName} has right now, only if this exchange makes one genuinely clear, omit entirely otherwise, and don't change it lightly","planUpdates":[ usually [], see the plan rules below ],"beliefUpdates":[ usually [], see the belief rules below ],"expectationUpdates":[ usually [], see the expectation rules below ]}.`,
+    `Return ONLY a minified JSON object: {"deltas":{ one integer -2..2 per dimension key },"newFlags":[ any newly-established flags from the known set, or [] ],"reason":"...","newFacts":[ any new durable facts, or [] ]${params.ownTakes ? `,"herTake":"if ${params.charName} clearly committed to an opinion in this reply, it as 'topic: her position' in under 15 words, omit otherwise"` : ''}${hasOpenThreads ? ',"resolvedFactIndices":[ open-thread index numbers this exchange clearly closed, or [] ]' : ''}${hasTasks ? ',"completedTaskIndices":[ pending task index numbers this exchange clearly and unambiguously accomplished, or [] ]' : ''}${hasAftercare ? `,"aftercareVerdict":"exactly one of [${AFTERCARE_VERDICTS.join(', ')}]"` : ''}${hasIntimacyScene ? `,"intimacyObservation":{"engagement":"one of [engaged, stalled, drifted]","intensityDelta":-1|0|1|2,"hesitationSignalled":true/false,"stageCompleteSignalled":true/false,"regionsTouched":[ zero or more of the region names listed below ],"clothingRemoved":[ zero or more {"who":"char"|"user","layer":"one of the layer names listed below"} ]${hasSharedScene ? ',"contact":[ zero or more {"actor":"...","target":"...","region":"..."} ],"participantClothingRemoved":[ zero or more {"who":"a character id","layer":"..."} ]' : ''}}` : ''},"mood":"one of [${MOOD_VOCAB.join(', ')}], only if this exchange gives a clear enough read to state one, omit entirely otherwise","currentNeed":"one of [${NEED_VOCAB.join(', ')}], only if this stretch of the story clearly shows this need going unmet, omit entirely otherwise, and don't change it lightly","characterIntent":"a short (under 12 words) private thing ${params.charName} now wants, only if something concrete and new became clear this exchange, omit entirely otherwise","currentDesire":"a short (under 12 words) deeper, steadier underlying drive of ${params.charName}'s, only if this exchange makes one genuinely clear, omit entirely otherwise, and don't change it lightly","currentFear":"a short (under 12 words) private fear ${params.charName} has right now, only if this exchange makes one genuinely clear, omit entirely otherwise, and don't change it lightly","planUpdates":[ usually [], see the plan rules below ],"beliefUpdates":[ usually [], see the belief rules below ],"expectationUpdates":[ usually [], see the expectation rules below ]}.`,
     'Only move a dimension if this specific exchange clearly affected it. Leave the rest at 0. Most turns should move only one or two dimensions and add no new flags.',
     '"reason" is a short (under 12 words) in-world one-liner naming what just happened, e.g. "Complimented their cooking unprompted". Give one only if at least one dimension moved or a flag was added, otherwise "".',
     `"newFacts" is for concrete, durable things worth recalling much later: a name, a stated preference, a piece of backstory, a promise made, a moment that landed hard. Not every line of dialogue. Most turns add none. Each fact is an object {"text": one short standalone sentence, "importance": 0-1, "valence": -1 to 1, "unresolved": true/false}. "importance": ~0.2 for a small detail, 0.8+ for something that reshapes how ${params.charName} sees ${params.userName}. "valence": how it felt to ${params.charName}, negative if it hurt or disappointed, positive if it meant a lot, 0 for neutral information. "unresolved": true only for an open wound or open question the story has NOT closed (a slight not addressed, a promise not yet kept, a question dodged), most facts are false.`,
+    params.ownTakes
+      ? `"herTake" records an opinion ${params.charName} stated as her own (e.g. "hot dogs: a taco, not a sandwich"), so she stays consistent later. Include it whenever she gave a clear ruling, preference or stance, even a playful one; omit it for pure jokes with no position.`
+      : '',
     hasOpenThreads
       ? '"resolvedFactIndices" lists open-thread indices from the list above that this exchange clearly closed, an apology that landed, a promise kept, a dodged question finally answered. Be conservative: [] unless it plainly happened this turn.'
       : '',
@@ -380,6 +370,18 @@ export async function assessRelationshipMoment(
     : []
   const reason = typeof obj.reason === 'string' && obj.reason.trim() ? obj.reason.trim().slice(0, 160) : undefined
   const newFacts = parseRememberedFacts(obj.newFacts)
+  // A stated opinion becomes a fact so the facts lorebook brings it back when the topic does.
+  const herTake = params.ownTakes && typeof obj.herTake === 'string' ? obj.herTake.trim().replace(/^["']|["']$/g, '').slice(0, 160) : ''
+  if (herTake) {
+    // The judge often restates the same take as a plain fact too; keep one copy.
+    const takeWords = new Set(herTake.toLowerCase().match(/[a-z]{3,}/g) ?? [])
+    const overlaps = (t: string) => {
+      const words = t.toLowerCase().match(/[a-z]{3,}/g) ?? []
+      return words.length > 0 && words.filter((w) => takeWords.has(w)).length / words.length >= 0.5
+    }
+    for (let i = newFacts.length - 1; i >= 0; i--) if (overlaps(newFacts[i].text)) newFacts.splice(i, 1)
+    newFacts.push({ text: `${params.charName}'s take: ${herTake}`, importance: 0.4, valence: 0, unresolved: false })
+  }
   const pendingCount = params.pendingTasks?.length ?? 0
   const completedTaskIndices =
     hasTasks && Array.isArray(obj.completedTaskIndices)
@@ -486,11 +488,7 @@ export interface DateOutcome {
   newFacts: RememberedFact[]
 }
 
-/**
- * Turns an entire date's transcript into one outcome — deltas, new flags, a player-facing recap,
- * durable facts — instead of the per-turn drip-feed `assessRelationshipMoment` does for ordinary
- * chat. A live date suppresses normal per-turn tracking, so only this end-of-scene judgment counts.
- */
+/** Turns an entire date's transcript into one outcome */
 export async function assessDateOutcome(
   client: ChatBackend,
   params: {

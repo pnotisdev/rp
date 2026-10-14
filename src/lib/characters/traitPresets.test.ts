@@ -77,9 +77,7 @@ describe('extractTraitOptionsPositionally', () => {
   })
 
   it('recovers axes whose array brackets were dropped entirely, the real failure this guards against', () => {
-    // Exactly the shape captured from a live free-model response: archetype/occupation keep
-    // their brackets, quirk and relationshipStarter don't — which breaks JSON.parse for the
-    // whole object even though every individual string is fine.
+    // Exactly the shape captured from a live free-model response
     const text =
       '{"archetype":["tsundere rival","guilt-ridden healer"],' +
       '"occupation":["night-shift ER nurse","forensic sketch artist"],' +

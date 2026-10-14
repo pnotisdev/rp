@@ -1,12 +1,15 @@
 // Shared helpers for the install/update scripts. No dependencies — these run before `npm install`.
 import { spawnSync } from 'node:child_process'
+import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
+/** The product name, from the one file that defines it. */
+export const APP_NAME = JSON.parse(fs.readFileSync(path.join(repoRoot, 'src', 'lib', 'brand.json'), 'utf8')).name
+
 // The server runs its own .ts files through Node (no build step) and stores data in node:sqlite.
-// Type stripping only became unflagged in 22.18, so that — not node:sqlite's 22.5 — is the floor.
 export const MIN_NODE = [22, 18, 0]
 
 const useColor = process.stdout.isTTY && process.env.NO_COLOR === undefined
@@ -38,7 +41,7 @@ export function nodeIsSupported() {
 /** Abort with an actionable message if this Node can't run the app. */
 export function requireNode() {
   if (nodeIsSupported()) return
-  fail(`RP Suite needs Node ${MIN_NODE.join('.')} or newer — you have ${process.versions.node}.`, [
+  fail(`${APP_NAME} needs Node ${MIN_NODE.join('.')} or newer — you have ${process.versions.node}.`, [
     "The server runs TypeScript directly and stores data in Node's built-in SQLite,",
     'both of which need a recent Node. Node 24 LTS is what this is developed against.',
     '',
@@ -54,8 +57,7 @@ export function run(cmd, args, opts = {}) {
   return { ok: res.status === 0, code: res.status ?? 1 }
 }
 
-// Invoke the same npm that launched this script rather than a PATH lookup — that keeps Windows out
-// of the npm/npm.cmd shell-quoting mess and guarantees the npm version the user actually ran.
+// Invoke the same npm that launched this script rather than a PATH lookup
 export function npmRun(args) {
   const execpath = process.env.npm_execpath
   if (execpath && execpath.endsWith('.js')) return run(process.execPath, [execpath, ...args])

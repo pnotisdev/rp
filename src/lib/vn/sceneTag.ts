@@ -1,7 +1,4 @@
-/**
- * Parses/emits the `<<scene:...>>` directive the model appends to a reply to drive VN mode's
- * expression/background/mood/outfit, and strips it from what's shown mid-stream.
- */
+/** Parses/emits the `<<scene:...>>` directive the model appends to a reply to drive VN mode's expression/background/mood/outfit */
 
 export interface SceneTag {
   expression?: string
@@ -13,8 +10,7 @@ export interface SceneTag {
 }
 
 const TAG_PREFIX = '<<scene:'
-// Global match, not anchored to end-of-string: a model can emit a tag mid-reply then another at the
-// end, and anchoring to `$` would leave the first as literal unstripped text.
+// Global match, not anchored to end-of-string
 const TAG_RE = /\n?<<scene:([^>]*)>>/gi
 
 /** Pulls every `<<scene:...>>` directive out of a completed generation, using the LAST one for the actual metadata while stripping ALL of them from the returned text. */
@@ -59,13 +55,11 @@ export function buildSceneInstruction(options?: {
 }): string {
   if (!options) return ''
   const wantsMood = !!options.moodIds && options.moodIds.length > 0
-  // Nothing worth asking for. Mood counts on its own: outside Visual Novel mode it is the only
-  // field anything still reads (it picks the background music), so a mood-only request is valid.
+  // Nothing worth asking for.
   if (options.expressionIds.length === 0 && options.backgroundIds.length === 0 && !wantsMood) return ''
   // One id is no choice at all (it's always just the base outfit), so it isn't worth a field.
   const wantsOutfit = !!options.outfitIds && options.outfitIds.length > 1
-  // Only the fields actually being asked for appear in the format line — a mood-only request must
-  // not still show `expression=ID` in the template it tells the model to follow.
+  // Only the fields actually being asked for appear in the format line
   const fields = [
     options.expressionIds.length ? 'expression=ID' : '',
     options.backgroundIds.length ? 'background=ID' : '',

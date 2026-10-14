@@ -1,10 +1,4 @@
-/**
- * Independent trait axes (archetype/occupation/quirk/relationship starter) for "combinatorial"
- * character creation. Picking one option per axis composes a short brief that feeds the same
- * `draftCharacterFromBrief`/`draftFullCharacter` pipeline the free-text path uses. Options per axis
- * come from `generateTraitOptions` (aiAssist.ts) at runtime; this module only holds axis metadata
- * and the pure functions for picking from and composing a returned pool.
- */
+/** Independent trait axes (archetype/occupation/quirk/relationship starter) for "combinatorial" character creation. */
 
 export type TraitAxisId = 'archetype' | 'occupation' | 'quirk' | 'relationshipStarter'
 
@@ -33,11 +27,7 @@ export const TRAIT_AXIS_META: TraitAxisMeta[] = [
 /** Raw option text per axis, as returned by `generateTraitOptions` — the model's answer, unshaped. */
 export type TraitOptionSet = Record<TraitAxisId, string[]>
 
-/**
- * Positional fallback for a trait-options response too malformed to parse as JSON (e.g. missing
- * array brackets around one or more keys). Finds where each known axis key occurs in the raw text
- * and takes every quoted string between it and the next key as that axis's option list.
- */
+/** Positional fallback for a trait-options response too malformed to parse as JSON (e.g. missing array brackets around one or more keys). */
 export function extractTraitOptionsPositionally(text: string): TraitOptionSet {
   const positions = TRAIT_AXIS_META.map((axis) => ({ id: axis.id, index: text.indexOf(`"${axis.id}"`) }))
     .filter((p) => p.index !== -1)

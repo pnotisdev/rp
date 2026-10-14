@@ -16,12 +16,7 @@ import { CHOICE_DEFAULT_AFTER_TURNS, defaultChoiceOption, RESOLVE_STAGE } from '
 import { detectContinuityBreak } from './continuityGuard'
 import { sceneStateBlock } from '@/lib/prompt/sceneStateBlock'
 
-// End-to-end validation of the whole engine running together, as opposed to each module's own unit
-// tests: one scene played turn by turn from the click that starts it to the choice that ends it, on
-// the real branching scenario, with the real meter, the real floors, and the real graph. What this
-// catches that the unit tests can't is the integration — a floor that is individually correct but
-// unreachable in practice, a branch that never actually gets raised in a real run, a scenario whose
-// arousal gates can't be cleared by the activity weights the catalog really ships.
+// End-to-end validation of the whole engine running together, as opposed to each module's own unit tests
 
 /** A committed, escalating turn — the shape of a scene actually going somewhere. */
 const pushing = (regions: IntimacyTurnObservation['regionsTouched'] = ['lips']): IntimacyTurnObservation => ({
@@ -106,8 +101,7 @@ describe('a full playthrough of the branching scenario', () => {
     expect(run.stageId).toBe('oral')
     expect(run.scene?.phase).toBe('peak')
 
-    // Each of these stages exits on an auto edge, so the scene walks itself forward from here — and
-    // stops on its own at the next thing that isn't the engine's to decide.
+    // Each of these stages exits on an auto edge
     run.playToChoice(20, pushing(['genitals']))
     expect(run.scene?.visitedStages).toEqual(['foreplay', 'oral', 'together', 'finish'])
 
@@ -137,9 +131,7 @@ describe('a full playthrough of the branching scenario', () => {
   })
 
   it('never ends the scene on a completion vote when the author made the ending a choice', () => {
-    // Every single turn claims the scene just finished. Since this scenario's only resolve edges are
-    // `choice`-mode, none of those votes may end anything — the scene has to arrive at the closing
-    // branch and wait there, because how it ends is the player's decision and carries consequences.
+    // Every single turn claims the scene just finished.
     const finishing = { ...pushing(['genitals']), stageCompleteSignalled: true }
     const run = new Run()
     run.play(1, finishing)

@@ -1,16 +1,9 @@
 import type { CharacterCardData, Lorebook } from '@/lib/characters/cardSpec'
 import type { Outfit } from '@/lib/vn/outfits'
 import type { DraftedBonds, DraftedProfile } from '@/lib/characters/aiAssist'
+import { formatToolResult } from './tools'
 
-/**
- * An assistant thread: a plain model conversation, stored whole. Deliberately not a `Chat` — that
- * type requires a `characterId` and carries the entire relationship track, and an assistant thread
- * has neither a character nor a relationship.
- *
- * Messages live inside the thread record rather than in their own table. Assistant threads are read
- * front to back, never searched per-message or forked mid-way (the two things that earn `messages`
- * its own table), so one row per thread keeps the whole feature to a single resource.
- */
+/** An assistant thread: a plain model conversation, stored whole. */
 
 /** What a turn produced beyond its text, when the assistant was asked to *make* something. */
 export interface AssistantAttachment {
@@ -56,6 +49,10 @@ export interface AssistantMessage {
   attachment?: AssistantAttachment
   /** Set when generation failed, so the turn renders as an error rather than an empty reply. */
   error?: string
+  /** A tool the assistant called this turn, with what came back. The message has no text of its own. */
+  tool?: { name: string; arguments: Record<string, unknown>; result: string; isError: boolean; images?: string[] }
+  /** Pictures the user attached to this message (shrunken data URLs). */
+  images?: string[]
 }
 
 export interface AssistantThread {
@@ -64,15 +61,14 @@ export interface AssistantThread {
   createdAt: number
   updatedAt: number
   messages: AssistantMessage[]
+  /** What the oldest turns said, once they no longer fit in the prompt. `covers` is how many prompt turns it stands in for. */
+  summary?: { text: string; covers: number }
 }
 
 /** How many characters of the first message become the thread's title. */
 const TITLE_LENGTH = 60
 
-/**
- * A thread title from its first user message: the first sentence or line, trimmed. Threads are
- * listed by title, and "New conversation" repeated twelve times is a useless list.
- */
+/** A thread title from its first user message: the first sentence or line, trimmed. */
 export function threadTitleFrom(text: string): string {
   const firstLine = text.trim().split('\n').find((line) => line.trim()) ?? ''
   const sentence = firstLine.split(/(?<=[.!?])\s/)[0] ?? firstLine
@@ -81,9 +77,22 @@ export function threadTitleFrom(text: string): string {
   return cleaned.length > TITLE_LENGTH ? `${cleaned.slice(0, TITLE_LENGTH - 1).trimEnd()}…` : cleaned
 }
 
-/** The turns to send to the model — text only, dropping attachments and failed turns. */
+/** Tool results older than this many messages are shortened in the prompt. */
+const FULL_RESULT_WINDOW = 8
+
+/** The turns to send to the model: text only (pictures become a note), dropping attachments and failed turns. */
 export function promptTurnsOf(messages: readonly AssistantMessage[]): { role: 'user' | 'assistant'; text: string }[] {
-  return messages
-    .filter((m) => !m.error && m.text.trim())
-    .map((m) => ({ role: m.role, text: m.text }))
+  return messages.flatMap((m, i) => {
+    if (m.tool) {
+      const call = JSON.stringify({ name: m.tool.name, arguments: m.tool.arguments })
+      const result = { text: m.tool.result, isError: m.tool.isError, images: m.tool.images }
+      return [
+        { role: 'assistant' as const, text: `<tool_call>${call}</tool_call>` },
+        { role: 'user' as const, text: formatToolResult(m.tool.name, result, { short: messages.length - i > FULL_RESULT_WINDOW }) },
+      ]
+    }
+    if (m.error) return []
+    const pictures = m.images?.length ? `\n[attached ${m.images.length} picture${m.images.length === 1 ? '' : 's'}]` : ''
+    return m.text.trim() || pictures ? [{ role: m.role, text: `${m.text}${pictures}`.trim() }] : []
+  })
 }

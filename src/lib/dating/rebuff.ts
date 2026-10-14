@@ -1,7 +1,4 @@
-// A decaying "recently turned down" cue for a deflected/backfired commitment or intimacy ask —
-// colors the next handful of turns rather than stopping the instant the outcome's deltas apply.
-// Soft and temporary, distinct from `RelationshipWarning`'s standing breakup-risk banner. Counted
-// in the character's own replies, same unit as `dating/aftercare.ts`'s `Afterglow`.
+// A decaying "recently turned down" cue for a deflected/backfired commitment or intimacy ask
 
 export const REBUFF_WINDOW_TURNS = 5
 

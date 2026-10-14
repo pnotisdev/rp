@@ -3,16 +3,12 @@ import type { ReactNode } from 'react'
 type ChipTone = 'accent' | 'romance' | 'danger'
 
 const TONE_ON: Record<ChipTone, string> = {
-  accent: 'bg-accent/12 text-accent ring-1 ring-accent/30',
-  romance: 'bg-romance/12 text-romance ring-1 ring-romance/30',
-  danger: 'bg-danger/12 text-danger ring-1 ring-danger/30',
+  accent: 'border border-accent/40 bg-accent/10 text-accent',
+  romance: 'border border-romance/40 bg-romance/10 text-romance',
+  danger: 'border border-danger/40 bg-danger/10 text-danger',
 }
 
-/**
- * A small toggleable pill — the pattern repeated ad hoc across the editors for weekday selectors,
- * weather likes/dislikes, scope pickers, tag toggles. `on` drives the selected styling; `tone`
- * picks the accent colour of the selected state.
- */
+/** A small toggleable pill — the pattern repeated ad hoc across the editors for weekday selectors, weather likes/dislikes, scope pickers, tag toggles. */
 export function Chip({
   on,
   onClick,
@@ -32,7 +28,7 @@ export function Chip({
       onClick={onClick}
       disabled={disabled}
       aria-pressed={on}
-      className={`rounded-lg px-2.5 py-1 text-xs transition-colors disabled:opacity-40 ${
+      className={`rounded-md px-2 py-0.5 text-xs transition-colors disabled:opacity-40 ${
         on ? TONE_ON[tone] : 'border border-border text-text-muted hover:border-text-muted/40 hover:text-text'
       }`}
     >

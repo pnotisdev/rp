@@ -1,10 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { KNOWN_CHAT_PROVIDERS, CHAT_BACKEND_LABELS } from './chatBackend'
 
-// The provider picker in Settings → Connection and WelcomeView both resolve their selection by
-// `KNOWN_CHAT_PROVIDERS.find(p => p.baseUrl === chatBackendBaseUrl)` and by `p.id`, and
-// `OpenAICompatibleClient` builds its request URL as `baseUrl + '/chat/completions'` — so a
-// duplicate id, a duplicate/trailing-slashed base URL, or a missing field silently breaks the UI.
+// The provider picker in Settings → Connection and WelcomeView both resolve their selection by `KNOWN_CHAT_PROVIDERS.find(p =>…
 
 describe('KNOWN_CHAT_PROVIDERS', () => {
   it('every entry is well-formed: non-empty id/label/modelExample, https base URL with no trailing slash', () => {

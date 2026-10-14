@@ -1,6 +1,4 @@
-// Replays a long synthetic chat through the app's real prompt builder and assist prompts, tokenized by a
-// live KoboldCpp, and prices each memory policy with an emulated KV cache (one slot vs smartcache).
-// Usage: npx tsx scripts/sim-cache.mts [turns=60] [kobold=http://localhost:5001]
+// Replays a long synthetic chat through the app's real prompt builder and assist prompts, tokenized by a live KoboldCpp
 import { buildPrompt, renderHistoryTurn, DEFAULT_SYSTEM_PROMPT, type ChatMessage, type StyleGuidanceItem } from '../src/lib/prompt/builder'
 import { getInstructTemplate } from '../src/lib/prompt/instructTemplates'
 import { planCompaction } from '../src/lib/prompt/compaction'

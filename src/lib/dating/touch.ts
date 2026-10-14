@@ -1,13 +1,6 @@
 import { DEFAULT_REGION_SENSITIVITY, type BodyRegion, type RegionSensitivity } from '@/lib/dating/arousal'
 
-// A character's own body: where they respond, where they don't, and where they won't yet. Small
-// authored map, engine bookkeeping around it — the thing that makes two characters feel different to
-// play rather than differing only in prose voice, since the same action on the same turn is worth
-// genuinely different amounts to each of them.
-//
-// The sensitivity half feeds `arousal.ts` (which falls back to `DEFAULT_REGION_SENSITIVITY` for an
-// unauthored character). The limit half is enforced the only way that actually works: by filtering
-// the action set, so a limited region's catalog entries are never offered and never reach a prompt.
+// A character's own body: where they respond, where they don't, and where they won't yet.
 
 export interface TouchProfile {
   /** Per-region multiplier, 0-3. 0 means this character simply doesn't respond there. */
@@ -40,10 +33,7 @@ export function unavailableRegions(profile: TouchProfile | undefined, warmth: nu
 /** How responsive a region has to be before finding it counts as learning something about this character. */
 const DISCOVERY_SENSITIVITY = 2
 
-/**
- * Regions worth remembering having found — the discovery loop. Only the ones that genuinely answer
- * for *this* character, so the list stays a fact about them rather than a log of everywhere touched.
- */
+/** Regions worth remembering having found — the discovery loop. */
 export function newlyDiscoveredRegions(
   profile: TouchProfile | undefined,
   touched: readonly BodyRegion[],

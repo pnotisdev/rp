@@ -1,8 +1,6 @@
 import type { CharacterPlan } from '@/lib/types'
 
-// Persistent agency layer: a character carries a few concrete intentions between turns (the richer,
-// multi-entry sibling of `mindGuidance.ts`'s transient `characterIntent`). Lifecycle driven entirely
-// by the per-turn judge call's `planUpdates` — no extra AI call. Read into the prompt via `plansGuidance`.
+// Persistent agency layer: a character carries a few concrete intentions between turns (the richer, multi-entry sibling of…
 
 /** Never more than this many live at once. Adding past the cap drops the oldest. */
 export const MAX_ACTIVE_PLANS = 3

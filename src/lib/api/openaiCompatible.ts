@@ -1,23 +1,12 @@
-import type { GenerateRequest } from './types'
+import type { ChatCompletionMessage, ChatContentPart, GenerateRequest } from './types'
+import { BRAND } from '@/lib/brand'
+import { imageMimeOfBase64 } from './binaryUtils'
 import { KoboldApiError } from './types'
 import { estimateTokens } from '@/lib/tokenEstimate'
 import type { ChatBackend, ConnectionCheckResult } from './chatBackend'
 import { isOpenMayhem, loadOpenMayhemModels, OPENMAYHEM_PROXY, openMayhemRequestBody } from './openMayhem'
 
-/**
- * OpenRouter increasingly routes its free tier through reasoning models, and reasoning is pure
- * overhead for this app — a roleplay reply is never improved by a hidden "thinking" phase the
- * player never sees, and it comes directly out of `max_tokens`. Left uncapped (the default for
- * most of these models when no `reasoning` field is sent at all), a small reply budget gets spent
- * entirely on reasoning tokens and the model never reaches the actual reply — `generate`/
- * `generateStream` below both read only `content`, so that shows up as a silent empty completion,
- * indistinguishable from the model just declining to answer.
- *
- * `reasoning` is OpenRouter's own unified control (not a standard OpenAI Chat Completions field),
- * so it's only sent to OpenRouter itself — an arbitrary extra top-level field is usually harmless
- * against another provider's endpoint, but there's no upside to sending a directive that only one
- * provider defined.
- */
+/** OpenRouter increasingly routes its free tier through reasoning models */
 function isOpenRouter(baseUrl: string): boolean {
   try {
     return /(^|\.)openrouter\.ai$/.test(new URL(baseUrl.trim()).hostname)
@@ -26,10 +15,21 @@ function isOpenRouter(baseUrl: string): boolean {
   }
 }
 
-// A single client for any provider that speaks the OpenAI Chat Completions wire format —
-// OpenAI, OpenRouter, Groq, Together, local servers (llama.cpp, LM Studio, Ollama's OpenAI shim),
-// and more. Does not attempt native Anthropic/Google wire formats; OpenRouter already re-exposes
-// both through this same shape.
+/** Attaches pictures to the last user turn as `image_url` parts, so a vision model on a hosted backend can see them. */
+export function withImages(messages: ChatCompletionMessage[], images: string[] | undefined): ChatCompletionMessage[] {
+  if (!images?.length) return messages
+  const at = messages.map((m) => m.role).lastIndexOf('user')
+  if (at < 0) return messages
+  const target = messages[at]
+  const text = typeof target.content === 'string' ? target.content : target.content.filter((p) => p.type === 'text').map((p) => (p as { text: string }).text).join(' ')
+  const parts: ChatContentPart[] = [
+    { type: 'text', text },
+    ...images.map((img) => ({ type: 'image_url' as const, image_url: { url: img.startsWith('data:') ? img : `data:${imageMimeOfBase64(img)};base64,${img}` } })),
+  ]
+  return messages.map((m, i) => (i === at ? { ...m, content: parts } : m))
+}
+
+// A single client for any provider that speaks the OpenAI Chat Completions wire format
 export class OpenAICompatibleClient implements ChatBackend {
   get prefersJsonObject(): boolean { return isOpenMayhem(this.baseUrl) }
   constructor(
@@ -38,24 +38,7 @@ export class OpenAICompatibleClient implements ChatBackend {
     private model: string,
   ) {}
 
-  /**
-   * OpenAI renamed `max_tokens` to `max_completion_tokens` for its reasoning models (o1/o3/o4-mini)
-   * and has since widened that to at least some GPT-5-family models too — the exact cutoff is a
-   * moving target OpenAI hasn't published as a queryable capability, and every other project
-   * hitting this (opencode, crush, several LangChain issues) has landed on the same conclusion:
-   * there's no clean way to know ahead of time which name a given model wants.
-   *
-   * So this doesn't try to guess from the model name. It sends the widely-supported `max_tokens`
-   * first, same as always — every other provider `OpenAICompatibleClient` talks to (Groq, Together,
-   * local llama.cpp/LM Studio/Ollama, and most of OpenAI's own catalog) still expects exactly that
-   * name, so guessing `max_completion_tokens` by default would trade one provider's rejection for
-   * silently uncapped replies everywhere else `max_completion_tokens` isn't recognised. Only on the
-   * one specific 400 OpenAI returns for this — matched by message, not by status code alone, so an
-   * unrelated 400 never trips it — does it flip to `max_completion_tokens` and redo that one request;
-   * `usesMaxCompletionTokens` then makes the switch stick for every later call this instance makes
-   * (the client is memoized per model/provider by `useChatBackendClient`, so this is a one-time cost
-   * per model, not a retry on every single turn).
-   */
+  /** OpenAI renamed `max_tokens` to `max_completion_tokens` for its reasoning models (o1/o3/o4-mini) and has since widened that to at… */
   private usesMaxCompletionTokens = false
 
   private isMaxTokensParamError(message: string): boolean {
@@ -77,29 +60,24 @@ export class OpenAICompatibleClient implements ChatBackend {
 
   /** Uses `params.messages` when the caller built one, else wraps `params.prompt` as a single user turn. */
   private body(params: GenerateRequest, stream: boolean): Record<string, unknown> {
-    const messages = params.messages?.length ? params.messages : [{ role: 'user' as const, content: params.prompt }]
+    const messages = withImages(params.messages?.length ? params.messages : [{ role: 'user' as const, content: params.prompt }], params.images)
     const body: Record<string, unknown> = {
       model: this.model || (isOpenMayhem(this.baseUrl) ? '' : 'gpt-4o-mini'),
       messages,
       stream,
     }
-    // Only fields with a real equivalent in the OpenAI Chat Completions contract are mapped;
-    // KoboldCpp-specific sampler fields with no equivalent are silently dropped.
+    // Only fields with a real equivalent in the OpenAI Chat Completions contract are mapped
     if (typeof params.temperature === 'number') body.temperature = params.temperature
     if (typeof params.top_p === 'number') body.top_p = params.top_p
     if (typeof params.presence_penalty === 'number') body.presence_penalty = params.presence_penalty
     if (typeof params.frequency_penalty === 'number') body.frequency_penalty = params.frequency_penalty
     if (params.reasoning_effort) body.reasoning_effort = params.reasoning_effort
     if (params.verbosity) body.verbosity = params.verbosity
-    // See `isOpenRouter`'s doc comment. An explicit effort still wins (translated into OpenRouter's
-    // own shape alongside the OpenAI-style field above, so either convention reaches the model);
-    // "Auto" — no explicit choice made — means "off" here, not "let the provider pick its own
-    // default", because that default is what was silently eating the whole reply budget.
+    // See `isOpenRouter`'s doc comment.
     if (isOpenRouter(this.baseUrl)) {
       body.reasoning = params.reasoning_effort ? { effort: params.reasoning_effort } : { enabled: false }
     }
-    // See `usesMaxCompletionTokens`'s doc comment — starts as the widely-supported `max_tokens`;
-    // only becomes `max_completion_tokens` after that exact rejection has actually been seen.
+    // See `usesMaxCompletionTokens`'s doc comment
     if (typeof params.max_length === 'number') {
       body[this.usesMaxCompletionTokens ? 'max_completion_tokens' : 'max_tokens'] = params.max_length
     }
@@ -128,27 +106,14 @@ export class OpenAICompatibleClient implements ChatBackend {
     return ' (this can sometimes clear on its own within a minute or two, despite the wording above)'
   }
 
-  /**
-   * The `reasoning: {enabled: false}` request above is a request, not a guarantee — a model that
-   * can't take the hint (or isn't reached through OpenRouter at all) still burns the whole
-   * `max_tokens` budget on reasoning and returns empty `content`. An ordinary empty `content` is
-   * left to whatever the caller already does with one (unchanged); this only intervenes for the one
-   * case that looks identical to that but has a completely different fix — more reply budget, or a
-   * model without a "thinking" step — which is worth surfacing rather than leaving indistinguishable
-   * from the model just declining to answer.
-   */
+  /** The `reasoning: {enabled: false}` request above is a request, not a guarantee */
   private reasoningExhaustedError(reasoningChars: number): KoboldApiError {
     return new KoboldApiError(
       `The model spent its whole reply budget on hidden reasoning and never wrote an actual reply (${reasoningChars} reasoning characters, 0 in the reply). Try a larger Reply length, or a model without a "thinking" step.`,
     )
   }
 
-  /**
-   * The fetch + error-classification shared by `generate` and `generateStream` — including the
-   * one-time `max_tokens` -> `max_completion_tokens` retry (see `usesMaxCompletionTokens`'s doc
-   * comment). Returns an `ok` `Response` with its body untouched, for the caller to read as JSON or
-   * as a stream; throws a `KoboldApiError` for anything that isn't recoverable this way.
-   */
+  /** The fetch + error-classification shared by `generate` and `generateStream` */
   private async postChatCompletion(params: GenerateRequest, stream: boolean, signal?: AbortSignal): Promise<Response> {
     const unreachableMessage = stream ? `Could not reach ${this.baseUrl} for streaming.` : `Could not reach ${this.baseUrl}. Is the base URL and network correct?`
     const failedMessage = stream ? 'Chat completion stream failed' : 'Chat completion failed'
@@ -187,8 +152,7 @@ export class OpenAICompatibleClient implements ChatBackend {
     if (isOpenMayhem(this.baseUrl) && !content.trim()) {
       throw new KoboldApiError('OpenMayhem returned no reply text. Check the model and response token limit; generation may still have used credit.')
     }
-    // `reasoning_content` is DeepSeek's own name for the same idea when reached directly (not through
-    // OpenRouter's `reasoning`) — checked either way so this isn't tied to one provider's wire format.
+    // `reasoning_content` is DeepSeek's own name for the same idea when reached directly (not through OpenRouter's `reasoning`)
     const reasoning = message?.reasoning || message?.reasoning_content || ''
     if (!content.trim() && reasoning.trim()) throw this.reasoningExhaustedError(reasoning.length)
     return content
@@ -200,8 +164,7 @@ export class OpenAICompatibleClient implements ChatBackend {
     try {
       res = await this.postChatCompletion(params, true, signal)
     } catch (e) {
-      // Matches this method's own pre-existing contract (distinct from `generate`'s, which throws):
-      // an abort before the request landed resolves quietly rather than surfacing as a failure.
+      // Matches this method's own pre-existing contract (distinct from `generate`'s
       if (signal?.aborted) return ''
       throw e
     }
@@ -213,8 +176,7 @@ export class OpenAICompatibleClient implements ChatBackend {
     const decoder = new TextDecoder()
     let buffer = ''
     let full = ''
-    // Never surfaced as reply text (`onToken` is never called with it) — tracked only so an
-    // all-reasoning, no-content stream can be told apart from a model that legitimately sent nothing.
+    // Never surfaced as reply text (`onToken` is never called with it)
     let reasoningChars = 0
 
     try {
@@ -298,7 +260,7 @@ export class OpenAICompatibleClient implements ChatBackend {
         if (model.availability === 'offline') return { ok: false, detail: 'This model has no providers online. Choose another model or check again later.' }
         return { ok: true, detail: 'Catalog reachable. Your key and credit are checked on your first reply; this check spends no credit.' }
       } catch {
-        return { ok: false, detail: 'Could not load the OpenMayhem catalog through the RP Suite server.' }
+        return { ok: false, detail: `Could not load the OpenMayhem catalog through the ${BRAND.name} server.` }
       }
     }
     const trimmed = this.baseUrl.replace(/\/+$/, '')
@@ -337,13 +299,7 @@ export class OpenAICompatibleClient implements ChatBackend {
     return { ok: true }
   }
 
-  /**
-   * Nano-GPT's key check: `POST {host}/api/check-balance` (deliberately not under `/v1`), with the
-   * key as `x-api-key`, returning `{ usd_balance, nano_balance, nanoDepositAddress }`. A bad key
-   * comes back non-2xx (live: 401 for a malformed key, with its own error body), so any non-ok
-   * response here is treated as a rejected key. The USD balance becomes the success detail,
-   * mirroring OpenRouter's usage readout.
-   */
+  /** Nano-GPT's key check: `POST {host}/api/check-balance` (deliberately not under `/v1`), with the key as `x-api-key`, returning `{… */
   private async checkNanoGptBalance(trimmed: string): Promise<ConnectionCheckResult> {
     const balanceUrl = `${trimmed.replace(/\/v1$/, '')}/check-balance`
     let res: Response

@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
+import { BRAND } from '@/lib/brand'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import { useConnectionStatus } from '@/lib/hooks/useConnectionStatus'
 import { useHostedBackendStatus } from '@/lib/hooks/useHostedBackendStatus'
@@ -18,6 +19,16 @@ import { isOpenMayhem } from '@/lib/api/openMayhem'
 const CHAT_BACKENDS = Object.keys(CHAT_BACKEND_LABELS) as ChatBackendId[]
 const BUILTIN_IDS = new Set(BUILTIN_INSTRUCT_TEMPLATES.map((t) => t.id))
 
+/** A quiet disclosure for technical detail most people never need. */
+function More({ summary, children }: { summary: string; children: ReactNode }) {
+  return (
+    <details className="mt-4 text-xs text-text-muted">
+      <summary className="cursor-pointer select-none transition-colors hover:text-text">{summary}</summary>
+      <div className="mt-2 space-y-2 leading-relaxed">{children}</div>
+    </details>
+  )
+}
+
 export function ConnectionSettings() {
   const baseUrl = useSettingsStore((s) => s.baseUrl)
   const setBaseUrl = useSettingsStore((s) => s.setBaseUrl)
@@ -30,11 +41,7 @@ export function ConnectionSettings() {
   const setChatBackendConfig = useSettingsStore((s) => s.setChatBackendConfig)
   const [draft, setDraft] = useState(baseUrl)
   const { status, model, version, maxContext, detectedTemplateId } = useConnectionStatus(baseUrl)
-  // Checked once per distinct config plus on manual demand (`recheck`), not on a timer like the
-  // KoboldCpp status above — see the hook's own doc comment for why a metered hosted backend
-  // shouldn't be polled the same way a free local one is. Only ever enabled for whichever hosted
-  // backend is actually selected, which — since the fields below are already gated the same way —
-  // is exactly "whichever of these two sections is currently visible."
+  // Hosted backends are checked once per config and on demand, not on a timer, since they can be metered.
   const hostedStatus = useHostedBackendStatus(
     chatBackend !== 'koboldcpp',
     chatBackend === 'novelai' ? 'novelai' : 'openai-compatible',
@@ -43,16 +50,12 @@ export function ConnectionSettings() {
     chatBackendModel,
   )
 
-  // Only nudge when the model clearly implies a builtin format AND the active template is itself a
-  // builtin we can compare against — a user on a hand-tuned custom template is assumed to know.
+  // Only nudge when the model clearly implies a builtin format and the active template is itself a builtin.
   const detected = detectedTemplateId ? BUILTIN_INSTRUCT_TEMPLATES.find((t) => t.id === detectedTemplateId) : undefined
   const templateMismatch =
     detected && BUILTIN_IDS.has(instructTemplateId) && detectedTemplateId !== instructTemplateId ? detected : undefined
 
-  // Derived from the current base URL rather than stored separately (same "match against known
-  // values, fall back to custom" idiom as the sampler/instruct-template presets elsewhere in
-  // Settings) — picking a provider is a one-time convenience fill-in, not a lock; editing the Base
-  // URL afterward is exactly what quietly falls back to "Custom" here.
+  // Derived from the base URL: picking a provider is a convenience fill-in, and editing the address falls back to "Custom".
   const matchedProvider = KNOWN_CHAT_PROVIDERS.find((p) => p.baseUrl === chatBackendBaseUrl)
 
   const { models: openAiModels, loading: modelsLoading, reload: reloadModels } = useOpenAiModels(
@@ -66,12 +69,11 @@ export function ConnectionSettings() {
   return (
     <SettingsPage>
       <Section
-        title="Chat generation backend"
-        description="Which provider generates replies: the main chat and every background judge/assist call. Leave it on 'KoboldCpp (local)' for a local model and set its URL below; switch it to a hosted provider (OpenRouter has a free tier) to run everything through their API instead."
-        surface="bare"
+        title="Where replies come from"
+        description="Pick the model that writes replies. Run one on your own computer, or connect a hosted provider with an API key."
       >
         <SelectField
-          label="Backend"
+          label="Model source"
           value={chatBackend}
           onChange={(e) => setChatBackendConfig({ chatBackend: e.target.value as ChatBackendId })}
         >
@@ -84,9 +86,6 @@ export function ConnectionSettings() {
 
         {chatBackend === 'openai-compatible' && (
           <>
-            <p className="mb-2 text-xs text-text-muted">
-              Choose a provider, enter its API key, then select a model for replies and background scoring.
-            </p>
             <SelectField
               label="Provider"
               value={matchedProvider?.id ?? 'custom'}
@@ -104,16 +103,17 @@ export function ConnectionSettings() {
             </SelectField>
             {isOpenMayhem(chatBackendBaseUrl) && <OpenMayhemSetup />}
             <TextField
-              label="Base URL"
+              label="Address"
               value={chatBackendBaseUrl}
               onChange={(e) => setChatBackendConfig({ chatBackendBaseUrl: e.target.value })}
-              placeholder="e.g. https://api.openai.com/v1 or https://openrouter.ai/api/v1"
+              placeholder="https://api.openai.com/v1"
             />
             <TextField
               label="API key"
               type="password"
               value={chatBackendApiKey}
               onChange={(e) => setChatBackendConfig({ chatBackendApiKey: e.target.value })}
+              hint="Stored in this browser and only sent to the address above."
             />
             {isOpenMayhem(chatBackendBaseUrl) ? (
               <OpenMayhemModelSelect models={openAiModels} loading={modelsLoading} value={chatBackendModel}
@@ -126,7 +126,7 @@ export function ConnectionSettings() {
                   if (e.target.value === '__type__') return setTypeModel(true)
                   setChatBackendConfig({ chatBackendModel: e.target.value })
                 }}
-                hint={`${openAiModels.length} models from /models. For one that isn't listed, pick "Type it in".`}
+                hint={`${openAiModels.length} model${openAiModels.length === 1 ? '' : 's'} available. Not listed? Choose "Type it in".`}
               >
                 {!openAiModels.includes(chatBackendModel) && <option value="">Choose a model…</option>}
                 {openAiModels.map((m) => (
@@ -144,10 +144,10 @@ export function ConnectionSettings() {
                 placeholder={matchedProvider ? `e.g. ${matchedProvider.modelExample}` : 'e.g. gpt-4o-mini'}
                 hint={
                   modelsLoading
-                    ? 'Checking /models…'
+                    ? 'Looking up models…'
                     : openAiModels && openAiModels.length > 0
-                      ? 'Back to the model list once you set a base URL and key.'
-                      : "This provider's /models list isn't reachable. Enter the id by hand."
+                      ? 'Enter an address and key to pick from the provider’s list.'
+                      : 'This provider does not list its models, so enter the model name by hand.'
                 }
               />
             )}
@@ -160,27 +160,21 @@ export function ConnectionSettings() {
               </button>
             )}
             <HostedConnectionStatus status={hostedStatus.status} detail={hostedStatus.detail} recheck={() => { reloadModels(); hostedStatus.recheck() }} />
-            <p className="mt-2 text-xs text-text-muted">
-              Keys are stored in this browser. {isOpenMayhem(chatBackendBaseUrl)
-                ? 'OpenMayhem requests pass through your RP Suite server, which forwards the key without saving it.'
-                : 'Requests are sent directly to the base URL above.'} Token counts fall back to an estimate for this backend (no
-              shared tokenizer endpoint); context size is read from the provider's model list when
-              it publishes one, otherwise it falls back too. Temperature, top P, penalties and
-              reasoning effort for this backend live in Settings → Generation, separate from the
-              KoboldCpp sampler below.
-            </p>
+            <More summary="About hosted models">
+              <p>
+                {isOpenMayhem(chatBackendBaseUrl)
+                  ? 'OpenMayhem requests pass through this app’s server, which forwards your key without saving it.'
+                  : 'Requests go straight from your browser to the address above.'}
+              </p>
+              <p>
+                Token counts are estimated for hosted models, and the context size comes from the provider’s model list when it has one. Temperature, top P and similar settings for hosted models are under Settings, Generation.
+              </p>
+            </More>
           </>
         )}
 
         {chatBackend === 'novelai' && (
           <>
-            <p className="mb-2 text-xs text-text-muted">
-              NovelAI's own hosted models: a paid subscription, not something verified live while
-              building this (see ROADMAP.md #123). Built against NovelAI's documented contract,
-              cross-checked against SillyTavern's own current source rather than guessed at.
-              Erato isn't offered here. It needs a different tokenizer this app doesn't bundle yet;
-              Kayra and Clio both work through the local tokenizer for stop sequences.
-            </p>
             <SelectField
               label="Model"
               value={chatBackendModel}
@@ -197,69 +191,56 @@ export function ConnectionSettings() {
               type="password"
               value={chatBackendApiKey}
               onChange={(e) => setChatBackendConfig({ chatBackendApiKey: e.target.value })}
-              hint="From your NovelAI account's user settings, not your login password."
+              hint="From your NovelAI account settings, not your login password."
             />
             <HostedConnectionStatus status={hostedStatus.status} detail={hostedStatus.detail} recheck={hostedStatus.recheck} />
-            <p className="mt-2 text-xs text-text-muted">
-              Keys are stored only in this browser and sent directly to NovelAI, never through any
-              other server. The KoboldCpp sampler below supplies temperature/top P/penalties for
-              this backend too, since NovelAI's own sampler shape is close enough to reuse directly.
-            </p>
+            <More summary="About NovelAI">
+              <p>NovelAI is a paid, hosted service. Your key stays in this browser. Requests pass through {BRAND.name}'s own server, which forwards them to NovelAI and stores nothing.</p>
+              <p>Erato, Kayra and Clio are supported. Sampler settings come from the KoboldCpp sampler under Settings, Generation. Stop sequences are applied here when the model has no tokenizer for NovelAI's own stop handling.</p>
+            </More>
           </>
         )}
       </Section>
 
       <Section
-        title="KoboldCpp connection"
-        description="Used whenever the backend above is 'KoboldCpp (local)'. Also supplies the sampler and instruct-template settings the hosted backends reuse."
-        surface="bare"
+        title="Local model (KoboldCpp)"
+        description="Used when the source above is KoboldCpp. Hosted models also reuse its sampler and chat-format settings."
       >
         <TextField
-          label="Server URL"
+          label="Server address"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onBlur={() => setBaseUrl(draft)}
           placeholder="http://localhost:5001"
         />
-        <div className="mt-6 rounded-xl bg-bg-elevated p-5 text-xs">
-          <div className="flex items-center gap-1.5">
+        <div className="rounded-xl bg-bg-sunken p-4 text-xs">
+          <div className="flex items-center gap-2">
             <span className={`h-2 w-2 rounded-full ${STATUS_DOT[status]}`} />
-            <span className="text-text">{STATUS_LABEL[status]}</span>
+            <span className="text-sm text-text">{STATUS_LABEL[status]}</span>
           </div>
-          {model && <div className="mt-1 text-text-muted">Model: {model}</div>}
+          {model && <div className="mt-1.5 text-text-muted">Model: {model}</div>}
           {version && <div className="text-text-muted">KoboldCpp {version}</div>}
-          {maxContext !== null && (
-            <div className="text-text-muted">
-              Max context: {maxContext.toLocaleString()} tokens, used automatically for judge/assist
-              calls (relationship scoring, choices, objectives, lore suggestions) instead of a fixed
-              guess.
-            </div>
-          )}
+          {maxContext !== null && <div className="text-text-muted">Context: {maxContext.toLocaleString()} tokens</div>}
           {status === 'offline' && (
-            <p className="mt-2 text-text-muted">
-              Make sure KoboldCpp is running and reachable at this URL. If it's on another machine,
-              launch it with <code>--host 0.0.0.0</code> or your usual CORS/tunnel setup.
+            <p className="mt-2 leading-relaxed text-text-muted">
+              Start KoboldCpp and check the address above. If it runs on another computer, launch it with <code>--host 0.0.0.0</code>.
             </p>
           )}
         </div>
 
         {templateMismatch && (
-          <div className="mt-4 rounded-xl bg-warning/10 p-4 text-xs ring-1 ring-warning/30">
-            <p className="text-text">
-              This model's chat template looks like <strong>{templateMismatch.name}</strong>, but the
-              active instruct template is{' '}
-              <strong>
-                {BUILTIN_INSTRUCT_TEMPLATES.find((t) => t.id === instructTemplateId)?.name ?? instructTemplateId}
-              </strong>
-              . A mismatch is the usual cause of a model that rambles, ignores its character, leaks
-              instructions, or never stops.
+          <div className="mt-4 rounded-xl bg-warning/10 p-4 text-xs">
+            <p className="leading-relaxed text-text">
+              This model looks like it uses the <strong>{templateMismatch.name}</strong> chat format, but{' '}
+              <strong>{BUILTIN_INSTRUCT_TEMPLATES.find((t) => t.id === instructTemplateId)?.name ?? instructTemplateId}</strong> is selected. A
+              mismatch is the usual cause of rambling, ignored characters and replies that never stop.
             </p>
             <div className="mt-2.5">
               <Button
                 variant="primary"
                 onClick={() => {
                   setInstructTemplateId(templateMismatch.id)
-                  toastSuccess(`Instruct template set to ${templateMismatch.name}`)
+                  toastSuccess(`Chat format set to ${templateMismatch.name}`)
                 }}
               >
                 Switch to {templateMismatch.name}
@@ -268,15 +249,12 @@ export function ConnectionSettings() {
           </div>
         )}
 
-        <div className="mt-4 rounded-xl bg-bg-elevated p-5 text-xs text-text-muted">
-          <p className="text-text">Make long chats cheaper on the GPU</p>
-          <p className="mt-1.5">
-            The app keeps the start of each prompt identical so KoboldCpp only reads what's new. Launch it with{' '}
-            <code>--smartcache 6</code> so it keeps a separate copy of the chat's cache while background checks
-            (relationship, choices, memory) run. The line under each reply (<em>cache reused</em> /{' '}
-            <em>full prompt re-read</em>) shows how that reply went.
+        <More summary="Make long chats cheaper on the GPU">
+          <p>
+            The app keeps the start of every prompt identical so KoboldCpp only reads what is new. Launch it with <code>--smartcache 6</code> so it keeps a separate cache for the chat while background checks run.
           </p>
-        </div>
+          <p>The line under each reply shows whether the cache was reused or the whole prompt was re-read.</p>
+        </More>
       </Section>
     </SettingsPage>
   )

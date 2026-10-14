@@ -7,13 +7,7 @@ import { confirmDialog } from '@/lib/store/useConfirmStore'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 
-/**
- * Deleted chats aren't actually gone — `DELETE /api/chats/:id` soft-deletes (sets `Chat.deletedAt`)
- * rather than cascading immediately, so a mistaken delete stays recoverable here until it's either
- * restored, purged by hand, or swept up by the server's own 30-day retention window
- * (`purgeExpiredTrash` in `server/app.ts`). This panel is the only UI for the other two: restore,
- * or purge right now instead of waiting out the window.
- */
+/** Deleted chats aren't actually gone — `DELETE /api/chats/:id` soft-deletes (sets `Chat.deletedAt`) rather than cascading immediately */
 export function TrashPanel({ onClose, onRestored }: { onClose: () => void; onRestored: (chatId: string) => void }) {
   const trashed = useApiQuery('chats', () => chatsApi.trash(), []) ?? []
   const characters = useApiQuery('characters', () => charactersApi.list(), []) ?? []

@@ -1,20 +1,7 @@
 import { forwardRef, useEffect, useRef, type ReactNode } from 'react'
 import { ChevronDown, Pencil } from 'lucide-react'
 
-/**
- * VN mode's dialogue box: one floating glass panel of a **fixed height**, carrying either the
- * character's line or — in `inline` input mode — the player's own, in the same frame.
- *
- * The height is fixed on purpose. The box used to grow with its content (`min-h` to `max-h-[40vh]`)
- * and had the composer, choices and a utility row all stacked inside it, so the scene it was
- * covering resized on every turn and the art never got to be the subject. Now the frame is a
- * constant, long replies scroll inside it, and everything that isn't dialogue lives outside it.
- *
- * The read/write swap is deliberately loud where it matters and invisible where it doesn't: the
- * nameplate identity, the accent rail down the left edge, and the caret all change; the frame,
- * its position and its height do not. That's what keeps "the same box is both people" legible
- * rather than confusing — you always know whose box it is, and nothing under it ever moves.
- */
+/** VN mode's dialogue box: one floating glass panel of a **fixed height**, carrying either the character's line or */
 
 export interface VNPlateColors {
   /** Nameplate text, set on the box's own glass. */
@@ -70,9 +57,7 @@ export const VNDialogueBox = forwardRef<HTMLDivElement, VNDialogueBoxProps>(func
   },
   bodyRef,
 ) {
-  // The caret belongs in the box the instant it becomes the player's — taking it over and then
-  // having to click it would defeat the whole point of the swap. Reached through the DOM rather
-  // than a `Composer` prop so the composer stays a plain slot this component knows nothing about.
+  // The caret belongs in the box the instant it becomes the player's
   const writeAreaRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (writing) writeAreaRef.current?.querySelector('textarea')?.focus()
@@ -93,11 +78,7 @@ export const VNDialogueBox = forwardRef<HTMLDivElement, VNDialogueBoxProps>(func
         </div>
       )}
 
-      {/* Whose box it is reads off the nameplate — avatar and name in read state, the persona in
-          accent with a pen glyph in write state. Write state adds a soft accent ring around the
-          whole frame, the ordinary "this field is live" signal, instead of a coloured bar down one
-          edge: at this size a hard stripe was the loudest thing on screen, next to art it was
-          supposed to be deferring to. */}
+      {/* Whose box it is reads off the nameplate — avatar and name in read state, the persona in accent with a pen glyph in write state. */}
       <div
         className={`vn-box vn-glass-solid relative overflow-hidden rounded-[22px] transition-shadow duration-200 ${
           writing ? 'ring-1 ring-accent/30' : ''
@@ -134,9 +115,7 @@ export const VNDialogueBox = forwardRef<HTMLDivElement, VNDialogueBoxProps>(func
           )}
         </div>
 
-        {/* The fixed frame. Write state takes the footer strip's height too (its own control row
-            sits there instead), so the outer box is the same size either way — see `.vn-box` in
-            globals.css. Nothing below this ever shifts. */}
+        {/* The fixed frame. */}
         <div className={`px-4 sm:px-6 ${writing ? 'vn-box-body-write' : 'vn-box-body'}`}>
           {writing ? (
             <div ref={writeAreaRef} className="h-full pb-2 pt-1">

@@ -2,8 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { Character, CharacterCardData } from '@/lib/characters/cardSpec'
 import type { WorldCard } from '@/lib/types'
 
-// `createChat` writes through `chatsApi`/`messagesApi` — stubbed so these tests only exercise its
-// own resolution logic (mode/assistOverrides), not the real HTTP layer.
+// `createChat` writes through `chatsApi`/`messagesApi`
 vi.mock('@/lib/api/client', () => ({
   chatsApi: {
     create: vi.fn(async (input: unknown) => ({ id: 'chat-1', createdAt: 0, updatedAt: 0, ...(input as object) })),

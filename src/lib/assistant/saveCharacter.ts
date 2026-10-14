@@ -1,17 +1,6 @@
 import type { GeneratedCharacter } from '@/lib/assistant/thread'
 
-/**
- * A generated character flattened into the shape `charactersApi.create` takes.
- *
- * The staged generator returns its stages as separate objects (`profile`, `bonds`, …) because the
- * character editor applies each to its own form fields. Saving straight from a thread has no form to
- * apply them to, so the same mapping happens here instead — kept as a pure function, and kept beside
- * the thread types rather than inline in the hook, because getting it wrong silently drops half of a
- * generated character and nothing would fail loudly.
- *
- * Mirrors `CharacterEditor`'s own `onGenerated` handler field for field; if that gains a stage, this
- * has to gain it too.
- */
+/** A generated character flattened into the shape `charactersApi.create` takes. */
 export function generatedToCharacterInput(generated: GeneratedCharacter): Record<string, unknown> {
   const { card, profile, bonds, outfits, characterBook } = generated
   return {

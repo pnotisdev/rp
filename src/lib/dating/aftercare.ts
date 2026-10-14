@@ -1,11 +1,7 @@
 import type { RelationshipDeltas } from '@/lib/dating/relationshipAssist'
 import type { CharacterNeed } from '@/lib/prompt/mindGuidance'
 
-// Aftercare: the window right after an intimate scene. An explicit intimacy action (or the "first
-// time together" milestone) opens a few-turn window during which the character is written as being
-// in the immediate aftermath. When it closes, the same per-turn judge that already runs on every
-// reply is asked one extra question about how those turns went, riding along at no extra model cost
-// (same trick as objective-task detection).
+// Aftercare: the window right after an intimate scene.
 
 /** How many of the character's own replies the window covers. Long enough to require sustaining something, short enough to still read as "after". */
 export const AFTERGLOW_TURNS = 4
@@ -63,8 +59,7 @@ export function isAfterglowActive(afterglow: Afterglow | undefined, charReplyCou
 
 const ZERO: RelationshipDeltas = { affection: 0, trust: 0, chemistry: 0, comfort: 0, respect: 0, curiosity: 0, tension: 0 }
 
-// `cold` is the sharpest of the three and the only one moving `tension` — a specific, memorable
-// hurt. `awkward` is close to nothing on purpose — fumbling the moment isn't a betrayal.
+// `cold` is the sharpest of the three and the only one moving `tension` — a specific, memorable hurt.
 const VERDICT_DELTAS: Record<AftercareVerdict, Partial<RelationshipDeltas>> = {
   tender: { affection: 2, trust: 3, comfort: 3, chemistry: 1 },
   awkward: { comfort: 1 },
@@ -123,19 +118,7 @@ const EARNED_SCENE_TURNS = 8
 /** Arousal at resolve below this means the scene ended without ever really arriving. */
 const EARNED_RESOLVE_AROUSAL = 60
 
-/**
- * Two things feed this, in order of how directly they bear on it.
- *
- * The scene itself comes first, when there's a record of one: how many turns it ran, how far the
- * meter actually got, and whether it moved through more than one stage of its scenario. That's a far
- * better read than the run-up, because it describes the thing the aftermath is the aftermath *of* —
- * a three-turn scene that resolved at the first opportunity leaves something different behind than a
- * dozen unhurried turns, regardless of how the warmth that led there accumulated.
- *
- * The run-up (`momentum.ts`'s own "deepening fast" bar) decides the cases the scene record leaves
- * genuinely ambiguous, and remains the whole answer for a window opened by a milestone with no
- * tracked scene behind it.
- */
+/** Two things feed this, in order of how directly they bear on it. */
 export function aftercarePaceContext(momentumAtStart: number | undefined, scene?: SceneResolveSnapshot): AftercarePace | undefined {
   if (scene) {
     if (scene.turns < RUSHED_SCENE_TURNS) return 'rushed'

@@ -13,21 +13,15 @@ import type {
   WorldInfoBook,
 } from '@/lib/types'
 import type { AssistantThread } from '@/lib/assistant/thread'
+import type { AgentTool } from '@/lib/assistant/tools'
+import type { ExtensionBundle, ExtensionRecord, ExtensionSource, Permission, SettingValue } from '@/lib/extensions/manifest'
+import type { LintFinding } from '@/lib/extensions/lint'
 import { toastError, toastSuccess, useToastStore } from '@/lib/store/useToastStore'
 
-// The local API server runs on the same machine, but a wedged Node process (or a very large
-// backup/restore payload) shouldn't be able to hang a call forever with no way out.
+// The local API server runs on the same machine
 const DEFAULT_TIMEOUT_MS = 15000
 
-/**
- * Every read/write in this file funnels through `request()`, and most callers either don't catch
- * its rejection at all (`useApiQuery`'s background refetches swallow it into `undefined`, silently)
- * or catch-and-toast only for the one action the user just took — so a dead local server used to be
- * completely invisible: generation still works (it talks to the model backend directly, never
- * through this server), but every save quietly failed with nothing on screen to say so. One sticky
- * toast per outage (not one per failed call — an outage spans many) closes that gap for every call
- * site at once, and clears itself the moment a request gets through again.
- */
+/** Every read/write in this file funnels through `request()` */
 let unreachableToastId: string | null = null
 
 function reportUnreachable(): void {
@@ -72,9 +66,7 @@ async function request<T>(
     if (controller.signal.aborted) {
       throw new Error(`${method} ${path} timed out after ${timeoutMs / 1000}s`)
     }
-    // Anything else `fetch` throws on a same-origin relative URL — connection refused, DNS,
-    // the dev server not running at all — means the server genuinely can't be reached, not just
-    // that it answered with an error (that's the `!res.ok` branch below, left alone).
+    // Anything else `fetch` throws on a same-origin relative URL
     reportUnreachable()
     throw e
   } finally {
@@ -84,15 +76,16 @@ async function request<T>(
   if (res.status === 404 && opts?.notFoundIsUndefined) return undefined as T
   if (!res.ok) {
     const text = await res.text().catch(() => '')
+    // Validation errors (4xx) carry a message meant for people; show just that.
+    const reason = res.status < 500 ? (() => { try { return (JSON.parse(text) as { error?: unknown } | null)?.error } catch { return null } })() : null
+    if (typeof reason === 'string' && reason) throw new Error(reason)
     throw new Error(`${method} ${path} failed (${res.status})${text ? `: ${text}` : ''}`)
   }
   if (res.status === 204) return undefined as T
   return (await res.json()) as T
 }
 
-// A local-server equivalent of Dexie's live-query: every mutating call below announces
-// which resource changed, and useApiQuery (src/lib/hooks/useApiQuery.ts) re-fetches
-// wherever that resource is being read — including the very same hook that just wrote it.
+// A local-server equivalent of Dexie's live-query
 type Listener = () => void
 const listeners = new Map<string, Set<Listener>>()
 
@@ -147,9 +140,7 @@ export const personasApi = makeResource<Persona>('personas', '/personas')
 export const assistantThreadsApi = makeResource<AssistantThread>('assistant-threads', '/assistant-threads')
 export const chatsApi = {
   ...makeResource<Chat>('chats', '/chats'),
-  // Soft delete — the chat moves to the trash (`trash`/`restore`/`purge` below) rather than being
-  // destroyed immediately. Nothing about it is actually touched, so this is always reversible
-  // until it's purged.
+  // Soft delete — the chat moves to the trash (`trash`/`restore`/`purge` below) rather than being destroyed immediately.
   async remove(id: string): Promise<void> {
     await request<void>('DELETE', `/chats/${id}`)
     invalidate('chats')
@@ -171,9 +162,7 @@ export const chatsApi = {
     invalidate('messages')
     invalidate('objectives')
   },
-  // Creates a new chat that branches off this one, carrying its relationship/gift/gallery
-  // state and a copy of the transcript up to (and including) `messageId` — or the whole
-  // transcript, if omitted.
+  // Creates a new chat that branches off this one, carrying its relationship/gift/gallery state and a copy of the transcript up to…
   async fork(id: string, messageId?: string): Promise<Chat> {
     const result = await request<Chat>('POST', `/chats/${id}/fork`, { messageId })
     invalidate('chats')
@@ -207,8 +196,7 @@ export const messagesApi = {
   },
 }
 
-// A full backup/restore inlines every avatar/sprite/background as base64 — on a
-// data-heavy install this can legitimately take much longer than the default timeout.
+// A full backup/restore inlines every avatar/sprite/background as base64
 const BACKUP_TIMEOUT_MS = 120000
 
 export const backupApi = {
@@ -229,6 +217,7 @@ export const backupApi = {
       'objectives',
       'relationship-events',
       'chat-facts',
+      'extensions',
     ]) {
       invalidate(resource)
     }
@@ -260,4 +249,149 @@ export const chatFactsApi = {
   listByChat(chatId: string): Promise<ChatFact[]> {
     return request<ChatFact[]>('GET', `/chats/${chatId}/chat-facts`)
   },
+}
+
+export interface ExtensionInstallResult {
+  record: ExtensionRecord
+  created: boolean
+  newPermissions: Permission[]
+  warnings: string[]
+}
+
+export interface ExtensionFileInfo {
+  path: string
+  size: number
+  mime: string
+}
+
+export interface ExtensionFileContent {
+  path: string
+  content: string
+  encoding: 'utf8' | 'base64'
+  mime: string
+}
+
+export interface ExtensionValidation {
+  ok: boolean
+  errors: string[]
+  warnings: string[]
+  lint: LintFinding[]
+}
+
+export interface McpSettingsView {
+  enabled: boolean
+  readOnly: boolean
+  token: string
+  apiPort: number
+  mcpPort: number
+  scriptPath: string
+}
+
+export interface WorkspaceConfig {
+  root: string
+  allowCommands: boolean
+}
+
+export interface MemoryNote {
+  id: string
+  text: string
+  createdAt: number
+}
+
+/** The tools the in-app Assistant can call (the library tools MCP agents get, workspace/web/memory tools, and connected servers). */
+export const agentApi = {
+  tools: () => request<AgentTool[]>('GET', '/agent/tools'),
+  /** `confirmed` is true once the user approved a risky call (an edit or a command). A picture the tool returns comes back in `images`. */
+  call: (name: string, args: Record<string, unknown>, allowWrites: boolean, confirmed = false) =>
+    request<{ text: string; isError: boolean; images?: string[] }>('POST', '/agent/call', { name, arguments: args, allowWrites, confirmed }, { timeoutMs: 180000 }),
+  saveImage: (path: string, dataUrl: string, confirmed: boolean) =>
+    request<{ text: string; isError: boolean }>('POST', '/agent/save-image', { path, dataUrl, allowWrites: true, confirmed }, { timeoutMs: 60000 }),
+  workspace: () => request<WorkspaceConfig>('GET', '/agent/workspace'),
+  setWorkspace: (config: WorkspaceConfig) => request<WorkspaceConfig>('PUT', '/agent/workspace', config),
+  memory: () => request<MemoryNote[]>('GET', '/agent/memory'),
+  addMemory: (text: string) => request<MemoryNote>('POST', '/agent/memory', { text }),
+  removeMemory: (id: string) => request<void>('DELETE', `/agent/memory/${id}`),
+}
+
+export interface McpServerView {
+  id: string
+  name: string
+  url: string
+  hasKey: boolean
+  tools: number | null
+}
+
+/** Other MCP servers whose tools the in-app Assistant can use. */
+export const mcpServersApi = {
+  list: () => request<McpServerView[]>('GET', '/mcp/servers'),
+  async add(input: { name: string; url: string; token?: string }): Promise<McpServerView> {
+    const result = await request<McpServerView>('POST', '/mcp/servers', input, { timeoutMs: 60000 })
+    invalidate('mcp-servers')
+    return result
+  },
+  async remove(id: string): Promise<void> {
+    await request<void>('DELETE', `/mcp/servers/${id}`)
+    invalidate('mcp-servers')
+  },
+}
+
+/** Agent access (MCP): the switch, read-only mode and the connection token. */
+export const mcpApi = {
+  get: () => request<McpSettingsView>('GET', '/mcp/settings'),
+  async update(patch: { enabled?: boolean; readOnly?: boolean }): Promise<McpSettingsView> {
+    const result = await request<McpSettingsView>('PUT', '/mcp/settings', patch)
+    invalidate('mcp')
+    return result
+  },
+  async rotateToken(): Promise<McpSettingsView> {
+    const result = await request<McpSettingsView>('POST', '/mcp/token', {})
+    invalidate('mcp')
+    return result
+  },
+}
+
+/** Extensions (`lib/extensions/`): installed bundles, their files, grants and scoped key-value data. */
+export const extensionsApi = {
+  list: () => request<ExtensionRecord[]>('GET', '/extensions'),
+  get: (id: string) => request<ExtensionRecord | undefined>('GET', `/extensions/${id}`, undefined, { notFoundIsUndefined: true }),
+  bundle: (id: string) => request<ExtensionBundle>('GET', `/extensions/${id}/bundle`),
+  files: (id: string) => request<ExtensionFileInfo[]>('GET', `/extensions/${id}/files`),
+  readFile: (id: string, path: string) => request<ExtensionFileContent>('GET', `/extensions/${id}/file?path=${encodeURIComponent(path)}`),
+  lint: (id: string) => request<LintFinding[]>('GET', `/extensions/${id}/lint`),
+  validate: (body: unknown) => request<ExtensionValidation>('POST', '/extensions/validate', body),
+  async install(bundle: unknown, source: ExtensionSource = 'local'): Promise<ExtensionInstallResult> {
+    const result = await request<ExtensionInstallResult>('POST', `/extensions/install?source=${source}`, bundle, { timeoutMs: 60000 })
+    invalidate('extensions')
+    return result
+  },
+  async setState(id: string, patch: { enabled?: boolean; grants?: Permission[]; settings?: Record<string, SettingValue> }): Promise<ExtensionRecord> {
+    const result = await request<ExtensionRecord>('PUT', `/extensions/${id}`, patch)
+    invalidate('extensions')
+    return result
+  },
+  async remove(id: string): Promise<void> {
+    await request<void>('DELETE', `/extensions/${id}`)
+    invalidate('extensions')
+  },
+  async writeFile(id: string, path: string, content: string): Promise<ExtensionRecord> {
+    const result = await request<ExtensionRecord>('PUT', `/extensions/${id}/file`, { path, content })
+    invalidate('extensions')
+    return result
+  },
+  async deleteFile(id: string, path: string): Promise<ExtensionRecord> {
+    const result = await request<ExtensionRecord>('DELETE', `/extensions/${id}/file?path=${encodeURIComponent(path)}`)
+    invalidate('extensions')
+    return result
+  },
+  async setManifest(id: string, manifest: unknown): Promise<ExtensionRecord> {
+    const result = await request<ExtensionRecord>('PUT', `/extensions/${id}/manifest`, manifest)
+    invalidate('extensions')
+    return result
+  },
+  kvList: (id: string, scope: string, scopeId: string) =>
+    request<Record<string, unknown>>('GET', `/extensions/${id}/data?scope=${scope}&scopeId=${encodeURIComponent(scopeId)}`),
+  kvSet: (id: string, scope: string, scopeId: string, key: string, value: unknown) =>
+    request<void>('PUT', `/extensions/${id}/data`, { scope, scopeId, key, value }),
+  kvRemove: (id: string, scope: string, scopeId: string, key: string) =>
+    request<void>('DELETE', `/extensions/${id}/data?scope=${scope}&scopeId=${encodeURIComponent(scopeId)}&key=${encodeURIComponent(key)}`),
 }

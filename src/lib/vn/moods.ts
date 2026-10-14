@@ -1,9 +1,4 @@
-/**
- * Ambient *scene* moods — the emotional weather of a moment, distinct from a character's
- * `expression` (a face) and a `SceneFlag` (a milestone event). The model tags each VN reply with
- * the closest one (when a world has music for it), and it selects the background track. A small,
- * evocative set: enough to cover the emotional range without asking the model to split hairs.
- */
+/** Ambient *scene* moods — the emotional weather of a moment, distinct from a character's `expression` (a face) and a `SceneFlag` (a milestone event). */
 export interface SceneMood {
   id: string
   label: string

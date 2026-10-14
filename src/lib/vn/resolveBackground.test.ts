@@ -46,8 +46,7 @@ describe('resolveSceneBackground', () => {
     expect(out).toMatchObject({ id: 'library', source: 'location' })
   })
 
-  // The bug this whole module exists for: an opening greeting carries no scene tag at all, so
-  // before this the stage rendered an unplaced void on a chat's first messages.
+  // The bug this whole module exists for
   it('reads the narration itself when there is no tag, event or established location', () => {
     const out = resolveSceneBackground({
       chat: chat(),
@@ -93,8 +92,7 @@ describe('resolveSceneBackground', () => {
     expect(out).toEqual({ source: 'none' })
   })
 
-  // `getUnlockedBackgroundIds` narrows to a world's own uploaded ids, but the built-in locations are
-  // still real places to recognise in prose — they just render as lighting rather than a photo.
+  // `getUnlockedBackgroundIds` narrows to a world's own uploaded ids
   it('still recognises a built-in location in a world that has uploaded art of its own', () => {
     const out = resolveSceneBackground({
       chat: chat(),

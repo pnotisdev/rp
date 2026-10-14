@@ -1,6 +1,7 @@
 import { charactersApi, worldsApi } from '@/lib/api/client'
 import { validateScenarioSource } from '@/lib/dating/scenarios'
 import { fileToDataUrl } from './importExport'
+import { downloadBlob, safeFilename } from '@/lib/io/transfer'
 import type { Character, CharacterCardData, GalleryEntry, Lorebook, RelationshipStarter, SocialConnection } from './cardSpec'
 import type { CustomSceneFlag, GiftItem, ItemDef, WorldCard } from '@/lib/types'
 import type { CustomExpression } from '@/lib/vn/expressions'
@@ -83,11 +84,7 @@ async function mapToDataUrls(map: Record<string, string> | undefined): Promise<R
   return result
 }
 
-/**
- * Bundles a character — and, if given, its bound world — into one self-contained, portable
- * pack, inlining every server-hosted image (avatar, sprites, gallery CGs, backgrounds) as a
- * data URL. Unlike the bare card export, nothing that makes this a VN character gets dropped.
- */
+/** Bundles a character — and, if given, its bound world */
 export async function buildCharacterPack(character: Character, world?: WorldCard): Promise<CharacterPackV1> {
   const [avatarDataUrl, sprites, gallery] = await Promise.all([
     urlToDataUrl(character.avatarDataUrl),
@@ -161,18 +158,11 @@ export async function buildCharacterPack(character: Character, world?: WorldCard
 }
 
 export function characterPackFilename(name: string): string {
-  const safe = (name || 'character').replace(/[^a-z0-9-_ ]/gi, '').trim() || 'character'
-  return `${safe}.rppack.json`
+  return `${safeFilename(name, 'character')}.rppack.json`
 }
 
 export function downloadCharacterPack(pack: CharacterPackV1) {
-  const blob = new Blob([JSON.stringify(pack, null, 2)], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = characterPackFilename(pack.character.card.name)
-  a.click()
-  URL.revokeObjectURL(url)
+  downloadBlob(new Blob([JSON.stringify(pack, null, 2)], { type: 'application/json' }), characterPackFilename(pack.character.card.name))
 }
 
 export async function parseCharacterPackFile(file: File): Promise<CharacterPackV1> {
@@ -189,14 +179,7 @@ export async function parseCharacterPackFile(file: File): Promise<CharacterPackV
   return raw as CharacterPackV1
 }
 
-/**
- * Recreates a character — and its bundled world, if present — from a pack, as brand-new records.
- *
- * `rejectedScenarios` names any scene shape that failed validation and was left out, so the caller
- * can say so. A malformed scenario is still never loaded (it would strand a live scene), but dropping
- * one in silence is its own failure: the author sees an import that reported success and a world that
- * quietly cannot run the scene they wrote.
- */
+/** Recreates a character — and its bundled world, if present — from a pack, as brand-new records. */
 export async function importCharacterPack(
   pack: CharacterPackV1,
 ): Promise<{ character: Character; world?: WorldCard; rejectedScenarios: string[] }> {
@@ -227,8 +210,7 @@ export async function importCharacterPack(
       gifts: pack.world.gifts,
       items: pack.world.items,
       customSceneFlags: pack.world.customSceneFlags,
-      // Rejected wholesale rather than loaded broken — see `dating/scenarios.ts`'s validator. What
-      // was rejected, and why, is returned above rather than swallowed here.
+      // Rejected wholesale rather than loaded broken — see `dating/scenarios.ts`'s validator.
       scenarios,
       relationshipThresholds: pack.world.relationshipThresholds,
     })

@@ -9,19 +9,7 @@ const CROSSFADE_MS = 1400
 const STEP_MS = 40
 const DUCK_FACTOR = 0.22
 
-/**
- * Background music for a scene. Renders nothing visible — a pair of looping `<audio>`
- * elements that crossfade whenever the resolved track changes (the model tags a new mood, the
- * scene moves to a location with its own track, the chat switches worlds). Silent and inert until
- * the user raises `bgmVolume` above 0 in Settings — dragging that slider is itself the user
- * gesture that unlocks browser audio. Drops to a low level (not silent) while `useAudioDuckStore`
- * is ducked (a line being read aloud).
- *
- * The fade is driven by a wall-clock `setInterval` rather than `requestAnimationFrame`: rAF is
- * paused outright in a background tab, which would leave a crossfade frozen half-done; a timer
- * keeps ticking (throttled, but ticking) and each step recomputes the volume from real elapsed
- * time, so the fade still lands on target in ~1.4s even if the steps are coarse.
- */
+/** Background music for a scene. */
 export function BgmPlayer({ world, scene }: { world?: WorldCard; scene?: SceneTag }) {
   const bgmVolume = useSettingsStore((s) => s.bgmVolume)
   const ducked = useAudioDuckStore((s) => s.ducked)
@@ -114,10 +102,7 @@ function absolute(url: string): string {
   }
 }
 
-/**
- * `.play()` rejects until the page has had a user gesture. Retry once on the next global
- * pointer/key event — by which point the browser has "unlocked" audio for the session.
- */
+/** `.play()` rejects until the page has had a user gesture. */
 function playWithUnlock(el: HTMLAudioElement) {
   el.play().catch(() => {
     const retry = () => {

@@ -6,17 +6,7 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        sans: [
-          'Inter Variable',
-          'ui-sans-serif',
-          'system-ui',
-          '-apple-system',
-          'Segoe UI',
-          'Roboto',
-          'Helvetica',
-          'Arial',
-          'sans-serif',
-        ],
+        sans: ['var(--font-ui)'],
       },
       colors: {
         bg: 'rgb(var(--c-bg) / <alpha-value>)',
@@ -35,8 +25,23 @@ export default {
         romance: 'rgb(var(--c-romance) / <alpha-value>)',
         'romance-text': 'rgb(var(--c-romance-text) / <alpha-value>)',
       },
+      // Every rounded-* scales from the user's roundness setting (6px by default; pills/avatars use rounded-full).
       borderRadius: {
+        sm: 'calc(var(--radius) * 0.5)',
         DEFAULT: 'var(--radius)',
+        md: 'calc(var(--radius) * 0.8)',
+        lg: 'var(--radius)',
+        xl: 'calc(var(--radius) * 1.35)',
+        '2xl': 'calc(var(--radius) * 1.7)',
+        '3xl': 'calc(var(--radius) * 2)',
+      },
+      boxShadow: {
+        sm: 'none',
+        DEFAULT: 'none',
+        md: 'none',
+        lg: 'none',
+        xl: 'none',
+        '2xl': 'none',
       },
       fontSize: {
         base: 'calc(1rem * var(--font-scale, 1))',

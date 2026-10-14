@@ -6,6 +6,10 @@ import type { Persona } from '@/lib/types'
 import { fileToDataUrl } from '@/lib/characters/importExport'
 import { TextAreaField, TextField } from '@/components/ui/Field'
 import { Button } from '@/components/ui/Button'
+import { FileButton } from '@/components/ui/FileButton'
+import { DropZone } from '@/components/ui/DropZone'
+import { importAndReport } from '@/lib/io/importFiles'
+import { downloadJsonFile, toEnvelope } from '@/lib/io/transfer'
 import { EditorShell } from '@/components/ui/EditorShell'
 import { ViewShell } from '@/components/ui/ViewShell'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -20,7 +24,10 @@ export function PersonasView() {
     return <PersonaEditor persona={editing === 'new' ? null : editing} onDone={() => setEditing(null)} />
   }
 
+  const importPersonas = (files: File[]) => importAndReport('persona', files, (data) => personasApi.create(data))
+
   return (
+    <DropZone onFiles={importPersonas} label="Drop persona files to import">
     <ViewShell
       title="Personas"
       description={
@@ -30,9 +37,14 @@ export function PersonasView() {
         </>
       }
       actions={
-        <Button variant="primary" onClick={() => setEditing('new')}>
-          New persona
-        </Button>
+        <>
+          <FileButton onPick={(f) => importPersonas(Array.from(f))} accept=".json" multiple>
+            Import
+          </FileButton>
+          <Button variant="primary" onClick={() => setEditing('new')}>
+            New persona
+          </Button>
+        </>
       }
     >
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-5 lg:grid-cols-4">
@@ -40,7 +52,7 @@ export function PersonasView() {
           <button
             key={p.id}
             onClick={() => setEditing(p)}
-            className="themed-shadow rounded-2xl bg-bg-elevated p-4 text-left transition-transform hover:-translate-y-0.5"
+            className="rounded-lg border border-border bg-bg-elevated p-4 text-left transition-colors hover:bg-bg-sunken"
           >
             {p.avatarDataUrl ? (
               <img src={p.avatarDataUrl} alt="" className="mx-auto mb-2 h-20 w-20 rounded-full object-cover" />
@@ -67,6 +79,7 @@ export function PersonasView() {
         )}
       </div>
     </ViewShell>
+    </DropZone>
   )
 }
 
@@ -109,6 +122,7 @@ function PersonaEditor({ persona, onDone }: { persona: Persona | null; onDone: (
       backLabel="Personas"
       eyebrow={persona ? 'Persona' : 'New persona'}
       title={name || 'Unnamed persona'}
+      headerActions={persona && <Button onClick={() => downloadJsonFile(toEnvelope('persona', persona), `${persona.name} persona`)}>Export</Button>}
       footer={
         <>
           {persona ? (

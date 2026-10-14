@@ -1,11 +1,4 @@
-/**
- * Section 11's "image/asset generation backends" — the same "one interface, many providers" shape
- * as `ChatBackend`/`ttsProviders.ts`, this time for generating an image into a slot (character
- * avatar, VN sprite, world background, gallery CG) that today only accepts an upload. Deliberately
- * minimal: one call to generate, one to list what models/checkpoints are available (best-effort —
- * a backend with no such introspection, or one that's unreachable, returns an empty list rather
- * than throwing, since the picker just falls back to a free-text field in that case).
- */
+/** Section 11's "image/asset generation backends" */
 export interface ImageGenerateParams {
   prompt: string
   negativePrompt?: string

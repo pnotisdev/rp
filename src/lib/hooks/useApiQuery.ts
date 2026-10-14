@@ -1,11 +1,7 @@
 import { useEffect, useState } from 'react'
 import { subscribe } from '@/lib/api/client'
 
-/**
- * `useLiveQuery`'s replacement now that data lives on the server instead of IndexedDB: fetches on
- * mount/dep-change, re-fetches on invalidation broadcasts, and coalesces simultaneous identical
- * requests (e.g. several components listing the same resource on first paint) into one round trip.
- */
+/** `useLiveQuery`'s replacement now that data lives on the server instead of IndexedDB */
 
 /** Entries exist only while their fetch is in flight, so this never serves stale data. */
 const inFlight = new Map<string, Promise<unknown>>()

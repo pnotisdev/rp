@@ -2,10 +2,7 @@ import { slugifyId } from '@/lib/text/slugify'
 import { BASE_OUTFIT_ID, spriteKey } from '@/lib/vn/outfits'
 import { pickVariant } from '@/lib/vn/pickVariant'
 
-/**
- * The default expression set, same-family fallback chains for missing art, and sprite resolution
- * (exact tag -> fallback -> neutral -> avatar, outfit-aware) used by VN mode's reactive portraits.
- */
+/** The default expression set, same-family fallback chains for missing art */
 
 export interface ExpressionOption {
   id: string

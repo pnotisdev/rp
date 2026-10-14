@@ -5,10 +5,7 @@ import { ASSIST_TIMEOUT_MS, generateWithTimeout, trimCodeFence } from './generat
 import { getInstructTemplate } from '../prompt/instructTemplates'
 
 describe('generateWithTimeout', () => {
-  // The live repro this exists for: a provider response that simply never resolves (confirmed
-  // against a rate-limited free OpenRouter model) used to leave the awaiting caller stuck forever
-  // — a button reading "Generating…"/"Thinking…" with no error and no way to retry, because the
-  // awaited promise never settled either way.
+  // The live repro this exists for: a provider response that simply never resolves (confirmed against a rate-limited free OpenRouter…
   beforeEach(() => {
     vi.useFakeTimers()
   })
@@ -34,9 +31,7 @@ describe('generateWithTimeout', () => {
     } as unknown as ChatBackend
 
     const pending = generateWithTimeout(client, { prompt: 'x' } as never, 'Test call')
-    // Attach the rejection assertion before advancing any timers, so the promise never has a tick
-    // where it's rejected but nothing is listening yet (fake timers otherwise make that window
-    // land as a real unhandled-rejection warning even though the test itself is correct).
+    // Attach the rejection assertion before advancing any timers
     const assertion = expect(pending).rejects.toThrow(/Test call timed out after 45s/)
 
     // Nothing has happened yet — still well within the timeout window.
@@ -60,19 +55,13 @@ describe('generateWithTimeout', () => {
   it('clears its internal timer on a normal resolution, so it does not fire after the fact', async () => {
     const client = { generate: async () => 'ok' } as unknown as ChatBackend
     await generateWithTimeout(client, { prompt: 'x' } as never, 'Test call')
-    // If the timer weren't cleared, this would eventually call `controller.abort()` against a
-    // long-settled controller — harmless either way, but asserting no pending timers confirms the
-    // `finally`'s `clearTimeout` actually ran.
+    // If the timer weren't cleared, this would eventually call `controller.abort()` against a long-settled controller
     expect(vi.getTimerCount()).toBe(0)
   })
 })
 
 describe('generateWithTimeout prompt shaping', () => {
-  // rp#7 + rp#6: a background judge call (relationship tracker, objectives, choices, director
-  // pick, rapport, scene vision) used to send a flat, unwrapped prompt with a small fixed
-  // max_length — no cue that it's the model's turn to speak (Gemma answers with EOS instead of
-  // JSON) and no headroom for a thinking model's hidden reasoning (truncated before the visible
-  // answer). `shaping` fixes both, but only when a caller actually opts in.
+  // rp#7 + rp#6: a background judge call (relationship tracker, objectives, choices, director pick, rapport, scene vision) used to…
   function captureClient() {
     let sent: GenerateRequest | undefined
     const client = {

@@ -5,8 +5,7 @@ import { SCENE_FLAGS } from './stage'
 import { MOOD_VOCAB } from '@/lib/prompt/mindGuidance'
 
 describe('getItemCatalog', () => {
-  // The bug this catalog exists to fix: with no default, the Items section, the Bag panel and the
-  // whole ItemEffect engine were invisible on a fresh install.
+  // The bug this catalog exists to fix: with no default, the Items section, the Bag panel and the whole ItemEffect engine were…
   it('falls back to the built-in catalog for a world with no items of its own', () => {
     expect(getItemCatalog(undefined)).toBe(DEFAULT_ITEM_CATALOG)
     expect(getItemCatalog({ items: [] } as unknown as WorldCard)).toBe(DEFAULT_ITEM_CATALOG)
@@ -74,7 +73,7 @@ describe('itemEffectSummary', () => {
   })
 })
 
-// §9.1 of CATALOG_IDEAS.md. Most things a consumable naturally wants to do are two-part.
+// §9.1 of docs/design/catalog-ideas.md. Most things a consumable naturally wants to do are two-part.
 describe('multi effects', () => {
   it('reads both halves of a two-part item in one line', () => {
     expect(itemEffectSummary(itemById('long-walk')!)).toBe('-6 tension, +3 comfort when used')

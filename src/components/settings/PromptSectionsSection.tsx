@@ -15,13 +15,7 @@ const SECTION_DESCRIPTIONS: Record<PromptSectionId, string> = {
 
 const SECTION_ORDER: PromptSectionId[] = ['system', 'description', 'world', 'persona', 'participants', 'summary', 'examples']
 
-/**
- * Section 13's instruct-template-manager part (c): `builder.ts`'s fixed prompt sections were all
- * unconditionally on (`includeExamples` existed but nothing ever set it) — this exposes each as a
- * toggle. Reordering isn't exposed here, deliberately — see `builder.ts`'s own note on why several
- * of these are order-coupled to world-info/author-note placement in ways a flat drag-and-drop
- * would silently break.
- */
+/** Section 13's instruct-template-manager part (c) */
 export function PromptSectionsSection() {
   const promptSections = useSettingsStore((s) => s.promptSections)
   const setPromptSectionEnabled = useSettingsStore((s) => s.setPromptSectionEnabled)

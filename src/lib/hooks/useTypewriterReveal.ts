@@ -1,12 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 
-/**
- * Reveals `text` one character at a time, `speedMs` per character — VN mode's ADV-style typewriter
- * effect for the dialogue box. `active: false` or `speedMs <= 0` shows the full text immediately;
- * the caller passes `speedMs: 0` for `reducedMotion`, same as every other animation in the app.
- * Restarts from scratch whenever `text`, `active`, or `speedMs` changes — a fresh line (a swipe, a
- * new reply finishing) always types out again rather than picking up mid-reveal.
- */
+/** Reveals `text` one character at a time, `speedMs` per character — VN mode's ADV-style typewriter effect for the dialogue box. */
 export function useTypewriterReveal(text: string, speedMs: number, active: boolean) {
   const [revealedLength, setRevealedLength] = useState(active && speedMs > 0 ? 0 : text.length)
   const skipRef = useRef(false)

@@ -1,13 +1,4 @@
-/**
- * Recognising the two things the assistant can *make* rather than just answer: a roleplay character,
- * and a long-form story.
- *
- * Deliberately lexical and deliberately advisory. A classifier call would cost a round trip on every
- * message to decide something the player already knows, and getting it wrong is worse than not
- * asking: silently turning "what makes a good elf character?" into a 5-stage generation run is a
- * confusing waste, while missing a real request costs one button press. So this only ever *offers*
- * the producer, and plain chat stays plain.
- */
+/** Recognising the two things the assistant can *make* rather than just answer: a roleplay character, and a long-form story. */
 
 export type ProducerKind = 'character' | 'story'
 
@@ -28,8 +19,7 @@ const CHARACTER_PATTERNS = [
 ]
 
 const STORY_PATTERNS = [
-  // "chapters" is one of the object nouns rather than a pattern of its own: standalone it matches
-  // "I like stories with chapters", which is conversation, not a commission.
+  // "chapters" is one of the object nouns rather than a pattern of its own
   new RegExp(
     String.raw`\b${MAKE}\b[^.?!]{0,80}?\b(?:story|novel|novella|book|fanfic|fanfiction|tale|saga|screenplay|chapters?)\b`,
     'i',
@@ -38,18 +28,11 @@ const STORY_PATTERNS = [
   /\b(?:full|complete|whole|entire|long)[- ](?:story|novel|book)\b/i,
 ]
 
-/**
- * What this message is asking to have made, or `undefined` for ordinary conversation.
- *
- * A message matching both reads as a story, since "write a story about a 3000 year old elf" wants
- * prose with an elf in it, not a character card.
- */
+/** What this message is asking to have made, or `undefined` for ordinary conversation. */
 export function detectProducer(text: string): ProducerKind | undefined {
   const trimmed = text.trim()
   if (!trimmed) return undefined
-  // Questions *about* the subject aren't requests to produce one: "what makes a good character?",
-  // "how would you write a story like that?". Checked before the patterns, since several of them
-  // would otherwise match a question containing the verb.
+  // Questions *about* the subject aren't requests to produce one: "what makes a good character?", "how would you write a story like that?".
   if (
     /^(?:what|which|why|is it|are there|do you think|can you explain|tell me about)\b/i.test(trimmed) ||
     /^how\s+(?:come|would|do|does|did|can|could|should|much|many)\b/i.test(trimmed)

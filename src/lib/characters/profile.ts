@@ -1,12 +1,8 @@
 import type { BehavioralRule, Character, VoiceFingerprint } from './cardSpec'
 
-/**
- * Builds the "Life beyond this scene" and voice-fingerprint notes folded into a character's
- * identity block in the prompt.
- */
+/** Builds the "Life beyond this scene" and voice-fingerprint notes folded into a character's identity block in the prompt. */
 
-// Caps for free-typed profile lists so they can't grow unbounded. `boundaries` is left uncapped
-// since dropping a stated hard limit for being "too many" would be a content-safety risk.
+// Caps for free-typed profile lists so they can't grow unbounded.
 const MAX_LIKES = 8
 const MAX_GOALS = 5
 const MAX_LOCATIONS = 5
@@ -73,8 +69,7 @@ function buildVoiceFingerprintReminder(fingerprint: VoiceFingerprint | undefined
   if (!fingerprint) return undefined
   const catchphrase = fingerprint.catchphrases?.[0]?.trim()
   const tic = fingerprint.verbalTics?.[0]?.trim()
-  // The full voice block immediately above already carries the register. Repeat it only when it
-  // is the sole available signal; otherwise the catchphrase/tic reminder is enough.
+  // The full voice block immediately above already carries the register.
   const register = !catchphrase && !tic ? (fingerprint.dialectNotes?.trim() || fingerprint.sentenceRhythm?.trim())?.replace(/\.+$/, '') : undefined
   const bits: string[] = []
   if (catchphrase) bits.push(`reach for "${catchphrase}" again when it fits`)

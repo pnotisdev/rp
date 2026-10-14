@@ -1,8 +1,4 @@
-/**
- * Core persisted data model: chats, characters' relationship state, world/lorebook content,
- * messages, and the smaller supporting types (gifts, items, scenes, regex scripts, etc.) that
- * make up what gets stored to and read from the SQLite-backed store.
- */
+/** Core persisted data model: chats, characters' relationship state, world/lorebook content, messages */
 
 import type { Lorebook } from '@/lib/characters/cardSpec'
 import type { ChatMessage } from '@/lib/prompt/builder'
@@ -20,6 +16,7 @@ import type { IntimacyDetailLevel } from '@/lib/store/useSettingsStore'
 import type { IntimacyScene } from '@/lib/dating/intimacyScene'
 import type { RecentRebuff } from '@/lib/dating/rebuff'
 import type { GiftLogEntry, ReciprocityCue } from '@/lib/dating/gifts'
+import type { DriveState } from '@/lib/persona/drive'
 
 export interface Persona {
   id: string
@@ -118,9 +115,7 @@ export interface RelationshipTrack {
   relationshipStats?: Partial<Record<RelationshipDimension, number>>
   relationshipStage?: RelationshipStage
   commitmentStatus?: CommitmentStatus
-  /** Day-of-year (world/calendar.ts) `commitmentStatus` first moved off `'none'` — the
-   *  relationship's anniversary. Stamped once, never overwritten by a later tier change (marriage
-   *  doesn't reset it), so it stays "the day we got together," not "the day we last leveled up." */
+  /** Day-of-year (world/calendar.ts) `commitmentStatus` first moved off `'none'` — the relationship's anniversary. */
   commitmentStartedDay?: number
   /** `null` clears it; `undefined` is dropped by `JSON.stringify` and won't overwrite a stored value. */
   relationshipWarning?: RelationshipWarning | null
@@ -166,11 +161,7 @@ export interface RelationshipTrack {
   reciprocityCue?: ReciprocityCue | null
 }
 
-/**
- * Group-chat turn policy — who replies next. `manual`: the Composer's "reply as" picker decides.
- * `round_robin`: cycles the primary + every participant in order. `director`: a judge call picks
- * who'd respond. `mention`: an `@Name` routes to them, else falls back to the primary.
- */
+/** Group-chat turn policy — who replies next. `manual`: the Composer's "reply as" picker decides. */
 export type ScenePolicy = 'manual' | 'round_robin' | 'director' | 'mention'
 
 export interface Scene {
@@ -180,10 +171,7 @@ export interface Scene {
   turnPolicy: ScenePolicy
   /** Round-robin bookkeeping: index into `[primaryId, ...participantIds]`. Read defensively (clamped/modulo) since the roster can shrink. */
   roundRobinIndex?: number
-  /** Per-chat override of the shared `WorldCard` clock's time-of-day, so a chat that has narrated
-   *  its way to "lunch" or "that night" isn't prompted with the world clock's frozen phase. Set
-   *  manually in the Scene panel or auto-detected from the player's narration; `null`/unset falls
-   *  back to the world clock. Day-of-week still comes from the world clock. */
+  /** Per-chat override of the shared `WorldCard` clock's time-of-day */
   timePhase?: DayPhase | null
 }
 
@@ -245,12 +233,7 @@ export type ItemEffect =
   | { kind: 'currency'; amount: number }
   /** Sets the character's current mood (food, a quiet walk, a warm can of tea). Replaces whatever read was there. */
   | { kind: 'mood'; mood: CharacterMood }
-  /**
-   * Several of the above at once, applied in order. Most things a consumable naturally wants to do
-   * are two-part — a long walk home takes the tension out *and* leaves you closer — and modelling
-   * that as one dimension was the reason half the item catalog read as flatter than it is.
-   * Deliberately not recursive in practice: nest one level and stop.
-   */
+  /** Several of the above at once, applied in order. */
   | { kind: 'multi'; effects: ItemEffect[] }
 
 export interface ItemDef {
@@ -286,10 +269,7 @@ export interface DateEventCard {
   startedAt?: number
   /** 10b's hidden stakes — drafted once from the character's card when a `date` starts (never for `hangout`), never shown to the player. Fed to `assessDateOutcome` at the end. Best-effort: may stay unset if a card's too thin or the draft call fails. */
   hiddenAgenda?: string
-  /** True for a world-triggered scene (`world/triggers.ts`'s `start_scene` action) — the player
-   *  didn't choose to spend a day's energy on it, so `startDateEvent` skips the energy check/spend
-   *  entirely for a `free` card rather than risk it silently failing to fire, or costing an action
-   *  the player never spent. */
+  /** True for a world-triggered scene (`world/triggers.ts`'s `start_scene` action) */
   free?: boolean
 }
 
@@ -400,11 +380,7 @@ export interface Chat {
   momentum?: number
   plans?: CharacterPlan[]
   firstIntimateSceneAt?: number
-  /**
-   * The following are the primary character's own copies of the same-named `RelationshipTrack`
-   * fields, kept as top-level `Chat` fields for backward compatibility with chats that predate
-   * multi-character tracking. See `RelationshipTrack` and `getRelationshipTrack`.
-   */
+  /** The following are the primary character's own copies of the same-named `RelationshipTrack` fields, kept as top-level `Chat`… */
   afterglow?: Afterglow | null
   initiativeBalance?: number
   recentRebuff?: RecentRebuff | null
@@ -430,28 +406,19 @@ export interface Chat {
   parentChatId?: string
   /** The message (in the parent chat) this fork branched off from. */
   forkedFromMessageId?: string
-  /** Display-only "play style" label picked in `NewChatDialog` (defaults to the bound world's own
-   *  template, editable independently) — decouples "how I play this chat" from "did I bind a
-   *  world," per `WORLD_TEMPLATES`. Purely a label: it seeds `assistOverrides` once at creation
-   *  (`assistOverridesForTemplate`) but is never live-recomputed from it afterward. */
+  /** Display-only "play style" label picked in `NewChatDialog` (defaults to the bound world's own template, editable independently) */
   mode?: WorldTemplateId
   /** Per-chat overrides for the global relationship-tracking/choice-suggestion toggles (Settings → Generation); unset falls back to the global default. Seeded once from the bound world's template at chat creation, not live-recomputed later. */
   assistOverrides?: {
     autoTrackRelationship?: boolean
     autoSuggestChoices?: boolean
-    /** Same fallback; seeded from the bound world's template (Visual Novel seeds `'auto'`), editable
-     *  afterward from `RelationshipPanel`. `'auto'` resolves live in `ChatWindow` — VN mode only
-     *  once the character has sprites and the world has scene art (`isVnReady`), never a blank void. */
+    /** Same fallback; seeded from the bound world's template (Visual Novel seeds `'auto'`), editable afterward from `RelationshipPanel`. */
     visualNovelMode?: boolean | 'auto'
     /** Same fallback as the two above, over Settings → Generation's global "Slow-burn pacing". */
     slowBurnPacing?: boolean
-    /** A `SystemPromptPreset.id` (`src/lib/prompt/systemPrompts.ts`) — wins over the global system
-     *  prompt but still loses to the character's own `system_prompt`, resolved in `useChatSession`'s
-     *  `buildPrompt` call. Unset means "inherit the global default", same as every override above. */
+    /** A `SystemPromptPreset.id` (`src/lib/prompt/systemPrompts.ts`) */
     systemPromptId?: string
-    /** Whether intent chips (Flirt/Tease/Open up/…) offer themselves above the composer. Unset
-     *  falls back to whether relationship tracking is active for this chat — the same condition
-     *  `ChatWindow` already gated them on before this existed. */
+    /** Whether intent chips (Flirt/Tease/Open up/…) offer themselves above the composer. */
     showIntentChips?: boolean
     /** Whether the "Start a date or event" toolbar button shows at all. Unset means shown — only
      *  Freeform/Slice-of-Life (whose own blurbs say "no romance mechanics") seed this off. */
@@ -459,9 +426,11 @@ export interface Chat {
   }
   /** 10f's proactive outreach bookkeeping — written every world-tick evaluation regardless of outcome, to avoid re-rolling on every app reopen. */
   lastOutreachCheckedAt?: number
+  /** Live persona engine state per drive-enabled character id (persona/drive.ts). */
+  driveStates?: Record<string, DriveState>
   /** True once the world tick has inserted an unprompted message the player hasn't seen yet. Cleared when the chat is opened. */
   hasUnreadOutreach?: boolean
-  /** Keeps a chat at the top of `ChatsPanel` regardless of `updatedAt` — the chat-level analog of `StoredMessage.pinned`. */
+  /** Keeps a chat at the top of `ChatList` regardless of `updatedAt` — the chat-level analog of `StoredMessage.pinned`. */
   pinned?: boolean
   /** Soft-delete timestamp. `GET /api/chats` excludes it, `GET /api/chats/trash` returns only it. Purges for real (`purgeChat` in `server/app.ts`) on request or after `TRASH_RETENTION_MS`. Restoring clears this back to unset. */
   deletedAt?: number
@@ -489,15 +458,11 @@ export interface WorldCard {
   avatarDataUrl?: string
   /** Scene art keyed by background id (`src/lib/vn/backgrounds.ts`) — falls back to a placeholder gradient when missing. */
   backgrounds?: Record<string, string>
-  /** Optional night-lighting variant of `backgrounds`, same keys — `VNStage` uses this instead of
-   *  `backgrounds` whenever `calendar.ts`'s `isNightPhase(currentPhaseIndex)` is true and a variant
-   *  exists for the current background id; missing keys just fall back to the day art. */
+  /** Optional night-lighting variant of `backgrounds`, same keys */
   backgroundsNight?: Record<string, string>
   /** Minimum affection required before a tagged background can be selected/displayed. */
   backgroundUnlocks?: Record<string, number>
-  /** Author-picked opening shot — `VNStage` falls back to this whenever a scene has no valid
-   *  background tag of its own (no model connected, the model omitted `<<scene:>>`, or it picked
-   *  a still-locked one), so VN mode never opens on a bare placeholder gradient. */
+  /** Author-picked opening shot — `VNStage` falls back to this whenever a scene has no valid background tag of its own (no model… */
   defaultBackgroundId?: string
   /** World-authored scene locations beyond the 12 built-ins — see `CustomBackground`. */
   customBackgrounds?: CustomBackground[]

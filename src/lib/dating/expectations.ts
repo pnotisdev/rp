@@ -1,15 +1,6 @@
 import type { UserExpectation } from '@/lib/types'
 
-/**
- * The other missing half of "how does she read {{user}}": `beliefs.ts` tracks standing impressions
- * of who {{user}} *is*; this tracks standing expectations of what {{user}} will *do* — "she's
- * started expecting him to check in on Sundays." The lifecycle mirrors `plans.ts` exactly, with one
- * real difference at the end of it: resolving an expectation names an `outcome` (met or violated),
- * since a broken expectation is a genuinely different, more memorable event than a quietly-met one.
- * This module stays pure (no side effects) — the caller (`useChatSession.ts`) is the one that turns
- * a `'violated'` resolution into a durable `ChatFact`, the same "pure lifecycle, caller decides
- * side effects" split `plans.ts` already uses.
- */
+/** The other missing half of "how does she read {{user}}" */
 
 /** Fewer than beliefs/plans on purpose — a handful of live expectations reads as attentive; a dozen would read as keeping score. */
 export const MAX_ACTIVE_EXPECTATIONS = 3
@@ -48,14 +39,7 @@ export function parseExpectationUpdates(raw: unknown): ExpectationUpdate[] {
 
 const defaultIdGen = () => `expect-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 
-/**
- * Applies a turn's `expectationUpdates` to the current list, same index-resolution order as
- * `plans.ts`'s `applyPlanUpdates` (resolves/notes against the original order before any `add`
- * shifts things, stale entries age out, result trimmed to `MAX_ACTIVE_EXPECTATIONS`). A `resolve`
- * always removes the entry regardless of outcome — the caller inspects the raw `updates` array
- * (not this function's return value) to find any `'violated'` resolution worth turning into a fact,
- * since by the time this returns, the resolved entry's text is already gone from the list.
- */
+/** Applies a turn's `expectationUpdates` to the current list, same index-resolution order as `plans.ts`'s `applyPlanUpdates`… */
 export function applyExpectationUpdates(
   expectations: UserExpectation[] | undefined,
   updates: ExpectationUpdate[],
@@ -108,10 +92,7 @@ export function expectationLinesForJudge(expectations: UserExpectation[] | undef
   return (expectations ?? []).map((e) => (e.note ? `${e.text} — ${e.note}` : e.text))
 }
 
-/**
- * The `styleGuidance` line carrying a character's standing expectations of {{user}} into
- * generation. Real names, no `{{macros}}`. Returns `''` with none live, the common case.
- */
+/** The `styleGuidance` line carrying a character's standing expectations of {{user}} into generation. */
 export function expectationsGuidance(charName: string, userName: string, expectations: UserExpectation[] | undefined): string {
   const active = expectations ?? []
   if (active.length === 0) return ''

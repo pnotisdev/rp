@@ -1,5 +1,4 @@
-// Push-to-talk feels like a walkie-talkie, not a friend — this records automatically,
-// starting the moment you speak and stopping the moment you go quiet, no held button.
+// Push-to-talk feels like a walkie-talkie, not a friend
 
 export interface VadRecording {
   /** Stop early by hand (used for barge-in, or a manual "stop listening" tap). */

@@ -1,13 +1,6 @@
 import { isRemoved, LAYER_WORDS, type ClothingLayer, type ClothingSide, type ClothingState } from '@/lib/dating/clothing'
 
-// The other half of the scene state block: telling the model what is true is only half the job, so
-// this checks the reply it wrote against that same state afterwards. Generalises
-// `detectExplicitAntiPatternUsed`'s reflex — verify what the model actually did rather than trusting
-// that an instruction was followed — to the continuity breaks that state block exists to prevent.
-//
-// Deterministic, lexical, no model call. Every check is deliberately conservative: a hit costs a
-// regeneration, so each one needs a removal verb, a named layer, or an explicit preposition rather
-// than a bare noun that could be a memory, a plan, or a figure of speech.
+// The other half of the scene state block
 
 export interface ContinuityBreak {
   kind: 'clothing' | 'location' | 'time'
@@ -50,13 +43,7 @@ const REMOVAL_CUES = [
 /** How far either side of a garment word a removal cue still counts as acting on it. */
 const CUE_WINDOW = 34
 
-/**
- * Whose garment a mention is, read off the possessive right before it. `your`/`my` and a name are
- * reliable; a third-person possessive means the character, since the app's own POV convention
- * addresses the player in second person throughout (`agencyGuard.ts` enforces the same split).
- * Anything else — including "his own", where the owner is whoever the sentence's subject is — is
- * ambiguous and skipped rather than guessed at, because a wrong guess costs a regeneration.
- */
+/** Whose garment a mention is, read off the possessive right before it. */
 function sideOfMention(before: string, charName: string, userName: string): ClothingSide | undefined {
   const tail = before.slice(-40).toLowerCase()
   if (/\bown\s+(\w+\s+){0,1}$/.test(tail)) return undefined
@@ -139,11 +126,7 @@ function escapeRegex(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-/**
- * The first continuity break in a reply, or `undefined` when it reads clean. Ordered by how certain
- * the engine is: clothing is state it wrote itself, where location and time are inferred from a
- * closed vocabulary and so are likelier to catch a turn of phrase.
- */
+/** The first continuity break in a reply, or `undefined` when it reads clean. */
 export function detectContinuityBreak(
   reply: string,
   facts: ContinuityFacts,

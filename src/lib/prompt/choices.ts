@@ -23,18 +23,12 @@ function renderContext(history: ChatMessage[], charName: string, userName: strin
   return history
     .slice(-depth)
     .filter((m) => m.text.trim())
-    // Label each line with the turn's actual speaker (`m.name`) rather than a single `charName`
-    // for every non-user line — in a group scene that one name would mislabel every participant's
-    // turn as the primary's, exactly the context a post-reply choice suggestion reads to stay on
-    // topic. Falls back to the role-based name for any stray unnamed entry.
+    // Label each line with the turn's actual speaker (`m.name`) rather than a single `charName` for every non-user line
     .map((m) => `${m.name?.trim() || (m.role === 'user' ? userName : charName)}: ${m.text}`)
     .join('\n')
 }
 
-/**
- * Proposes a few distinct directions the user could take next — the multiple-choice prompt shown
- * after a reply lands, so picking one nudges the scene forward instead of staring at a blank composer.
- */
+/** Proposes a few distinct directions the user could take next */
 export async function generateChoices(
   client: ChatBackend,
   params: {
@@ -61,9 +55,7 @@ export async function generateChoices(
     'JSON:',
   ].join('\n\n')
 
-  // A hang here (backend never responds) used to leave the "choices" background-assist indicator
-  // stuck forever with nothing to show for it — `generateWithTimeout` bounds it to 45s, after which
-  // the caller's own catch-everything wrapper clears the indicator same as any other failure.
+  // A hang here (backend never responds) used to leave the "choices" background-assist indicator stuck forever with nothing to show for it
   const text = await generateWithTimeout(
     client,
     { ...GENERATE_PARAMS, ...(jsonObject ? { jsonOutput: true } : {}), max_context_length: await client.getEffectiveMaxContext(), prompt },

@@ -9,16 +9,7 @@ import { Button } from '@/components/ui/Button'
 import { FileButton } from '@/components/ui/FileButton'
 import { toastError, toastInfo, toastSuccess } from '@/lib/store/useToastStore'
 
-/**
- * User control over the instruction block at the top of every generation (rule 2 of the prompt
- * overhaul). A character's own `system_prompt` field still wins when set; this is the global
- * fallback that replaced the old hardcoded line.
- *
- * The store holds a plain string. Empty means "use the built-in default" (`DEFAULT_SYSTEM_PROMPT`,
- * i.e. the first built-in variation). Picking any other built-in variation, or a user preset, sets
- * the string to that full text so it stays editable afterward. Post-history steering is appended
- * after any per-character post-history and applies to every chat.
- */
+/** User control over the instruction block at the top of every generation (rule 2 of the prompt overhaul). */
 export function SystemPromptSection() {
   const systemPrompt = useSettingsStore((s) => s.systemPrompt)
   const setSystemPrompt = useSettingsStore((s) => s.setSystemPrompt)
@@ -96,7 +87,7 @@ export function SystemPromptSection() {
       <select
         value={selectValue}
         onChange={(e) => onSelect(e.target.value)}
-        className="w-full rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40"
+        className="w-full rounded-xl border border-border bg-bg-elevated px-3 py-2 text-sm text-text outline-none focus:border-accent/70"
       >
         <optgroup label="Built-in">
           {BUILTIN_SYSTEM_PROMPTS.map((p) => (
@@ -148,7 +139,7 @@ export function SystemPromptSection() {
                 if (e.key === 'Escape') setSaving(false)
               }}
               placeholder="Preset name"
-              className="w-36 rounded-lg bg-bg-sunken px-2.5 py-1 text-xs text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40 placeholder:text-text-muted/55"
+              className="w-36 rounded-lg border border-border bg-bg-elevated px-2.5 py-1 text-xs text-text outline-none focus:border-accent/70 placeholder:text-text-muted/55"
             />
             <Button variant="primary" onClick={savePreset}>
               Save

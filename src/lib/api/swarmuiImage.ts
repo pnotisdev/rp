@@ -2,17 +2,7 @@ import { KoboldApiError } from './types'
 import { uint8ArrayToBase64 } from './binaryUtils'
 import type { ImageBackend, ImageGenerateParams, ImageGenerateResult } from './imageBackend'
 
-/**
- * SwarmUI (mcmonkeyprojects) wraps ComfyUI internally but exposes its own simpler, session-based
- * REST API — confirmed from its own official `docs/API.md` and `docs/APIRoutes/T2IAPI.md`:
- * `POST /API/GetNewSession` (no auth by default) returns a `session_id` every other call must
- * include; `POST /API/GenerateText2Image` takes `session_id` plus generation params at the same
- * JSON level and returns `{images: [...]}`, each entry a relative path to `GET` (the docs note it
- * can occasionally be a `data:` URI directly instead). The individual parameter names below
- * (`negativeprompt`, `cfgscale`, ...) follow SwarmUI's documented naming convention but weren't
- * individually confirmed one-by-one in the source actually fetched while building this — the
- * lowest-confidence piece of this client. Never run against a real SwarmUI instance.
- */
+/** SwarmUI (mcmonkeyprojects) wraps ComfyUI internally but exposes its own simpler, session-based REST API */
 export class SwarmUIClient implements ImageBackend {
   private sessionId: string | null = null
 
@@ -77,9 +67,7 @@ export class SwarmUIClient implements ImageBackend {
     }
     let data = (await res.json().catch(() => ({}))) as { images?: string[]; error?: string; error_id?: string }
 
-    // Per SwarmUI's own docs: any route can return error_id "invalid_session_id" once a session
-    // expires — get a fresh one and retry exactly once rather than surface a confusing failure for
-    // what's really just a stale cached id.
+    // Per SwarmUI's own docs: any route can return error_id "invalid_session_id" once a session expires
     if (data.error_id === 'invalid_session_id') {
       const freshId = await this.fetchNewSession()
       res = await post({ ...body, session_id: freshId })

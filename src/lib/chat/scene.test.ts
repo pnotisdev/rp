@@ -134,9 +134,7 @@ describe('pickDirectorSpeaker', () => {
   })
 
   describe('when the backend never responds', () => {
-    // A hang here used to block the whole group-scene turn forever — nobody's reply could be
-    // generated until this pick landed. `generateWithTimeout` bounds it to 45s, after which this
-    // falls back to undefined (primary) the same as any other failure.
+    // A hang here used to block the whole group-scene turn forever — nobody's reply could be generated until this pick landed.
     beforeEach(() => vi.useFakeTimers())
     afterEach(() => vi.useRealTimers())
 

@@ -13,9 +13,7 @@ import { truncateAtStrayTurnMarker } from '@/lib/text/slop'
 
 export { truncateAtStrayTurnMarker } from '@/lib/text/slop'
 
-// Proactive outreach: characters that can text the player first, unprompted. Eligibility is pure,
-// deterministic code (no model call) deciding whether and why to reach out; the model
-// (`generateOutreachMessage`) only writes the text.
+// Proactive outreach: characters that can text the player first, unprompted.
 
 const HOUR_MS = 3_600_000
 
@@ -79,12 +77,12 @@ export function evaluateOutreach(opts: EvaluateOutreachOptions): OutreachCheck {
 
   const warmth = computeWarmth(opts.chat.affection ?? 0, getRelationshipStats(opts.chat))
   const chance = BASE_CHANCE[frequency] + (warmth / 100) * MAX_WARMTH_BONUS
-  // Seeded off an hour-bucket of real elapsed silence, not the frozen world day/phase, so the roll still varies while the player leaves the world clock untouched.
+  // Seeded off an hour-bucket of real elapsed silence, not the frozen world day/phase
   const hourBucket = Math.floor(elapsedSinceMessage / HOUR_MS)
   const roll = seededFraction(`outreach:${opts.character.id}:${opts.chat.id}:${hourBucket}`)
   if (roll >= chance) return { status: 'rolled', eligible: false }
 
-  // A concrete ambient-event hook beats every generic reason below when one's available. Seeded off the world day/phase, not the hour bucket, so it doesn't change every silent hour.
+  // A concrete ambient-event hook beats every generic reason below when one's available.
   const ambientEvent = selectAmbientEvent({
     worldId: opts.world?.id,
     characterId: opts.character.id,
@@ -220,7 +218,7 @@ export async function generateOutreachMessage(client: ChatBackend, params: Gener
   })
 
   const maxLength = Math.min(params.sampler.max_length, 200)
-  // Same dynamic stop-sequence treatment as useChatSession.ts's live-turn generation — outreach risks a model imitating a card's own example-dialogue delimiters more than a normal reply does (two character turns back to back, no player line between). `truncateAtStrayTurnMarker` below is a defensive backstop, not a replacement.
+  // Same dynamic stop-sequence treatment as useChatSession.ts's live-turn generation
   const personaName = params.personaName || 'You'
   const dynamicStops = ['<START>', `\n${personaName}:`, `\n${character.card.name}:`]
   const stopSequence = [...new Set([...params.template.stopSequences, ...(params.sampler.stop_sequence ?? []), ...dynamicStops])]

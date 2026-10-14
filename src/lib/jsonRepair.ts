@@ -1,8 +1,4 @@
-// Local models frequently return "almost JSON": markdown-fenced or with surrounding commentary,
-// trailing commas, literal newlines in strings, missing commas between properties, and unescaped
-// quote marks inside dialogue text that desync naive string-boundary tracking. Each repair pass
-// below assumes the earlier ones already ran; parseLenientJson tries progressively more aggressive
-// combinations.
+// Local models frequently return "almost JSON"
 export function parseLenientJson(raw: string): unknown {
   const attempts: (() => unknown)[] = [
     () => JSON.parse(raw),
@@ -28,7 +24,7 @@ function stripLeadingPlus(json: string): string {
 
 function repairPipeline(json: string): string {
   const quotesNormalized = stripLeadingPlus(normalizeQuotes(json))
-  // Must run before repairUnescapedQuotes — that pass would otherwise read a key genuinely followed by a bracket as "not really closed" and escape it into a never-ending string.
+  // Must run before repairUnescapedQuotes
   const colonsInserted = insertMissingColons(quotesNormalized)
   const quotesRepaired = repairUnescapedQuotes(colonsInserted)
   const newlinesEscaped = escapeRawNewlinesInStrings(quotesRepaired)
@@ -83,7 +79,7 @@ function repairUnescapedQuotes(json: string): string {
     let j = i + 1
     while (j < json.length && /\s/.test(json[j])) j++
     const next = json[j]
-    // A following `"` also counts as a terminator — the common "missing comma before the next key" case, far more likely than two literal quotes back to back.
+    // A following `"` also counts as a terminator
     const looksLikeTerminator = next === undefined || ',:}]"'.includes(next)
     if (looksLikeTerminator) {
       inString = false

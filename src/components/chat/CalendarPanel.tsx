@@ -18,10 +18,7 @@ interface CalendarPanelProps {
   onClose: () => void
 }
 
-/** Birthdays, relationship anniversaries, and the world's fixed holidays, sorted by how soon each
- *  comes around again — a small, flat "key dates" list rather than a full month-grid calendar,
- *  since that's genuinely all there is to show today. See `daysUntilAnnualDate`'s own doc comment:
- *  every one of these is just "a day-of-year to count down to." */
+/** Birthdays, relationship anniversaries */
 export function CalendarPanel({ world, character, participantCharacters, chat, onClose }: CalendarPanelProps) {
   const day = world.currentDay ?? 0
   const info = getCalendarInfo(day)

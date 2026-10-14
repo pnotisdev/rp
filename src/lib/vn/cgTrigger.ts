@@ -2,12 +2,7 @@ import type { GalleryEntry } from '@/lib/characters/cardSpec'
 import type { RelationshipStage } from '@/lib/types'
 import type { IntimacyPhase } from '@/lib/dating/intimacyScene'
 
-/**
- * Item 10: picks which (if any) gallery CG should auto-surface full-bleed on the VN stage right
- * now, from the live scene state rather than the player browsing the Gallery. Pure and stateless —
- * `VNStage` recomputes this every render, so the CG appears and disappears with the condition
- * itself (e.g. it drops away the moment `intimacyPhase` moves on from `'peak'`).
- */
+/** Item 10: picks which (if any) gallery CG should auto-surface full-bleed on the VN stage right now, from the live scene state… */
 export interface CgTriggerContext {
   affection: number
   sceneFlags: readonly string[]
@@ -37,12 +32,7 @@ function triggerFires(trigger: GalleryEntry['autoTrigger'], ctx: CgTriggerContex
   }
 }
 
-/**
- * The first gallery entry (in authored order) that's both unlocked and has a firing `autoTrigger`.
- * `isEnding` entries are never auto-surfaced — those stay a browsable epilogue the player reaches
- * on their own, not something swapped into a live scene unprompted. Returns undefined with nothing
- * to show, which is the common case (most entries have no `autoTrigger` at all).
- */
+/** The first gallery entry (in authored order) that's both unlocked and has a firing `autoTrigger`. */
 export function triggeredCg(gallery: GalleryEntry[] | undefined, ctx: CgTriggerContext): GalleryEntry | undefined {
   if (!gallery?.length) return undefined
   return gallery.find((entry) => !entry.isEnding && galleryUnlocked(entry, ctx.affection, ctx.sceneFlags) && triggerFires(entry.autoTrigger, ctx))

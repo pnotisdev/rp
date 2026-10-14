@@ -16,9 +16,7 @@ export function PromptInspector({
   summary?: string
   onUpdateSummary: () => Promise<string | null>
   onClose: () => void
-  /** The chat's latest character reply, processed (what's stored/rendered) vs. raw (the model's
-   *  exact output, before scene-tag extraction) — `raw` is undefined for a reply generated before
-   *  this field existed. Undefined entirely when the chat has no character message yet. */
+  /** The chat's latest character reply, processed (what's stored/rendered) vs. raw (the model's exact output, before scene-tag extraction) */
   lastReply?: { processed: string; raw?: string }
 }) {
   const [result, setResult] = useState<PromptBuildResult | null | 'error'>(null)
@@ -124,10 +122,7 @@ export function PromptInspector({
               </p>
             ) : (
               <ul className="mb-5 space-y-1 text-xs">
-                {/* Entry ids are only unique within one lorebook — the synthetic "Remembered
-                    facts" book uses id 0,1,2… which collides with low ids from an imported
-                    character/world book. This list is display-only and never reorders, so the
-                    map index is a safe stable key. */}
+                {/* Entry ids are only unique within one lorebook */}
                 {result.activatedEntries.map((e, i) => (
                   <li key={i} className="rounded-lg bg-bg-sunken px-2.5 py-1.5">
                     <span className="font-medium text-text">{e.keys.join(', ') || '(no keys)'}</span>
@@ -149,9 +144,7 @@ export function PromptInspector({
               </p>
             )}
             {result.styleGuidanceDroppedCount > 0 && (
-              // The context window was too tight for every steering line at once — `buildPrompt`
-              // dropped the least-essential ones (mood/need/plans texture, never content policy or
-              // scene state) so the chat history it was steering didn't get squeezed out instead.
+              // The context window was too tight for every steering line at once
               <p className="mb-5 text-xs text-warning">
                 Context is tight: {result.styleGuidanceDroppedCount} lower-priority steering{' '}
                 {result.styleGuidanceDroppedCount === 1 ? 'line was' : 'lines were'} dropped to leave room for chat

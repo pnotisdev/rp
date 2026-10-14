@@ -79,8 +79,7 @@ describe('buildAssistantPrompt', () => {
   it('drops whole turns only, never half of one', () => {
     const turns = [turn('user', 'A'.repeat(500)), turn('assistant', 'B'.repeat(20)), turn('user', 'C'.repeat(20))]
     const { prompt } = buildAssistantPrompt({ turns, template, contextBudget: 400, estimate: perChar })
-    // Either the whole long turn is present or none of it — a truncated turn would teach the model a
-    // malformed turn format, which costs more than the lost context.
+    // Either the whole long turn is present or none of it
     expect(prompt.includes('A'.repeat(500)) || !prompt.includes('AAAA')).toBe(true)
   })
 
@@ -113,5 +112,13 @@ describe('assistantStopSequences', () => {
     const stops = assistantStopSequences(template)
     expect(new Set(stops).size).toBe(stops.length)
     expect(stops).not.toContain('')
+  })
+})
+
+describe('reply cue', () => {
+  it('opens the reply with the template cue when it defines one', () => {
+    const template = { ...getInstructTemplate('gemma4') }
+    const { prompt } = buildAssistantPrompt({ turns: [{ role: 'user', text: 'hi' }], template, contextBudget: 4000 })
+    expect(prompt.endsWith('<|turn>model\n<|channel>thought\n<channel|>Assistant: ')).toBe(true)
   })
 })

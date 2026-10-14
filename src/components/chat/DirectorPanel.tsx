@@ -65,14 +65,7 @@ interface DirectorPanelProps {
   onClose: () => void
 }
 
-/**
- * Section 12's "director/debug view" — a read-only inspector over a chat's live state plus manual
- * world-state controls, so iterating on a world doesn't mean playing through it turn by turn every
- * time. Deliberately a power-user layer *on top of* the existing mechanics rather than a new
- * system: every control here goes through the same `chatsApi`/`worldsApi` PUTs and the same
- * deterministic `calendar.ts` reads that the ordinary chat UI already uses (see
- * `RelationshipPanel`/`ChatWindow`'s presence badge) — nothing new is stored.
- */
+/** Section 12's "director/debug view" — a read-only inspector over a chat's live state plus manual world-state controls */
 export function DirectorPanel({
   chat,
   character,
@@ -108,9 +101,7 @@ export function DirectorPanel({
     .sort((a, b) => b.createdAt - a.createdAt)
     .slice(0, 8)
 
-  // The primary's persistent agency layer (`dating/plans.ts`). Every field is type-guarded before
-  // it reaches JSX — a half-written plan object must never render as a React child (that crash has
-  // happened before, with facts).
+  // The primary's persistent agency layer (`dating/plans.ts`).
   const activePlans = (chat.plans ?? []).filter(
     (p): p is CharacterPlan => !!p && typeof p.goal === 'string' && typeof p.kind === 'string',
   )
@@ -179,8 +170,7 @@ export function DirectorPanel({
     if (!grantId || grantQty < 1) return
     setGranting(true)
     try {
-      // Reads a fresh copy first, same as `buyGift`/`buyItem`/`useItem` in `useChatSession.ts` —
-      // the local `chat` prop can lag behind a mutation made elsewhere while this panel is open.
+      // Reads a fresh copy first, same as `buyGift`/`buyItem`/`useItem` in `useChatSession.ts`
       const fresh = await chatsApi.get(chat.id)
       if (!fresh) return
       const key = grantKind === 'gift' ? 'giftInventory' : 'itemInventory'
@@ -296,7 +286,7 @@ export function DirectorPanel({
         <Section title="Recent memories" surface="sunken">
           <div className="space-y-1.5">
             {recentFacts.map((f) => (
-              <div key={f.id} className="rounded-lg bg-bg-elevated px-3 py-1.5 text-xs text-text-muted">
+              <div key={f.id} className="rounded-lg border border-border bg-bg-elevated px-3 py-1.5 text-xs text-text-muted">
                 <span className="text-text">{f.text}</span>
                 <div className="mt-0.5 text-[10px]">
                   {new Date(f.createdAt).toLocaleString()}
@@ -319,7 +309,7 @@ export function DirectorPanel({
         >
           <div className="space-y-1.5">
             {activePlans.map((p) => (
-              <div key={p.id} className="rounded-lg bg-bg-elevated px-3 py-1.5 text-xs text-text-muted">
+              <div key={p.id} className="rounded-lg border border-border bg-bg-elevated px-3 py-1.5 text-xs text-text-muted">
                 <span className="text-text">{p.goal}</span>
                 <div className="mt-0.5 text-[10px]">
                   {PLAN_KIND_LABELS[p.kind] ?? p.kind}
@@ -338,9 +328,7 @@ export function DirectorPanel({
           className="md:col-span-2"
         >
           <div className="space-y-1.5 text-xs text-text-muted">
-            {/* The whole engine-tracked scene rather than just its derived phase: stage, scenario,
-                every participant's own meter, clothing and the contact graph. This is the inspector,
-                so it reads the scene chat-wide the way the engine does. */}
+            {/* The whole engine-tracked scene rather than just its derived phase: stage, scenario, every participant's own meter, clothing and the contact graph. */}
             {liveScene ? (
               <SceneStateCard
                 scene={liveScene.scene}
@@ -408,13 +396,13 @@ export function DirectorPanel({
               )}
             </div>
             {(chat.beliefsAboutUser ?? []).map((b) => (
-              <div key={b.id} className="rounded-lg bg-bg-elevated px-3 py-1.5 text-xs text-text-muted">
+              <div key={b.id} className="rounded-lg border border-border bg-bg-elevated px-3 py-1.5 text-xs text-text-muted">
                 <span className="text-text">{b.text}</span>
                 <div className="mt-0.5 text-[10px]">belief · formed turn {b.formedTurn}</div>
               </div>
             ))}
             {(chat.expectationsOfUser ?? []).map((e) => (
-              <div key={e.id} className="rounded-lg bg-bg-elevated px-3 py-1.5 text-xs text-text-muted">
+              <div key={e.id} className="rounded-lg border border-border bg-bg-elevated px-3 py-1.5 text-xs text-text-muted">
                 <span className="text-text">{e.text}</span>
                 <div className="mt-0.5 text-[10px]">
                   expectation{typeof e.note === 'string' && e.note ? ` · ${e.note}` : ''}

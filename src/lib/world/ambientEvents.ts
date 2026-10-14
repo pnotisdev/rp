@@ -1,12 +1,7 @@
 import type { PresenceStatus, ScheduleEntry, WeatherPreferences } from '@/lib/world/calendar'
 import { daysUntilAnnualDate, describeWeather, getCalendarInfo, getCurrentActivity, getWeather, pickFrom, seededFraction } from '@/lib/world/calendar'
 
-/**
- * Deterministic "something is going on" hooks derived from a character's already-authored world
- * state (weather preferences, schedule, likes, goals, frequented locations) — no new persisted
- * state of its own. Feeds `dating/outreach.ts`'s proactive texts and the per-turn style-guidance
- * channel; also covers off-screen social-connection reactions and schedule-conflict friction.
- */
+/** Deterministic "something is going on" hooks derived from a character's already-authored world state (weather preferences… */
 
 export const AMBIENT_EVENT_KINDS = [
   'holiday',
@@ -100,8 +95,7 @@ function selectFreeTimeInterest(ctx: AmbientEventContext): AmbientEvent | undefi
 export function selectAmbientEvent(ctx: AmbientEventContext): AmbientEvent | undefined {
   const info = getCalendarInfo(ctx.day)
   if (info.holiday) return { kind: 'holiday', detail: info.holiday }
-  // Same unconditional priority as a holiday — a real, once-a-year occasion, not something that
-  // should have to win a coin flip against "free time interest" to ever come up on the actual day.
+  // Same unconditional priority as a holiday
   if (ctx.birthday !== undefined && daysUntilAnnualDate(ctx.day, ctx.birthday) === 0) {
     return { kind: 'birthday', detail: '' }
   }

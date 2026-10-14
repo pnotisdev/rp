@@ -1,11 +1,4 @@
-/**
- * The stand-in scene art VN mode paints when a background id has no uploaded image — most installs,
- * most of the time. This used to be a hash of the id into a random hue, which is why an unplaced
- * scene rendered as a flat violet slab and a placed one as an arbitrary colour with no relationship
- * to the room it was standing in. Each family below is instead a hand-picked light/sky/ground triple
- * that reads as the *kind* of place: a warm afternoon classroom, a fluorescent convenience store, a
- * dim theatre. Not art, but a believable lighting environment for a sprite to stand in.
- */
+/** The stand-in scene art VN mode paints when a background id has no uploaded image — most installs, most of the time. */
 
 interface ScenePalette {
   /** Upper field — sky outdoors, far wall/ceiling indoors. */
@@ -199,17 +192,12 @@ function paletteFor(tag: string | undefined, night: boolean): ScenePalette {
   return night && base.night ? { ...base, ...base.night } : base
 }
 
-/**
- * A layered CSS `background` standing in for a real photo: the light source bloomed over a
- * sky/ground split, with a soft horizon band where the two meet so a sprite has something to
- * stand on rather than floating in a flat wash.
- */
+/** A layered CSS `background` standing in for a real photo */
 export function sceneGradient(tag?: string, options?: { night?: boolean }): string {
   const p = paletteFor(tag, !!options?.night)
   return [
     `radial-gradient(${p.lightPos ?? 'ellipse 70% 55% at 50% 15%'}, ${p.light}, transparent 70%)`,
-    // The horizon: a narrow darkening right where the two fields meet, which is what makes the
-    // split read as a room/landscape instead of a two-stop gradient.
+    // The horizon: a narrow darkening right where the two fields meet
     'linear-gradient(to bottom, transparent 52%, rgb(0 0 0 / 0.22) 62%, transparent 74%)',
     `linear-gradient(to bottom, ${p.sky} 0%, ${p.sky} 38%, ${p.ground} 72%, ${p.ground} 100%)`,
   ].join(', ')

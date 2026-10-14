@@ -32,9 +32,7 @@ describe('resolveIntimacyLevel', () => {
   })
 
   it("lets an explicit world be explicit under the global's untouched default", () => {
-    // The reason this overrides rather than clamps: 'default' is what a user who never opened the
-    // setting has, and clamping to the stricter of the two would make an explicit world impossible
-    // for exactly those users.
+    // The reason this overrides rather than clamps
     expect(resolveIntimacyLevel('explicit', 'default')).toBe('explicit')
   })
 
@@ -43,9 +41,7 @@ describe('resolveIntimacyLevel', () => {
   })
 
   it('treats null the same as undefined — the wire format for "clear it back to inherit"', () => {
-    // `JSON.stringify` drops an undefined-valued key, so clearing a rating has to send null; the
-    // resolver must read it as inherit rather than as a level. Caught live: without this, setting
-    // a world to explicit and then choosing "use the global setting" left it explicit.
+    // `JSON.stringify` drops an undefined-valued key, so clearing a rating has to send null; the resolver must read it as inherit rather than as a level.
     expect(resolveIntimacyLevel(null, 'suggestive')).toBe('suggestive')
   })
 

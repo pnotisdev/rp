@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { shallow } from 'zustand/shallow'
 import { Plus, X } from 'lucide-react'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { themesApi } from '@/lib/api/client'
@@ -19,12 +20,14 @@ import { Button } from '@/components/ui/Button'
 import { TextAreaField, TextField } from '@/components/ui/Field'
 import { Section } from '@/components/ui/Section'
 import { SettingsPage } from '@/components/ui/SettingsPage'
+import { isFontId } from '@/lib/store/fonts'
+import { BACKDROPS } from '@/lib/store/looks'
+import { LooksSection } from './LooksSection'
+import { ColourFromHue, ShapeSection, TypeSection } from './LookControls'
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 
-// "Default" sits in the same Presets row as the built-in palettes so reverting is exactly as
-// discoverable as applying — a user who picked Sakura from this row looks for the way back here,
-// not for a faint ghost button far below the swatch list.
+// "Default" sits in the same Presets row as the built-in palettes so reverting is exactly as discoverable as applying
 const DEFAULT_PRESET: ThemePreset = {
   id: 'default',
   name: 'Default',
@@ -88,7 +91,6 @@ export function ThemeEditor() {
   const chatWidthRem = useSettingsStore((s) => s.chatWidthRem)
   const fontScale = useSettingsStore((s) => s.fontScale)
   const blurPx = useSettingsStore((s) => s.blurPx)
-  const shadowStrength = useSettingsStore((s) => s.shadowStrength)
   const vnTextSpeedMs = useSettingsStore((s) => s.vnTextSpeedMs)
   const setLayout = useSettingsStore((s) => s.setLayout)
 
@@ -113,6 +115,15 @@ export function ThemeEditor() {
   const visionSceneDetection = useSettingsStore((s) => s.visionSceneDetection)
   const toggleFlag = useSettingsStore((s) => s.toggleFlag)
 
+  const look = useSettingsStore((s) => ({
+    uiFont: s.uiFont,
+    readFont: s.readFont,
+    displayFont: s.displayFont,
+    radiusPx: s.radiusPx,
+    readScale: s.readScale,
+    backdrop: s.backdrop,
+    glass: s.glass,
+  }), shallow)
   const customCss = useSettingsStore((s) => s.customCss)
   const setCustomCss = useSettingsStore((s) => s.setCustomCss)
 
@@ -132,8 +143,14 @@ export function ThemeEditor() {
     chatWidthRem,
     fontScale,
     blurPx,
-    shadowStrength,
     customCss,
+    uiFont: look.uiFont,
+    readFont: look.readFont,
+    displayFont: look.displayFont,
+    radiusPx: look.radiusPx,
+    readScale: look.readScale,
+    backdrop: look.backdrop,
+    glass: look.glass,
   })
 
   const applyImported = (data: Record<string, unknown>) => {
@@ -152,9 +169,18 @@ export function ThemeEditor() {
       chatWidthRem: (data.chatWidthRem as number) ?? store.chatWidthRem,
       fontScale: (data.fontScale as number) ?? store.fontScale,
       blurPx: (data.blurPx as number) ?? store.blurPx,
-      shadowStrength: (data.shadowStrength as number) ?? store.shadowStrength,
     })
     if (typeof data.customCss === 'string') store.setCustomCss(data.customCss)
+    const num = (v: unknown, lo: number, hi: number) => (typeof v === 'number' && v >= lo && v <= hi ? v : undefined)
+    store.setLook({
+      ...(isFontId(data.uiFont) ? { uiFont: data.uiFont } : {}),
+      ...(isFontId(data.readFont) ? { readFont: data.readFont } : {}),
+      ...(isFontId(data.displayFont) ? { displayFont: data.displayFont } : {}),
+      ...(num(data.radiusPx, 0, 20) !== undefined ? { radiusPx: data.radiusPx as number } : {}),
+      ...(num(data.readScale, 0.5, 2) !== undefined ? { readScale: data.readScale as number } : {}),
+      ...(BACKDROPS.some((b) => b.id === data.backdrop) ? { backdrop: data.backdrop as (typeof BACKDROPS)[number]['id'] } : {}),
+      ...(typeof data.glass === 'boolean' ? { glass: data.glass } : {}),
+    })
   }
 
   const saveThemeToLibrary = async () => {
@@ -181,9 +207,6 @@ export function ThemeEditor() {
   }
 
   // Only touches color tokens (both light and dark, regardless of which mode is active right now)
-  // — deliberately leaves chatStyle/avatarShape/layout/customCss alone, unlike applying a full
-  // saved theme, since a color-palette preset shouldn't reach into unrelated settings. "Default"
-  // is just the preset whose overrides are the built-in palette, so it goes through the same path.
   const applyPreset = (preset: ThemePreset) => {
     if (preset.id === 'default') resetTheme()
     else applyThemePreset(preset.light, preset.dark)
@@ -200,9 +223,13 @@ export function ThemeEditor() {
 
   return (
     <SettingsPage>
+      <LooksSection />
+      <TypeSection />
+      <ShapeSection />
+
       <Section
-        title="Presets"
-        description="A starting palette. Every swatch below stays editable afterward. Pick Default to undo one, or save the colours you've tuned as a preset of your own."
+        title="Colour palettes"
+        description="Just the colours, keeping your type and shape. Every swatch below stays editable afterward. Pick Default to undo one, or save the colours you've tuned as a preset of your own."
         surface="bare"
       >
         <div className="flex flex-wrap items-center gap-3">
@@ -257,7 +284,7 @@ export function ThemeEditor() {
                   if (e.key === 'Escape') setSavingPreset(false)
                 }}
                 placeholder="Preset name"
-                className="w-36 rounded-xl bg-bg-sunken px-3 py-1.5 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40 placeholder:text-text-muted/55"
+                className="w-36 rounded-xl border border-border bg-bg-elevated px-3 py-1.5 text-sm text-text outline-none focus:border-accent/70 placeholder:text-text-muted/55"
               />
               <Button variant="primary" onClick={saveCurrentAsPreset}>
                 Save
@@ -276,6 +303,7 @@ export function ThemeEditor() {
             </button>
           )}
         </div>
+        <ColourFromHue />
       </Section>
 
       <Section
@@ -345,15 +373,6 @@ export function ThemeEditor() {
           value={blurPx}
           onChange={(v) => setLayout({ blurPx: v })}
           formatValue={(v) => `${v}px`}
-        />
-        <Slider
-          label="Shadow strength"
-          min={0}
-          max={2}
-          step={0.1}
-          value={shadowStrength}
-          onChange={(v) => setLayout({ shadowStrength: v })}
-          formatValue={(v) => `${Math.round(v * 100)}%`}
         />
         <Slider
           label="VN text speed"

@@ -55,9 +55,7 @@ export function Composer({
   const [attachments, setAttachments] = useState<PendingAttachment[]>([])
   const [composerError, setComposerError] = useState<string | null>(null)
   const [impersonating, setImpersonating] = useState(false)
-  // VN mode only, mobile only (see the `sm:hidden` / `hidden sm:block` split below) — intent chips
-  // compete with the sprite/dialogue box for the little vertical room a phone has, so they start
-  // collapsed there. Desktop VN keeps them always visible, no toggle chrome at all.
+  // VN mode only, mobile only (see the `sm:hidden` / `hidden sm:block` split below)
   const [showIntentMobile, setShowIntentMobile] = useState(false)
   const textRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -109,24 +107,24 @@ export function Composer({
 
   const iconBtnClass = vn
     ? 'text-white/70 hover:bg-white/15 hover:text-white'
-    : 'text-text-muted hover:bg-bg-elevated hover:text-text'
+    : 'text-text-muted hover:bg-bg-sunken hover:text-text'
   const attachmentChipClass = vn ? 'bg-white/10 text-white' : 'bg-bg-elevated text-text'
   const attachmentRemoveClass = vn
     ? 'bg-black/50 text-white/70 hover:text-danger'
     : 'bg-bg-elevated text-text-muted hover:text-danger'
 
   return (
-    <div className={vn ? `w-full ${fillHeight ? 'flex h-full min-h-0 flex-col' : ''}` : 'border-t border-border/50 bg-bg-elevated p-3'}>
+    <div data-rp-part="composer" className={vn ? `w-full ${fillHeight ? 'flex h-full min-h-0 flex-col' : ''}` : 'px-4 pb-4 pt-2'}>
       <div
         className={
           vn
             ? `w-full ${fillHeight ? 'flex min-h-0 flex-1 flex-col' : ''}`
-            : 'mx-auto max-w-chat rounded-2xl bg-bg-sunken p-3 ring-1 ring-transparent transition-shadow focus-within:ring-accent/30'
+            : 'mx-auto max-w-chat rounded-xl border border-border bg-bg-elevated p-2.5 transition-colors focus-within:border-text-muted/50'
         }
       >
         {composerError && <p className="mb-2 px-1.5 text-xs text-danger">{composerError}</p>}
         {intentSlot && !vn && (
-          <div className="mb-2.5 border-b border-border/50 px-1.5 pb-2.5">{intentSlot}</div>
+          <div className="mb-2 border-b border-border px-1.5 pb-2">{intentSlot}</div>
         )}
         {intentSlot && vn && (
           <>
@@ -190,7 +188,7 @@ export function Composer({
           }
           disabled={disabled}
           rows={1}
-          className={`w-full resize-none bg-transparent px-1.5 py-1.5 text-base outline-none sm:text-sm ${
+          className={`w-full resize-none bg-transparent px-1.5 py-1.5 text-base outline-none sm:text-[15px] ${
             vn ? 'text-white placeholder:text-white/40' : 'text-text placeholder:text-text-muted'
           } ${fillHeight ? 'min-h-0 flex-1' : ''}`}
         />
@@ -200,7 +198,7 @@ export function Composer({
             {turnPolicyHint ? (
               <span
                 title="The scene's turn policy is deciding who replies. See the Scene panel to change it"
-                className={`mr-1 rounded-full px-2.5 py-1.5 text-xs ${vn ? 'bg-white/10 text-white/70' : 'bg-bg-elevated text-text-muted'}`}
+                className={`mr-1 rounded-md px-2 py-1 text-xs ${vn ? 'bg-white/10 text-white/70' : 'bg-bg-sunken text-text-muted'}`}
               >
                 {turnPolicyHint}
               </span>
@@ -211,8 +209,8 @@ export function Composer({
                   onChange={(e) => onChangeReplyAs?.(e.target.value)}
                   title="Reply as"
                   aria-label="Reply as"
-                  className={`mr-1 rounded-full px-2.5 py-1.5 text-xs outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40 ${
-                    vn ? 'bg-white/10 text-white/80' : 'bg-bg-elevated text-text-muted hover:text-text'
+                  className={`mr-1 rounded-md px-2 py-1 text-xs outline-none focus:border-accent/70 ${
+                    vn ? 'bg-white/10 text-white/80' : 'bg-bg-sunken text-text-muted hover:text-text'
                   }`}
                 >
                   {replyAsOptions.map((o) => (
@@ -228,18 +226,18 @@ export function Composer({
               disabled={disabled}
               title="Attach images or text files for the model to read"
               aria-label="Attach images or text files"
-              className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors disabled:opacity-40 ${iconBtnClass}`}
+              className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors disabled:opacity-40 ${iconBtnClass}`}
             >
-              <Paperclip size={16} strokeWidth={1.75} />
+              <Paperclip size={15} strokeWidth={1.6} />
             </button>
             <button
               onClick={onContinue}
               disabled={disabled || isGenerating || !canContinue}
               title="Continue the last reply"
               aria-label="Continue the last reply"
-              className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors disabled:opacity-40 ${iconBtnClass}`}
+              className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors disabled:opacity-40 ${iconBtnClass}`}
             >
-              <ChevronsRight size={16} strokeWidth={1.75} />
+              <ChevronsRight size={15} strokeWidth={1.6} />
             </button>
             {canUndoLastContinue && (
               <>
@@ -248,18 +246,18 @@ export function Composer({
                   disabled={disabled || isGenerating}
                   title="Undo last continue"
                   aria-label="Undo last continue"
-                  className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors disabled:opacity-40 ${iconBtnClass}`}
+                  className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors disabled:opacity-40 ${iconBtnClass}`}
                 >
-                  <Undo2 size={16} strokeWidth={1.75} />
+                  <Undo2 size={15} strokeWidth={1.6} />
                 </button>
                 <button
                   onClick={onRegenerateLastContinueSegment}
                   disabled={disabled || isGenerating}
                   title="Regenerate last continue segment"
                   aria-label="Regenerate last continue segment"
-                  className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors disabled:opacity-40 ${iconBtnClass}`}
+                  className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors disabled:opacity-40 ${iconBtnClass}`}
                 >
-                  <RefreshCw size={16} strokeWidth={1.75} />
+                  <RefreshCw size={15} strokeWidth={1.6} />
                 </button>
               </>
             )}
@@ -268,9 +266,9 @@ export function Composer({
               disabled={disabled || isGenerating || impersonating}
               title="Suggest what you'd say next"
               aria-label="Suggest what you'd say next"
-              className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors disabled:opacity-40 ${iconBtnClass}`}
+              className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors disabled:opacity-40 ${iconBtnClass}`}
             >
-              <Wand2 size={16} strokeWidth={1.75} className={impersonating ? 'animate-pulse' : ''} />
+              <Wand2 size={15} strokeWidth={1.6} className={impersonating ? 'animate-pulse' : ''} />
             </button>
           </div>
           <input
@@ -283,7 +281,7 @@ export function Composer({
           />
 
           {isGenerating ? (
-            <Button variant="danger" onClick={onAbort} className="flex items-center gap-1.5 rounded-full">
+            <Button variant="danger" onClick={onAbort} className="flex items-center gap-1.5">
               <Square size={13} strokeWidth={2} fill="currentColor" />
               Stop
             </Button>
@@ -292,7 +290,7 @@ export function Composer({
               variant="primary"
               onClick={submit}
               disabled={disabled || (isEmpty && !canContinue)}
-              className="flex items-center gap-1.5 rounded-full"
+              className="flex items-center gap-1.5"
             >
               <Send size={13} strokeWidth={2} />
               {isEmpty && canContinue ? 'Continue' : 'Send'}

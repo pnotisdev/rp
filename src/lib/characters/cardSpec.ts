@@ -1,6 +1,4 @@
-// SillyTavern-compatible character card types (chara_card_v2 spec), so cards
-// exported from/imported into SillyTavern round-trip without loss.
-// https://github.com/malfoyslastname/character-card-spec-v2
+// SillyTavern-compatible character card types (chara_card_v2 spec), so cards exported from/imported into SillyTavern round-trip without loss.
 
 import type { TtsProviderId } from '@/lib/voice/ttsProviders'
 import type { ReplyLength } from '@/lib/characters/voice'
@@ -11,12 +9,11 @@ import type { IntimacyPhase } from '@/lib/dating/intimacyScene'
 import type { TouchProfile } from '@/lib/dating/touch'
 import type { KinkProfile } from '@/lib/dating/kinks'
 import type { RelationshipStage } from '@/lib/types'
+import type { DriveConfig } from '@/lib/persona/drive'
 
 export type WorldInfoActivationMode = 'always' | 'keyword' | 'manual'
 
-/** Concrete, recurring speech patterns an author fills in directly — the structured complement to
- *  free-text `personality`/`mes_example`. `detectVoiceFingerprint` (`voice.ts`) can seed a first
- *  draft from the card's own examples; every field stays freely editable afterward. */
+/** Concrete, recurring speech patterns an author fills in directly — the structured complement to free-text `personality`/`mes_example`. */
 export interface VoiceFingerprint {
   /** Filler words/discourse markers — "well,", "I mean", "you know?" */
   verbalTics?: string[]
@@ -175,9 +172,7 @@ export interface Character {
   weatherPreferences?: WeatherPreferences
   /** Daily/weekly routine (world/calendar.ts); only meaningful for a world-bound character. */
   schedule?: ScheduleEntry[]
-  /** Day-of-year (0–111, world/calendar.ts) this character was born — an 8x gift multiplier on the
-   *  day (`dating/gifts.ts`), plus an ambient "it's coming up" nudge in the week before
-   *  (`world/ambientEvents.ts`). Only meaningful for a world-bound character. */
+  /** Day-of-year (0–111, world/calendar.ts) this character was born */
   birthday?: number
   /** General interests/hobbies, distinct from `giftLikes` (gift-shopping taste specifically). */
   likes?: string[]
@@ -205,9 +200,15 @@ export interface Character {
   dateModeOptOut?: boolean
   /** How often this character texts the player first, unprompted. Unset behaves as 'never'. */
   outreach?: { frequency: OutreachFrequency }
+  /** Live persona engine (persona/drive.ts): chaos/sincerity impulses, idle chatter, real telemetry. Unset = off. */
+  drive?: DriveConfig
+  /** `texting`: replies as short separate text bubbles with no narration (text/texting.ts). Unset = roleplay prose. */
+  replyFormat?: ReplyFormat
   createdAt: number
   updatedAt: number
 }
+
+export type ReplyFormat = 'roleplay' | 'texting'
 
 /** How readily a character initiates unprompted contact. */
 export type OutreachFrequency = 'never' | 'rare' | 'normal' | 'eager'
@@ -255,10 +256,7 @@ export function wrapCardV2(data: CharacterCardData): CharacterCardV2 {
   return { spec: 'chara_card_v2', spec_version: '2.0', data }
 }
 
-/**
- * Accepts a V2 card ({spec,data}), a V3-ish card (same shape, spec_version 3.0),
- * or a legacy flat V1 card (fields at top level) and normalizes to our data shape.
- */
+/** Accepts a V2 card ({spec,data}), a V3-ish card (same shape, spec_version 3.0), or a legacy flat V1 card (fields at top level) and… */
 export function normalizeCardJson(raw: unknown): CharacterCardData {
   if (!raw || typeof raw !== 'object') throw new Error('Character JSON is not an object')
   const obj = raw as Record<string, unknown>
@@ -289,31 +287,37 @@ export function normalizeCardJson(raw: unknown): CharacterCardData {
   }
 }
 
-function normalizeLorebook(raw: unknown): Lorebook | undefined {
+/** Accepts a V2 `character_book` or a SillyTavern World Info export (`key`/`keysecondary`/`order`/numeric `position`). */
+export function normalizeLorebook(raw: unknown): Lorebook | undefined {
   if (!raw || typeof raw !== 'object') return undefined
   const obj = raw as Record<string, unknown>
   const entriesRaw = obj.entries
   const entries: LorebookEntry[] = []
   const pushEntry = (e: Record<string, unknown>, fallbackId: number) => {
     const constant = !!e.constant
+    const position: LorebookEntry['position'] =
+      e.position === 'after_char' || e.position === 1 ? 'after_char' : e.position === 'at_depth' || e.position === 4 ? 'at_depth' : 'before_char'
     const activationMode: WorldInfoActivationMode =
       (e.activationMode as WorldInfoActivationMode) ?? (constant ? 'always' : 'keyword')
     entries.push({
-      id: typeof e.id === 'number' ? e.id : fallbackId,
+      id: typeof e.id === 'number' ? e.id : typeof e.uid === 'number' ? e.uid : fallbackId,
       keys: Array.isArray(e.keys) ? (e.keys as string[]) : Array.isArray(e.key) ? (e.key as string[]) : [],
-      secondary_keys: Array.isArray(e.secondary_keys) ? (e.secondary_keys as string[]) : [],
+      secondary_keys: Array.isArray(e.secondary_keys)
+        ? (e.secondary_keys as string[])
+        : Array.isArray(e.keysecondary)
+          ? (e.keysecondary as string[])
+          : [],
       comment: str(e.comment),
       content: str(e.content),
       constant,
       selective: !!e.selective,
-      insertion_order: typeof e.insertion_order === 'number' ? e.insertion_order : 100,
+      insertion_order: typeof e.insertion_order === 'number' ? e.insertion_order : typeof e.order === 'number' ? e.order : 100,
       enabled: e.enabled === undefined ? !(e.disable === true) : !!e.enabled,
-      position: e.position === 'after_char' || e.position === 'at_depth' ? e.position : 'before_char',
-      depth: typeof e.depth === 'number' && e.depth >= 0 ? e.depth : undefined,
+      position,
+      depth: position === 'at_depth' && typeof e.depth === 'number' && e.depth >= 0 ? e.depth : undefined,
       case_sensitive: !!e.case_sensitive,
       activationMode,
-      // ST only honors `probability` when `useProbability` is explicitly true; absent entirely,
-      // treat it the same as "no probability set" (always passes) rather than silently dropping it.
+      // ST only honors `probability` when `useProbability` is explicitly true
       probability:
         typeof e.probability === 'number' && e.useProbability !== false ? e.probability : undefined,
       group: typeof e.group === 'string' && e.group.trim() ? e.group : undefined,
@@ -348,16 +352,7 @@ function str(v: unknown): string {
   return typeof v === 'string' ? v : ''
 }
 
-/**
- * Character Card V3 (`chara_card_v3`) standardises embedded art in a `data.assets` array —
- * `{ type, uri, name, ext }` per asset. This pulls the parts we can actually use out of a card
- * being imported: the `icon` asset as a portrait, and `emotion` assets as expression sprites
- * (keyed by our expression id — with a few common aliases mapped, and anything unrecognised kept
- * as a custom expression so it still gets an editor slot). `ccdefault:` and `embeded://` URIs are
- * skipped — neither resolves from a plain card file (the former means "use the card's own image",
- * already handled for PNG imports; the latter needs the CHARX zip container we don't read).
- * `http:` is skipped too; only `data:` and `https:` art is taken.
- */
+/** Character Card V3 (`chara_card_v3`) standardises embedded art in a `data.assets` array — `{ type, uri, name, ext }` per asset. */
 const CCV3_USABLE_URI = /^(data:|https:\/\/)/i
 
 /** V3 emotion names that don't line up 1:1 with our expression ids (src/lib/vn/expressions.ts). */

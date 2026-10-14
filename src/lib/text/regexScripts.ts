@@ -18,11 +18,7 @@ function unescapeReplacement(replace: string): string {
   return replace.replace(/\\n/g, '\n').replace(/\\t/g, '\t')
 }
 
-/**
- * Runs every enabled script whose `target` includes `target`, in order, over `text`. Pure and
- * synchronous; a script with a broken pattern is silently skipped so one typo can't blank a
- * message. Returns the input unchanged when nothing applies.
- */
+/** Runs every enabled script whose `target` includes `target`, in order, over `text`. */
 export function applyRegexScripts(text: string, scripts: RegexScript[] | undefined, target: RegexTarget): string {
   if (!text || !scripts?.length) return text
   let out = text

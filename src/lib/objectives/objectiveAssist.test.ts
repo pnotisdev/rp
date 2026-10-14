@@ -62,8 +62,7 @@ describe('suggestObjective', () => {
     await expect(suggestObjective(stubClient('{"title":"   "}'), CHARACTER, PERSONA)).rejects.toThrow(
       'Model did not propose a usable objective',
     )
-    // A bare JSON number is valid JSON (so parseLenientJson returns it rather than throwing) but
-    // isn't the object shape this function needs — exercises its own guard, not jsonRepair's.
+    // A bare JSON number is valid JSON (so parseLenientJson returns it rather than throwing) but isn't the object shape this function needs
     await expect(suggestObjective(stubClient('42'), CHARACTER, PERSONA)).rejects.toThrow('Model did not return a JSON object')
   })
 
@@ -104,10 +103,7 @@ describe('detectCompletedTasks', () => {
 })
 
 describe('timeout handling', () => {
-  // Same live-confirmed failure mode `relationshipAssist.ts`'s `generateWithTimeout` exists for:
-  // a provider response that simply never resolves used to leave the awaiting caller — here,
-  // `ObjectivePanel`'s "Suggest one for me" / "Generate tasks with AI" buttons — stuck forever
-  // with no error and no way to retry.
+  // Same live-confirmed failure mode `relationshipAssist.ts`'s `generateWithTimeout` exists for
   beforeEach(() => {
     vi.useFakeTimers()
   })

@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { Dices, RefreshCw } from 'lucide-react'
 import { useChatBackendClient } from '@/lib/hooks/useChatBackendClient'
+import { resolveAssistShaping } from '@/lib/api/assistShaping'
 import type { CharacterCardData, Lorebook } from '@/lib/characters/cardSpec'
 import type { Outfit } from '@/lib/vn/outfits'
 import {
@@ -96,16 +97,14 @@ export function GenerateCharacterDialog({
     return dataUrl.slice(dataUrl.indexOf(',') + 1)
   }
 
-  // The option pool is never a fixed list — every "From traits" entry (and every "New options" click)
-  // asks the connected model for a fresh batch, so the menu itself has no ceiling. `shuffleTraits` and
-  // `rerollTrait` below just re-pick within whatever pool is currently loaded — free, no AI call.
+  // The option pool is never a fixed list
   const loadTraitPool = async () => {
     setTraitPoolLoading(true)
     setTraitPoolError('')
     const controller = new AbortController()
     traitAbortRef.current = controller
     try {
-      const raw = await generateTraitOptions(client, { worldTone, styleGuidance, signal: controller.signal })
+      const raw = await generateTraitOptions(client, { worldTone, styleGuidance, signal: controller.signal, shaping: await resolveAssistShaping(120_000) })
       const pool = toTraitOptionPool(raw)
       setTraitPool(pool)
       const picks = randomTraitPicks(pool)
@@ -162,8 +161,9 @@ export function GenerateCharacterDialog({
                 worldTone,
                 styleGuidance,
                 signal: controller.signal,
+                shaping: await resolveAssistShaping(120_000),
               })
-            : await draftCharacterFromBrief(client, brief.trim(), { worldTone, styleGuidance, signal: controller.signal })
+            : await draftCharacterFromBrief(client, brief.trim(), { worldTone, styleGuidance, signal: controller.signal, shaping: await resolveAssistShaping(120_000) })
         setRawOutput(result.rawOutput)
         if (!result.card.name.trim()) result.card.name = brief.trim().slice(0, 40) || 'New Character'
         onGenerated({ card: result.card })
@@ -179,6 +179,7 @@ export function GenerateCharacterDialog({
           styleGuidance,
         },
         {
+          shaping: await resolveAssistShaping(120_000),
           signal: controller.signal,
           onStage: (stage, status) => setStages((prev) => (prev ? { ...prev, [stage]: status } : prev)),
         },
@@ -390,7 +391,7 @@ export function GenerateCharacterDialog({
       {failed && rawOutput && (
         <details className="mb-3 rounded-xl bg-bg-sunken p-3 text-xs text-text-muted">
           <summary className="cursor-pointer">Raw model output</summary>
-          <pre className="mt-1.5 max-h-48 overflow-y-auto whitespace-pre-wrap rounded-lg bg-bg-elevated p-2 text-text">
+          <pre className="mt-1.5 max-h-48 overflow-y-auto whitespace-pre-wrap rounded-lg border border-border bg-bg-elevated p-2 text-text">
             {rawOutput}
           </pre>
         </details>

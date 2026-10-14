@@ -4,23 +4,20 @@ import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { charactersApi, chatsApi, worldsApi } from '@/lib/api/client'
 import { NAV, type ViewId } from './Sidebar'
 import { useVnChromeClass } from '@/lib/store/useVnChromeStore'
+import { LOOKS } from '@/lib/store/looks'
+import { useSettingsStore } from '@/lib/store/useSettingsStore'
 
 interface PaletteResult {
   key: string
   label: string
   sublabel?: string
-  group: 'View' | 'Chat' | 'Character' | 'World'
+  group: 'View' | 'Chat' | 'Character' | 'World' | 'Look'
   onSelect: () => void
 }
 
 const MAX_PER_GROUP = 6
 
-/**
- * Global "jump to anything" search (Ctrl/Cmd-K) — the nav is an icon-only rail by default
- * (section 13's open item), so even finding the right section is a hover-hunt as the number of
- * characters/chats/worlds grows. One input searches across all four; arrow keys + Enter to pick,
- * Escape or a backdrop click to dismiss.
- */
+/** Global "jump to anything" search (Ctrl/Cmd-K) */
 export function CommandPalette({
   onClose,
   onNavigateView,
@@ -39,6 +36,9 @@ export function CommandPalette({
   const vnChrome = useVnChromeClass()
   const [activeIndex, setActiveIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
+  const applyLook = useSettingsStore((s) => s.applyLook)
+  const colorMode = useSettingsStore((s) => s.colorMode)
+  const setColorMode = useSettingsStore((s) => s.setColorMode)
 
   const chats = useApiQuery('chats', () => chatsApi.list(), []) ?? []
   const characters = useApiQuery('characters', () => charactersApi.list(), []) ?? []
@@ -95,11 +95,22 @@ export function CommandPalette({
         onSelect: () => onSelectWorld(w.id),
       }))
 
-    // Order must match the render groups below (View, Character, Chat, World) — the keyboard
-    // index and the visual highlight both walk this same array, so a mismatch here means
-    // Enter activates a different row than the one shown as active.
-    return [...views.slice(0, MAX_PER_GROUP), ...characterResults, ...chatResults, ...worldResults]
-  }, [query, chats, characters, worlds])
+    // Looks and the light/dark switch, found by name or by typing "look", "theme" or "dark".
+    const wants = (words: string[]) => q.length >= 2 && words.some((w) => w.startsWith(q))
+    const lookResults: PaletteResult[] = LOOKS.filter((l) => l.name.toLowerCase().includes(q) || wants(['looks', 'themes', 'appearance'])).map((l) => ({
+      key: `look-${l.id}`,
+      label: l.name,
+      sublabel: l.blurb,
+      group: 'Look',
+      onSelect: () => applyLook(l),
+    }))
+    if (wants(['dark', 'light', 'mode', 'themes'])) {
+      lookResults.push({ key: 'look-mode', label: colorMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode', group: 'Look', onSelect: () => setColorMode(colorMode === 'dark' ? 'light' : 'dark') })
+    }
+
+    // Order must match the render groups below (View, Character, Chat, World, Look)
+    return [...views.slice(0, MAX_PER_GROUP), ...characterResults, ...chatResults, ...worldResults, ...lookResults]
+  }, [query, chats, characters, worlds, applyLook, colorMode, setColorMode])
 
   // The active index can point past the end once a keystroke shrinks the result list.
   const clampedIndex = results.length ? Math.min(activeIndex, results.length - 1) : 0
@@ -129,11 +140,11 @@ export function CommandPalette({
 
   return (
     <div
-      className="animate-overlay-in fixed inset-0 z-50 flex items-start justify-center bg-black/40 pt-[15vh] backdrop-blur-sm"
+      className="animate-overlay-in fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-[15vh]"
       onClick={onClose}
     >
       <div
-        className={`animate-panel-in w-full max-w-lg overflow-hidden rounded-2xl border border-border bg-bg-elevated themed-shadow ${vnChrome}`}
+        className={`animate-panel-in w-full max-w-lg overflow-hidden rounded-xl border border-border bg-bg-elevated ${vnChrome}`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-2.5 border-b border-border px-4 py-3">
@@ -152,16 +163,13 @@ export function CommandPalette({
         </div>
         <div className="max-h-[50vh] overflow-y-auto p-2">
           {results.length === 0 && <p className="px-3 py-6 text-center text-xs text-text-muted">No matches.</p>}
-          {/* Groups are derived from `results` itself (first-appearance order), not a separately
-              hardcoded list — the keyboard index and the render walk the same order this way, so
-              they can't drift apart again the way they did before (Enter would silently activate
-              a different row than the one shown as active). */}
+          {/* Groups are derived from `results` itself (first-appearance order), not a separately hardcoded list */}
           {[...new Set(results.map((r) => r.group))].map((group) => {
             const groupResults = results.filter((r) => r.group === group)
             if (groupResults.length === 0) return null
             return (
               <div key={group} className="mb-1">
-                <div className="px-3 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wide text-text-muted">
+                <div className="px-3 pb-1 pt-2 font-mono text-[10px] uppercase tracking-wider text-text-muted/80">
                   {group === 'View' ? 'Sections' : `${group}s`}
                 </div>
                 {groupResults.map((r) => {
@@ -172,8 +180,8 @@ export function CommandPalette({
                       key={r.key}
                       onMouseEnter={() => setActiveIndex(runningIndex)}
                       onClick={() => activate(r)}
-                      className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm transition-colors ${
-                        isActive ? 'bg-accent/10 text-accent' : 'text-text hover:bg-bg-sunken'
+                      className={`flex w-full items-center justify-between rounded-md px-3 py-1.5 text-left text-[13px] transition-colors ${
+                        isActive ? 'bg-bg-sunken text-text' : 'text-text-muted hover:bg-bg-sunken/60'
                       }`}
                     >
                       <span className="truncate">{r.label}</span>

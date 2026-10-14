@@ -1,9 +1,4 @@
-/**
- * Reply length and register, derived per-character instead of set globally. `deriveCardReplyBand`
- * measures a card's own example dialogue/greeting; `resolveReplyLength` turns that (or an explicit
- * override) into a concrete sentence-count instruction; `replyMaxTokens` turns the same band into
- * a hard sampler cap that only ever lowers the user's own `max_length`, never raises it.
- */
+/** Reply length and register, derived per-character instead of set globally. */
 
 import type { CharacterCardData } from './cardSpec'
 
@@ -161,11 +156,7 @@ export function resolveReplyLength(
   return { band: derived.band, instruction, derived: true, measuredWords: derived.measuredWords }
 }
 
-/**
- * Deterministic "voice fingerprint" extraction (see `VoiceFingerprint` in `cardSpec.ts`) — a
- * zero-cost heuristic pass over the card's own authored dialogue. Never touches `ChatBackend`;
- * the "Detect from examples" button in `CharacterEditor` calls it directly and synchronously.
- */
+/** Deterministic "voice fingerprint" extraction (see `VoiceFingerprint` in `cardSpec.ts`) */
 export interface DetectedVoiceFingerprint {
   /** Filler words/phrases recurring across at least two distinct turns. */
   verbalTics: string[]
@@ -226,9 +217,7 @@ export function collectCharacterTurns(
   return [...exampleTurns, ...greetings]
 }
 
-/** Whether this card's own authored text uses the `*action*` / `"speech"` convention — i.e. the
- *  author opted into it. Used to decide whether the prompt should hold a weak model to it; a
- *  deliberately plain-prose card (no asterisks anywhere) is left alone. */
+/** Whether this card's own authored text uses the `*action*` / `"speech"` convention — i.e. the author opted into it. */
 export function usesActionMarkup(card: Pick<CharacterCardData, 'mes_example' | 'first_mes' | 'alternate_greetings'>): boolean {
   return collectCharacterTurns(card).some((t) => /\*[^*\n]+\*/.test(t))
 }
@@ -309,15 +298,7 @@ export function detectVoiceFingerprint(
 const TOKENS_PER_WORD = 1.6
 const SENTENCE_HEADROOM = 1.5
 
-/**
- * Hard ceiling on this turn's `max_length`. Never above `userMaxLength` — only ever tightens it.
- * `reasoningReserve` adds headroom on top of the band's own prose cap for a thinking/reasoning
- * model's hidden reasoning phase (DeepSeek R1, Qwen3, GPT-OSS, and similar GGUF thinking models
- * served locally, e.g. via llama.cpp): that reasoning counts against the same server-side token
- * budget as the visible reply, so without it a terse band cap (a few hundred tokens) starves the
- * model before it even finishes thinking, let alone replies. 0 (the default) reproduces the old
- * prose-only cap exactly.
- */
+/** Hard ceiling on this turn's `max_length`. Never above `userMaxLength` — only ever tightens it. */
 export function replyMaxTokens(band: ReplyLengthBand, userMaxLength: number, reasoningReserve = 0): number {
   const cap = Math.ceil(BANDS[band].words * TOKENS_PER_WORD * SENTENCE_HEADROOM) + Math.max(0, reasoningReserve)
   return Math.max(48, Math.min(userMaxLength, cap))

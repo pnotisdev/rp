@@ -9,11 +9,7 @@ export interface SamplerPreset {
   params: Partial<GenerationParams>
 }
 
-/**
- * Starting points for the sampler, picked in Settings -> Generation. Each one only sets the
- * handful of fields it actually has an opinion about, so applying one leaves max context, stop
- * sequences, and anything else you tuned by hand alone.
- */
+/** Starting points for the sampler, picked in Settings -> Generation. */
 export const BUILTIN_PRESETS: SamplerPreset[] = [
   {
     id: 'balanced',

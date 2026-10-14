@@ -1,6 +1,4 @@
-// Works out what a local model server speaks from just its URL — KoboldCpp's native API or the
-// OpenAI-compatible /v1 shape (LM Studio, llama.cpp, Ollama, TabbyAPI, oobabooga) — so onboarding
-// can take one address and wire the right backend without asking which protocol it is.
+// Works out what a local model server speaks from just its URL
 
 import { hasAvailableOpenMayhemProvider, isOpenMayhem, loadOpenMayhemModels } from './openMayhem'
 
@@ -48,12 +46,7 @@ function openAiCandidates(base: string): string[] {
   return [`${base}/v1`, base]
 }
 
-/**
- * Probe `url` and report which backend answers. KoboldCpp is checked first because its client is
- * written against Kobold's own API (streaming, vision, abort, token counts) rather than the
- * lowest common denominator — and Kobold also serves an OpenAI shim, so an OpenAI-first check
- * would misroute it. Returns null if nothing recognisable answers.
- */
+/** Probe `url` and report which backend answers. */
 export async function detectLocalBackend(url: string, apiKey?: string): Promise<DetectedBackend | null> {
   const base = strip(url)
   if (!base) return null
@@ -84,11 +77,7 @@ export async function listOpenAiModels(baseUrl: string, apiKey?: string): Promis
   return modelIdsFrom(await getJson(`${root}/models`, apiKey))
 }
 
-/**
- * Best-effort context window for one model id from `/models` metadata. OpenRouter returns
- * `context_length`, vLLM/llama.cpp return `max_model_len`, some return `context_window`. Null
- * when `/models` didn't answer or carried no size for that id — the caller keeps its own default.
- */
+/** Best-effort context window for one model id from `/models` metadata. */
 export async function fetchOpenAiModelContext(baseUrl: string, model: string, apiKey?: string): Promise<number | null> {
   if (isOpenMayhem(baseUrl)) {
     try { return (await loadOpenMayhemModels()).find((m) => m.id === model)?.context_length ?? null } catch { return null }

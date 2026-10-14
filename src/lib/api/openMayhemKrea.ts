@@ -101,7 +101,7 @@ export function kreaImageBody(model: OpenMayhemModel, params: ImageGenerateParam
   Object.assign(settings, {
     'positive.text': params.prompt, 'negative.text': params.negativePrompt ?? '', 'sampler.seed': seed,
     'latent.width': size.width, 'latent.height': size.height, 'latent.batch_size': 1,
-    'sampling.width': size.width, 'sampling.height': size.height, 'output.filename_prefix': 'rp-suite',
+    'sampling.width': size.width, 'sampling.height': size.height, 'output.filename_prefix': 'hakoniwa',
   })
   const graph: Graph = {}
   for (const [role, allowedClasses] of Object.entries(classes)) {

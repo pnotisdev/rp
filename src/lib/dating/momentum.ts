@@ -1,11 +1,7 @@
 import type { RelationshipDimension } from '@/lib/types'
 import type { CharacterMood } from '@/lib/prompt/mindGuidance'
 
-// Relationship *momentum*: the derivative of warmth, not its level — a warmth-90 couple in a quiet
-// stretch vs. mid-whirlwind shouldn't read the same. Stored as one decayed running number per turn:
-// `momentum = momentum * DECAY + (this turn's warmth movement)`, so a burst fades on its own over
-// ~4-5 quiet turns. Also covers the initiative-balance axis (who's doing the reaching) and the
-// mood-aware slow-burn pacing note.
+// Relationship *momentum*: the derivative of warmth, not its level — a warmth-90 couple in a quiet stretch vs. mid-whirlwind shouldn't read the same.
 
 export const MOMENTUM_DECAY = 0.65
 

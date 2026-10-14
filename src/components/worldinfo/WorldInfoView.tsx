@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { ChevronLeft } from 'lucide-react'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { charactersApi, worldInfoBooksApi, worldsApi } from '@/lib/api/client'
 import { isGlobalBook } from '@/lib/worldinfo/scope'
@@ -7,6 +6,11 @@ import type { WorldInfoBook } from '@/lib/types'
 import { LorebookEditor } from './LorebookEditor'
 import { BookScopePicker } from './BookScopePicker'
 import { Button } from '@/components/ui/Button'
+import { FileButton } from '@/components/ui/FileButton'
+import { DropZone } from '@/components/ui/DropZone'
+import { EditorShell } from '@/components/ui/EditorShell'
+import { importLorebookFile } from '@/lib/worldinfo/lorebookIo'
+import { errorMessage, toastError, toastSuccess } from '@/lib/store/useToastStore'
 import { Section } from '@/components/ui/Section'
 import { ViewShell } from '@/components/ui/ViewShell'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -40,8 +44,8 @@ export function WorldInfoView() {
 
   const createBook = async () => {
     const created = await worldInfoBooksApi.create({
-      name: 'New World Info',
-      book: { name: 'New World Info', entries: [], token_budget: 512, scan_depth: 8 },
+      name: 'New lorebook',
+      book: { name: 'New lorebook', entries: [], token_budget: 512, scan_depth: 8 },
       boundChatIds: [],
       boundCharacterIds: [],
       boundWorldIds: [],
@@ -62,19 +66,30 @@ export function WorldInfoView() {
     if (activeId === id) setActiveId(null)
   }
 
+  const importBooks = async (files: File[]) => {
+    let added = 0
+    for (const file of files) {
+      try {
+        const book = await importLorebookFile(file)
+        await worldInfoBooksApi.create({ name: book.name, book, boundChatIds: [], boundCharacterIds: [], boundWorldIds: [] })
+        added++
+      } catch (e) {
+        toastError(errorMessage(e))
+      }
+    }
+    if (added) toastSuccess(`Imported ${added} lorebook${added === 1 ? '' : 's'}.`)
+  }
+
   if (active) {
     return (
-      <div className="mx-auto w-full max-w-3xl flex-1 overflow-y-auto p-6 sm:p-8">
-        <Button variant="ghost" onClick={() => setActiveId(null)} className="mb-6 -ml-2 flex items-center gap-1">
-          <ChevronLeft size={15} strokeWidth={2} />
-          All books
-        </Button>
-
+      <EditorShell
+        onBack={() => setActiveId(null)}
+        backLabel="Lorebooks"
+        eyebrow="Lorebook"
+        title={active.book.name || 'Untitled'}
+      >
         <Section title="Scope" description="Where this book's entries are eligible to activate." className="mb-8">
-          <BookScopePicker
-            scope={active}
-            onChange={(patch) => worldInfoBooksApi.update(active.id, patch)}
-          />
+          <BookScopePicker scope={active} onChange={(patch) => worldInfoBooksApi.update(active.id, patch)} />
         </Section>
 
         <Section title="Entries" surface="bare">
@@ -83,18 +98,24 @@ export function WorldInfoView() {
             onChange={(book) => worldInfoBooksApi.update(active.id, { book, name: book.name || active.name })}
           />
         </Section>
-      </div>
+      </EditorShell>
     )
   }
 
   return (
+    <DropZone onFiles={importBooks} label="Drop lorebooks to import">
     <ViewShell
-      title="World Info"
-      description="Standalone lorebooks. Locations, factions, history, world rules. A book with no scope is available to every chat; scope it to a character or world to keep unrelated lore out. Lore that belongs to one character lives on the character card instead."
+      title="Lorebooks"
+      description="Reusable lore (SillyTavern's World Info): places, factions, history. A book with no scope applies to every chat; scope it to a character or world to keep unrelated lore out. Lore for one character lives on its card, and a world has its own lorebook too. Use a book here when several of them share it."
       actions={
-        <Button variant="primary" onClick={createBook}>
-          New book
-        </Button>
+        <>
+          <FileButton onPick={(f) => importBooks(Array.from(f))} accept=".json,.png" multiple title="SillyTavern World Info files, lorebook JSON, or card PNGs">
+            Import
+          </FileButton>
+          <Button variant="primary" onClick={createBook}>
+            New book
+          </Button>
+        </>
       }
     >
       <div className="space-y-2">
@@ -128,10 +149,11 @@ export function WorldInfoView() {
               </Button>
             }
           >
-            No standalone world info books yet. Most lore can live on a character or world instead. Reach for a book when the same lore spans several of them.
+            No lorebooks yet. Most lore can live on a character or world instead. Reach for a book when the same lore spans several of them, or import one.
           </EmptyState>
         )}
       </div>
     </ViewShell>
+    </DropZone>
   )
 }

@@ -8,11 +8,7 @@ import type {
 import { KoboldApiError } from './types'
 import type { ChatBackend } from './chatBackend'
 
-// Background judge/choice calls (relationshipAssist.ts, choices.ts, objectiveAssist.ts,
-// aiAssist.ts) never pass their own AbortSignal — without this, a hung KoboldCpp connection
-// wedges them indefinitely. The interactive reply-generation flow always passes its own
-// user-controlled signal (tied to the Stop button), so it's untouched by this: a caller-supplied
-// signal is used as-is, with no extra timeout layered on top of it.
+// Background judge/choice calls (relationshipAssist.ts, choices.ts, objectiveAssist.ts, aiAssist.ts) never pass their own AbortSignal
 const DEFAULT_TIMEOUT_MS = 30000
 
 async function req<T>(baseUrl: string, path: string, init?: RequestInit): Promise<T> {
@@ -70,12 +66,7 @@ export class KoboldClient implements ChatBackend {
     return r.value
   }
 
-  /**
-   * The loaded model's own chat template (the GGUF's embedded Jinja string), from llama.cpp's
-   * `/props` endpoint that modern KoboldCpp also serves. Used only to warn when the app's active
-   * instruct template doesn't match the model's actual training format. Returns null on any older
-   * build that lacks the endpoint or a model with no embedded template — never an error.
-   */
+  /** The loaded model's own chat template (the GGUF's embedded Jinja string), from llama.cpp's `/props` endpoint that modern KoboldCpp also serves. */
   async getChatTemplate(): Promise<string | null> {
     try {
       const r = await req<{ chat_template?: string }>(this.baseUrl, '/props')
@@ -90,15 +81,7 @@ export class KoboldClient implements ChatBackend {
     return r.value
   }
 
-  /**
-   * The judge/assist calls (relationship scoring, choice generation, objective planning, lore
-   * suggestions, card field regeneration) each fire their own short `generate()` outside the
-   * main chat's configured sampler, and used to hardcode `max_context_length: 4096` — wrong for
-   * a smaller-context model (an invalid oversized request) and needlessly restrictive for a
-   * bigger one. This asks the server what's actually loaded instead, caching the answer on this
-   * instance (one extra request per `KoboldClient`, not per judge call) and falling back to
-   * `fallback` if the server is unreachable or doesn't support the endpoint.
-   */
+  /** The judge/assist calls (relationship scoring, choice generation, objective planning, lore suggestions, card field regeneration)… */
   async getEffectiveMaxContext(fallback = 4096): Promise<number> {
     if (this.cachedMaxContext !== undefined) return this.cachedMaxContext
     try {
@@ -134,10 +117,7 @@ export class KoboldClient implements ChatBackend {
     return r.results?.[0]?.text ?? ''
   }
 
-  /**
-   * Streaming generation via SSE. Calls onToken for each new token as it
-   * arrives, and resolves with the full concatenated text at the end.
-   */
+  /** Streaming generation via SSE. */
   async generateStream(
     params: GenerateRequest,
     onToken: (token: string, full: string) => void,
@@ -152,8 +132,7 @@ export class KoboldClient implements ChatBackend {
         signal,
       })
     } catch (e) {
-      // An intentional abort (Stop button) isn't "server unreachable" — there's no partial
-      // text to save yet since streaming hadn't started, but don't mislabel it as a crash.
+      // An intentional abort (Stop button) isn't "server unreachable"
       if (signal?.aborted) return ''
       throw new KoboldApiError(`Could not reach KoboldCpp at ${this.baseUrl} for streaming.`)
     }
@@ -196,8 +175,7 @@ export class KoboldClient implements ChatBackend {
         }
       }
     } catch (e) {
-      // Stopped mid-stream — keep whatever text had already arrived instead of throwing
-      // it away; the caller treats an aborted stream the same as a short completed one.
+      // Stopped mid-stream — keep whatever text had already arrived instead of throwing it away
       if (signal?.aborted) return full
       throw e
     }

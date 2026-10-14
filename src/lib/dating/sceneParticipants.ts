@@ -2,22 +2,7 @@ import { BODY_REGIONS, regionLabel, type ArousalState, type BodyRegion } from '@
 import type { ClothingState } from '@/lib/dating/clothing'
 import type { IntimacyScene } from '@/lib/dating/intimacyScene'
 
-// The scene as a shared entity rather than one relationship's private state. Two characters in one
-// scene used to mean two `IntimacyScene`s advancing independently, which guarantees they eventually
-// disagree about what is happening; there is now exactly one scene, one stage, one contact graph, and
-// one meter per participant.
-//
-// Relationship *stats* stay per-relationship — they are a fact about a pair, not about a scene, and
-// the group-chat code already tracks them separately. Only the scene state is shared.
-//
-// Storage deliberately has no migration step: the scene still lives on the relationship track of its
-// *owner* (`participants[0]`, whoever's click started it), the owner's own arousal/clothing stay in
-// the scene's original single-character fields, and every additional participant gets an entry in the
-// maps here. So one participant means byte-identical state to before this existed, and nothing
-// persisted needs rewriting. `isSceneOwner` is the only place that split is expressed.
-//
-// The import of `IntimacyScene` is type-only by design: the value dependency runs the other way, the
-// same arrangement `arousal.ts` uses, so the two never form a runtime cycle.
+// The scene as a shared entity rather than one relationship's private state.
 
 /** The player's side of a contact edge. Character ids are opaque strings, so this reserved token keeps the two apart. */
 export const SCENE_PLAYER = 'player'
@@ -25,11 +10,7 @@ export const SCENE_PLAYER = 'player'
 /** A character in the scene, by id, or `SCENE_PLAYER`. */
 export type SceneActor = string
 
-/**
- * One live contact: who is touching whom, where. This is what generalises cleanly from two
- * participants to N — and what makes a group scene tractable at all, since the model is *told* the
- * contact graph rather than asked to remember it across turns.
- */
+/** One live contact: who is touching whom, where. */
 export interface ContactEdge {
   actor: SceneActor
   target: SceneActor
@@ -73,12 +54,7 @@ function contactKey(edge: ObservedContact): string {
   return `${edge.actor}>${edge.target}:${edge.region}`
 }
 
-/**
- * Folds a turn's observed contact into the graph. A contact that was already there keeps its original
- * `sinceTurn` — that is the whole point, since "her hands have been at your hips for three turns" is
- * exactly the fact a model loses. A turn that described no contact at all leaves the graph standing
- * rather than blanking it, matching how the single-character anchor has always behaved.
- */
+/** Folds a turn's observed contact into the graph. */
 export function advanceContact(
   prev: ContactEdge[] | undefined,
   observed: readonly ObservedContact[],
@@ -94,11 +70,7 @@ export function advanceContact(
   return next.length > MAX_CONTACT_EDGES ? next.slice(next.length - MAX_CONTACT_EDGES) : next
 }
 
-/**
- * Regions of *this* participant's own body that the graph says are being touched. Arousal is scored
- * against the body being touched, so this is the per-participant equivalent of the two-party
- * `regionsTouched` — a participant nobody is touching gains nothing from contact this turn.
- */
+/** Regions of *this* participant's own body that the graph says are being touched. */
 export function contactRegionsFor(contact: readonly ContactEdge[] | undefined, who: SceneActor): BodyRegion[] {
   return [...new Set((contact ?? []).filter((edge) => edge.target === who).map((edge) => edge.region))]
 }
@@ -108,22 +80,13 @@ export function sceneParticipants(scene: Pick<IntimacyScene, 'participants'>): s
   return scene.participants ?? []
 }
 
-/**
- * Whether this character's own per-turn state lives in the scene's original single-character fields
- * rather than a participant map. True for the scene's owner, and for every character in a scene from
- * before rosters existed — such a scene has exactly one participant by definition.
- */
+/** Whether this character's own per-turn state lives in the scene's original single-character fields rather than a participant map. */
 export function isSceneOwner(scene: Pick<IntimacyScene, 'participants'>, charId: string): boolean {
   const roster = sceneParticipants(scene)
   return roster.length === 0 || roster[0] === charId
 }
 
-/**
- * Whether this character is actually in the scene. A scene with a roster names its participants
- * outright; one without has exactly one, its owner. Worth keeping distinct from "the chat has a live
- * scene": a character standing in the same room as a scene they are not part of must not be handed
- * its physical state or told to write continuously with it.
- */
+/** Whether this character is actually in the scene. */
 export function isSceneParticipant(scene: Pick<IntimacyScene, 'participants'>, charId: string, ownerId: string): boolean {
   const roster = sceneParticipants(scene)
   return roster.length ? roster.includes(charId) : ownerId === charId
@@ -185,11 +148,7 @@ function possessiveOf(who: SceneActor, nameOf: (id: string) => string): string {
   return who === SCENE_PLAYER ? 'your' : `${nameOf(who)}'s`
 }
 
-/**
- * The contact graph as the state block's own line — the continuity anchor against hands silently
- * relocating between turns. How long a contact has been held is included, because a contact three
- * turns old is exactly the one a reply is most likely to re-establish as if it were new.
- */
+/** The contact graph as the state block's own line — the continuity anchor against hands silently relocating between turns. */
 export function describeContact(
   contact: readonly ContactEdge[] | undefined,
   nameOf: (id: string) => string,

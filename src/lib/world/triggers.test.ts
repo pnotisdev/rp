@@ -203,10 +203,7 @@ describe('evaluateTriggers', () => {
       // Turn 1: tension is high enough for the first rule, but trust isn't there yet for the second.
       const turn1 = evaluateTriggers(chain, ctx({ stats: { tension: 60, trust: 40 } }))
       expect(turn1.fired.map((t) => t.id)).toEqual(['jealousy-flares'])
-      // Turn 2 (a later scene): tension has settled back down (the first rule's own condition no
-      // longer holds, and it's one-shot so it wouldn't re-fire anyway), but trust has since grown
-      // — the second rule fires now purely because the first one fired *at some point*, exactly
-      // the "a jealousy beat feeds a later trust rule" shape this was built for.
+      // Turn 2 (a later scene): tension has settled back down (the first rule's own condition no longer holds
       const turn2 = evaluateTriggers(chain, ctx({ stats: { tension: 10, trust: 85 } }), turn1.firedIds)
       expect(turn2.fired.map((t) => t.id)).toEqual(['trust-test'])
     })

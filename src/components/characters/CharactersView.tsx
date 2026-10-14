@@ -4,6 +4,7 @@ import { charactersApi } from '@/lib/api/client'
 import type { Character } from '@/lib/characters/cardSpec'
 import { CharacterList } from './CharacterList'
 import { CharacterEditor } from './CharacterEditor'
+import type { NewCharacterStart } from './NewCharacterDialog'
 
 export function CharactersView({
   initialCharacterId,
@@ -14,6 +15,7 @@ export function CharactersView({
   onConsumedInitial?: () => void
 } = {}) {
   const [selected, setSelected] = useState<Character | null | 'new'>(null)
+  const [start, setStart] = useState<NewCharacterStart>('blank')
   const characters = useApiQuery('characters', () => charactersApi.list(), []) ?? []
 
   useEffect(() => {
@@ -22,17 +24,21 @@ export function CharactersView({
     if (!match) return
     setSelected(match)
     onConsumedInitial?.()
-    // Only re-run when the target id changes (or the list finishes loading) — not on every
-    // `characters` refetch, which would otherwise snap back open every time this save happens.
+    // Only re-run when the target id changes (or the list finishes loading)
   }, [initialCharacterId, characters.length])
 
   if (selected === null) {
-    return <CharacterList onSelect={(c) => setSelected(c)} onCreateNew={() => setSelected('new')} />
+    return <CharacterList onSelect={(c) => setSelected(c)} onCreateNew={(s) => {
+          setStart(s)
+          setSelected('new')
+        }} />
   }
 
   return (
     <CharacterEditor
+      key={selected === 'new' ? 'new' : selected.id}
       character={selected === 'new' ? null : selected}
+      start={start}
       onSaved={() => setSelected(null)}
       onDeleted={() => setSelected(null)}
     />

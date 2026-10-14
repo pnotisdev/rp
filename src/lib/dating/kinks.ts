@@ -1,10 +1,4 @@
-// Kinks as structured data rather than free text. `Character.boundaries` and `likes` are authored
-// prose and reach the model as prose, which means they get ignored exactly often enough to matter —
-// the same reason `EXPLICIT_ANTI_PATTERNS` exists as a detector and not only as an instruction.
-//
-// Enforcement here is never an instruction. A hard limit means the catalog entry is never rendered,
-// its stage edges are never traversable, and its `promptNote` never enters the context: a model
-// cannot write toward content it was never shown, and cannot reach a stage the graph won't route to.
+// Kinks as structured data rather than free text.
 
 /** Built-in vocabulary. A world extends it the same way it extends the catalog — see `KinkId`. */
 export const BUILT_IN_KINKS = [
@@ -19,9 +13,7 @@ export const BUILT_IN_KINKS = [
   'oral',
   'rough',
   'gentle',
-  // A catalog entry can only ever be ruled out by a kink an author can actually name, and the
-  // editor offers exactly this list — so a content class with no id here ships ungateable however
-  // carefully the entry itself is written.
+  // A catalog entry can only ever be ruled out by a kink an author can actually name
   'anal',
   'marking',
   'overstimulation',
@@ -58,11 +50,7 @@ export function isAnyHardLimit(profile: KinkProfile | undefined, kinks: readonly
   return !!kinks?.some((kink) => isHardLimit(profile, kink))
 }
 
-/**
- * One valence for a piece of content that may involve several kinks. A dislike dominates enthusiasm —
- * a scene combining something they love with something they don't is governed by the part they don't,
- * which is both the safer read and the more human one.
- */
+/** One valence for a piece of content that may involve several kinks. */
 export function combinedValence(profile: KinkProfile | undefined, kinks: readonly KinkId[] | undefined): KinkValence {
   if (!kinks?.length) return 0
   const valences = kinks.map((kink) => kinkValence(profile, kink))

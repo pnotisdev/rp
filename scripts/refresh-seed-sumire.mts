@@ -1,5 +1,4 @@
 // Brings an existing install's seeded Sumire, starter persona and seed-world gifts/items up to the bundled content.
-// Backs up what it replaces to data/backups/. Needs the app server running. Usage: npx tsx scripts/refresh-seed-sumire.mts [apiBase]
 import fs from 'node:fs'
 import path from 'node:path'
 import {

@@ -1,9 +1,6 @@
 import type { CSSProperties } from 'react'
 
-// Fixed per-petal values rather than Math.random() on every render — stable across re-renders
-// (no petal "jumping" mid-fall when an unrelated state update repaints VNStage), and still reads
-// as organic since the seven vary in every axis (x position, size, fall speed, start delay, and
-// how far they drift sideways on the way down).
+// Fixed per-petal values rather than Math.random() on every render
 const PETALS = [
   { x: '6%', size: 12, duration: 13, delay: 0, drift: 60 },
   { x: '18%', size: 9, duration: 16, delay: 3, drift: -40 },
@@ -23,12 +20,7 @@ function Petal() {
   )
 }
 
-/**
- * Ambient falling-petal layer behind the VN scene — the "keep improving the design" ask, and a
- * genuinely open ROADMAP item ("subtle ambient particle/gradient effects... optional falling
- * sakura petals layer"). VNStage only mounts this for outdoor backgrounds where petals make
- * sense (park/forest/rooftop/city-street/beach) — the parent decides that, this just renders.
- */
+/** Ambient falling-petal layer behind the VN scene */
 export function SakuraPetals() {
   return (
     <div className="pointer-events-none absolute inset-0 overflow-hidden">

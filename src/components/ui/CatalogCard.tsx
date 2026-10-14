@@ -20,18 +20,12 @@ interface CatalogCardProps {
   action?: ReactNode
 }
 
-/**
- * One row in a shop or a bag. Replaces the three near-identical hand-rolled blocks the Shop tab
- * and the Bag panel each grew (a name, a "rarity • price • owned" run-on in muted grey, and a
- * full-width Buy button), which rendered every entry as the same grey rectangle regardless of what
- * it was. Rarity is carried by the icon tile's colour instead of a word in the metadata line, and
- * the action shrinks to a price pill so a grid of six reads as six items rather than six buttons.
- */
+/** One row in a shop or a bag. */
 export function CatalogCard({ icon: Icon, name, tone = 'common', meta, note, owned = 0, locked, action }: CatalogCardProps) {
   const tones = RARITY_TONE[tone]
   return (
     <div
-      className={`flex items-center gap-2.5 rounded-lg bg-bg-elevated px-2.5 py-2 ring-1 transition-colors ${
+      className={`flex items-center gap-2.5 rounded-lg border border-border bg-bg-elevated px-2.5 py-2 ring-1 transition-colors ${
         locked ? 'opacity-55 ring-border/60' : `${tones.ring} hover:bg-bg-elevated/70`
       }`}
     >
@@ -62,11 +56,7 @@ export function CatalogCard({ icon: Icon, name, tone = 'common', meta, note, own
   )
 }
 
-/**
- * The buy/give/use action on a `CatalogCard` — compact enough that a grid of them stays calm,
- * and showing the price inline so "what does this cost" and "buy it" are the same control rather
- * than a number in the metadata line and a button somewhere below it.
- */
+/** The buy/give/use action on a `CatalogCard` */
 export function CatalogAction({
   label,
   price,

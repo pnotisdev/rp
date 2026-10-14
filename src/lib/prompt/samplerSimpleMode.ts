@@ -1,9 +1,4 @@
-/**
- * The "simple mode" sampler sliders (Settings → Generation, and the chat-side Quick tuning panel)
- * present three intuitive 0-100 dials instead of raw sampler fields. Extracted from
- * `SamplingControls.tsx` so both surfaces share one formula rather than risking the two drifting
- * apart — a real risk once a second UI reads/writes the same `GenerationParams` fields.
- */
+/** The "simple mode" sampler sliders (Settings → Generation */
 
 export function creativityToParams(v: number) {
   return { temperature: Number((0.2 + (v / 100) * 1.6).toFixed(2)) }

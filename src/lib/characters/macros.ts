@@ -3,11 +3,7 @@ export interface MacroContext {
   userName: string
 }
 
-/**
- * Substitutes SillyTavern-style macros. Kept intentionally small — {{char}}
- * and {{user}} are the load-bearing ones for card compatibility; the rest
- * are cheap conveniences authors commonly rely on in card text.
- */
+/** Substitutes SillyTavern-style macros. */
 export function substituteMacros(text: string, ctx: MacroContext): string {
   if (!text) return text
   const now = new Date()

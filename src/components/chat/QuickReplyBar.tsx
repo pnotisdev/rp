@@ -8,16 +8,11 @@ interface QuickReplyBarProps {
 }
 
 const CHIP_CLASSES = {
-  default: 'bg-bg-elevated text-text-muted hover:bg-accent/10 hover:text-accent',
+  default: 'border border-border text-text-muted hover:bg-bg-sunken hover:text-text',
   vn: 'vn-glass text-white/80 hover:bg-white/20 hover:text-white',
 }
 
-/**
- * Section 14's Quick Replies bar — a fixed, user-authored row (Settings → Generation), unlike
- * `ChoiceList`'s AI-suggested one: always the same buttons, always available, never regenerated.
- * Deliberately shown only when `ChoiceList` isn't (see `ChatWindow.tsx`) so at most one chip row
- * ever competes for the same strip of space above the composer.
- */
+/** Section 14's Quick Replies bar — a fixed, user-authored row (Settings → Generation), unlike `ChoiceList`'s AI-suggested one */
 export function QuickReplyBar({ replies, onPick, variant = 'default' }: QuickReplyBarProps) {
   if (replies.length === 0) return null
   return (
@@ -35,7 +30,7 @@ export function QuickReplyBar({ replies, onPick, variant = 'default' }: QuickRep
           key={reply.id}
           onClick={() => onPick(reply)}
           title={reply.message}
-          className={`shrink-0 rounded-full py-1.5 px-3.5 text-left text-sm transition-colors ${CHIP_CLASSES[variant]}`}
+          className={`shrink-0 rounded-md px-3 py-1 text-left text-[13px] transition-colors ${CHIP_CLASSES[variant]}`}
         >
           {reply.label}
         </button>

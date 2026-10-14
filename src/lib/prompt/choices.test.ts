@@ -91,9 +91,7 @@ describe('generateChoices', () => {
   })
 
   it('labels each turn with its own speaker name, not one charName for every non-user line', async () => {
-    // A group scene: the reply we are suggesting follow-ups to came from Kestrel, a participant,
-    // while `charName` is still the primary (Sumire). The brainstorm context must show Kestrel as
-    // the one who just spoke, or the suggestions drift toward answering Sumire.
+    // A group scene: the reply we are suggesting follow-ups to came from Kestrel, a participant, while `charName` is still the primary (Sumire).
     let sent: Record<string, unknown> = {}
     const groupHistory: ChatMessage[] = [
       { id: '1', role: 'user', name: 'Kai', text: 'You two know each other?' },
@@ -121,8 +119,7 @@ describe('generateChoices', () => {
   })
 
   describe('when the backend never responds', () => {
-    // Before `generateWithTimeout` was wired in, a hang here left the "choices" background-assist
-    // indicator stuck forever — the caller only ever clears it once the awaited call settles.
+    // Before `generateWithTimeout` was wired in, a hang here left the "choices" background-assist indicator stuck forever
     beforeEach(() => vi.useFakeTimers())
     afterEach(() => vi.useRealTimers())
 

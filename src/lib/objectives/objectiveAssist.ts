@@ -3,12 +3,7 @@ import { generateWithTimeout, type AssistShaping } from '@/lib/api/generateWithT
 import { parseLenientJson } from '@/lib/jsonRepair'
 import type { AiLoreSubject } from '@/lib/characters/aiAssist'
 
-// None of this file's `client.generate` calls ever passed a `signal`, so a slow or hanging
-// provider response (the live-confirmed failure mode `generateWithTimeout` exists for: a
-// rate-limited free OpenRouter model that simply never resolves) left the caller stuck forever
-// too — "Suggest one for me" / "Generate tasks with AI" in `ObjectivePanel` set `busy` and only
-// clear it in a `finally` after the awaited call settles, so a hang there reads as the button
-// stuck on "Thinking…"/"Generating…" forever, with no error and no way to retry.
+// None of this file's `client.generate` calls ever passed a `signal`
 
 const GENERATE_PARAMS = {
   max_length: 400,
@@ -86,12 +81,7 @@ export async function suggestObjective(
   return { title, description: typeof obj.description === 'string' ? obj.description.trim() : '' }
 }
 
-/**
- * Cheap classifier pass: given the reply that just landed, which pending tasks (by index)
- * does it look like this moment accomplished? Conservative by design — only ever used to
- * check things off automatically, never to invent progress, so a false negative just means
- * the user checks it off by hand later.
- */
+/** Cheap classifier pass: given the reply that just landed */
 export async function detectCompletedTasks(
   client: ChatBackend,
   replyText: string,

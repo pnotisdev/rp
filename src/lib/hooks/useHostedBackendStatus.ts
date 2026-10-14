@@ -3,19 +3,7 @@ import { OpenAICompatibleClient } from '@/lib/api/openaiCompatible'
 import { NovelAIClient } from '@/lib/api/novelai'
 import type { ConnectionStatus } from './useConnectionStatus'
 
-/**
- * The hosted-backend equivalent of `useConnectionStatus` — deliberately a separate hook, not a
- * branch inside that one, because the right *cadence* is different, not just the right client.
- * KoboldCpp is local and free, so polling it every 15s (that hook's own behavior) costs nothing;
- * OpenRouter/NovelAI/etc. are metered external services, so this only checks once per distinct
- * config (backend/baseUrl/apiKey/model) instead of on a timer, plus an explicit `recheck()` for a
- * "Test connection" button — Settings → Connection and the header status dot both read this same
- * hook so they can never disagree.
- *
- * `enabled: false` (the backend this instance covers isn't the one actually selected right now)
- * skips the network call entirely rather than running it in the background just to discard the
- * result — the whole reason this isn't on the same always-polling timer as KoboldCpp's check.
- */
+/** The hosted-backend equivalent of `useConnectionStatus` */
 export function useHostedBackendStatus(
   enabled: boolean,
   backend: 'openai-compatible' | 'novelai',
@@ -29,9 +17,7 @@ export function useHostedBackendStatus(
 
   useEffect(() => {
     if (!enabled) return
-    // A missing key isn't a hard failure — a local OpenAI-compatible server (LM Studio, llama.cpp,
-    // Ollama, TabbyAPI) usually needs none. NovelAI genuinely can't work without one; everything
-    // else gets the real check and shows the provider's own 401 if a key was actually required.
+    // A missing key isn't a hard failure — a local OpenAI-compatible server (LM Studio, llama.cpp, Ollama, TabbyAPI) usually needs none.
     if (!apiKey.trim() && backend === 'novelai') {
       setStatus('offline')
       setDetail('NovelAI needs an API key.')

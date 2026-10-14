@@ -13,8 +13,7 @@ import type {
 import type { GalleryEntry } from '@/lib/characters/cardSpec'
 import type { IntimacyScene } from '@/lib/dating/intimacyScene'
 
-// Relationship stage/warmth/commitment ladder logic, risk/breakup evaluation, and the
-// multi-character relationship-track resolution (`getRelationshipTrack`/`patchRelationshipTrack`).
+// Relationship stage/warmth/commitment ladder logic, risk/breakup evaluation
 
 /** Which `DateEventCard` kinds are a live, end-of-scene-scored scene (date/hangout) vs. the lightweight gift/milestone flow. */
 export function isLiveScene(event: Pick<DateEventCard, 'kind' | 'startedAt'> | undefined): boolean {
@@ -66,8 +65,7 @@ export function nextCommitmentTier(current: CommitmentStatus): Exclude<Commitmen
   return i >= 0 && i < COMMITMENT_ORDER.length - 1 ? (COMMITMENT_ORDER[i + 1] as Exclude<CommitmentStatus, 'none'>) : undefined
 }
 
-// Reuses the existing warmth milestones rather than a second threshold set; living_together and
-// married both peg to the top stage since ladder order (not warmth) is what actually gates married.
+// Reuses the existing warmth milestones rather than a second threshold set
 const COMMITMENT_TIER_STAGE: Record<Exclude<CommitmentStatus, 'none'>, RelationshipStage> = {
   dating: 'getting_close',
   exclusive: 'close',
@@ -94,12 +92,7 @@ export function canAskForCommitment(
 /** Why `tier` isn't askable right now — `undefined` means it actually is. See `canActuallyAskForCommitment`, which this backs. */
 export type CommitmentLockReason = 'warmth' | 'kiss' | 'first_time'
 
-/**
- * Composes the warmth gate with physical-reality checks (so e.g. "married" can't be reached on
- * warmth alone with the pair never having kissed): `dating` needs `hasKissed`; `living_together`/
- * `married` need `firstIntimateSceneAt`. `exclusive` needs no extra check of its own since `dating`
- * already required a kiss.
- */
+/** Composes the warmth gate with physical-reality checks (so e.g. "married" can't be reached on warmth alone with the pair never having kissed) */
 export function commitmentLockReason(
   tier: Exclude<CommitmentStatus, 'none'>,
   warmth: number,
@@ -263,17 +256,7 @@ export function patchRelationshipTrack(
   }
 }
 
-/**
- * The chat's one live intimate scene and whose track holds it, or `undefined` when none is running.
- *
- * A scene is shared by everyone in it (`sceneParticipants.ts`), but it is *stored* on the track of
- * the character whose click started it, so any other participant's turn has to find it here rather
- * than reading its own track and finding nothing. Without this, a second character in the scene would
- * start a second state machine and the two would immediately disagree about what is happening — the
- * exact failure promoting the scene to a shared entity exists to prevent.
- *
- * The primary is checked first, so a single-character chat resolves without touching the map at all.
- */
+/** The chat's one live intimate scene and whose track holds it, or `undefined` when none is running. */
 export function findActiveIntimacyScene(
   chat: TrackHost,
   isActive: (scene: IntimacyScene) => boolean,

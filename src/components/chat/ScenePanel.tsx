@@ -53,9 +53,7 @@ export function ScenePanel({
   otherCharacters: { id: string; name: string }[]
   onClose: () => void
   onSave: (patch: Partial<Scene> | null) => Promise<void>
-  /** Previously there was no way to change `Chat.participants` after the chat was created at all —
-   *  "a friend walks in" mid-scene, or someone leaving, meant abandoning the chat and starting a
-   *  fresh one with the right roster from the start. */
+  /** Previously there was no way to change `Chat.participants` after the chat was created at all */
   onSaveParticipants: (ids: string[]) => Promise<void>
 }) {
   const [location, setLocation] = useState(scene?.location ?? '')

@@ -1,6 +1,4 @@
-// Minimal PNG tEXt chunk reader/writer, just enough to read/write the
-// SillyTavern/TavernAI "chara" metadata chunk (base64 JSON) embedded in
-// character card avatar PNGs. No external deps, browser-only.
+// Minimal PNG tEXt chunk reader/writer, just enough to read/write the SillyTavern/TavernAI "chara" metadata chunk (base64 JSON)…
 
 const PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10]
 

@@ -175,11 +175,7 @@ describe('canAskForCommitment', () => {
   })
 })
 
-// Gap the user's own playthrough surfaced: warmth alone let a couple reach "married" without ever
-// having kissed. `commitmentLockReason`/`canActuallyAskForCommitment` compose the existing warmth
-// gate with two physical-reality checks — these tests cover both directions the task called out:
-// warmth met but not the physical gate (still locked), the physical gate met but not warmth (still
-// locked), and both met together (unlocked).
+// Gap the user's own playthrough surfaced: warmth alone let a couple reach "married" without ever having kissed.
 describe('commitmentLockReason', () => {
   const kissed = { hasKissed: true, firstIntimateSceneAt: undefined }
   const notKissed = { hasKissed: false, firstIntimateSceneAt: undefined }
@@ -458,16 +454,7 @@ describe('getRelationshipTrack / patchRelationshipTrack', () => {
     })
   })
 
-  // A structural guard, not just a case. `getRelationshipTrack` builds the primary's track by
-  // hand-listing fields rather than spreading, so a field added to `RelationshipTrack` and mirrored
-  // onto `Chat` can be persisted correctly and still be invisible to every reader — which is
-  // exactly what happened to `afterglow`: it saved fine, and the prompt guidance and the
-  // Relationship panel both silently saw nothing, with the whole feature inert and every test
-  // still green.
-  //
-  // Typing the fixture as `Required<RelationshipTrack>` is what makes this a guard: adding a field
-  // to that type now breaks *compilation* here until the fixture covers it, and then breaks this
-  // assertion until `getRelationshipTrack` actually returns it.
+  // A structural guard, not just a case.
   it("surfaces every field of the primary's track, so a newly added one cannot go missing", () => {
     const fullTrack: Required<RelationshipTrack> = {
       affection: 40,
@@ -498,8 +485,7 @@ describe('getRelationshipTrack / patchRelationshipTrack', () => {
       currentDesire: 'wants to feel truly seen, not just liked',
       reciprocityCue: { startedAtTurn: 7, reason: 'gift_received' },
     }
-    // `Chat` stores `relationshipWarning` as `T | undefined` while the track accepts `T | null`
-    // (null being the wire signal for "clear it"), so the spread needs the narrowing.
+    // `Chat` stores `relationshipWarning` as `T | undefined` while the track accepts `T | null` (null being the wire signal for "clear it")
     const chat: Chat = { ...baseChat, ...fullTrack, relationshipWarning: fullTrack.relationshipWarning ?? undefined }
     expect(getRelationshipTrack(chat, 'primary')).toEqual(fullTrack)
   })

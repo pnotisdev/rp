@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { BRAND } from '@/lib/brand'
 import { openMayhemImageLabel } from '@/lib/api/openMayhemKrea'
 import { useOpenMayhemModels } from '@/lib/hooks/useOpenMayhemModels'
 import { OpenMayhemModelSelect } from './OpenMayhemModelSelect'
@@ -10,6 +11,7 @@ import { IMAGE_BACKEND_LABELS, type ImageBackendId } from '@/lib/api/imageBacken
 import { NOVELAI_IMAGE_MODELS } from '@/lib/api/novelaiImage'
 import { TextField, SelectField } from '@/components/ui/Field'
 import { Section } from '@/components/ui/Section'
+import { ComfySettings } from './ComfySettings'
 import { SettingsPage } from '@/components/ui/SettingsPage'
 
 const IMAGE_BACKENDS = Object.keys(IMAGE_BACKEND_LABELS) as ImageBackendId[]
@@ -46,8 +48,7 @@ export function ImageGenSettings() {
           onChange={(e) => {
             const backend = e.target.value as ImageBackendId
             const patch: Parameters<typeof setImageBackendConfig>[0] = { imageBackend: backend }
-            // A fresh local-backend pick with no URL yet gets a sane default instead of a blank
-            // field — the same convenience the chat-backend provider picker already gives.
+            // A fresh local-backend pick with no URL yet gets a sane default instead of a blank field
             if ((backend === 'a1111' || backend === 'comfyui' || backend === 'swarmui') && !imageBackendBaseUrl) {
               patch.imageBackendBaseUrl = LOCAL_BACKEND_DEFAULTS[backend]
             }
@@ -105,13 +106,7 @@ export function ImageGenSettings() {
           </>
         )}
 
-        {imageBackend === 'comfyui' && (
-          <p className="mb-2 text-xs text-text-muted">
-            Uses ComfyUI's own default txt2img workflow (checkpoint → positive/negative prompt →
-            sampler → save) with your prompt and settings substituted in. A heavily customized
-            workflow of your own isn't supported yet.
-          </p>
-        )}
+        {imageBackend === 'comfyui' && <ComfySettings />}
 
         {imageBackend === 'swarmui' && (
           <p className="mb-2 text-xs text-text-muted">
@@ -120,7 +115,7 @@ export function ImageGenSettings() {
           </p>
         )}
 
-        {(isLocal || imageBackend === 'novelai-image') && (
+        {((isLocal && imageBackend !== 'comfyui') || imageBackend === 'novelai-image') && (
           <TextField
             label={imageBackend === 'novelai-image' ? 'Model' : 'Checkpoint / model (optional)'}
             value={imageBackendModel}
@@ -148,9 +143,11 @@ export function ImageGenSettings() {
         )}
 
         <p className="mt-2 text-xs text-text-muted">
-          {imageBackend === 'openmayhem' ? 'Images are downloaded into RP Suite, so saved assets remain available after OpenMayhem artifacts expire.' : imageBackend === 'novelai-image'
-            ? 'Keys are stored only in this browser and sent directly to NovelAI. Never through any other server.'
-            : 'Requests go straight from this browser to the server URL above. Never through any other server.'}
+          {imageBackend === 'openmayhem' ? `Images are downloaded into ${BRAND.name}, so saved assets remain available after OpenMayhem artifacts expire.` : imageBackend === 'novelai-image'
+            ? `Your key is stored only in this browser. Requests pass through the ${BRAND.name} server to NovelAI, which keeps nothing.`
+            : imageBackend === 'comfyui'
+              ? `Requests go to the server URL above through the ${BRAND.name} server. Nothing leaves your machine.`
+              : 'Requests go straight from this browser to the server URL above. Never through any other server.'}
         </p>
       </Section>
     </SettingsPage>

@@ -23,23 +23,14 @@ describe('extractSceneTag', () => {
     expect(extractSceneTag('X\n<<scene:mood=Tender>>').scene).toEqual({ mood: 'tender' })
   })
 
-  // `useChatSession.ts`'s `runGeneration` treats an empty `text` here (once `cleanModelOutput`,
-  // itself a no-op on '', runs over it too) as a real generation failure rather than a successful
-  // empty reply — see its `isUsableReply` check. A model occasionally emits nothing but the tag
-  // with no dialogue at all; this is the exact shape that scenario reduces to.
+  // `useChatSession.ts`'s `runGeneration` treats an empty `text` here (once `cleanModelOutput`, itself a no-op on '', runs over it…
   it('returns empty text when the model emits nothing but the scene tag', () => {
     const { text, scene } = extractSceneTag('<<scene:expression=blush,background=school-hallway>>')
     expect(text).toBe('')
     expect(scene).toEqual({ expression: 'blush', background: 'school-hallway' })
   })
 
-  // Seen live: a model emitting one tag mid-reply (still followed by real dialogue) and a second
-  // one at the very end, rather than exactly one trailing tag as `buildSceneInstruction` asks for.
-  // Before this was handled, the mid-reply tag survived `extractSceneTag` untouched (its own match
-  // is anchored to end-of-string) and `cleanModelOutput`'s later HTML-tag cleanup then mangled it —
-  // stripping the inside but leaving the outer angle brackets, reducing a real reply to literally
-  // `"<>"`. Both tags must come out, and the LAST one's values are what actually get used, on the
-  // reasoning that a tag the model updates partway through is meant to reflect its final state.
+  // Seen live: a model emitting one tag mid-reply (still followed by real dialogue) and a second one at the very end, rather than…
   it('strips every scene tag when the model emits more than one, using the last for the actual scene', () => {
     const { text, scene } = extractSceneTag(
       '<<scene:expression=neutral,background=living-room>>\n' +
@@ -146,8 +137,7 @@ describe('buildSceneInstruction — asks only for the fields something will rend
   const MOODS = ['calm', 'tense', 'warm']
 
   it('a mood-only request names mood alone in the format line', () => {
-    // Outside Visual Novel mode with no live scene, mood is the only field still read (it picks
-    // the background music), so the ~245-token expression/background/outfit instruction is skipped.
+    // Outside Visual Novel mode with no live scene, mood is the only field still read (it picks the background music)
     const out = buildSceneInstruction({ expressionIds: [], backgroundIds: [], moodIds: MOODS })
     expect(out).toContain('<<scene:mood=ID>>')
     expect(out).not.toContain('expression=ID')

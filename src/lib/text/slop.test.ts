@@ -23,6 +23,7 @@ describe('cleanModelOutput — meta/preamble removal', () => {
 
   it('strips a leading affirmation line', () => {
     expect(cleanModelOutput('Certainly! Here is the scene:\n\n*She turns.* "Hi."')).toBe('*She turns.* "Hi."')
+    expect(cleanModelOutput('"Rude." `tess.log: logic error detected.')).toBe('"Rude." `tess.log: logic error detected.`')
   })
 
   it('strips an echoed speaker prefix for the actual speaker only', () => {
@@ -80,8 +81,7 @@ describe('cleanModelOutput — meta/preamble removal', () => {
 
   it('strips a closed <think> block whole, tag and reasoning text together, not just the tag markup', () => {
     const raw = '<think>The user wants a short reply. I should keep this terse.</think>"Fine."'
-    // Plain tag-stripping alone (like the <b>/<p> case above) would leave the reasoning prose
-    // dangling in front of the reply instead of removing it with its tag.
+    // Plain tag-stripping alone (like the <b>/<p> case above) would leave the reasoning prose dangling in front of the reply instead of…
     expect(cleanModelOutput(raw)).toBe('"Fine."')
   })
 
@@ -93,9 +93,6 @@ describe('cleanModelOutput — meta/preamble removal', () => {
 
   it('only removes a well-formed, closed think block — an unclosed one (generation cut off mid-thought) is not guessed at and eaten wholesale', () => {
     // THINK_BLOCK_RE requires a matching close, so an open-ended block isn't swallowed here.
-    // The bare `<think>` marker itself still goes, same as any other unrecognised tag
-    // (normalizeRpMarkup strips tag markup generically) — only its *content* survives untouched,
-    // reading as an odd but visible reply rather than silently vanishing.
     const raw = '<think>Still reasoning about how to open this scene'
     expect(cleanModelOutput(raw)).toBe('Still reasoning about how to open this scene')
   })
@@ -112,7 +109,7 @@ describe('cleanModelOutput — meta/preamble removal', () => {
     expect(cleanModelOutput(once, { charName: 'Sumire' })).toBe(once)
   })
 
-  it("strips a leaked relationship-guidance block (FIXES_TODO.md's live-reproduced bug), leaving real dialogue around it intact", () => {
+  it("strips a leaked relationship-guidance block (docs/planning/fixes-todo.md's live-reproduced bug), leaving real dialogue around it intact", () => {
     const leaked =
       '*She glances up.* "Hey."\n' +
       'Relationship: Kai and Sumire are at the "near strangers" stage.\n' +
@@ -251,6 +248,7 @@ describe('endsCleanly', () => {
 describe('balanceTrailingMarkup', () => {
   it('closes an action beat a stop sequence cut off mid-mark', () => {
     expect(balanceTrailingMarkup('*She says it like a warning.')).toBe('*She says it like a warning.*')
+    expect(balanceTrailingMarkup('"Fine." `tess.log: patience at 4%')).toBe('"Fine." `tess.log: patience at 4%`')
   })
 
   it('closes an open line of dialogue', () => {
@@ -314,8 +312,7 @@ describe('isVerbatimEcho', () => {
   })
 
   it('does not flag a short reply that legitimately starts with a capitalized clause before a colon', () => {
-    // The exact failure mode this is narrow on purpose to avoid: stripping the opening clause of a
-    // real sentence that happens to contain an early colon, rather than an actual speaker label.
+    // The exact failure mode this is narrow on purpose to avoid
     expect(isVerbatimEcho('Chapter One: this is not an echo at all.', priorText)).toBe(false)
   })
 

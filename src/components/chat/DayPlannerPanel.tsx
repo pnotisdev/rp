@@ -11,9 +11,7 @@ import { Section } from '@/components/ui/Section'
 interface DayPlannerPanelProps {
   character: Character
   world: WorldCard
-  /** `chat.activeEvent` — a live hangout/date already in progress (started from here or from the
-   *  ordinary "Start a date or event" picker) takes over the whole panel with a redirect instead
-   *  of a second "end this scene" UI. */
+  /** `chat.activeEvent` — a live hangout/date already in progress (started from here or from the ordinary "Start a date or event"… */
   activeEvent: DateEventCard | undefined
   onOpenActiveEvent: () => void
   onPick: (activity: DayPlannerActivity) => Promise<void>

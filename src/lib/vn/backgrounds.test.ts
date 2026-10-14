@@ -61,8 +61,7 @@ describe('matchBackgroundKeyword', () => {
     expect(matchBackgroundKeyword('The konbini is bright enough to hurt at this hour.', candidates)).toBe('convenience-store')
   })
 
-  // Whole-phrase matching, not bare containment: before this, "cafeteria" also scored a `cafe` hit
-  // (it only lost on length) and "parking lot" scored a `park`.
+  // Whole-phrase matching, not bare containment
   it('does not fire a short id inside a longer unrelated word', () => {
     expect(matchBackgroundKeyword('He waits in the parking lot.', candidates)).toBeUndefined()
   })

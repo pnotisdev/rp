@@ -1,13 +1,7 @@
 import { KoboldApiError } from './types'
 import type { ImageBackend, ImageGenerateParams, ImageGenerateResult } from './imageBackend'
 
-/**
- * Automatic1111's `stable-diffusion-webui` (and forks like Forge/reForge that keep the same API
- * surface) — the most standardized and widely-documented of section 11's four backends, run with
- * `--api` on the command line. Contract confirmed from the project's own official wiki
- * (`/sdapi/v1/txt2img` request/response shape, base64 images in the `images` array) — not
- * live-verified against a running instance this session.
- */
+/** Automatic1111's `stable-diffusion-webui` (and forks like Forge/reForge that keep the same API surface) */
 export class A1111Client implements ImageBackend {
   constructor(
     private baseUrl: string,

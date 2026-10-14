@@ -5,9 +5,7 @@ export interface BackgroundOption {
   label: string
 }
 
-/** Default scene locations offered to every world so the LLM has somewhere to place the moment even
- *  with no custom art uploaded. Each can optionally have a night-lighting variant — see
- *  `WorldCard.backgroundsNight` and `calendar.ts`'s `isNightPhase`. */
+/** Default scene locations offered to every world so the LLM has somewhere to place the moment even with no custom art uploaded. */
 export const DEFAULT_BACKGROUNDS: BackgroundOption[] = [
   // school
   { id: 'classroom', label: 'Classroom' },
@@ -48,12 +46,7 @@ export const DEFAULT_BACKGROUNDS: BackgroundOption[] = [
 
 export const DEFAULT_BACKGROUND_IDS = DEFAULT_BACKGROUNDS.map((b) => b.id)
 
-/**
- * A world-specific scene location beyond the 12 defaults — e.g. "the abandoned shrine" or "her
- * family's bookshop." Mirrors `CustomExpression` (`vn/expressions.ts`) exactly: same shape, same
- * "author extends a fixed default set per-subject" pattern, just for `WorldCard.backgrounds`
- * instead of `Character.sprites`.
- */
+/** A world-specific scene location beyond the 12 defaults */
 export interface CustomBackground {
   id: string
   label: string
@@ -63,13 +56,7 @@ export function slugifyBackgroundId(label: string, existingIds: string[]): strin
   return slugifyId(label, existingIds, 'location')
 }
 
-/**
- * Phrases beyond a background's own label/id that indicate it. A greeting almost never says
- * "school hallway" outright — it says lockers, or the corridor — which is why the label-only match
- * this replaces so rarely fired, leaving VN mode on a bare placeholder for the opening scene.
- * Default backgrounds only; a world's custom background still matches on its own label/id, which is
- * all this app knows about it.
- */
+/** Phrases beyond a background's own label/id that indicate it. */
 const BACKGROUND_ALIASES: Record<string, string[]> = {
   classroom: ['class room', 'homeroom', 'blackboard', 'chalkboard', 'her desk', 'his desk', 'the desks', 'after class', 'during class', 'lesson'],
   'school-hallway': ['hallway', 'corridor', 'lockers', 'locker', 'the halls'],
@@ -113,14 +100,7 @@ function containsPhrase(haystack: string, needle: string): boolean {
   return !/[a-z0-9]/.test(before) && !/[a-z0-9]/.test(after)
 }
 
-/**
- * Deterministic, no-model fallback for tagging a scene's location: matches narration against
- * candidate background labels/ids and their `BACKGROUND_ALIASES`, so VN mode still opens on
- * something plausible even with no client to run `detectGreetingScene` (or when it declined).
- * Longest matching phrase wins, so a specific label beats a generic alias; returns `undefined`
- * when nothing in the text matches, which is what keeps a genuinely unplaceable scene unplaced
- * rather than guessed at.
- */
+/** Deterministic, no-model fallback for tagging a scene's location */
 export function matchBackgroundKeyword(text: string, candidates: { id: string; label: string }[]): string | undefined {
   const lower = text.toLowerCase()
   let best: { id: string; length: number } | undefined
@@ -138,9 +118,7 @@ export function matchBackgroundKeyword(text: string, candidates: { id: string; l
   return best?.id
 }
 
-/** The human-readable label for a background id — one of the 12 defaults, or a world's own custom
- *  one. Falls back to the raw id (title-cased) for one that's been removed from both lists since it
- *  was set, rather than showing nothing. */
+/** The human-readable label for a background id — one of the 12 defaults, or a world's own custom one. */
 export function backgroundLabel(id: string, world?: { customBackgrounds?: CustomBackground[] }): string {
   const found = DEFAULT_BACKGROUNDS.find((b) => b.id === id) ?? world?.customBackgrounds?.find((b) => b.id === id)
   if (found) return found.label

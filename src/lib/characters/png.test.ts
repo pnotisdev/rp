@@ -1,17 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { readCharacterFromPng, writeCharacterToPng } from './png'
 
-// The null terminator PNG tEXt keywords use, built at runtime (not embedded as a literal escape
-// in this file's own source) to keep this file plain ASCII throughout.
+// The null terminator PNG tEXt keywords use, built at runtime (not embedded as a literal escape in this file's own source) to keep…
 const NUL = String.fromCharCode(0)
 
-/**
- * The smallest byte-valid PNG this module's own chunk walker will accept: signature, an IHDR
- * (required first chunk, arbitrary 1x1 dimensions), and an IEND. `readChunks` never reads or
- * validates the trailing CRC on a chunk it's walking (only `makeChunk`, used for chunks this
- * module writes itself, computes one) — so the dummy zero CRCs below are fine for round-tripping
- * through this module, even though a real image viewer would reject them.
- */
+/** The smallest byte-valid PNG this module's own chunk walker will accept */
 function buildMinimalPng(): Blob {
   const bytes = new Uint8Array([
     // PNG signature
@@ -58,8 +51,7 @@ describe('writeCharacterToPng / readCharacterFromPng', () => {
     const first = await writeCharacterToPng(buildMinimalPng(), CARD_A)
     const second = await writeCharacterToPng(first, CARD_B)
     expect(await readCharacterFromPng(second)).toEqual(CARD_B)
-    // Only ever one "chara" tEXt chunk, not one from each write left stacked up. Matches on the
-    // keyword plus its null terminator, the same bytes `writeCharacterToPng` writes.
+    // Only ever one "chara" tEXt chunk, not one from each write left stacked up.
     const bytes = new Uint8Array(await second.arrayBuffer())
     const charaOccurrences = countAsciiOccurrences(bytes, `chara${NUL}`)
     expect(charaOccurrences).toBe(1)
@@ -75,9 +67,7 @@ describe('writeCharacterToPng / readCharacterFromPng', () => {
   })
 
   it('prefers a "ccv3" chunk over a "chara" chunk when both are present', async () => {
-    // Simulate an imported card that already carries both a v2 "chara" and a v3 "ccv3" chunk by
-    // writing "chara" first (this module's own writer only ever produces "chara"), then manually
-    // appending a "ccv3" tEXt chunk with different content before the trailing IEND.
+    // Simulate an imported card that already carries both a v2 "chara" and a v3 "ccv3" chunk by writing "chara" first (this module's…
     const withChara = await writeCharacterToPng(buildMinimalPng(), CARD_A)
     const bytes = new Uint8Array(await withChara.arrayBuffer())
 

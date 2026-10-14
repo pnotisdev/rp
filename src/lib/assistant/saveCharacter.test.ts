@@ -2,9 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { generatedToCharacterInput } from './saveCharacter'
 import type { GeneratedCharacter } from './thread'
 
-// This mapping is the one place a generated character can lose half of itself without anything
-// failing, so every stage it flattens is pinned here. It mirrors `CharacterEditor`'s own
-// `onGenerated` handler — if that gains a field, these break.
+// This mapping is the one place a generated character can lose half of itself without anything failing, so every stage it flattens is pinned here.
 
 const card = {
   name: 'Lirael',

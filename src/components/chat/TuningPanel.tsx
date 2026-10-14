@@ -24,22 +24,9 @@ import { Button } from '@/components/ui/Button'
 import { useVnChromeClass } from '@/lib/store/useVnChromeStore'
 
 const SELECT_CLASS =
-  'w-full cursor-pointer rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40'
+  'w-full cursor-pointer rounded-xl border border-border bg-bg-elevated px-3 py-2 text-sm text-text outline-none focus:border-accent/70'
 
-/**
- * The image-gen-style "tweak it from a side panel, not a settings maze" pattern. Deliberately NOT
- * a `<Modal>` — it docks to the right edge over whatever's behind it (chat log or VNStage) without
- * a backdrop, so you can still read the scene and keep composing while you nudge a slider, the way
- * Anima's panel sits beside the canvas rather than covering it. Every value here is the same
- * global Settings state (`useSettingsStore`) — a deliberately simple v1: this changes generation
- * everywhere, not just the open chat. Kept mounted at all times and slid off-screen when closed
- * (rather than conditionally rendered) so the open/close transition actually animates.
- *
- * Quick-select only, not quick-author: picking a sampler/instruct preset here is instant, matching
- * Settings → Generation's own "Starting point"/"Active template" selects (same store fields, same
- * resolution rules) — but authoring one (raw fields, saving a new preset, importing a SillyTavern
- * file) stays behind "Open full Generation settings" rather than being duplicated here.
- */
+/** The image-gen-style "tweak it from a side panel, not a settings maze" pattern. */
 export function TuningPanel({
   open,
   onClose,
@@ -77,11 +64,7 @@ export function TuningPanel({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [open, onClose])
 
-  // Same "which preset does the live sampler exactly match" resolution as Settings → Generation,
-  // extended to also check saved presets (a saved preset stores the *entire* sampler snapshot, so
-  // the same "every field it opinionates about matches" check that works for a builtin's partial
-  // params works here too). One merged select rather than two separate widgets, same shape as the
-  // System prompt section's builtin+user-preset dropdown.
+  // Same "which preset does the live sampler exactly match" resolution as Settings → Generation, extended to also check saved presets…
   const current = sampler as unknown as Record<string, number>
   const activeBuiltinPreset = BUILTIN_PRESETS.find((p) => Object.entries(p.params).every(([k, v]) => current[k] === v))
   const activeSavedPreset = !activeBuiltinPreset
@@ -111,7 +94,7 @@ export function TuningPanel({
     <aside
       aria-hidden={!open}
       aria-label="Quick tuning"
-      className={`absolute inset-y-0 right-0 z-40 flex w-full flex-col border-l border-border bg-bg-elevated shadow-2xl transition-transform duration-300 ease-out sm:w-96 ${vnChrome} ${
+      className={`absolute inset-y-0 right-0 z-40 flex w-full flex-col border-l border-border bg-bg-elevated transition-transform duration-300 ease-out sm:w-96 ${vnChrome} ${
         open ? 'translate-x-0' : 'pointer-events-none translate-x-full'
       }`}
     >
@@ -274,9 +257,7 @@ export function TuningPanel({
           </div>
         )}
 
-        {/* A chat-completion backend formats its own turns — an instruct template (ChatML, Llama 3,
-            ...) is a text-completion-only concept and would be actively misleading to show here.
-            NovelAI is a raw text-completion API too, so it still wants a real instruct template. */}
+        {/* A chat-completion backend formats its own turns */}
         {chatBackend !== 'openai-compatible' && (
           <div className="mb-5">
             <span className="mb-1.5 block text-sm font-semibold text-text">Instruct template</span>

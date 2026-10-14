@@ -4,20 +4,7 @@ import type { ChoiceOption } from '@/lib/types'
 
 const KIND_ICON: Record<ChoiceOption['kind'], LucideIcon> = { gift: Gift, action: Zap, line: MessageSquare }
 
-/**
- * `vnChoiceStyle: 'centered'` — the genre's own choice screen: the options float over the scene as
- * a stack of wide bars, roughly where a VN puts them, rather than as a docked pill row.
- *
- * Two things changed from the first pass at this. It sits high (over the character, above the
- * dialogue box) instead of dead centre, so the sprite and the line that prompted the choice both
- * stay readable underneath — the whole point is that this is a beat *in* the scene, not a screen
- * that replaces it. And the scrim is much lighter, for the same reason: enough separation to read
- * the bars against, not a blackout.
- *
- * `VNStage` renders this as a sibling of the dialogue box (not nested inside it) so it can span the
- * whole stage, and only ever for genuine AI-suggested choices — quick replies stay docked either
- * way (see `VNStage`'s own doc comment on `choiceListSlot` vs `activeChoiceData`).
- */
+/** `vnChoiceStyle: 'centered'` — the genre's own choice screen */
 export function VNCenteredChoices({
   choices,
   onPick,

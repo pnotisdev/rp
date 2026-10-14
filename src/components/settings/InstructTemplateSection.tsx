@@ -102,7 +102,7 @@ export function InstructTemplateSection() {
           <select
             value={instructTemplateId}
             onChange={(e) => setInstructTemplateId(e.target.value)}
-            className="w-full rounded-xl bg-bg-sunken px-3 py-2 text-sm text-text outline-none ring-1 ring-transparent transition-shadow focus:ring-accent/40"
+            className="w-full rounded-xl border border-border bg-bg-elevated px-3 py-2 text-sm text-text outline-none focus:border-accent/70"
           >
             <optgroup label="Builtin">
               {BUILTIN_INSTRUCT_TEMPLATES.map((t) => (
@@ -153,7 +153,7 @@ export function InstructTemplateSection() {
         </div>
       )}
 
-      <div className="rounded-xl bg-bg-elevated p-5">
+      <div className="rounded-lg border border-border bg-bg-elevated p-5">
         <TextField label="Name" value={draftName} onChange={(e) => setDraftName(e.target.value)} />
         <div className="grid grid-cols-1 gap-x-3 sm:grid-cols-2">
           <TextAreaField

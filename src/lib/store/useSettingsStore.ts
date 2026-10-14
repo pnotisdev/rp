@@ -1,8 +1,4 @@
-/**
- * Zustand store for all persisted user settings: connection, identity, theming, layout toggles,
- * generation/sampler params, memory/relationship/objective behavior, and backend configs (chat,
- * image, TTS). Persisted to localStorage as `rp-settings`, with a deep `merge` for a few nested keys.
- */
+/** Zustand store for all persisted user settings */
 import { create } from 'zustand'
 import { isOpenMayhem } from '@/lib/api/openMayhem'
 import { persist } from 'zustand/middleware'
@@ -11,11 +7,15 @@ import { DEFAULT_CHAT_COMPLETION_SAMPLER } from '@/lib/api/types'
 import type { TtsProviderId } from '@/lib/voice/ttsProviders'
 import type { ChatBackendId } from '@/lib/api/chatBackend'
 import type { ImageBackendId } from '@/lib/api/imageBackend'
+import { DEFAULT_COMFY_CONFIG, type ComfyConfig } from '@/lib/api/comfyWorkflow'
 import type { RelationshipDifficulty } from '@/lib/dating/relationshipAssist'
 import type { QuickReply, RegexScript } from '@/lib/types'
 import type { ThemePreset } from '@/lib/store/themePresets'
 import type { PromptSectionId } from '@/lib/prompt/builder'
 import { DEFAULT_PROMPT_SECTIONS } from '@/lib/prompt/builder'
+import { LEGACY_DARK_PALETTES, LEGACY_LIGHT_PALETTES, mergePalette } from './palette'
+import type { FontId } from './fonts'
+import type { Backdrop, Look } from './looks'
 
 /** Seeded on first run only; a returning user's own edits/deletions are never overwritten. */
 const DEFAULT_QUICK_REPLIES: QuickReply[] = [
@@ -38,46 +38,44 @@ export type ColorMode = 'light' | 'dark'
 export type IntimacyDetailLevel = 'default' | 'fade_to_black' | 'suggestive' | 'explicit'
 
 export const DEFAULT_THEME_TOKENS: Record<string, string> = {
-  '--c-bg': '251 251 250',
-  '--c-bg-elevated': '255 255 255',
-  '--c-bg-sunken': '244 244 242',
-  '--c-border': '231 229 225',
-  '--c-text': '30 32 30',
-  '--c-text-muted': '133 129 123',
-  '--c-accent': '13 121 105',
+  '--c-bg': '247 247 244',
+  '--c-bg-elevated': '252 252 250',
+  '--c-bg-sunken': '238 237 232',
+  '--c-border': '226 224 217',
+  '--c-text': '38 37 30',
+  '--c-text-muted': '117 114 104',
+  '--c-accent': '214 62 0',
   '--c-accent-text': '255 255 255',
-  '--c-msg-user': '13 121 105',
-  '--c-msg-char': '255 255 255',
-  '--c-danger': '197 48 48',
-  '--c-success': '22 130 74',
-  '--c-warning': '180 108 8',
-  '--c-romance': '201 63 122',
+  '--c-msg-user': '214 62 0',
+  '--c-msg-char': '252 252 250',
+  '--c-danger': '192 57 43',
+  '--c-success': '38 125 82',
+  '--c-warning': '168 108 20',
+  '--c-romance': '190 76 128',
   '--c-romance-text': '255 255 255',
 }
 
 export const DEFAULT_THEME_TOKENS_DARK: Record<string, string> = {
-  '--c-bg': '17 18 18',
-  '--c-bg-elevated': '26 27 27',
-  '--c-bg-sunken': '12 13 13',
-  '--c-border': '42 44 43',
-  '--c-text': '235 235 232',
-  '--c-text-muted': '148 148 143',
-  '--c-accent': '94 224 197',
-  '--c-accent-text': '12 13 13',
-  '--c-msg-user': '94 224 197',
-  '--c-msg-char': '26 27 27',
-  '--c-danger': '240 120 120',
-  '--c-success': '94 220 150',
-  '--c-warning': '240 190 90',
-  '--c-romance': '236 108 184',
-  '--c-romance-text': '12 13 13',
+  '--c-bg': '20 19 15',
+  '--c-bg-elevated': '27 26 22',
+  '--c-bg-sunken': '36 34 29',
+  '--c-border': '47 45 38',
+  '--c-text': '237 236 230',
+  '--c-text-muted': '150 147 138',
+  '--c-accent': '245 96 31',
+  '--c-accent-text': '20 19 15',
+  '--c-msg-user': '245 96 31',
+  '--c-msg-char': '27 26 22',
+  '--c-danger': '232 112 100',
+  '--c-success': '122 192 150',
+  '--c-warning': '222 180 100',
+  '--c-romance': '222 132 172',
+  '--c-romance-text': '20 14 17',
 }
 
 // Kept in sync with the "Balanced" built-in preset (builtinPresets.ts) so a fresh install shows it selected.
 export const DEFAULT_SAMPLER: GenerationParams = {
-  // A modern floor, not a real limit: `contextLengthAuto` (on by default) raises this to the
-  // connected model's actual context as soon as one reports it. Only backends with no way to
-  // introspect that (most hosted OpenAI-compatible providers) keep this value.
+  // A modern floor, not a real limit: `contextLengthAuto` (on by default) raises this to the connected model's actual context as soon as one reports it.
   max_context_length: 32768,
   max_length: 512,
   temperature: 0.9,
@@ -134,10 +132,7 @@ interface SettingsState {
   chatWidthRem: number
   fontScale: number
   blurPx: number
-  shadowStrength: number
-  /** VN mode's per-character typewriter delay, in ms — 0 is instant (no typewriter at all).
-   *  `reducedMotion` always reveals instantly regardless of this value, same as every other
-   *  animation in the app. */
+  /** VN mode's per-character typewriter delay, in ms — 0 is instant (no typewriter at all). */
   vnTextSpeedMs: number
   reducedMotion: boolean
   reducedAudio: boolean
@@ -152,6 +147,8 @@ interface SettingsState {
   showTimestamps: boolean
   showTokenCounts: boolean
   showGenerationHud: boolean
+  /** Texting-format replies are read aloud bubble by bubble as they appear. */
+  autoVoiceTexting: boolean
   tagsAsFolders: boolean
   clickToEdit: boolean
   /** `'auto'` (only via `setVisualNovelMode`, not `toggleFlag` — it's a tri-state) turns VN mode on
@@ -162,20 +159,32 @@ interface SettingsState {
    *  VN mode only; the ordinary chat layout's choices/quick-replies are unaffected either way. */
   vnChoiceStyle: 'docked' | 'centered'
   setVnChoiceStyle: (v: 'docked' | 'centered') => void
-  /** Where the player writes in VN mode. `'inline'` hands the dialogue box itself over — same
-   *  frame, same height, nameplate and accent rail switched to the persona — so the scene isn't
-   *  paying for a permanently docked composer bar. `'docked'` keeps that bar under the box. */
+  /** Where the player writes in VN mode. */
   vnInputMode: 'inline' | 'docked'
   setVnInputMode: (v: 'inline' | 'docked') => void
   /** With a vision-capable model loaded, runs a post-reply pass to correct the model's `<<scene:>>` tag. Off by default. */
   visionSceneDetection: boolean
   setChatStyle: (s: ChatStyle) => void
   setAvatarShape: (s: AvatarShape) => void
+
+  // look: type, shape and atmosphere (colours are the theme tokens above)
+  uiFont: FontId
+  readFont: FontId
+  displayFont: FontId
+  /** Corner roundness in px; every rounded-* size scales from it. */
+  radiusPx: number
+  /** Message text size multiplier. */
+  readScale: number
+  backdrop: Backdrop
+  /** Translucent panels over the backdrop. */
+  glass: boolean
+  setLook: (patch: Partial<Pick<SettingsState, 'uiFont' | 'readFont' | 'displayFont' | 'radiusPx' | 'readScale' | 'backdrop' | 'glass'>>) => void
+  /** Applies a whole look: its palette, type, shape, atmosphere and chat style, and its light/dark mode. */
+  applyLook: (look: Look) => void
   setLayout: (patch: Partial<{
     chatWidthRem: number
     fontScale: number
     blurPx: number
-    shadowStrength: number
     vnTextSpeedMs: number
   }>) => void
   toggleFlag: (
@@ -186,6 +195,7 @@ interface SettingsState {
       | 'showTimestamps'
       | 'showTokenCounts'
       | 'showGenerationHud'
+      | 'autoVoiceTexting'
       | 'tagsAsFolders'
       | 'clickToEdit'
       | 'visionSceneDetection',
@@ -213,11 +223,10 @@ interface SettingsState {
   customCss: string
   setCustomCss: (css: string) => void
 
-  sidebarExpanded: boolean
-  setSidebarExpanded: (v: boolean) => void
+  /** The nav shows labels unless collapsed to the icon rail. */
+  sidebarCollapsed: boolean
+  setSidebarCollapsed: (v: boolean) => void
 
-  chatsPanelCollapsed: boolean
-  setChatsPanelCollapsed: (v: boolean) => void
 
   /** Character ids whose "VN mode has no art yet" setup hint the user has dismissed. */
   vnArtHintDismissed: string[]
@@ -265,18 +274,19 @@ interface SettingsState {
   quickReplies: QuickReply[]
   setQuickReplies: (replies: QuickReply[]) => void
 
-  // system prompt — the instruction block at the top of every generation. Empty = the built-in
-  // `DEFAULT_SYSTEM_PROMPT` (builder.ts); a character's own `system_prompt` still overrides both.
+  // system prompt — the instruction block at the top of every generation.
   systemPrompt: string
   /** Global steering appended after any per-character post-history instructions. */
   postHistoryInstructions: string
-  /**
-   * The Assistant view's own instruction (`lib/assistant/prompt.ts`). Separate from `systemPrompt`
-   * on purpose: that one tells the model to be a character, which is exactly what the assistant must
-   * not do. Empty = the built-in `ASSISTANT_SYSTEM_PROMPT`.
-   */
+  /** The Assistant view's own instruction (`lib/assistant/prompt.ts`). */
   assistantSystemPrompt: string
   setAssistantSystemPrompt: (v: string) => void
+  /** What the Assistant may do with tools: nothing, look at the library, or look and change it. */
+  assistantTools: 'off' | 'read' | 'write'
+  /** Apply the Assistant's file edits without asking each time (commands always ask). */
+  assistantAutoApprove: boolean
+  setAssistantAutoApprove: (v: boolean) => void
+  setAssistantTools: (v: 'off' | 'read' | 'write') => void
   setSystemPrompt: (v: string) => void
   setPostHistoryInstructions: (v: string) => void
   /** User-saved {system prompt + post-history} pairs, shown as a picker in Settings → Generation. */
@@ -339,6 +349,9 @@ interface SettingsState {
   imageBackendUsername: string
   imageBackendPassword: string
   imageBackendModel: string
+  /** ComfyUI only: which graph to run, its model files, and a workflow of your own. Kept apart so switching backends never loses it. */
+  comfy: ComfyConfig
+  setComfyConfig: (patch: Partial<ComfyConfig>) => void
   setImageBackendConfig: (patch: Partial<{
     imageBackend: ImageBackendId
     imageBackendBaseUrl: string
@@ -403,7 +416,6 @@ export const useSettingsStore = create<SettingsState>()(
       chatWidthRem: 48,
       fontScale: 1,
       blurPx: 0,
-      shadowStrength: 1,
       vnTextSpeedMs: 18,
       reducedMotion: false,
       reducedAudio: false,
@@ -415,6 +427,7 @@ export const useSettingsStore = create<SettingsState>()(
       showTimestamps: true,
       showTokenCounts: false,
       showGenerationHud: true,
+      autoVoiceTexting: false,
       tagsAsFolders: true,
       clickToEdit: true,
       visualNovelMode: false,
@@ -426,6 +439,28 @@ export const useSettingsStore = create<SettingsState>()(
       visionSceneDetection: false,
       setChatStyle: (s) => set({ chatStyle: s }),
       setAvatarShape: (s) => set({ avatarShape: s }),
+      uiFont: 'inter',
+      readFont: 'inter',
+      displayFont: 'rounded',
+      radiusPx: 6,
+      readScale: 1,
+      backdrop: 'none',
+      glass: false,
+      setLook: (patch) => set(patch),
+      applyLook: (look) =>
+        set({
+          themeTokensLight: { ...DEFAULT_THEME_TOKENS, ...look.light },
+          themeTokensDark: { ...DEFAULT_THEME_TOKENS_DARK, ...look.dark },
+          colorMode: look.mode,
+          uiFont: look.uiFont,
+          readFont: look.readFont,
+          displayFont: look.displayFont,
+          radiusPx: look.radiusPx,
+          backdrop: look.backdrop,
+          glass: look.glass,
+          chatStyle: look.chatStyle,
+          avatarShape: look.avatarShape,
+        }),
       setLayout: (patch) => set(patch),
       toggleFlag: (key) => set((s) => ({ [key]: !s[key] }) as Partial<SettingsState>),
 
@@ -447,11 +482,9 @@ export const useSettingsStore = create<SettingsState>()(
       customCss: '',
       setCustomCss: (css) => set({ customCss: css }),
 
-      sidebarExpanded: false,
-      setSidebarExpanded: (v) => set({ sidebarExpanded: v }),
+      sidebarCollapsed: false,
+      setSidebarCollapsed: (v) => set({ sidebarCollapsed: v }),
 
-      chatsPanelCollapsed: false,
-      setChatsPanelCollapsed: (v) => set({ chatsPanelCollapsed: v }),
 
       vnArtHintDismissed: [],
       dismissVnArtHint: (characterId) =>
@@ -496,6 +529,10 @@ export const useSettingsStore = create<SettingsState>()(
       postHistoryInstructions: '',
       assistantSystemPrompt: '',
       setAssistantSystemPrompt: (v) => set({ assistantSystemPrompt: v }),
+      assistantTools: 'off',
+      assistantAutoApprove: false,
+      setAssistantAutoApprove: (v) => set({ assistantAutoApprove: v }),
+      setAssistantTools: (v) => set({ assistantTools: v }),
       setSystemPrompt: (v) => set({ systemPrompt: v }),
       setPostHistoryInstructions: (v) => set({ postHistoryInstructions: v }),
       promptPresets: [],
@@ -564,6 +601,8 @@ export const useSettingsStore = create<SettingsState>()(
       imageBackendUsername: '',
       imageBackendPassword: '',
       imageBackendModel: '',
+      comfy: { ...DEFAULT_COMFY_CONFIG },
+      setComfyConfig: (patch) => set((s) => ({ comfy: { ...s.comfy, ...patch } })),
       setImageBackendConfig: (patch) => set((s) => {
         const changesProvider = patch.imageBackend !== undefined && patch.imageBackend !== s.imageBackend
           || patch.imageBackendBaseUrl !== undefined && patch.imageBackendBaseUrl !== s.imageBackendBaseUrl
@@ -582,8 +621,9 @@ export const useSettingsStore = create<SettingsState>()(
           ...p,
           openMayhemApiKey: key,
           ...(usesOpenMayhem ? { chatBackendApiKey: key } : {}),
-          themeTokensLight: { ...current.themeTokensLight, ...p.themeTokensLight },
-          themeTokensDark: { ...current.themeTokensDark, ...p.themeTokensDark },
+          themeTokensLight: mergePalette(current.themeTokensLight, p.themeTokensLight, LEGACY_LIGHT_PALETTES),
+          themeTokensDark: mergePalette(current.themeTokensDark, p.themeTokensDark, LEGACY_DARK_PALETTES),
+          comfy: { ...DEFAULT_COMFY_CONFIG, ...p.comfy },
           sampler: { ...current.sampler, ...p.sampler },
         }
       },

@@ -1,9 +1,4 @@
-// Character Mind: dynamic per-turn state (mood, need, intent, desire, fear) set by the same
-// relationship judge call, read back as `styleGuidance` lines. Separate from the relationship
-// track — emotion isn't relationship (a character can love/trust the player while currently angry
-// with them). `mood`/`currentNeed` are shown to the player (RelationshipPanel); the rest are
-// private, model-only signals. `plans` (a persistent multi-entry layer) and
-// `beliefsAboutUser`/`expectationsOfUser` (impressions of the player) live in their own modules.
+// Character Mind: dynamic per-turn state (mood, need, intent, desire, fear) set by the same relationship judge call, read back as `styleGuidance` lines.
 
 /** Closed vocabulary, not free text, so the classifier's output stays legible. */
 export const MOOD_VOCAB = [
@@ -75,8 +70,6 @@ export function fearGuidance(charName: string, fear?: string): string {
 }
 
 // Moods that pull against a generic romance scene's trained instinct to soften/lean in/escalate.
-// Moods that already point the same direction as a romance default (content, playful, etc.) are
-// left out — there's no trained instinct to override there.
 const RESISTANT_MOODS: readonly CharacterMood[] = [
   'anxious',
   'guarded',
@@ -109,12 +102,7 @@ export function authoredStatePriorityNote(
   return `${charName} is ${because}. A generic romance story would have a character soften, lean in, or escalate anyway just because the moment invites it, resist that trained instinct here. ${charName}'s actual authored state wins over generic romantic instinct: however high warmth or affection reads right now, it does not override a mood like this, an unmet need, or what ${charName} is actually doing right now.${boundaryClause} Write the character who is actually anxious/guarded/holding back, not the version of this scene a stock romance would write.`
 }
 
-// Stock romance-writing tells a model reaches for regardless of character/relationship. This is the
-// STATIC pre-warning list; `text/slop.ts`'s `SLOP_PATTERNS` is the REACTIVE corpus that names back
-// a tell the character has actually just used. They deliberately overlap on a few phrases
-// ("despite herself", "the air was thick with", "couldn't help but", "sent shivers down"): when a
-// phrase has already been used, `stockRomancePhrasingNote` drops it here so the reactive catch is
-// the only place it's named.
+// Stock romance-writing tells a model reaches for regardless of character/relationship.
 export const STOCK_ROMANCE_PHRASES = [
   'electricity between them',
   'the air was thick with',
@@ -131,9 +119,7 @@ export const STOCK_ROMANCE_PHRASES = [
   'electric touch',
 ] as const
 
-/** Warns off stock romance-writing tells. Only worth the tokens during an actually romantic/intimate
- *  moment. Any phrase already present in `recentCharTurns` is dropped — the reactive slop note
- *  (`buildSlopAvoidanceNote`) names those, and one place is enough. */
+/** Warns off stock romance-writing tells. Only worth the tokens during an actually romantic/intimate moment. */
 export function stockRomancePhrasingNote(isRomanticMoment: boolean, recentCharTurns: string[] = []): string {
   if (!isRomanticMoment) return ''
   const recent = recentCharTurns.join('\n').toLowerCase()

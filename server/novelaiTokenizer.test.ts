@@ -1,12 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { encodeTokens, tokenizerForModel } from './novelaiTokenizer.ts'
 
-/**
- * Unlike the rest of the NovelAI integration (real generation needs a paid account this session
- * never had), this piece is genuinely, fully verifiable: the bundled `.model` files are NovelAI's
- * own real published tokenizers, loaded by the same library SillyTavern itself uses. These tests
- * load the actual files and check real output — not mocked.
- */
+/** Unlike the rest of the NovelAI integration (real generation needs a paid account this session never had), this piece is… */
 describe('tokenizerForModel', () => {
   it('maps kayra and clio model ids to their respective NerdStash tokenizer', () => {
     expect(tokenizerForModel('kayra-v1')).toBe('nerdstash_v2')
@@ -53,8 +48,7 @@ describe('encodeTokens — real NerdStash model files', () => {
   })
 
   it('caches the loaded processor — a second call for the same tokenizer does not reload the model file', async () => {
-    // Not directly observable from outside, but a second real call completing quickly (not
-    // re-reading a ~1MB file + WASM init) is the practical signal this test cares about.
+    // Not directly observable from outside
     const start = performance.now()
     await encodeTokens('warm', 'nerdstash_v2')
     const elapsed = performance.now() - start

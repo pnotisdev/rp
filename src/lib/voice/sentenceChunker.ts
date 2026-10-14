@@ -1,10 +1,4 @@
-/**
- * Incrementally pulls complete sentences out of a growing streamed string, so the
- * playback can start on the first sentence while the rest is still being
- * generated instead of waiting for the whole reply. Call again as more text arrives;
- * pass back the returned `consumedLength` each time so already-spoken text isn't
- * re-extracted.
- */
+/** Incrementally pulls complete sentences out of a growing streamed string */
 const SENTENCE_BOUNDARY = /[.!?…]+["')\]]*\s+|\n+/g
 
 export function extractCompleteSentences(

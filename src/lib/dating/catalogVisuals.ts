@@ -18,7 +18,7 @@ import {
   Search,
   ShieldCheck,
   Sofa,
-  Sparkles,
+  Star,
   Ticket,
   Wand2,
   Zap,
@@ -26,15 +26,9 @@ import {
 } from 'lucide-react'
 import type { GiftRarity } from '@/lib/types'
 
-// Shared visual vocabulary for the dating layer — anything sold or carried (gifts, items, toys),
-// plus the relationship dimensions and intimacy categories the Relationship panel lists. Purely
-// derived from data the catalogs already carry (`rarity`, `tags`, the fixed dimension/category
-// ids), so a world author gets a distinct-looking shop and menu without authoring any art.
+// Shared visual vocabulary for the dating layer
 
-/**
- * A catalog entry's colour family: its rarity, or `intimate` for the toy catalog, which is gated by
- * warmth rather than priced by rarity and so has no rarity of its own to colour by.
- */
+/** A catalog entry's colour family: its rarity, or `intimate` for the toy catalog */
 export type CatalogTone = GiftRarity | 'intimate'
 
 /** Per-tone tint, built only from existing theme tokens so it survives a custom theme. */
@@ -57,7 +51,7 @@ export const TAG_ICONS: [string, LucideIcon][] = [
   ['creative', Brush],
   ['sweet', Cake],
   ['comfort', Coffee],
-  ['cute', Sparkles],
+  ['cute', Star],
   ['personal', Feather],
   ['thoughtful', Feather],
   ['ticket', Ticket],
@@ -95,5 +89,5 @@ export const INTIMACY_CATEGORY_ICONS: Record<string, LucideIcon> = {
   kissing_spot: MessageCircleHeart,
   position: HeartHandshake,
   toy: Wand2,
-  activity: Sparkles,
+  activity: Star,
 }

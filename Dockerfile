@@ -1,5 +1,5 @@
 # Runs the whole app from one Node process: the Express API and the built client on one port.
-# See DOCKER.md for usage. Model backends (KoboldCpp etc.) still run wherever you already run them —
+# See docs/guides/docker.md for usage. Model backends (KoboldCpp etc.) still run wherever you already run them —
 # the browser talks to those directly, so this image never needs to reach them.
 
 # --- build the client -------------------------------------------------------
@@ -29,6 +29,9 @@ RUN npm ci --omit=dev && npm cache clean --force
 # Server source, committed seed assets, and the client build from the stage above.
 COPY --chown=node:node server ./server
 COPY --chown=node:node seed ./seed
+# Extension modules the server imports for validation/linting, and the guide it serves to AI agents.
+COPY --chown=node:node src/lib/extensions ./src/lib/extensions
+COPY --chown=node:node docs/guides/extensions.md ./docs/guides/extensions.md
 COPY --from=build --chown=node:node /app/dist ./dist
 
 # All characters/chats/worlds/images live under data/ — mount a volume here to keep them.

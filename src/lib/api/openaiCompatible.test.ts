@@ -1,17 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { OpenAICompatibleClient } from './openaiCompatible'
+import { OpenAICompatibleClient, withImages } from './openaiCompatible'
 import { KoboldApiError } from './types'
 import type { GenerateRequest } from './types'
 import type { ChatBackend } from './chatBackend'
 
-/**
- * Section 8's "additional model backends" — these tests check `OpenAICompatibleClient` against the
- * documented OpenAI Chat Completions contract with a mocked `fetch`, NOT against a real provider
- * (see the honesty note atop openaiCompatible.ts: nobody working on this had a real API key to
- * verify against). They lock in the request-shape/param-mapping and SSE-parsing logic so a future
- * change can't silently break it, but they cannot catch a real provider behaving differently than
- * documented.
- */
+/** Section 8's "additional model backends" */
 
 const BASE_REQUEST: GenerateRequest = {
   prompt: 'Hello there',
@@ -136,10 +129,7 @@ describe('OpenAICompatibleClient — request building', () => {
     expect(body).not.toHaveProperty('verbosity')
   })
 
-  // Live-verified against a real key: OpenRouter's free tier increasingly routes to reasoning
-  // models, and one (`nex-agi/nex-n2.5-mini:free`) reproduced exactly this — reasoning tokens
-  // filled the whole `max_tokens` budget and `content` came back empty every time, with no error at
-  // all, until `reasoning: {enabled: false}` was added to the request.
+  // Live-verified against a real key: OpenRouter's free tier increasingly routes to reasoning models
   describe('reasoning — OpenRouter only', () => {
     it("requests reasoning off by default, since a hidden 'thinking' phase only costs reply budget in a roleplay app", async () => {
       const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { choices: [{ message: { content: 'hi' } }] }))
@@ -221,13 +211,7 @@ describe('OpenAICompatibleClient — request building', () => {
   })
 })
 
-// A real user hit this against real OpenAI: "Unsupported parameter: 'max_tokens' is not supported
-// with this model. Use 'max_completion_tokens' instead." OpenAI made that switch mandatory for
-// o1/o3/o4-mini and has since widened it to some GPT-5-family models too, with no published,
-// queryable way to know ahead of time which name a given model wants — every other project that's
-// hit this (opencode, crush, several LangChain issues) confirms the same thing. So this client
-// doesn't guess from the model name; it sends the widely-supported `max_tokens` first and only
-// switches for the rest of its lifetime once it's actually seen that specific rejection.
+// A real user hit this against real OpenAI: "Unsupported parameter: 'max_tokens' is not supported with this model.
 describe('OpenAICompatibleClient — max_tokens / max_completion_tokens', () => {
   function maxTokensRejection() {
     return jsonResponse(400, {
@@ -390,9 +374,7 @@ describe('OpenAICompatibleClient — generate()', () => {
     await expect(client.generate(BASE_REQUEST, controller.signal)).rejects.toBe(abortError)
   })
 
-  // FIXES_TODO.md item #14 — a 429's own body text can overclaim permanence (a provider's "Daily
-  // limit reached" wording, confirmed live to sometimes clear in under a minute). These lock in that
-  // the provider's own message is never dropped or rewritten, only ever appended to.
+  // docs/planning/fixes-todo.md item #14 — a 429's own body text can overclaim permanence (a provider's "Daily limit reached" wording, confirmed…
   describe('429 rate-limit hint', () => {
     it("appends the provider's own Retry-After seconds when the header is present", async () => {
       vi.stubGlobal(
@@ -460,9 +442,7 @@ describe('OpenAICompatibleClient — generateStream()', () => {
     expect(full).toBe('')
   })
 
-  // Reproduces the live shape captured from an actual OpenRouter response: `delta.reasoning`
-  // streams real text every chunk while `delta.content` stays `''` for the whole reply, right up to
-  // `[DONE]` — the model spent its entire token budget thinking and never actually answered.
+  // Reproduces the live shape captured from an actual OpenRouter response
   it('throws a specific error (not a silent empty reply) when every delta was reasoning and none was content', async () => {
     const events = [
       `data: ${JSON.stringify({ choices: [{ delta: { content: '', role: 'assistant', reasoning: 'Let me consider how ' } }] })}`,
@@ -522,9 +502,7 @@ describe('OpenAICompatibleClient — no-op / fallback surface', () => {
   it('abort() resolves without making any request', async () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
-    // Typed as the shared interface, not the concrete class — every real call site holds a
-    // `ChatBackend`, and the interface's `abort(genkey)` takes an argument this implementation
-    // itself just ignores.
+    // Typed as the shared interface, not the concrete class
     const client: ChatBackend = new OpenAICompatibleClient('https://api.example.com/v1', '', 'gpt-4o-mini')
     await expect(client.abort('some-genkey')).resolves.toBeUndefined()
     expect(fetchMock).not.toHaveBeenCalled()
@@ -536,8 +514,7 @@ describe('OpenAICompatibleClient — no-op / fallback surface', () => {
   })
 })
 
-// Settings → Connection's "does this actually work" check (also the header status dot for this
-// backend) — a GET, never a real chat completion, so it costs nothing on a paid provider.
+// Settings → Connection's "does this actually work" check (also the header status dot for this backend)
 describe('checkConnection', () => {
   it("hits GET {baseUrl}/models for a non-OpenRouter provider, and treats 200 as ok", async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { data: [{ id: 'gpt-4o-mini' }] }))
@@ -603,9 +580,7 @@ describe('checkConnection', () => {
     expect(await client.checkConnection()).toEqual({ ok: false, detail: 'The API key was rejected.' })
   })
 
-  // Nano-GPT's /models is public too (200s for any key), so — like OpenRouter — it needs a
-  // dedicated key check. Its balance endpoint lives at /api/check-balance, one level up from the
-  // configured /api/v1 base URL, and wants the key as x-api-key.
+  // Nano-GPT's /models is public too (200s for any key), so — like OpenRouter — it needs a dedicated key check.
   describe('Nano-GPT', () => {
     it('POSTs to /api/check-balance (not /v1/models), sending the key as x-api-key', async () => {
       const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { usd_balance: '5.00', nano_balance: '1.0', nanoDepositAddress: 'nano_x' }))
@@ -653,5 +628,34 @@ describe('checkConnection', () => {
       const client = new OpenAICompatibleClient('https://nano-gpt.com/api/v1', 'sk-nano-real', 'anthropic/claude-sonnet-5')
       expect(await client.checkConnection()).toEqual({ ok: true })
     })
+  })
+})
+
+describe('withImages', () => {
+  const png = 'iVBORw0KGgo='
+  it('adds pictures to the last user turn as image parts', () => {
+    const out = withImages([{ role: 'system', content: 's' }, { role: 'user', content: 'look' }], [png, 'data:image/webp;base64,AAA'])
+    expect(out[0].content).toBe('s')
+    expect(out[1].content).toEqual([
+      { type: 'text', text: 'look' },
+      { type: 'image_url', image_url: { url: `data:image/png;base64,${png}` } },
+      { type: 'image_url', image_url: { url: 'data:image/webp;base64,AAA' } },
+    ])
+  })
+
+  it('leaves messages alone without images or a user turn', () => {
+    const msgs = [{ role: 'user' as const, content: 'x' }]
+    expect(withImages(msgs, undefined)).toBe(msgs)
+    expect(withImages(msgs, [])).toBe(msgs)
+    const sys = [{ role: 'system' as const, content: 'x' }]
+    expect(withImages(sys, [png])).toBe(sys)
+  })
+
+  it('sends them in the request body', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { choices: [{ message: { content: 'ok' } }] }))
+    vi.stubGlobal('fetch', fetchMock)
+    await new OpenAICompatibleClient('https://example.com/v1', 'k', 'vision-model').generate({ ...BASE_REQUEST, images: [png] })
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(body.messages[0].content[1].type).toBe('image_url')
   })
 })

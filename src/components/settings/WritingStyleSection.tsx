@@ -25,10 +25,7 @@ export function WritingStyleSection() {
   const regexScripts = useSettingsStore((s) => s.regexScripts)
   const setRegexScripts = useSettingsStore((s) => s.setRegexScripts)
 
-  // Belt and suspenders: the toggle also steers the prompt (see useChatSession's styleGuidance),
-  // but a model won't always follow a style instruction perfectly, so this also keeps a managed
-  // regex rule in sync that strips any em dash that slips through anyway — applied to both what's
-  // displayed and what's fed back into future prompts, so one slip doesn't compound over the chat.
+  // Belt and suspenders: the toggle also steers the prompt (see useChatSession's styleGuidance)
   const toggleAvoidEmDashes = (v: boolean) => {
     setAvoidEmDashes(v)
     const withoutManaged = regexScripts.filter((s) => s.id !== EM_DASH_SCRIPT_ID)

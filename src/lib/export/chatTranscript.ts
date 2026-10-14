@@ -30,13 +30,7 @@ function avatarHtml(dataUrl: string | undefined, initials: string): string {
   return `<div class="avatar avatar-fallback">${escapeHtml(initials.slice(0, 2).toUpperCase())}</div>`
 }
 
-/**
- * Renders a chat as a standalone, self-contained HTML transcript — a "visual novel log" readable
- * in any browser with no server running, so it's a real portable export rather than a snapshot
- * that only works while the app is up. Avatars are inlined as data URLs for the same reason;
- * `StoredMessage.images` already are full data URLs (see useChatSession.ts's sendUserMessage), so
- * those need no conversion.
- */
+/** Renders a chat as a standalone, self-contained HTML transcript */
 export async function buildChatTranscriptHtml(opts: {
   chat: Chat
   character?: Character

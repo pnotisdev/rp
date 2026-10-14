@@ -1,15 +1,7 @@
 import type { RelationshipDimension } from '@/lib/types'
 import { availableIntents, type MessageIntent } from '@/lib/dating/intent'
 
-/**
- * 10b's intent chips — a quiet row inside the composer for tagging *how* the next line is meant.
- * Arming a chip attaches it to the message you send next, then disarms. The tag never moves a stat
- * on its own; it's context for the relationship judge, and can land badly if misread (`intent.ts`).
- *
- * Lives inside the composer card (passed as `Composer`'s `intentSlot`) rather than as its own bar,
- * so it reads as part of composing a message. Reassure and Apologize only appear once there's
- * friction to repair (tension elevated).
- */
+/** 10b's intent chips — a quiet row inside the composer for tagging *how* the next line is meant. */
 export function IntentChips({
   stats,
   armed,
@@ -35,13 +27,10 @@ export function IntentChips({
             key={spec.id}
             type="button"
             title={spec.hint}
-            // A chip is a toggle, not a command: arming one holds it until the next message is
-            // sent. That state was carried by background color alone, which says nothing to a
-            // screen reader — `aria-pressed` is what makes "armed" audible rather than just
-            // visible, and it's what turns the control into a toggle button semantically.
+            // A chip is a toggle, not a command: arming one holds it until the next message is sent.
             aria-pressed={active}
             onClick={() => onArm(active ? null : spec.id)}
-            className={`rounded-full px-2.5 py-1 text-[11px] leading-none transition-colors ${
+            className={`rounded-md px-2.5 py-1 text-[11px] leading-none transition-colors ${
               active
                 ? vn
                   ? 'bg-accent/30 text-white ring-1 ring-accent/60'

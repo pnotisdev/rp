@@ -117,8 +117,7 @@ describe('resolveExpressionSprite — outfits', () => {
   })
 
   it('is byte-for-byte unchanged when no outfit is passed', () => {
-    // The backward-compatibility guarantee: every pre-outfit character and every call site that
-    // does not pass an outfit must resolve exactly as it did before this feature existed.
+    // The backward-compatibility guarantee
     expect(resolveExpressionSprite(sprites, {}, AVATAR, 'blush', 50)).toBe('base-blush')
     expect(resolveExpressionSprite(sprites, {}, AVATAR, 'angry', 50)).toBe('base-angry')
   })

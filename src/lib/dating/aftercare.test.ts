@@ -38,8 +38,7 @@ describe('afterglowTurnsSince', () => {
   })
 
   it('is null for a window that starts ahead of the conversation', () => {
-    // What a rewind or a fork-from-earlier produces. Reading it as "0 turns in" would reopen an
-    // aftermath for a scene that no longer exists in this timeline.
+    // What a rewind or a fork-from-earlier produces.
     expect(afterglowTurnsSince(glow(9), 4)).toBeNull()
   })
 })
@@ -142,8 +141,7 @@ describe('aftercareNeed', () => {
   })
 
   it('leaves nothing behind for tender or awkward', () => {
-    // "They were looked after" is not an unmet need, and inventing a positive one would put words
-    // in the judge's mouth about a character who has nothing to want.
+    // "They were looked after" is not an unmet need
     expect(aftercareNeed('tender')).toBeUndefined()
     expect(aftercareNeed('awkward')).toBeUndefined()
   })

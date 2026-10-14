@@ -1,11 +1,4 @@
-/**
- * The single decision for "what is VN mode standing in right now" — every fallback in one ordered
- * walk instead of the three-line chain this replaces, which bottomed out at `undefined` and painted
- * the neutral gradient. That bottom was reached constantly on a chat's opening messages: a static
- * greeting is never generated, so it carries no `<<scene:>>` tag, and `detectGreetingScene`'s model
- * pass is deliberately skipped for a world with no uploaded art. Reading the narration itself
- * (step 4) is what closes that gap without a model call or a new stored field.
- */
+/** The single decision for "what is VN mode standing in right now" */
 
 import type { Chat, WorldCard } from '@/lib/types'
 import { backgroundLabel, matchBackgroundKeyword, DEFAULT_BACKGROUNDS } from '@/lib/vn/backgrounds'
@@ -47,8 +40,7 @@ function candidates(world: WorldCard | undefined, affection: number): { id: stri
   const customLabels = new Map((world?.customBackgrounds ?? []).map((b) => [b.id, b.label]))
   const seen = new Set(ids)
   const rows = ids.map((id) => ({ id, label: customLabels.get(id) ?? backgroundLabel(id, world) }))
-  // A world with uploaded art narrows `getUnlockedBackgroundIds` to just those ids; the defaults are
-  // still legitimate *places* to recognise in prose, they just have no photo behind them.
+  // A world with uploaded art narrows `getUnlockedBackgroundIds` to just those ids
   for (const d of DEFAULT_BACKGROUNDS) if (!seen.has(d.id)) rows.push(d)
   return rows
 }
@@ -69,17 +61,14 @@ export function resolveSceneBackground(params: ResolveBackgroundParams): Resolve
   const eventBackground = chat.activeEvent?.backgroundId
   if (unlocked(eventBackground, world, affection)) return withArt(eventBackground, 'event')
 
-  // 3. The chat's own established scene location — free text, but it was written from a background
-  //    label in the first place (see `createChat`), so it usually matches one exactly.
+  // 3.
   const pool = candidates(world, affection)
   if (chat.scene?.location) {
     const fromLocation = matchBackgroundKeyword(chat.scene.location, pool)
     if (unlocked(fromLocation, world, affection)) return withArt(fromLocation, 'location')
   }
 
-  // 4. The prose itself. Deliberately last among the real signals — an explicit tag always outranks
-  //    a guess — but ahead of giving up, because a greeting that plainly says "the classroom is
-  //    empty" should never render as an unplaced void.
+  // 4. The prose itself.
   if (narration) {
     const fromText = matchBackgroundKeyword(narration, pool)
     if (unlocked(fromText, world, affection)) return withArt(fromText, 'text')
@@ -88,8 +77,7 @@ export function resolveSceneBackground(params: ResolveBackgroundParams): Resolve
   // 5. The world author's own opening shot.
   if (unlocked(world?.defaultBackgroundId, world, affection)) return withArt(world!.defaultBackgroundId, 'world-default')
 
-  // 6. A tag that exists but is still gated: paint that place's lighting without ever handing over
-  //    its art, which is what the unlock was protecting. Better than a nowhere.
+  // 6.
   if (taggedBackground) return { id: taggedBackground, source: 'locked-tag' }
 
   return { source: 'none' }

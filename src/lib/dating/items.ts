@@ -1,18 +1,6 @@
 import type { ItemDef, ItemEffect, WorldCard } from '@/lib/types'
 
-/**
- * The baseline item catalog every chat gets, mirroring `gifts.ts`'s `DEFAULT_GIFT_CATALOG`.
- *
- * There wasn't one before — `getItemCatalog` was `world?.items ?? []`, which meant the whole
- * `ItemEffect` engine, the Bag panel and the Shop's Items section were invisible on a fresh install
- * unless a world author sat down and wrote items by hand. A gift is a gesture the character reacts
- * to; an item is a thing the player *uses*, with a stated effect. Both need to exist out of the box
- * for the difference between them to be legible at all.
- *
- * Prices sit inside the real coin economy: milestones pay +15, an accepted commitment ask +25, a
- * completed objective +12, and a date scores `affection delta × 2`, from a starting 24. So a common
- * is 3-8, an uncommon 9-14, a rare 15-22.
- */
+/** The baseline item catalog every chat gets, mirroring `gifts.ts`'s `DEFAULT_GIFT_CATALOG`. */
 export const DEFAULT_ITEM_CATALOG: ItemDef[] = [
   // --- Everyday consumables: the low band, where a small specific gesture is the whole point. ---
   {
@@ -109,9 +97,7 @@ export const DEFAULT_ITEM_CATALOG: ItemDef[] = [
     effect: { kind: 'relationship', dimension: 'trust', amount: 3 },
   },
 
-  // --- Repair. `tension` is the one dimension where down is the good direction, and nothing else
-  //     in the app moves it deliberately — these are the closest thing to a potion this should have,
-  //     which is why the effective one is expensive enough to think about. ---
+  // --- Repair.
   {
     id: 'apology-cake',
     name: 'Apology Cake',
@@ -146,8 +132,7 @@ export const DEFAULT_ITEM_CATALOG: ItemDef[] = [
     effect: { kind: 'relationship', dimension: 'trust', amount: 8 },
   },
 
-  // --- Flag setters. A flag is a permission rather than a stat — it gates gallery CGs, outfits and
-  //     intimacy entries — so these are the most consequential purchases in the catalog. ---
+  // --- Flag setters.
   {
     id: 'festival-tickets',
     name: 'Festival Ticket Pair',

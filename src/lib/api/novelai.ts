@@ -3,21 +3,28 @@ import { KoboldApiError } from './types'
 import { estimateTokens } from '@/lib/tokenEstimate'
 import type { ChatBackend, ConnectionCheckResult } from './chatBackend'
 
-const TEXT_NOVELAI = 'https://text.novelai.net'
-const API_NOVELAI = 'https://api.novelai.net'
-
-/** Kayra (and Erato, not supported here) serve off a different host than every older model. */
-function baseUrlForModel(model: string): string {
-  return model.includes('kayra') || model.includes('erato') ? TEXT_NOVELAI : API_NOVELAI
+/** Kayra and Erato serve off a different host than the older models. */
+function hostForModel(model: string): 'text' | 'api' {
+  return model.includes('kayra') || model.includes('erato') ? 'text' : 'api'
 }
 
-// NovelAI's hosted text-generation backend (Kayra, Clio). Built to the documented/reverse-
-// engineered contract, never run against a real account — sanity-check the first real call.
-// Sends `input` as plain text (`use_string: true`); NovelAI's tokenizer (server-side, see
-// `server/novelaiTokenizer.ts`) is only needed for `stop_sequences`, which want token ids.
-// Deliberately unsupported: Erato, and `bad_words_ids`/`logit_bias_exp` preset tuning. The SSE
-// streaming event format is an unconfirmed guess; `generateStream` falls back to `generate()`
-// if a stream ever produces zero tokens.
+/** NovelAI sends no CORS headers a browser accepts, so every call goes through this app's own server, which relays it with your key and stores nothing. */
+export function novelaiUrl(host: 'text' | 'api' | 'image', path: string): string {
+  return `/api/novelai/proxy/${host}${path}`
+}
+
+/** Cuts text at the first stop sequence. The hosted API wants token ids for stops, which only some models have a tokenizer for. */
+export function cutAtStop(text: string, stops: readonly string[] | undefined): string {
+  let end = text.length
+  for (const stop of stops ?? []) {
+    if (!stop) continue
+    const at = text.indexOf(stop)
+    if (at >= 0 && at < end) end = at
+  }
+  return text.slice(0, end)
+}
+
+// NovelAI's hosted text-generation backend (Kayra, Clio).
 export class NovelAIClient implements ChatBackend {
   constructor(
     private apiKey: string,
@@ -91,7 +98,7 @@ export class NovelAIClient implements ChatBackend {
   async generate(params: GenerateRequest, signal?: AbortSignal): Promise<string> {
     let res: Response
     try {
-      res = await fetch(`${baseUrlForModel(this.model)}/ai/generate`, {
+      res = await fetch(novelaiUrl(hostForModel(this.model), '/ai/generate'), {
         method: 'POST',
         headers: this.headers(),
         body: JSON.stringify(await this.body(params)),
@@ -105,14 +112,14 @@ export class NovelAIClient implements ChatBackend {
       throw new KoboldApiError(`NovelAI generation failed (${res.status}): ${(await this.parseErrorBody(res)).slice(0, 300)}`, res.status)
     }
     const data = (await res.json()) as { output?: string }
-    return data.output ?? ''
+    return cutAtStop(data.output ?? '', params.stop_sequence)
   }
 
   /** See the class doc comment: the response event format here is a best-effort guess, with a fallback to `generate()` if it ever produces zero tokens. */
   async generateStream(params: GenerateRequest, onToken: (token: string, full: string) => void, signal?: AbortSignal): Promise<string> {
     let res: Response
     try {
-      res = await fetch(`${baseUrlForModel(this.model)}/ai/generate-stream`, {
+      res = await fetch(novelaiUrl(hostForModel(this.model), '/ai/generate-stream'), {
         method: 'POST',
         headers: this.headers(),
         body: JSON.stringify(await this.body(params)),
@@ -152,6 +159,12 @@ export class NovelAIClient implements ChatBackend {
             const parsed = JSON.parse(dataStr) as { token?: string }
             if (typeof parsed.token === 'string') {
               full += parsed.token
+              const cut = cutAtStop(full, params.stop_sequence)
+              if (cut.length < full.length) {
+                full = cut
+                await reader.cancel().catch(() => undefined)
+                return full
+              }
               onToken(parsed.token, full)
             }
           } catch {
@@ -207,7 +220,7 @@ export class NovelAIClient implements ChatBackend {
     if (!this.apiKey.trim()) return { ok: false, detail: 'No API key set.' }
     let res: Response
     try {
-      res = await fetch(`${API_NOVELAI}/user/subscription`, { headers: this.headers() })
+      res = await fetch(novelaiUrl('api', '/user/subscription'), { headers: this.headers() })
     } catch {
       return { ok: false, detail: 'Could not reach NovelAI.' }
     }

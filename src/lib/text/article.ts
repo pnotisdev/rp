@@ -1,7 +1,4 @@
-// Puts an indefinite article in front of a noun phrase, for the gift-giving action line
-// (`*I give {name} {gift}.*`). A display-only heuristic biased toward *not* inserting an article —
-// a missing "a" reads clipped, a wrong one ("a Chocolates") reads broken. Gift names are arbitrary
-// authored text (`WorldCard.gifts`), not a fixed set this could be hand-tuned against.
+// Puts an indefinite article in front of a noun phrase, for the gift-giving action line (`*I give {name} {gift}.*`).
 
 /** Words that already determine the noun — prefixing anything would double up. Numbers count too ("Two Tickets", "3 Coins"). */
 const DETERMINERS = new Set([
@@ -27,8 +24,7 @@ const DETERMINERS = new Set([
   'those',
 ])
 
-// Written vowels are only a proxy for vowel sounds — these catch the two common mismatches: a
-// silent `h` ("an hour") and a `u`/`o` that opens on a consonant sound ("a university").
+// Written vowels are only a proxy for vowel sounds
 const SILENT_H = /^(hour|honest|honou?r|heir)/i
 const CONSONANT_INITIAL_VOWEL = /^(uni(?![a-z]*[aeiou]?n\b)|use|user|usual|euro|eu|ubiquit|one|once)/i
 

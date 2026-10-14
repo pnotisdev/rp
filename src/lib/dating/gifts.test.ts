@@ -308,8 +308,7 @@ describe('pre-existing gift catalog exports still work', () => {
   })
 })
 
-// §2 of CATALOG_IDEAS.md. Taste discovery is the whole point of `giftPreferences`, and it only
-// works if a character's authored likes have enough to discriminate between.
+// §2 of docs/design/catalog-ideas.md.
 describe('DEFAULT_GIFT_CATALOG coverage', () => {
   it('has unique ids', () => {
     const ids = DEFAULT_GIFT_CATALOG.map((g) => g.id)

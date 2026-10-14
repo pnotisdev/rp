@@ -31,10 +31,7 @@ describe('createGenerationLock', () => {
   })
 
   it('is synchronous, so a second caller in the same tick is refused', async () => {
-    // The regression this exists for. The old guard was React state, which a callback created on
-    // an earlier render still read as `false` after a newer call had already started generating —
-    // both proceeded and interleaved their writes to the same message row. Modelled here as two
-    // callers dispatched together with no render (and no await) between them.
+    // The regression this exists for.
     const lock = createGenerationLock()
     const ran: string[] = []
     const attempt = async (name: string) => {
