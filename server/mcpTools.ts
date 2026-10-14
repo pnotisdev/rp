@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url'
 import { characterStore, chatFactStore, chatStore, messageStore, newId, personaStore, worldInfoBookStore, worldStore } from './db.ts'
 import * as ext from './extensions.ts'
 import { STARTER_KINDS, starterBundle, type StarterKind } from '../src/lib/extensions/starter.ts'
+import { describesMinor } from '../src/lib/characters/minor.ts'
+import { PHASES, WEATHER_KINDS, WEEKDAYS } from '../src/lib/world/calendar.ts'
 import type { JsonSchema, McpConfig, PromptDef, ResourceDef, ResourceTemplateDef, ToolDef, ToolOutput } from './mcpProtocol.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -260,7 +262,42 @@ const CHARACTER_PROPS: Record<string, JsonSchema> = {
   boundaries: list(str('A boundary'), 'Hard limits, in character.'),
   love_language: str('How they feel most loved, for example "quality time".'),
   reply_format: str('"roleplay" for prose with narration (default), or "texting" for short chat bubbles.', { enum: ['roleplay', 'texting'] }),
+  birthday: num('Birthday as a day of the in-app year, 0 to 111 (four seasons of 28 days: 0 is spring day 1, 28 is summer day 1, 111 is winter day 28).'),
+  gift_likes: list(str('A gift'), 'Kinds of gift they love, in words ("field guides").'),
+  gift_dislikes: list(str('A gift'), 'Kinds of gift that fall flat.'),
+  weather_loves: list(str('A weather', { enum: [...WEATHER_KINDS] }), 'Weather that lifts their mood.'),
+  weather_hates: list(str('A weather', { enum: [...WEATHER_KINDS] }), 'Weather that sours their mood.'),
+  reply_length: str('How long their replies run: "auto" (measured from the card), "brief", "moderate" or "detailed".', { enum: ['auto', 'brief', 'moderate', 'detailed'] }),
+  outreach_frequency: str('How often they text first without being asked.', { enum: ['never', 'rare', 'normal', 'eager'] }),
+  sfx_words: list(str('A sound word'), 'Short sound-effect words in their voice, like "tch".'),
 }
+
+const SCHEDULE_ENTRY = shape(
+  {
+    phase: str('Part of the day.', { enum: [...PHASES] }),
+    status: str('What they are up to.', { enum: ['available', 'busy', 'sleeping', 'traveling'] }),
+    activity: str('What they are doing.'),
+    location: str('Where.'),
+    days: list(str('A weekday', { enum: [...WEEKDAYS] }), 'Weekdays this applies to; empty means every day.'),
+  },
+  ['phase', 'status', 'activity'],
+)
+
+/** Nested sections with full schemas. A small local model cannot fill them through a plain-text tool call, so the Assistant's own list leaves them out. */
+const NESTED_CHARACTER_PROPS: Record<string, JsonSchema> = {
+  schedule: list(SCHEDULE_ENTRY, 'Their weekly routine.'),
+  social_connections: list(shape({ name: str('Person.'), relation: str('How they are connected.'), notes: str('Why they matter.') }, ['name', 'relation']), 'People in their life.'),
+  behavioral_rules: list(shape({ kind: str('"when_then" or "never".', { enum: ['when_then', 'never'] }), when: str('The situation (when_then only).'), then: str('What they do, or never do.') }, ['kind', 'then']), 'Concrete rules for how they behave.'),
+  voice_fingerprint: shape({ verbalTics: list(str('A tic'), 'Filler words.'), catchphrases: list(str('A phrase'), 'Signature phrases.'), dialectNotes: str('Register and diction.'), sentenceRhythm: str('How their sentences run.') }),
+  gift_preferences: { type: 'object', description: 'Gift id to score, -2 (dislikes) through 3 (favorite). Ids come from the world the character lives in.', additionalProperties: { type: 'number' } },
+  touch_profile: shape({ sensitivity: { type: 'object', description: 'Body region to sensitivity 0 to 3.', additionalProperties: { type: 'number' } }, offLimits: list(str('A body region'), 'Regions that are never touched.'), gated: { type: 'object', description: 'Body region to the warmth it opens at.', additionalProperties: { type: 'number' } } }, [], 'Mature content. Refused for a card that describes someone under 18.'),
+  kink_profile: shape({ valence: { type: 'object', description: 'Kink to -2 (hard limit) through 2 (eager). Absent means neutral.', additionalProperties: { type: 'number' } }, hardLimits: list(str('A kink'), 'Absolute limits.') }, [], 'Mature content. Refused for a card that describes someone under 18.'),
+  explicit_voice_note: str('How their voice holds up in an intimate scene. Refused for a card that describes someone under 18.'),
+  drive: shape({ chaosBase: num('0 to 0.4.'), energyBase: num('0 to 10.'), fixations: list(str('A fixation'), ''), loves: list(str('A topic'), ''), boredBy: list(str('A topic'), ''), motifs: list(str('A motif'), '') }, [], 'Live persona engine settings. It is never switched on from here: the user does that in the editor.'),
+}
+
+/** Property names the Assistant does not see on create_character and update_character. */
+export const AGENT_HIDDEN_PROPS: ReadonlySet<string> = new Set(Object.keys(NESTED_CHARACTER_PROPS))
 
 function characterView(c: Row) {
   const card = (c.card as Row) ?? {}
@@ -287,15 +324,98 @@ function characterView(c: Row) {
     boundaries: c.boundaries,
     love_language: c.loveLanguage,
     reply_format: c.replyFormat,
+    birthday: c.birthday,
+    gift_likes: c.giftLikes,
+    gift_dislikes: c.giftDislikes,
+    weather_loves: (c.weatherPreferences as Row | undefined)?.loves,
+    weather_hates: (c.weatherPreferences as Row | undefined)?.hates,
+    reply_length: c.replyLength,
+    outreach_frequency: (c.outreach as Row | undefined)?.frequency,
+    sfx_words: c.sfxWords,
+    schedule: c.schedule,
+    social_connections: c.socialConnections,
+    behavioral_rules: c.behavioralRules,
+    voice_fingerprint: c.voiceFingerprint,
+    gift_preferences: c.giftPreferences,
+    touch_profile: c.touchProfile,
+    kink_profile: c.kinkProfile,
+    explicit_voice_note: c.explicitVoiceNote,
+    drive: c.drive,
     lore_entries: ((card.character_book as Row | undefined)?.entries as unknown[] | undefined)?.length ?? 0,
     has_portrait: Boolean(c.avatarDataUrl),
     updated_at: iso(c.updatedAt),
   }
 }
 
-/** Top-level Character fields (everything outside the portable card). */
-function extrasFrom(a: Row): Row {
+/** A value from a fixed list, or an error that names the choices. */
+function pick<T extends string>(a: Row, key: string, allowed: readonly T[]): T {
+  const v = a[key]
+  if (typeof v !== 'string' || !allowed.includes(v as T)) throw new Error(`"${key}" must be one of: ${allowed.join(', ')}`)
+  return v as T
+}
+
+function weatherList(a: Row, key: string, fallback: unknown): string[] {
+  if (!has(a, key)) return Array.isArray(fallback) ? (fallback as string[]) : []
+  return [...new Set(strings(a[key], 7, 20).map((w) => w.toLowerCase()))].filter((w) => (WEATHER_KINDS as readonly string[]).includes(w))
+}
+
+/** A routine entry with the fields the app needs; anything else is dropped. */
+function scheduleFrom(v: unknown): Row[] {
+  if (!Array.isArray(v)) throw new Error('"schedule" must be an array')
+  return v.slice(0, 24).map((raw, i) => {
+    const e = (raw && typeof raw === 'object' ? raw : {}) as Row
+    const phase = pick(e, 'phase', PHASES)
+    const status = pick(e, 'status', ['available', 'busy', 'sleeping', 'traveling'] as const)
+    const activity = clean(e.activity, 200)
+    if (!activity) throw new Error(`schedule[${i}] needs an "activity"`)
+    const days = strings(e.days, 7, 12).map((d) => d.toLowerCase()).filter((d) => (WEEKDAYS as readonly string[]).includes(d))
+    return { id: newId(), phase, status, activity, ...(clean(e.location, 120) ? { location: clean(e.location, 120) } : {}), ...(days.length ? { days } : {}) }
+  })
+}
+
+function giftScoresFrom(v: unknown): Row {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error('"gift_preferences" must be an object of gift id to score')
   const out: Row = {}
+  for (const [id, score] of Object.entries(v as Row)) {
+    if (typeof score === 'number' && Number.isFinite(score) && Math.round(score) !== 0) out[id] = Math.max(-2, Math.min(3, Math.round(score)))
+  }
+  return out
+}
+
+/** Top-level Character fields (everything outside the portable card). `current` is the stored character on an edit; `card` is the card being saved. */
+function extrasFrom(a: Row, current?: Row, card?: Row): Row {
+  const out: Row = {}
+  if (has(a, 'birthday')) out.birthday = typeof a.birthday === 'number' ? a.birthday : null
+  if (has(a, 'gift_likes')) out.giftLikes = strings(a.gift_likes)
+  if (has(a, 'gift_dislikes')) out.giftDislikes = strings(a.gift_dislikes)
+  if (has(a, 'weather_loves') || has(a, 'weather_hates')) {
+    const was = current?.weatherPreferences as Row | undefined
+    const loves = weatherList(a, 'weather_loves', was?.loves)
+    const hates = weatherList(a, 'weather_hates', was?.hates)
+    if (loves.some((w) => hates.includes(w))) throw new Error('A weather cannot be both loved and hated')
+    out.weatherPreferences = loves.length || hates.length ? { loves, hates } : null
+  }
+  if (has(a, 'reply_length')) out.replyLength = pick(a, 'reply_length', ['auto', 'brief', 'moderate', 'detailed'] as const)
+  if (has(a, 'outreach_frequency')) {
+    const frequency = pick(a, 'outreach_frequency', ['never', 'rare', 'normal', 'eager'] as const)
+    out.outreach = frequency === 'never' ? null : { frequency }
+  }
+  if (has(a, 'sfx_words')) out.sfxWords = strings(a.sfx_words, 10, 30)
+  if (has(a, 'schedule')) out.schedule = scheduleFrom(a.schedule)
+  if (has(a, 'social_connections')) out.socialConnections = a.social_connections
+  if (has(a, 'behavioral_rules')) out.behavioralRules = a.behavioral_rules
+  if (has(a, 'voice_fingerprint')) out.voiceFingerprint = a.voice_fingerprint
+  if (has(a, 'gift_preferences')) out.giftPreferences = giftScoresFrom(a.gift_preferences)
+  // The persona engine is never switched on from here; an edit keeps whatever the user chose.
+  if (has(a, 'drive')) out.drive = { ...(a.drive as Row), enabled: (current?.drive as Row | undefined)?.enabled === true }
+  const intimate = ['touch_profile', 'kink_profile', 'explicit_voice_note'].filter((k) => has(a, k))
+  if (intimate.length) {
+    const text = card ?? (current?.card as Row | undefined) ?? {}
+    if (describesMinor(...['name', 'description', 'personality', 'scenario', 'first_mes'].map((k) => String(text[k] ?? '')))) throw new Error(`${intimate.join(', ')} cannot be set: the card describes someone under 18.`)
+    if (has(a, 'touch_profile')) out.touchProfile = a.touch_profile
+    if (has(a, 'kink_profile')) out.kinkProfile = a.kink_profile
+    if (has(a, 'explicit_voice_note')) out.explicitVoiceNote = clean(a.explicit_voice_note, 400) || null
+  }
   if (has(a, 'world_id')) {
     const id = clean(a.world_id, 80)
     if (id) must(worldStore.get(id), 'world', id)
@@ -522,14 +642,14 @@ function tools(): ToolDef<McpContext>[] {
       name: 'create_character',
       title: 'Create a character',
       description: 'Creates a new character card. Requires name, description and first_mes. Optionally embeds lore_entries (a private lorebook for this character). Returns the new id.',
-      inputSchema: shape({ ...CHARACTER_PROPS, lore_entries: list(ENTRY_SCHEMA, 'Lorebook entries that belong to this character.') }, ['name', 'description', 'first_mes']),
+      inputSchema: shape({ ...CHARACTER_PROPS, ...NESTED_CHARACTER_PROPS, lore_entries: list(ENTRY_SCHEMA, 'Lorebook entries that belong to this character.') }, ['name', 'description', 'first_mes']),
       run: async (a, ctx) => {
         for (const key of ['name', 'description', 'first_mes']) if (!clean(a[key])) throw new Error(`"${key}" is required and cannot be empty`)
         const card = cardFrom(a, blankCard())
         if (Array.isArray(a.lore_entries) && a.lore_entries.length) {
           card.character_book = { name: `${String(card.name)} lore`, token_budget: 512, scan_depth: 8, entries: a.lore_entries.slice(0, 100).map((e, i) => entryFrom(e, i, `lore_entries[${i}]`)) }
         }
-        const created = (await ctx.rest('POST', '/api/characters', { card, ...extrasFrom(a) })) as Row
+        const created = (await ctx.rest('POST', '/api/characters', { card, ...extrasFrom(a, undefined, card) })) as Row
         return json({ created: true, ...characterView(created) })
       },
     }),
@@ -537,12 +657,12 @@ function tools(): ToolDef<McpContext>[] {
       name: 'update_character',
       title: 'Edit a character',
       description: 'Changes only the fields you pass. Arrays (tags, likes, goals…) are replaced as a whole. Use the lorebook tools to edit the character\'s lore.',
-      inputSchema: shape({ id: str('Character id.'), ...CHARACTER_PROPS }, ['id']),
+      inputSchema: shape({ id: str('Character id.'), ...CHARACTER_PROPS, ...NESTED_CHARACTER_PROPS }, ['id']),
       run: async (a, ctx) => {
         const id = clean(a.id, 80)
         const current = must(characterStore.get(id), 'character', id)
         const card = cardFrom(a, current.card as Row)
-        const updated = (await ctx.rest('PUT', `/api/characters/${enc(id)}`, { card, ...extrasFrom(a) })) as Row
+        const updated = (await ctx.rest('PUT', `/api/characters/${enc(id)}`, { card, ...extrasFrom(a, current, card) })) as Row
         return json({ updated: true, ...characterView(updated) })
       },
     }),

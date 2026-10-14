@@ -10,6 +10,8 @@ import {
   findSlopAcross,
   isDuplicateOfRecentText,
   isVerbatimEcho,
+  configureReasoning,
+  splitReasoning,
   stripThinkBlocks,
   replaceEmDashes,
   trimToLastSentence,
@@ -376,6 +378,39 @@ describe('stripThinkBlocks', () => {
   it('removes <think> blocks and leaves ordinary text alone', () => {
     expect(stripThinkBlocks('<think>x</think>Answer')).toBe('Answer')
     expect(stripThinkBlocks('Plain reply.')).toBe('Plain reply.')
+  })
+  it('drops everything before a lone </think>, for a template that opens the block in the prompt', () => {
+    expect(stripThinkBlocks('Let me think about this.\n</think>\n\nHello.')).toBe('Hello.')
+    expect(stripThinkBlocks('<think>a</think>One<think>b</think>Two')).toBe('OneTwo')
+  })
+  it('splits a reply into what the model thought and what it said', () => {
+    expect(splitReasoning('<think>Plan it.</think>\n\nHello.')).toEqual({ reasoning: 'Plan it.', reply: 'Hello.', open: false })
+    expect(splitReasoning('<|channel>thought\nHmm.<channel|>Hi.')).toMatchObject({ reasoning: 'Hmm.', reply: 'Hi.' })
+    expect(splitReasoning('Reasoning here.\n</think>\nAnswer.')).toMatchObject({ reasoning: 'Reasoning here.', reply: 'Answer.' })
+    expect(splitReasoning('<|channel|>analysis<|message|>Think.<|end|><|start|>assistant<|channel|>final<|message|>Said.')).toMatchObject({ reasoning: 'Think.', reply: 'Said.' })
+    expect(splitReasoning('<think>a</think>One<think>b</think>Two')).toMatchObject({ reasoning: 'a\n\nb', reply: 'OneTwo' })
+    expect(splitReasoning('Just a reply.')).toEqual({ reasoning: '', reply: 'Just a reply.', open: false })
+  })
+
+  it('reports reasoning that is still being written, for a streaming display', () => {
+    expect(splitReasoning('<think>Still going')).toEqual({ reasoning: 'Still going', reply: '', open: true })
+    expect(splitReasoning('Said first. <think>then more')).toMatchObject({ reply: 'Said first. ', open: true })
+  })
+
+  it('uses the writer\'s own markers when they are set, and stops when cleared', () => {
+    configureReasoning('[[', ']]')
+    expect(splitReasoning('[[plan]]Reply')).toMatchObject({ reasoning: 'plan', reply: 'Reply' })
+    expect(stripThinkBlocks('[[plan]]Reply')).toBe('Reply')
+    configureReasoning('', '')
+    expect(splitReasoning('[[plan]]Reply').reply).toBe('[[plan]]Reply')
+    configureReasoning('[[', '')
+    expect(splitReasoning('[[plan]]Reply').reply).toBe('[[plan]]Reply')
+  })
+
+  it('strips a Harmony analysis channel and the markers around the final one', () => {
+    const raw = '<|channel|>analysis<|message|>Plan the reply.<|end|><|start|>assistant<|channel|>final<|message|>Hello there.<|return|>'
+    expect(stripThinkBlocks(raw)).toBe('Hello there.')
+    expect(stripThinkBlocks('<|channel|>final<|message|>Hi<|end|>')).toBe('Hi')
   })
 })
 

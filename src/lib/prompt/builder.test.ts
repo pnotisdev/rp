@@ -740,3 +740,69 @@ describe('styleGuidanceItems — graceful degradation under a tight budget', () 
     expect(result.prompt).not.toContain('SHOULD_NOT_APPEAR')
   })
 })
+
+describe('buildPrompt — macros and outlets', () => {
+  it('fills card values, chat values and variables inside the card', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        character: character({ name: 'Aria', description: '{{char}} greets {{user}}. {{if scenario}}Scene: {{scenario}}{{/if}} Last: {{lastUserMessage}}', scenario: 'A library.' }),
+        personaName: 'Kai',
+        history: [{ id: '1', role: 'user', name: 'Kai', text: 'Hello there.' }],
+      }),
+    )
+    expect(result.prompt).toContain('Aria greets Kai. Scene: A library. Last: Hello there.')
+  })
+
+  it('keeps an outlet entry out of the prompt until a macro asks for it', async () => {
+    const lorebooks = [{ entries: [{ id: 1, keys: ['rain'], content: 'It pours all week.', constant: false, selective: false, insertion_order: 1, enabled: true, position: 'outlet' as const, outletName: 'weather' }] }]
+    const history: ChatMessage[] = [{ id: '1', role: 'user', name: 'You', text: 'Look at the rain.' }]
+    const without = await buildPrompt(baseInput({ character: character({ name: 'Aria', description: 'A calm archivist.' }), lorebooks, history }))
+    expect(without.prompt).not.toContain('It pours all week.')
+    expect(without.activatedEntries).toHaveLength(1)
+    const asked = await buildPrompt(baseInput({ character: character({ name: 'Aria', description: 'A calm archivist. Weather: {{outlet::weather}}' }), lorebooks, history }))
+    expect(asked.prompt).toContain('Weather: It pours all week.')
+  })
+
+  it('uses a per-entry scan depth against the whole history', async () => {
+    const lorebooks = [{ entries: [{ id: 1, keys: ['dragon'], content: 'Dragons hoard.', constant: false, selective: false, insertion_order: 1, enabled: true, scanDepth: 30 }] }]
+    const history: ChatMessage[] = [
+      { id: '1', role: 'user', name: 'You', text: 'A dragon!' },
+      ...Array.from({ length: 12 }, (_, i): ChatMessage => ({ id: `m${i}`, role: i % 2 ? 'user' : 'char', name: i % 2 ? 'You' : 'Aria', text: `filler ${i}` })),
+    ]
+    const result = await buildPrompt(baseInput({ lorebooks, history, scanDepth: 4 }))
+    expect(result.prompt).toContain('Dragons hoard.')
+  })
+})
+
+describe('buildPrompt — retrieved memories', () => {
+  it('puts matched passages after the history, so the start of the prompt stays the same', async () => {
+    const history: ChatMessage[] = [{ id: '1', role: 'user', name: 'You', text: 'Tell me about the harbor.' }]
+    const plain = await buildPrompt(baseInput({ history }))
+    const withMemory = await buildPrompt(baseInput({ history, retrievedMemories: ['[Notes] The harbor floods every spring.', 'Aria: I grew up near the docks.'] }))
+    expect(withMemory.prompt).toContain('- [Notes] The harbor floods every spring.')
+    expect(withMemory.prompt).toContain('- Aria: I grew up near the docks.')
+    expect(withMemory.prompt.indexOf('The harbor floods')).toBeGreaterThan(withMemory.prompt.indexOf('Tell me about the harbor.'))
+    const start = (p: string) => p.slice(0, p.indexOf('Tell me about the harbor.'))
+    expect(start(withMemory.prompt)).toBe(start(plain.prompt))
+    expect(withMemory.tokensUsed).toBeGreaterThan(plain.tokensUsed)
+  })
+
+  it('adds nothing when no passages matched', async () => {
+    const a = await buildPrompt(baseInput({ retrievedMemories: [] }))
+    const b = await buildPrompt(baseInput())
+    expect(a.prompt).toBe(b.prompt)
+  })
+})
+
+describe('buildPrompt — banned words from macros', () => {
+  it('collects them for the sampler and takes them out of the text', async () => {
+    const result = await buildPrompt(baseInput({ character: character({ name: 'Aria', description: 'A calm archivist.{{banned::delve}}{{banned::"tapestry"}}' }) }))
+    expect(result.bannedWords).toEqual(['delve', 'tapestry'])
+    expect(result.prompt).toContain('A calm archivist.')
+    expect(result.prompt).not.toContain('banned')
+  })
+
+  it('has none when no macro names one', async () => {
+    expect((await buildPrompt(baseInput())).bannedWords).toEqual([])
+  })
+})

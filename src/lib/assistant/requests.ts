@@ -53,6 +53,6 @@ export const PRODUCER_LABEL: Record<ProducerKind, string> = {
 /** One line under the chip saying what pressing it will actually do. */
 export const PRODUCER_DETAIL: Record<ProducerKind, string> = {
   character:
-    'Runs the full character build (card, profile, wardrobe, lore) and offers to save it to your library for roleplay.',
+    'Drafts every section (card, greetings, life, connections, voice, gifts, routine, wardrobe, lore) for you to review, then offers to save it to your library.',
   story: 'Plans a chapter outline first, then writes each chapter in order, keeping continuity across them.',
 }

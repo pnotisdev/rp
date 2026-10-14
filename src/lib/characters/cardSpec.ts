@@ -66,7 +66,28 @@ export interface LorebookEntry {
   selective: boolean
   insertion_order: number
   enabled: boolean
-  position?: 'before_char' | 'after_char' | 'at_depth'
+  /** `outlet` keeps the entry out of the prompt until a `{{outlet::name}}` macro asks for it. */
+  position?: 'before_char' | 'after_char' | 'at_depth' | 'outlet'
+  /** The outlet this entry fills, for `position: 'outlet'`. */
+  outletName?: string
+  /** How secondary keys combine with the primary ones when `selective`: any (default), none, not all, or all of them. */
+  selectiveLogic?: 'and_any' | 'not_all' | 'not_any' | 'and_all'
+  /** Scans this many of the last messages instead of the book's own depth. */
+  scanDepth?: number
+  /** Single-word keys match whole words only ("cat" does not fire on "catalog"). */
+  matchWholeWords?: boolean
+  /** In a group, this entry beats the others (the highest order among prioritized ones wins). */
+  groupOverride?: boolean
+  /** In a group, the entry with the most keys found wins. */
+  useGroupScoring?: boolean
+  /** Other entries' text cannot trigger this one. */
+  excludeRecursion?: boolean
+  /** This entry's own text cannot trigger others. */
+  preventRecursion?: boolean
+  /** Fires only when another entry's text triggers it, never from the chat itself. */
+  delayUntilRecursion?: boolean
+  /** Always fits: does not count against the book's token budget. */
+  ignoreBudget?: boolean
   /** Only used when `position` is `'at_depth'` — messages up from the latest, same convention as `AuthorNote.depth`. */
   depth?: number
   case_sensitive?: boolean
@@ -295,8 +316,24 @@ export function normalizeLorebook(raw: unknown): Lorebook | undefined {
   const entries: LorebookEntry[] = []
   const pushEntry = (e: Record<string, unknown>, fallbackId: number) => {
     const constant = !!e.constant
+    // ST V2 cards keep the newer fields in `extensions` (snake_case); World Info exports keep them on the entry (camelCase).
+    const ext = (e.extensions && typeof e.extensions === 'object' ? e.extensions : {}) as Record<string, unknown>
+    const field = (camel: string, snake: string): unknown => e[camel] ?? ext[snake] ?? ext[camel]
+    const flag = (camel: string, snake: string): true | undefined => (field(camel, snake) === true ? true : undefined)
+    const stPosition = e.position ?? ext.position
     const position: LorebookEntry['position'] =
-      e.position === 'after_char' || e.position === 1 ? 'after_char' : e.position === 'at_depth' || e.position === 4 ? 'at_depth' : 'before_char'
+      stPosition === 'after_char' || stPosition === 1
+        ? 'after_char'
+        : stPosition === 'at_depth' || stPosition === 4
+          ? 'at_depth'
+          : stPosition === 'outlet' || stPosition === 7
+            ? 'outlet'
+            : 'before_char'
+    const logicRaw = field('selectiveLogic', 'selectiveLogic')
+    const selectiveLogic: LorebookEntry['selectiveLogic'] =
+      logicRaw === 1 || logicRaw === 'not_all' ? 'not_all' : logicRaw === 2 || logicRaw === 'not_any' ? 'not_any' : logicRaw === 3 || logicRaw === 'and_all' ? 'and_all' : undefined
+    const outlet = field('outletName', 'outlet_name')
+    const scanRaw = field('scanDepth', 'scan_depth')
     const activationMode: WorldInfoActivationMode =
       (e.activationMode as WorldInfoActivationMode) ?? (constant ? 'always' : 'keyword')
     entries.push({
@@ -315,6 +352,16 @@ export function normalizeLorebook(raw: unknown): Lorebook | undefined {
       enabled: e.enabled === undefined ? !(e.disable === true) : !!e.enabled,
       position,
       depth: position === 'at_depth' && typeof e.depth === 'number' && e.depth >= 0 ? e.depth : undefined,
+      outletName: position === 'outlet' && typeof outlet === 'string' && outlet.trim() ? outlet.trim() : undefined,
+      selectiveLogic,
+      scanDepth: typeof scanRaw === 'number' && scanRaw >= 0 ? Math.floor(scanRaw) : undefined,
+      matchWholeWords: flag('matchWholeWords', 'match_whole_words'),
+      groupOverride: flag('groupOverride', 'group_override'),
+      useGroupScoring: flag('useGroupScoring', 'use_group_scoring'),
+      excludeRecursion: flag('excludeRecursion', 'exclude_recursion'),
+      preventRecursion: flag('preventRecursion', 'prevent_recursion'),
+      delayUntilRecursion: flag('delayUntilRecursion', 'delay_until_recursion'),
+      ignoreBudget: flag('ignoreBudget', 'ignore_budget'),
       case_sensitive: !!e.case_sensitive,
       activationMode,
       // ST only honors `probability` when `useProbability` is explicitly true

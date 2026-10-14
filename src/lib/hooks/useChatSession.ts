@@ -6,6 +6,8 @@ import { newId } from '@/lib/id'
 import type { AuthorNote, Chat, CommitmentStatus, DateEventCard, ItemEffect, MessageIntent, Objective, ObjectiveTask, RelationshipStage, StoredMessage } from '@/lib/types'
 import { collectImageBase64, composeMessageText, type PendingAttachment } from '@/lib/attachments'
 import { makeGenKey } from '@/lib/api/kobold'
+import { tokenProbStore } from '@/lib/api/logprobs'
+import { retrieveForPrompt, syncChatMemory } from '@/lib/vectors/chatMemory'
 import { generateWithTimeout, type AssistShaping } from '@/lib/api/generateWithTimeout'
 import { useChatBackendClient } from '@/lib/hooks/useChatBackendClient'
 import { BUILTIN_SYSTEM_PROMPTS, buildPrompt, estimateTokens, renderHistoryTurn, type ChatMessage, type StyleGuidanceItem } from '@/lib/prompt/builder'
@@ -1062,8 +1064,14 @@ export function useChatSession(chatId: string | null) {
           ]
 
       const contextBudget = sampler.max_context_length - sampler.max_length - 32
+      // Passages from older messages and the writer's documents that match what was just said; none while impersonating.
+      const retrievedMemories = impersonating
+        ? []
+        : await retrieveForPrompt({ chatId: freshChat.id, characterId: speaker.id, history: historyForPrompt, recent: recentHistory })
       return buildPrompt({
+        retrievedMemories,
         character: speaker.card,
+        macroExtras: { chatId: freshChat.id, maxResponse: sampler.max_length, generationType: opts?.impersonateAsUser ? 'impersonate' : opts?.continueLastTurn ? 'continue' : 'normal' },
         characterProfile: buildCharacterProfileNote(speaker),
         personaName: persona?.name || 'You',
         personaDescription: persona?.description || '',
@@ -2642,11 +2650,19 @@ export function useChatSession(chatId: string | null) {
           const dynamicStops = texting ? ['<START>', `\n${personaName}:`] : ['<START>', `\n${personaName}:`, `\n${speaker.card.name}:`]
           const stopSequence = [...new Set([...template.stopSequences, ...(sampler.stop_sequence ?? []), ...dynamicStops])]
 
+          // Read when the reply is generated, so the toggle takes effect on the very next one.
+          const showTokenProbabilities = useSettingsStore.getState().showTokenProbabilities
           // A chat-completion backend needs its own native sampler params, not KoboldCpp's shape.
           const generationParams =
             chatBackend === 'openai-compatible'
               ? { max_context_length: sampler.max_context_length, ...chatCompletionSamplerToRequest(chatCompletionSampler) }
-              : { ...sampler, ...drive?.sampler }
+              : {
+                  ...sampler,
+                  ...drive?.sampler,
+                  ...(showTokenProbabilities ? { logprobs: true } : {}),
+                  // Words a card names with {{banned::word}} join the writer's own list.
+                  ...(built.bannedWords.length ? { banned_tokens: [...new Set([...(sampler.banned_tokens ?? []), ...built.bannedWords])] } : {}),
+                }
 
           const genStartedAt = performance.now()
           let firstTokenAt: number | null = null
@@ -2709,6 +2725,12 @@ export function useChatSession(chatId: string | null) {
               },
               abort.signal,
             )
+          }
+
+          // Token probabilities for the viewer under the reply; a continue round adds to the earlier ones.
+          if (showTokenProbabilities && chatBackend === 'koboldcpp' && client.lastLogprobs) {
+            const probs = await client.lastLogprobs()
+            if (probs.length) tokenProbStore.set(targetMessageId, round === 0 && !continuing ? probs : [...(tokenProbStore.get(targetMessageId) ?? []), ...probs])
           }
 
           // Stats computed client-side from this round's own stream
@@ -3056,6 +3078,7 @@ export function useChatSession(chatId: string | null) {
         setIsGenerating(false)
         setStreamingText('')
         setGeneratingMessageId(null)
+        if (chat) void syncChatMemory(chat.id)
       }
     },
     [

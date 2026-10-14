@@ -49,8 +49,16 @@ export function activateWorldInfo(
   recentText: string,
   affection = 0,
   runtime?: WorldInfoRuntimeInput,
+  /** Every message's text, oldest first. Only needed for entries that set their own `scanDepth`. */
+  messageTexts?: string[],
 ): WorldInfoActivationResult {
   const haystackLower = recentText.toLowerCase()
+  /** The text an entry scans: the shared recent window, or its own number of last messages. */
+  const scanFor = (entry: LorebookEntry): { text: string; lower: string } => {
+    if (entry.scanDepth === undefined || !messageTexts) return { text: recentText, lower: haystackLower }
+    const text = messageTexts.slice(-Math.max(0, entry.scanDepth)).join('\n')
+    return { text, lower: text.toLowerCase() }
+  }
   const activated: LorebookEntry[] = []
   const droppedForBudget: LorebookEntry[] = []
   const droppedForGroup: LorebookEntry[] = []
@@ -91,7 +99,10 @@ export function activateWorldInfo(
 
     for (let ei = 0; ei < keywordEntries.length; ei++) {
       const entry = keywordEntries[ei]
-      const matchedNow = matchesKeywords(entry, recentText, haystackLower) && passesProbability(entry)
+      // `delayUntilRecursion` entries wait for a recursive pass to be triggered by another entry's text.
+      if (entry.delayUntilRecursion) continue
+      const own = scanFor(entry)
+      const matchedNow = matchesKeywords(entry, own.text, own.lower) && passesProbability(entry)
       let active = matchedNow
       if (runtime) {
         const key = compositeKey(book, bookIndex, entry, ei)
@@ -112,13 +123,14 @@ export function activateWorldInfo(
 
     // Recursive scanning: a just-activated entry's own content can introduce keywords that trigger further keyword-mode entries…
     if (book.recursive_scanning) {
-      let frontier = matched.filter((e) => keywordEntries.includes(e))
+      let frontier = matched.filter((e) => keywordEntries.includes(e) && !e.preventRecursion)
       for (let depth = 0; depth < MAX_RECURSION_DEPTH && frontier.length > 0; depth++) {
         const frontierText = frontier.map((e) => e.content).join('\n')
         const frontierLower = frontierText.toLowerCase()
         const next: LorebookEntry[] = []
         for (const entry of keywordEntries) {
           if (entry.id !== undefined && matchedIds.has(entry.id)) continue
+          if (entry.excludeRecursion) continue
           if (matchesKeywords(entry, frontierText, frontierLower) && passesProbability(entry)) {
             next.push(entry)
             if (entry.id !== undefined) matchedIds.add(entry.id)
@@ -144,10 +156,7 @@ export function activateWorldInfo(
     }
     matched = ungrouped
     for (const group of byGroup.values()) {
-      // ST's weighted groups: if any member sets `groupWeight`, pick via weighted random draw; else the plain highest-insertion_order rule.
-      const winner = group.some((e) => e.groupWeight !== undefined)
-        ? pickWeighted(group)
-        : [...group].sort((a, b) => b.insertion_order - a.insertion_order)[0]
+      const winner = pickGroupWinner(group, scanFor)
       matched.push(winner)
       droppedForGroup.push(...group.filter((e) => e !== winner))
     }
@@ -162,7 +171,8 @@ export function activateWorldInfo(
     const budget = book.token_budget ?? Infinity
     let used = 0
     for (const entry of byPriority) {
-      const cost = estimateTokens(entry.content)
+      // `ignoreBudget` entries are always kept and do not count against the book's budget.
+      const cost = entry.ignoreBudget ? 0 : estimateTokens(entry.content)
       if (used + cost > budget) {
         droppedForBudget.push(entry)
         continue
@@ -244,22 +254,58 @@ function parseRegexKey(key: string, caseSensitive: boolean): RegExp | null {
   }
 }
 
+const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/** Whether one key is found in the text: a regex, a whole word (single-word keys when the entry asks for it), or a plain substring. */
+function keyHits(entry: LorebookEntry, key: string, haystackOriginal: string, haystackLower: string): boolean {
+  const regex = parseRegexKey(key, !!entry.case_sensitive)
+  // Only the regex path can catastrophically backtrack, so only it's length-capped; plain `.includes()` is safe uncapped.
+  if (regex) return regex.test(haystackOriginal.slice(0, MAX_REGEX_HAYSTACK_LENGTH))
+  const trimmed = key.trim()
+  if (!trimmed) return false
+  if (entry.matchWholeWords && !/\s/.test(trimmed)) {
+    return new RegExp(`(?<![\\w])${escapeRegex(trimmed)}(?![\\w])`, entry.case_sensitive ? '' : 'i').test(haystackOriginal)
+  }
+  const needle = entry.case_sensitive ? key : key.toLowerCase()
+  const hay = entry.case_sensitive ? haystackOriginal : haystackLower
+  return needle.length > 0 && hay.includes(needle)
+}
+
+/** How many of an entry's keys (primary and secondary) are found, for group scoring. */
+function matchCount(entry: LorebookEntry, haystackOriginal: string, haystackLower: string): number {
+  return [...entry.keys, ...(entry.secondary_keys ?? [])].filter((k) => keyHits(entry, k, haystackOriginal, haystackLower)).length
+}
+
 function matchesKeywords(entry: LorebookEntry, haystackOriginal: string, haystackLower: string): boolean {
   if (entry.keys.length === 0) return false
-  const test = (k: string) => {
-    const regex = parseRegexKey(k, !!entry.case_sensitive)
-    // Only the regex path can catastrophically backtrack, so only it's length-capped; plain `.includes()` is safe uncapped.
-    if (regex) return regex.test(haystackOriginal.slice(0, MAX_REGEX_HAYSTACK_LENGTH))
-    const needle = entry.case_sensitive ? k : k.toLowerCase()
-    const hay = entry.case_sensitive ? haystackOriginal : haystackLower
-    return needle.length > 0 && hay.includes(needle)
+  if (!entry.keys.some((k) => keyHits(entry, k, haystackOriginal, haystackLower))) return false
+  const secondary = entry.secondary_keys ?? []
+  if (!entry.selective || secondary.length === 0) return true
+  const hits = secondary.filter((k) => keyHits(entry, k, haystackOriginal, haystackLower)).length
+  switch (entry.selectiveLogic ?? 'and_any') {
+    case 'and_all': return hits === secondary.length
+    case 'not_all': return hits < secondary.length
+    case 'not_any': return hits === 0
+    default: return hits > 0
   }
-  const primaryHit = entry.keys.some(test)
-  if (!primaryHit) return false
-  if (entry.selective && entry.secondary_keys && entry.secondary_keys.length > 0) {
-    return entry.secondary_keys.some(test)
+}
+
+/** ST's group rules: a prioritized entry beats the rest, then group scoring (most keys matched), then the weighted draw, then the highest insertion order. */
+function pickGroupWinner(group: LorebookEntry[], scanFor: (e: LorebookEntry) => { text: string; lower: string }): LorebookEntry {
+  const byOrder = (list: LorebookEntry[]) => [...list].sort((a, b) => b.insertion_order - a.insertion_order)[0]
+  const prioritized = group.filter((e) => e.groupOverride)
+  if (prioritized.length) return byOrder(prioritized)
+  let pool = group
+  if (group.some((e) => e.useGroupScoring)) {
+    const scores = group.map((e) => {
+      const own = scanFor(e)
+      return matchCount(e, own.text, own.lower)
+    })
+    const best = Math.max(...scores)
+    pool = group.filter((_, i) => scores[i] === best)
   }
-  return true
+  // ST's weighted groups: if any member sets `groupWeight`, pick via weighted random draw; else the plain highest-insertion_order rule.
+  return pool.some((e) => e.groupWeight !== undefined) ? pickWeighted(pool) : byOrder(pool)
 }
 
 export function recentMessagesText(messages: { text: string }[], scanDepth: number): string {

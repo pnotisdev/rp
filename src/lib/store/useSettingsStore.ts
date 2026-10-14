@@ -1,4 +1,7 @@
 /** Zustand store for all persisted user settings */
+import { configureReasoning } from '@/lib/text/slop'
+import { newId } from '@/lib/id'
+import { profileFieldsOf, upsertProfile, type ConnectionProfile } from '@/lib/connectionProfiles'
 import { create } from 'zustand'
 import { isOpenMayhem } from '@/lib/api/openMayhem'
 import { persist } from 'zustand/middleware'
@@ -208,6 +211,25 @@ interface SettingsState {
   contextLengthAuto: boolean
   /** Extra `max_length` headroom for a thinking/reasoning model's hidden reasoning phase (see `replyMaxTokens`). Backend-agnostic, so kept outside `sampler` (KoboldCpp's own wire-format shape, serialized as-is) rather than as one more of its fields. 0 = off, reproducing the old behavior. */
   reasoningTokenReserve: number
+  /** Show a thinking model's reasoning in a collapsible block above its reply instead of discarding it. */
+  showReasoning: boolean
+  /** Similarity search over documents and the chat's older messages. Needs an embeddings model on a server. */
+  vectorsEnabled: boolean
+  vectorChatMemory: boolean
+  /** Blank uses the chat server (KoboldCpp, or the hosted one) for embeddings too. */
+  embeddingsBaseUrl: string
+  embeddingsApiKey: string
+  embeddingsModel: string
+  vectorTopK: number
+  vectorMinScore: number
+  vectorChunkChars: number
+  setVectorSettings: (patch: Partial<Pick<SettingsState, 'vectorsEnabled' | 'vectorChatMemory' | 'embeddingsBaseUrl' | 'embeddingsApiKey' | 'embeddingsModel' | 'vectorTopK' | 'vectorMinScore' | 'vectorChunkChars'>>) => void
+  /** Ask KoboldCpp for the token probabilities of each reply, and show them under it. */
+  showTokenProbabilities: boolean
+  setShowTokenProbabilities: (v: boolean) => void
+  /** Own reasoning markers for a model whose tags are not one of the built-in kinds. Both blank means automatic. */
+  reasoningPrefix: string
+  reasoningSuffix: string
   instructTemplateId: string
   /** Which of `builder.ts`'s fixed prompt sections are included; a missing key defaults to on. */
   promptSections: Record<PromptSectionId, boolean>
@@ -217,6 +239,8 @@ interface SettingsState {
   setDetectedContextLength: (n: number) => void
   setContextLengthAuto: (v: boolean) => void
   setReasoningTokenReserve: (n: number) => void
+  setShowReasoning: (v: boolean) => void
+  setReasoningMarkers: (prefix: string, suffix: string) => void
   setInstructTemplateId: (id: string) => void
   setPromptSectionEnabled: (id: PromptSectionId, enabled: boolean) => void
 
@@ -286,6 +310,9 @@ interface SettingsState {
   /** Apply the Assistant's file edits without asking each time (commands always ask). */
   assistantAutoApprove: boolean
   setAssistantAutoApprove: (v: boolean) => void
+  /** A message asking for a character builds a draft card straight away, instead of offering a button. */
+  assistantAutoBuild: boolean
+  setAssistantAutoBuild: (v: boolean) => void
   setAssistantTools: (v: 'off' | 'read' | 'write') => void
   setSystemPrompt: (v: string) => void
   setPostHistoryInstructions: (v: string) => void
@@ -327,6 +354,12 @@ interface SettingsState {
     ttsVoice: string
     ttsModel: string
   }>) => void
+
+  /** Saved backend, model, template and sampler bundles to switch between. */
+  connectionProfiles: ConnectionProfile[]
+  saveConnectionProfile: (name: string) => void
+  applyConnectionProfile: (id: string) => void
+  removeConnectionProfile: (id: string) => void
 
   /** Defaults to `'koboldcpp'`; the other three fields only matter for `'openai-compatible'`. */
   chatBackend: ChatBackendId
@@ -468,6 +501,26 @@ export const useSettingsStore = create<SettingsState>()(
       sampler: { ...DEFAULT_SAMPLER },
       contextLengthAuto: true,
       reasoningTokenReserve: 0,
+      showReasoning: false,
+      showTokenProbabilities: false,
+      vectorsEnabled: false,
+      vectorChatMemory: true,
+      embeddingsBaseUrl: '',
+      embeddingsApiKey: '',
+      embeddingsModel: '',
+      vectorTopK: 4,
+      vectorMinScore: 0.3,
+      vectorChunkChars: 800,
+      setVectorSettings: (patch) =>
+        set({
+          ...patch,
+          ...(patch.vectorTopK !== undefined ? { vectorTopK: Math.max(1, Math.min(20, Math.round(patch.vectorTopK) || 1)) } : {}),
+          ...(patch.vectorMinScore !== undefined ? { vectorMinScore: Math.max(0, Math.min(1, patch.vectorMinScore || 0)) } : {}),
+          ...(patch.vectorChunkChars !== undefined ? { vectorChunkChars: Math.max(200, Math.min(4000, Math.round(patch.vectorChunkChars) || 800)) } : {}),
+        }),
+      setShowTokenProbabilities: (v) => set({ showTokenProbabilities: v }),
+      reasoningPrefix: '',
+      reasoningSuffix: '',
       instructTemplateId: 'plain-chat',
       promptSections: DEFAULT_PROMPT_SECTIONS,
       setAdvancedSamplerMode: (v) => set({ advancedSamplerMode: v }),
@@ -476,6 +529,8 @@ export const useSettingsStore = create<SettingsState>()(
         set((s) => (s.sampler.max_context_length === n ? {} : { sampler: { ...s.sampler, max_context_length: n } })),
       setContextLengthAuto: (v) => set({ contextLengthAuto: v }),
       setReasoningTokenReserve: (n) => set({ reasoningTokenReserve: Math.max(0, Math.round(n) || 0) }),
+      setShowReasoning: (v) => set({ showReasoning: v }),
+      setReasoningMarkers: (prefix, suffix) => set({ reasoningPrefix: prefix, reasoningSuffix: suffix }),
       setInstructTemplateId: (id) => set({ instructTemplateId: id }),
       setPromptSectionEnabled: (id, enabled) => set((s) => ({ promptSections: { ...s.promptSections, [id]: enabled } })),
 
@@ -532,6 +587,8 @@ export const useSettingsStore = create<SettingsState>()(
       assistantTools: 'off',
       assistantAutoApprove: false,
       setAssistantAutoApprove: (v) => set({ assistantAutoApprove: v }),
+      assistantAutoBuild: true,
+      setAssistantAutoBuild: (v) => set({ assistantAutoBuild: v }),
       setAssistantTools: (v) => set({ assistantTools: v }),
       setSystemPrompt: (v) => set({ systemPrompt: v }),
       setPostHistoryInstructions: (v) => set({ postHistoryInstructions: v }),
@@ -576,6 +633,19 @@ export const useSettingsStore = create<SettingsState>()(
           || patch.ttsBaseUrl !== undefined && patch.ttsBaseUrl !== s.ttsBaseUrl
         return changesProvider ? { ttsApiKey: '', ttsVoice: '', ttsModel: '', ...patch } : patch
       }),
+
+      connectionProfiles: [],
+      saveConnectionProfile: (name) => set((s) => ({ connectionProfiles: upsertProfile(s.connectionProfiles, name, s, newId) })),
+      applyConnectionProfile: (id) =>
+        set((s) => {
+          const profile = s.connectionProfiles.find((p) => p.id === id)
+          if (!profile) return {}
+          const fields = profileFieldsOf(profile)
+          // A hosted OpenMayhem connection keeps its key in a second field too.
+          const mayhem = fields.chatBackend === 'openai-compatible' && isOpenMayhem(fields.chatBackendBaseUrl)
+          return { ...fields, ...(mayhem ? { openMayhemApiKey: fields.chatBackendApiKey } : {}) }
+        }),
+      removeConnectionProfile: (id) => set((s) => ({ connectionProfiles: s.connectionProfiles.filter((p) => p.id !== id) })),
 
       chatBackend: 'koboldcpp',
       chatBackendBaseUrl: '',
@@ -630,3 +700,7 @@ export const useSettingsStore = create<SettingsState>()(
     },
   ),
 )
+
+// The text scrubber is plain code with no store access, so it is told the writer's reasoning markers when they change.
+configureReasoning(useSettingsStore.getState().reasoningPrefix, useSettingsStore.getState().reasoningSuffix)
+useSettingsStore.subscribe((s) => configureReasoning(s.reasoningPrefix, s.reasoningSuffix))

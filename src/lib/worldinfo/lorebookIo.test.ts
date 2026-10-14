@@ -30,3 +30,38 @@ describe('lorebook import/export', () => {
     expect(lorebookFromJson({ hello: 1 })).toBeUndefined()
   })
 })
+
+describe('SillyTavern entry options', () => {
+  it('reads them from a World Info export', () => {
+    const book = lorebookFromJson({
+      entries: {
+        '0': { uid: 0, key: ['a'], content: 'x', position: 7, outletName: 'weather', selectiveLogic: 3, scanDepth: 6, matchWholeWords: true, groupOverride: true, useGroupScoring: true, excludeRecursion: true, preventRecursion: true, delayUntilRecursion: true, ignoreBudget: true },
+      },
+    })!
+    expect(book.entries[0]).toMatchObject({
+      position: 'outlet', outletName: 'weather', selectiveLogic: 'and_all', scanDepth: 6, matchWholeWords: true, groupOverride: true, useGroupScoring: true, excludeRecursion: true, preventRecursion: true, delayUntilRecursion: true, ignoreBudget: true,
+    })
+  })
+
+  it('reads them from the snake_case extensions of a V2 card', () => {
+    const card = {
+      spec: 'chara_card_v2',
+      data: { name: 'A', character_book: { entries: [{ keys: ['k'], content: 'y', enabled: true, constant: false, selective: true, insertion_order: 1, extensions: { selectiveLogic: 2, scan_depth: 3, match_whole_words: true, group_override: true, exclude_recursion: true, prevent_recursion: true, delay_until_recursion: true } }] } },
+    }
+    expect(lorebookFromJson(card)!.entries[0]).toMatchObject({ selectiveLogic: 'not_any', scanDepth: 3, matchWholeWords: true, groupOverride: true, excludeRecursion: true, preventRecursion: true, delayUntilRecursion: true })
+  })
+
+  it('leaves them off an entry that does not set them', () => {
+    const e = lorebookFromJson(st)!.entries[0]
+    expect(e.selectiveLogic).toBeUndefined()
+    expect(e.scanDepth).toBeUndefined()
+    expect(e.matchWholeWords).toBeUndefined()
+    expect(e.outletName).toBeUndefined()
+  })
+
+  it('round-trips every option through the export', () => {
+    const entry = { keys: ['a'], content: 'x', enabled: true, constant: false, selective: true, secondary_keys: ['b'], insertion_order: 5, position: 'outlet' as const, outletName: 'weather', selectiveLogic: 'not_all' as const, scanDepth: 4, matchWholeWords: true, groupOverride: true, useGroupScoring: true, excludeRecursion: true, preventRecursion: true, delayUntilRecursion: true, ignoreBudget: true, group: 'g', sticky: 2, cooldown: 3, delay: 1 }
+    const out = lorebookFromJson(lorebookToStJson({ entries: [{ ...entry, id: 0 }] }))!.entries[0]
+    expect(out).toMatchObject(entry)
+  })
+})

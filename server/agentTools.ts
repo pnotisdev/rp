@@ -7,11 +7,13 @@ import { addNote, MEMORY_TOOLS, readNotes, removeNote } from './assistantMemory.
 import { appSettingsStore, dataDir } from './db.ts'
 import { callExternalTool, externalTools, isExternalTool } from './mcpClient.ts'
 import { validateArgs, type ToolDef } from './mcpProtocol.ts'
-import { createMcpConfig, restClient } from './mcpTools.ts'
+import { AGENT_HIDDEN_PROPS, createMcpConfig, restClient } from './mcpTools.ts'
 import { inside, saveImage, WEB_TOOLS, workspaceTools, WorkspaceError, type WorkspaceConfig, type WorkspaceCtx, type WorkspaceOutput } from './workspace.ts'
 
 const config = createMcpConfig('0')
 const builtin = new Map(config.tools.map((t) => [t.name, t]))
+
+const CHARACTER_WRITERS = new Set(['create_character', 'update_character'])
 
 const WORKSPACE_SETTINGS_ID = 'workspace'
 
@@ -52,7 +54,7 @@ export function agentRouter(): express.Router {
       name: t.name,
       title: t.title,
       description: t.description,
-      inputSchema: { properties: t.inputSchema.properties ?? {}, required: t.inputSchema.required ?? [] },
+      inputSchema: { properties: Object.fromEntries(Object.entries(t.inputSchema.properties ?? {}).filter(([k]) => !(CHARACTER_WRITERS.has(t.name) && AGENT_HIDDEN_PROPS.has(k)))), required: t.inputSchema.required ?? [] },
       write: t.annotations?.readOnlyHint !== true,
       confirm: 'needsApproval' in t && t.needsApproval === true,
     })

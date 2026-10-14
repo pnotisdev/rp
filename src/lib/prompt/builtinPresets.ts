@@ -110,4 +110,42 @@ export const BUILTIN_PRESETS: SamplerPreset[] = [
       rep_pen_slope: 0.9,
     },
   },
+
+  // SillyTavern's own KoboldAI sampler presets, unchanged (default/content/presets/kobold).
+  {
+    id: 'st-universal-light',
+    name: 'SillyTavern: Universal Light',
+    use: 'Temperature 1.25 with min-p 0.1 and no repetition penalty. Light variety.',
+    params: { temperature: 1.25, rep_pen: 1, rep_pen_range: 0, rep_pen_slope: 0, top_p: 1, min_p: 0.1, top_a: 0, top_k: 0, typical: 1, tfs: 1, sampler_order: [5, 6, 0, 1, 2, 3, 4], mirostat: 0, mirostat_tau: 5, mirostat_eta: 0.1 },
+  },
+  {
+    id: 'st-universal-creative',
+    name: 'SillyTavern: Universal Creative',
+    use: 'Temperature 1.5 with min-p 0.1 holding it together.',
+    params: { temperature: 1.5, rep_pen: 1, rep_pen_range: 0, rep_pen_slope: 0, top_p: 1, min_p: 0.1, top_a: 0, top_k: 0, typical: 1, tfs: 1, sampler_order: [5, 6, 0, 1, 2, 3, 4], mirostat: 0, mirostat_tau: 5, mirostat_eta: 0.1 },
+  },
+  {
+    id: 'st-universal-super-creative',
+    name: 'SillyTavern: Universal Super-Creative',
+    use: 'Temperature 2 with min-p 0.1. Very varied; the sampler order matters here.',
+    params: { temperature: 2, rep_pen: 1, rep_pen_range: 0, rep_pen_slope: 0, top_p: 1, min_p: 0.1, top_a: 0, top_k: 0, typical: 1, tfs: 1, sampler_order: [5, 6, 0, 1, 2, 3, 4], mirostat: 0, mirostat_tau: 5, mirostat_eta: 0.1 },
+  },
+  {
+    id: 'st-recovered-ruins',
+    name: 'SillyTavern: Recovered Ruins',
+    use: 'Temperature 1, top-p 0.95, a mild repetition penalty over 600 tokens.',
+    params: { temperature: 1, rep_pen: 1.1, rep_pen_range: 600, rep_pen_slope: 0, top_p: 0.95, min_p: 0.01, top_a: 0, top_k: 0, typical: 1, tfs: 1, sampler_order: [6, 0, 1, 2, 3, 4, 5], mirostat: 0, mirostat_tau: 5, mirostat_eta: 0.1 },
+  },
+  {
+    id: 'st-neutral',
+    name: 'SillyTavern: Neutral',
+    use: 'Every sampler off at temperature 1: the model exactly as it is.',
+    params: { temperature: 1, rep_pen: 1, rep_pen_range: 0, rep_pen_slope: 0, top_p: 1, min_p: 0, top_a: 0, top_k: 0, typical: 1, tfs: 1, sampler_order: [6, 0, 1, 3, 4, 2, 5], mirostat: 0, mirostat_tau: 5, mirostat_eta: 0.1 },
+  },
+  {
+    id: 'st-deterministic',
+    name: 'SillyTavern: Deterministic',
+    use: 'Always the most likely token (top-k 1). The same prompt gives the same reply.',
+    params: { temperature: 0, rep_pen: 1, rep_pen_range: 0, rep_pen_slope: 0, top_p: 0, min_p: 0, top_a: 0, top_k: 1, typical: 1, tfs: 1, sampler_order: [6, 0, 1, 3, 4, 2, 5], mirostat: 0, mirostat_tau: 5, mirostat_eta: 0.1 },
+  },
 ]

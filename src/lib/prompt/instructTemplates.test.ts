@@ -44,7 +44,57 @@ describe('builtin coverage', () => {
   })
 })
 
+describe('SillyTavern coverage', () => {
+  const ids = BUILTIN_INSTRUCT_TEMPLATES.map((t) => t.id)
+
+  it('ships a template for every SillyTavern instruct preset it has a distinct format for', () => {
+    expect(ids).toEqual(
+      expect.arrayContaining(['llama4', 'llama3-names', 'chatml-names', 'glm4', 'harmony', 'harmony-thinking', 'kimi-k2', 'tulu', 'dots1', 'mistral-v3-tekken', 'mistral-v7-tekken', 'llama2', 'koala', 'vicuna-1-0', 'wizardlm', 'synthia', 'openorca-openchat', 'lightning', 'libra', 'koboldcpp-adapter']),
+    )
+  })
+
+  it('has unique ids, and a stop sequence for every template that marks its turns', () => {
+    expect(new Set(ids).size).toBe(ids.length)
+    for (const t of BUILTIN_INSTRUCT_TEMPLATES) {
+      if (!['plain-chat', 'koboldcpp-adapter'].includes(t.id)) expect(t.stopSequences.length, t.id).toBeGreaterThan(0)
+    }
+  })
+
+  it('writes the exact turn markers of the formats that changed most recently', () => {
+    expect(getInstructTemplate('llama4').userPrefix).toBe('<|header_start|>user<|header_end|>\n\n{name}: ')
+    expect(getInstructTemplate('kimi-k2').assistantPrefix).toBe('<|im_assistant|>assistant<|im_middle|>{name}: ')
+    expect(getInstructTemplate('glm4').systemPrefix).toBe('[gMASK]<sop><|system|>\n')
+    expect(getInstructTemplate('harmony').assistantPrefix).toBe('<|start|>assistant<|channel|>final<|message|>{name}: ')
+  })
+
+  it('lets a thinking Harmony model open its own channel, and does not stop on the channel switch', () => {
+    const t = getInstructTemplate('harmony-thinking')
+    expect(t.assistantCuePrefix).toBe('<|start|>assistant')
+    expect(t.stopSequences).not.toContain('<|start|>')
+    expect(wrapAssistPrompt('x', t)).toBe('<|start|>system<|message|>x<|end|><|start|>assistant')
+  })
+
+  it('wraps a judge prompt for a template that puts the name in the turn header', () => {
+    expect(wrapAssistPrompt('x', getInstructTemplate('chatml-names'))).toBe('<|im_start|>system\nx<|im_end|>\n<|im_start|>assistant\n')
+  })
+})
+
 describe('detectInstructTemplateId', () => {
+  it('reads the newer formats from their markers', () => {
+    expect(detectInstructTemplateId('<|header_start|>user<|header_end|>')).toBe('llama4')
+    expect(detectInstructTemplateId('<|start|>assistant<|channel|>final<|message|>')).toBe('harmony')
+    expect(detectInstructTemplateId('<|im_user|>user<|im_middle|>')).toBe('kimi-k2')
+    expect(detectInstructTemplateId('[gMASK]<sop><|user|>')).toBe('glm4')
+    expect(detectInstructTemplateId('<|userprompt|>hi<|endofuserprompt|>')).toBe('dots1')
+    expect(detectInstructTemplateId('<|user|>\nhi\n<|assistant|>\n')).toBe('tulu')
+    expect(detectInstructTemplateId('[INST] <<SYS>>\nx\n<</SYS>>')).toBe('llama2')
+  })
+
+  it('still reads Phi and Metharme, which share the Tulu markers', () => {
+    expect(detectInstructTemplateId('<|user|>hi<|end|><|assistant|>')).toBe('phi')
+    expect(detectInstructTemplateId('<|user|>hi<|model|>')).toBe('metharme')
+  })
+
   it('reads Gemma from a start_of_turn template', () => {
     expect(detectInstructTemplateId('{{ bos_token }}{% for message in messages %}{{ "<start_of_turn>" + role }}')).toBe('gemma')
   })

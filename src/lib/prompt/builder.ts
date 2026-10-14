@@ -1,5 +1,5 @@
 import type { CharacterCardData, Lorebook, LorebookEntry } from '@/lib/characters/cardSpec'
-import { substituteMacros } from '@/lib/characters/macros'
+import { substituteMacros, type MacroContext } from '@/lib/characters/macros'
 import { activateWorldInfo, recentMessagesText, type WorldInfoRuntimeState } from '@/lib/worldinfo/activation'
 import { estimateTokens } from '@/lib/tokenEstimate'
 import { buildSceneInstruction } from '@/lib/vn/sceneTag'
@@ -108,6 +108,10 @@ export interface PromptBuildInput {
   participants?: { name: string; description?: string; personality?: string }[]
   /** Whose turn is being generated — defaults to `character.name`. */
   nextSpeakerName?: string
+  /** Passages found by similarity search over this chat's older messages and the writer's documents. Placed after the history, so the cached start of the prompt does not change. */
+  retrievedMemories?: string[]
+  /** Extra values for macros ({{model}}, {{lastGenerationType}}, variables per chat…); the builder fills in the rest. */
+  macroExtras?: Partial<MacroContext>
   /** Adds `sectionBreakdown` to the result (Prompt Inspector). Opt-in — costs extra `countTokens` calls. */
   includeSectionBreakdown?: boolean
   /** Cache-friendly layout: summary last in the fixed block, keyword/fact lore after the history, so the prefix stays identical between turns. */
@@ -144,6 +148,8 @@ export interface PromptBuildResult {
   /** `systemText` and `conversationText` are the same two pieces joined into `prompt`, exposed separately for a hosted chat-completion backend that wants a proper system/user pair instead of one flat string. */
   systemText: string
   conversationText: string
+  /** Words named by `{{banned::word}}` macros in the text, for the sampler to ban. */
+  bannedWords: string[]
 }
 
 export { estimateTokens }
@@ -161,7 +167,19 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
   } = input
   const sections = { ...DEFAULT_PROMPT_SECTIONS, ...input.promptSections }
 
-  const macroCtx = { charName: character.name || 'Character', userName: personaName || 'User' }
+  const macroCtx: MacroContext = {
+    charName: character.name || 'Character',
+    userName: personaName || 'User',
+    card: character,
+    persona: input.personaDescription,
+    history: history.map((m) => ({ role: m.role, text: m.text })),
+    participants: input.participants?.map((p) => p.name),
+    instruct: template,
+    systemPrompt: input.chatSystemPrompt?.trim() || input.globalSystemPrompt?.trim(),
+    maxContext: contextBudget,
+    banned: [],
+    ...input.macroExtras,
+  }
   const sub = (text: string | undefined) => substituteMacros(text ?? '', macroCtx)
 
   // Honor the deepest scan_depth requested by any book; never narrower than the default.
@@ -174,17 +192,26 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
     input.worldInfoState
       ? { turn: input.worldInfoTurn ?? history.length, prevState: input.worldInfoState }
       : undefined,
+    history.map((m) => m.text),
   )
+  // Outlet entries stay out of the prompt; a {{outlet::name}} macro placed in the card or a prompt asks for them.
+  const placedEntries = activatedEntries.filter((e) => e.position !== 'outlet')
+  const outlets: Record<string, string> = {}
+  for (const e of activatedEntries) {
+    if (e.position !== 'outlet' || !e.outletName) continue
+    outlets[e.outletName] = [outlets[e.outletName], sub(e.content)].filter(Boolean).join('\n')
+  }
+  macroCtx.outlets = { ...macroCtx.outlets, ...outlets }
   const cacheFriendly = !!input.cacheFriendly
   // Keyword-fired and fact entries change per turn, so cache-friendly mode puts them after the history.
   const isLate = (e: LorebookEntry) =>
     cacheFriendly &&
     e.position !== 'at_depth' &&
     (e.volatile || (e.activationMode ?? (e.constant ? 'always' : 'keyword')) === 'keyword')
-  const lateEntries = activatedEntries.filter(isLate)
-  const before = activatedEntries.filter((e) => e.position !== 'after_char' && e.position !== 'at_depth' && !isLate(e))
-  const after = activatedEntries.filter((e) => e.position === 'after_char' && !isLate(e))
-  const worldAtDepth = activatedEntries.filter((e) => e.position === 'at_depth')
+  const lateEntries = placedEntries.filter(isLate)
+  const before = placedEntries.filter((e) => e.position !== 'after_char' && e.position !== 'at_depth' && !isLate(e))
+  const after = placedEntries.filter((e) => e.position === 'after_char' && !isLate(e))
+  const worldAtDepth = placedEntries.filter((e) => e.position === 'at_depth')
 
   // Impersonation needs its own system block; the normal one tells the model to never write {{user}}.
   const systemBlock = input.impersonateAsUser
@@ -234,9 +261,11 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
   const authorNotePosition = input.authorNote?.position ?? 'at_depth'
   const authorNoteDepth = Math.max(0, Math.floor(Number(input.authorNote?.depth) || 0))
 
-  const lateLoreBlock = lateEntries.length
-    ? `Relevant background to keep in mind:\n${lateEntries.map((e) => sub(e.content)).join('\n')}`
+  const lateLoreText = lateEntries.length ? `Relevant background to keep in mind:\n${lateEntries.map((e) => sub(e.content)).join('\n')}` : ''
+  const retrievedText = input.retrievedMemories?.length
+    ? `Related earlier moments and notes, found because they match what was just said (background only, not something to repeat):\n${input.retrievedMemories.map((m) => `- ${m.trim()}`).join('\n')}`
     : ''
+  const lateLoreBlock = [lateLoreText, retrievedText].filter(Boolean).join('\n\n')
   const summarySection = sections.summary ? summaryBlock : ''
 
   const fixedSections = [
@@ -422,6 +451,7 @@ export async function buildPrompt(input: PromptBuildInput): Promise<PromptBuildR
     historyTokens,
     systemText: fixedText,
     conversationText: tail,
+    bannedWords: macroCtx.banned ?? [],
   }
 }
 

@@ -4,14 +4,16 @@ import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { createChatBackend } from '@/lib/api/createChatBackend'
 import { cleanModelOutput } from '@/lib/text/slop'
 import { newId } from '@/lib/id'
-import { errorMessage, toastError, toastSuccess } from '@/lib/store/useToastStore'
+import { errorMessage, toastError, toastInfo, toastSuccess } from '@/lib/store/useToastStore'
 import { useSettingsStore } from '@/lib/store/useSettingsStore'
 import { resolveInstructTemplate } from '@/lib/prompt/instructTemplates'
 import { resolveAssistShaping } from '@/lib/api/assistShaping'
-import { draftFullCharacter, isAbortError } from '@/lib/characters/generateFullCharacter'
+import { STAGE_LABELS, StageSkipped, draftFullCharacter, isAbortError, runDraftStage, type OptionalStage } from '@/lib/characters/generateFullCharacter'
 import { ASSISTANT_SYSTEM_PROMPT, assistantStopSequences, buildAssistantPrompt } from '@/lib/assistant/prompt'
 import { withAgentContext } from '@/lib/assistant/agentContext'
 import { buildToolbox } from '@/lib/assistant/toolbox'
+import { generatedFromDraft } from '@/lib/assistant/characterTools'
+import { patchBody } from '@/lib/assistant/characterSections'
 import { pendingImages, runToolLoop, stepTurns, toolInstructions, type ToolStep } from '@/lib/assistant/tools'
 import { summarizeTurns, summaryIsStale } from '@/lib/assistant/summary'
 import { base64FromDataUrl } from '@/lib/api/binaryUtils'
@@ -24,7 +26,7 @@ import { promptTurnsOf, threadTitleFrom, type AssistantMessage, type AssistantTh
 /** The assistant thread's own session: send, stream, and the two producers. Deliberately not `useChatSession`. */
 
 /** Reserved for the reply, so the prompt never eats the whole context window. */
-const REPLY_RESERVE = 900
+const REPLY_RESERVE = 2000
 /** Tool calls carry whole documents (a world with its lore) as arguments, so a step needs far more room. */
 const TOOL_REPLY_RESERVE = 2600
 const MAX_TOOL_STEPS = 24
@@ -131,6 +133,7 @@ export function useAssistant(threadId: string | null, onThreadsChanged?: () => v
           autoApprove: settings.assistantAutoApprove,
           imageSettings: settings,
           signal: controller.signal,
+          character: { client, styleGuidance: settings.styleGuidance, onProgress: (label) => setProgress({ kind: 'character', label }) },
           ask: (p) => confirmDialog({ title: p.title, detail: p.detail, confirmLabel: p.confirmLabel, tone: 'default' }),
         })
         const withTools = box.tools.length > 0
@@ -232,7 +235,8 @@ export function useAssistant(threadId: string | null, onThreadsChanged?: () => v
                   role: 'assistant',
                   text: '',
                   createdAt: Date.now(),
-                  tool: { name: step.call.name, arguments: step.call.arguments, result: step.result.text, isError: step.result.isError, ...(step.result.images?.length ? { images: step.result.images } : {}) },
+                  tool: { name: step.call.name, arguments: step.call.arguments, result: step.result.text, isError: step.result.isError, ...(step.result.images?.length ? { images: step.result.images } : {}), ...(step.result.undo ? { undo: step.result.undo } : {}) },
+                  ...(step.result.draft ? { attachment: { kind: 'character' as const, character: step.result.draft } } : {}),
                 },
               ]
               void persist(working, id)
@@ -270,7 +274,16 @@ export function useAssistant(threadId: string | null, onThreadsChanged?: () => v
     [client, isBusy, persist, saveSummary, settings, customInstructTemplates, threadId],
   )
 
-  /** Builds a full character from a brief and attaches it to the thread. */
+  /** Records a request as the user's own turn without asking the model for a chat reply: the producers answer with a card. */
+  const addUserTurn = useCallback(
+    async (text: string, id: string) => {
+      const userMessage: AssistantMessage = { id: newId(), role: 'user', text, createdAt: Date.now() }
+      await persist([...(threadRef.current?.id === id ? threadRef.current.messages : []), userMessage], id)
+    },
+    [persist],
+  )
+
+  /** Builds a full character from a brief and attaches the draft to the thread; nothing is saved until the user says so. */
   const produceCharacter = useCallback(
     async (brief: string, idOverride?: string) => {
       const id = idOverride ?? threadId
@@ -278,8 +291,9 @@ export function useAssistant(threadId: string | null, onThreadsChanged?: () => v
       const controller = new AbortController()
       abortRef.current = controller
       setIsBusy(true)
-      setProgress({ kind: 'character', label: 'Writing the card' })
+      setProgress({ kind: 'character', label: STAGE_LABELS.card })
       try {
+        await addUserTurn(brief, id)
         const draft = await draftFullCharacter(
           client,
           { brief, styleGuidance: settings.styleGuidance },
@@ -287,11 +301,10 @@ export function useAssistant(threadId: string | null, onThreadsChanged?: () => v
             shaping: await resolveAssistShaping(120_000),
             signal: controller.signal,
             onStage: (stage, status) => {
-              if (status === 'start') setProgress({ kind: 'character', label: `Writing the ${stage}` })
+              if (status === 'start') setProgress({ kind: 'character', label: STAGE_LABELS[stage] })
             },
           },
         )
-        const failedStages = draft.failed.map((f) => f.stage)
         await persist(
           [
             ...(threadRef.current?.messages ?? []),
@@ -300,17 +313,7 @@ export function useAssistant(threadId: string | null, onThreadsChanged?: () => v
               role: 'assistant',
               text: `**${draft.card.name}**\n\n${draft.card.description}`,
               createdAt: Date.now(),
-              attachment: {
-                kind: 'character',
-                character: {
-                  card: draft.card,
-                  profile: draft.profile,
-                  bonds: draft.bonds,
-                  outfits: draft.outfits,
-                  characterBook: draft.characterBook,
-                  ...(failedStages.length ? { failedStages } : {}),
-                },
-              },
+              attachment: { kind: 'character', character: generatedFromDraft(draft) },
             },
           ],
           id,
@@ -323,7 +326,65 @@ export function useAssistant(threadId: string | null, onThreadsChanged?: () => v
         abortRef.current = null
       }
     },
+    [addUserTurn, client, isBusy, persist, settings.styleGuidance, threadId],
+  )
+
+  /** Re-runs one section of a draft that has not been saved, so a weak one can be redone without starting over. */
+  const redoStage = useCallback(
+    async (messageId: string, stage: OptionalStage) => {
+      const id = threadId
+      const generated = threadRef.current?.messages.find((m) => m.id === messageId)?.attachment?.character
+      if (!id || !generated || generated.savedCharacterId || isBusy) return
+      const controller = new AbortController()
+      abortRef.current = controller
+      setIsBusy(true)
+      setProgress({ kind: 'character', label: STAGE_LABELS[stage] })
+      try {
+        const next = await runDraftStage(client, stage, generated, {
+          styleGuidance: settings.styleGuidance,
+          shaping: await resolveAssistShaping(120_000),
+          signal: controller.signal,
+        })
+        const { failedStages: _was, ...sections } = next
+        const stillFailed = (generated.failedStages ?? []).filter((s) => s !== stage)
+        await persist(
+          (threadRef.current?.messages ?? []).map((m) =>
+            m.id === messageId ? { ...m, attachment: { kind: 'character', character: { ...sections, ...(stillFailed.length ? { failedStages: stillFailed } : {}) } } } : m,
+          ),
+          id,
+        )
+      } catch (e) {
+        if (e instanceof StageSkipped) toastInfo(`${STAGE_LABELS[stage]}: ${e.message}`)
+        else if (!isAbortError(e)) toastError(`${STAGE_LABELS[stage]}: ${errorMessage(e)}`)
+      } finally {
+        setProgress(null)
+        setIsBusy(false)
+        abortRef.current = null
+      }
+    },
     [client, isBusy, persist, settings.styleGuidance, threadId],
+  )
+
+  /** Puts a section the Assistant rewrote back as it was. */
+  const revertEdit = useCallback(
+    async (messageId: string) => {
+      const id = threadId
+      const undo = threadRef.current?.messages.find((m) => m.id === messageId)?.tool?.undo
+      if (!id || !undo || undo.reverted) return
+      try {
+        const current = await charactersApi.get(undo.characterId)
+        if (!current) throw new Error(`${undo.name} no longer exists.`)
+        await charactersApi.update(undo.characterId, patchBody(current, undo.before))
+        toastSuccess(`Put back the ${STAGE_LABELS[undo.section as OptionalStage]?.toLowerCase() ?? undo.section} of ${undo.name}.`)
+        await persist(
+          (threadRef.current?.messages ?? []).map((m) => (m.id === messageId && m.tool?.undo ? { ...m, tool: { ...m.tool, undo: { ...m.tool.undo, reverted: true } } } : m)),
+          id,
+        )
+      } catch (e) {
+        toastError(errorMessage(e))
+      }
+    },
+    [persist, threadId],
   )
 
   /** Plans a story, then writes each chapter in order, persisting as it goes so nothing is lost mid-run. */
@@ -337,6 +398,7 @@ export function useAssistant(threadId: string | null, onThreadsChanged?: () => v
       setProgress({ kind: 'story', label: 'Planning the chapters' })
       const messageId = newId()
       try {
+        await addUserTurn(brief, id)
         const outline = await planStory(client, brief, {
           chapterCount: requestedChapterCount(brief) ?? DEFAULT_CHAPTER_COUNT,
           styleGuidance: settings.styleGuidance,
@@ -386,7 +448,7 @@ export function useAssistant(threadId: string | null, onThreadsChanged?: () => v
         abortRef.current = null
       }
     },
-    [client, isBusy, persist, settings.styleGuidance, threadId],
+    [addUserTurn, client, isBusy, persist, settings.styleGuidance, threadId],
   )
 
   /** Saves a generated character into the library, and stamps the message so it can't be saved twice. */
@@ -423,7 +485,9 @@ export function useAssistant(threadId: string | null, onThreadsChanged?: () => v
     sendMessage,
     produceCharacter,
     produceStory,
+    redoStage,
     saveCharacter,
+    revertEdit,
     abort,
     detectProducer,
   }

@@ -29,6 +29,20 @@ export interface GenerationParams {
   banned_tokens?: string[]
   grammar?: string
   trim_stop?: boolean
+  /** Dynamic temperature: the temperature moves within ± this range, by the model's confidence. 0 is off. */
+  dynatemp_range?: number
+  dynatemp_exponent?: number
+  /** Quadratic smoothing of the probability curve. 0 is off. */
+  smoothing_factor?: number
+  /** Top-n-sigma: drops tokens more than this many standard deviations under the top logit. 0 is off. */
+  nsigma?: number
+  /** Token id to bias, -100 (never) to 100 (always). Ids belong to the loaded model's tokenizer. */
+  logit_bias?: Record<string, number>
+  /** Classifier-free guidance; needs KoboldCpp started with --enableguidance. */
+  guidance_scale?: number
+  negative_prompt?: string
+  /** Ask the server to keep the top token probabilities of the reply. */
+  logprobs?: boolean
 }
 
 /** One turn in a native chat-completion request — see `GenerateRequest.messages`. */

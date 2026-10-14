@@ -240,6 +240,63 @@ describe('library tools', () => {
     expect(back.data().reply_format).toBeUndefined()
   })
 
+  it('sets the scalar fields the live engine reads, merging one weather side with the other', async () => {
+    const r = await tool('update_character', { id: characterId, birthday: 40, gift_likes: ['field guides'], weather_loves: ['storm', 'fog'], reply_length: 'brief', outreach_frequency: 'rare' })
+    expect(r.data()).toMatchObject({ birthday: 40, gift_likes: ['field guides'], weather_loves: ['storm', 'fog'], reply_length: 'brief', outreach_frequency: 'rare' })
+    const hates = await tool('update_character', { id: characterId, weather_hates: ['rain', 'snow'] })
+    expect(hates.data()).toMatchObject({ weather_loves: ['storm', 'fog'], weather_hates: ['rain', 'snow'] })
+    expect((await tool('update_character', { id: characterId, weather_hates: ['fog'] })).text).toMatch(/both loved and hated/)
+    expect((await tool('update_character', { id: characterId, reply_length: 'huge' })).text).toMatch(/reply_length must be one of/)
+    const cleared = await tool('update_character', { id: characterId, reply_length: 'auto', outreach_frequency: 'never', weather_loves: [], weather_hates: [] })
+    expect(cleared.data().reply_length).toBeUndefined()
+    expect(cleared.data().outreach_frequency).toBeUndefined()
+  })
+
+  it('takes nested sections, never switches the persona engine on, and refuses intimacy settings for a card under 18', async () => {
+    const r = await tool('update_character', {
+      id: characterId,
+      schedule: [{ phase: 'night', status: 'sleeping', activity: 'Asleep in the keeper cottage', days: ['monday'] }],
+      social_connections: [{ name: 'Oren', relation: 'brother' }],
+      gift_preferences: { 'field-guide': 3, tea: 0, soap: -9 },
+      drive: { enabled: true, fixations: ['the beacon lamp'] },
+      kink_profile: { valence: { praise: 2 }, hardLimits: ['bondage'] },
+    })
+    expect(r.isError).toBe(false)
+    expect(r.data()).toMatchObject({
+      schedule: [{ phase: 'night', status: 'sleeping', days: ['monday'] }],
+      social_connections: [{ name: 'Oren' }],
+      gift_preferences: { 'field-guide': 3, soap: -2 },
+      drive: { enabled: false, fixations: ['the beacon lamp'] },
+      kink_profile: { valence: { praise: 2 }, hardLimits: ['bondage'] },
+    })
+    expect((await tool('update_character', { id: characterId, schedule: [{ phase: 'dusk', status: 'busy', activity: 'x' }] })).isError).toBe(true)
+
+    const young = await tool('create_character', { name: 'Mika', description: 'A 16-year-old runner.', first_mes: 'hi' })
+    const refused = await tool('update_character', { id: young.data().id, kink_profile: { valence: { praise: 2 } }, explicit_voice_note: 'x' })
+    expect(refused.isError).toBe(true)
+    expect(refused.text).toMatch(/under 18/)
+    expect((await tool('update_character', { id: young.data().id, occupation: 'Student' })).isError).toBe(false)
+    await api('DELETE', `/api/characters/${young.data().id}`)
+  })
+
+  it('leaves the nested sections out of the Assistant tool list', async () => {
+    const list = (await api('GET', '/api/agent/tools')) as { name: string; inputSchema: { properties: Record<string, unknown> } }[]
+    const props = Object.keys(list.find((t) => t.name === 'update_character')!.inputSchema.properties)
+    expect(props).toEqual(expect.arrayContaining(['birthday', 'weather_loves', 'outreach_frequency', 'sfx_words']))
+    for (const hidden of ['schedule', 'drive', 'kink_profile', 'touch_profile', 'gift_preferences']) expect(props).not.toContain(hidden)
+    const external = (await rpc('tools/list')).body.result.tools.find((t: { name: string }) => t.name === 'update_character')
+    expect(Object.keys(external.inputSchema.properties)).toContain('schedule')
+  })
+
+  it('refuses a save made from a stale copy, and lets a current one through', async () => {
+    const stored = await api('GET', `/api/characters/${characterId}`)
+    const stale = await fetch(`${base}/api/characters/${characterId}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ occupation: 'Pilot', ifUpdatedAt: stored.updatedAt - 1 }) })
+    expect(stale.status).toBe(409)
+    expect((await api('GET', `/api/characters/${characterId}`)).occupation).toBe('Lighthouse keeper')
+    const fresh = await api('PUT', `/api/characters/${characterId}`, { occupation: 'Pilot', ifUpdatedAt: stored.updatedAt })
+    expect(fresh.occupation).toBe('Pilot')
+  })
+
   it('lists and filters characters and worlds', async () => {
     expect((await tool('list_characters', { query: 'maren' })).data()).toHaveLength(1)
     expect((await tool('list_characters', { tag: 'nonexistent' })).data()).toHaveLength(0)

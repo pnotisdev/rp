@@ -181,13 +181,22 @@ export function LorebookEditor({
                       label="Position"
                       value={entry.position ?? 'before_char'}
                       onChange={(e) =>
-                        updateEntry(entry.id!, { position: e.target.value as 'before_char' | 'after_char' | 'at_depth' })
+                        updateEntry(entry.id!, { position: e.target.value as NonNullable<LorebookEntry['position']> })
                       }
                     >
                       <option value="before_char">Before card</option>
                       <option value="after_char">After card</option>
                       <option value="at_depth">At depth</option>
+                      <option value="outlet">Outlet (macro)</option>
                     </SelectField>
+                    {entry.position === 'outlet' && (
+                      <TextField
+                        label="Outlet name"
+                        hint="Placed with {{outlet::name}}"
+                        value={entry.outletName ?? ''}
+                        onChange={(e) => updateEntry(entry.id!, { outletName: e.target.value.trim() || undefined })}
+                      />
+                    )}
                     {entry.position === 'at_depth' && (
                       <NumberField
                         label="Depth"
@@ -222,6 +231,18 @@ export function LorebookEditor({
                         }
                       />
                     )}
+                    <NumberField
+                      label="Scan depth"
+                      min={0}
+                      hint="Messages to scan for this entry; empty uses the book's."
+                      value={entry.scanDepth ?? ''}
+                      onChange={(e) =>
+                        updateEntry(entry.id!, {
+                          scanDepth: e.target.value === '' ? undefined : Math.max(0, Math.floor(Number(e.target.value)) || 0),
+                        })
+                      }
+                      placeholder="book"
+                    />
                     <NumberField
                       label="Delay"
                       min={0}
@@ -305,6 +326,53 @@ export function LorebookEditor({
                           />
                           Also require a secondary key
                         </label>
+                        <label className="flex cursor-pointer items-center gap-1.5 text-xs text-text-muted">
+                          <input
+                            type="checkbox"
+                            checked={!!entry.matchWholeWords}
+                            onChange={(e) => updateEntry(entry.id!, { matchWholeWords: e.target.checked || undefined })}
+                          />
+                          Whole words only
+                        </label>
+                      </div>
+                      {entry.group && (
+                        <div className="flex flex-wrap items-center gap-x-4">
+                          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-text-muted">
+                            <input
+                              type="checkbox"
+                              checked={!!entry.groupOverride}
+                              onChange={(e) => updateEntry(entry.id!, { groupOverride: e.target.checked || undefined })}
+                            />
+                            Beats the rest of its group
+                          </label>
+                          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-text-muted">
+                            <input
+                              type="checkbox"
+                              checked={!!entry.useGroupScoring}
+                              onChange={(e) => updateEntry(entry.id!, { useGroupScoring: e.target.checked || undefined })}
+                            />
+                            Most keys found wins
+                          </label>
+                        </div>
+                      )}
+                      <div className="flex flex-wrap items-center gap-x-4">
+                        {(
+                          [
+                            ['excludeRecursion', 'Not triggered by other entries'],
+                            ['preventRecursion', "Does not trigger other entries"],
+                            ['delayUntilRecursion', 'Only triggered by other entries'],
+                            ['ignoreBudget', 'Ignore the token budget'],
+                          ] as const
+                        ).map(([key, label]) => (
+                          <label key={key} className="flex cursor-pointer items-center gap-1.5 text-xs text-text-muted">
+                            <input
+                              type="checkbox"
+                              checked={!!entry[key]}
+                              onChange={(e) => updateEntry(entry.id!, { [key]: e.target.checked || undefined })}
+                            />
+                            {label}
+                          </label>
+                        ))}
                       </div>
                       {entry.selective && (
                         <>
@@ -318,6 +386,18 @@ export function LorebookEditor({
                               })
                             }
                           />
+                          <SelectField
+                            label="Secondary key logic"
+                            value={entry.selectiveLogic ?? 'and_any'}
+                            onChange={(e) =>
+                              updateEntry(entry.id!, { selectiveLogic: e.target.value === 'and_any' ? undefined : (e.target.value as NonNullable<LorebookEntry['selectiveLogic']>) })
+                            }
+                          >
+                            <option value="and_any">Any secondary key</option>
+                            <option value="and_all">Every secondary key</option>
+                            <option value="not_any">No secondary key</option>
+                            <option value="not_all">Not every secondary key</option>
+                          </SelectField>
                           {anyKeyIsRisky(entry.secondary_keys ?? []) && (
                             <p className="-mt-2 mb-3 text-[11px] text-warning">
                               One of these regex keys has a nested-quantifier shape that can run catastrophically

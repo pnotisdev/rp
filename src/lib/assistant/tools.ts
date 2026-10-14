@@ -1,6 +1,7 @@
 // Plain-text tool use for the Assistant: works on any local model, no native function calling needed.
 
 import { parseLenientJson } from '@/lib/jsonRepair'
+import type { GeneratedCharacter } from './thread'
 
 export interface AgentTool {
   name: string
@@ -18,11 +19,25 @@ export interface ToolCall {
   arguments: Record<string, unknown>
 }
 
+/** What it takes to put a changed character section back as it was. */
+export interface ToolUndo {
+  characterId: string
+  name: string
+  section: string
+  /** The section's stored values before the change (keys prefixed `card.` live inside the card). */
+  before: Record<string, unknown>
+  reverted?: boolean
+}
+
 export interface ToolResult {
   text: string
   isError: boolean
   /** Pictures for a vision model, as data URLs. */
   images?: string[]
+  /** A character draft for the thread to show as a card. */
+  draft?: GeneratedCharacter
+  /** Set when the call changed a saved character and can be reverted. */
+  undo?: ToolUndo
 }
 
 const RESULT_CHAR_LIMIT = 6000

@@ -1,3 +1,4 @@
+import type { TokenProb } from './logprobs'
 import type { GenerateRequest } from './types'
 
 // Shared interface implemented by `KoboldClient` and every hosted-provider client, plus the provider metadata (ids, labels, known…
@@ -14,6 +15,8 @@ export interface ChatBackend {
   abort(genkey: string): Promise<void>
   /** The loaded model's own chat template — always null for a backend that isn't running a local GGUF. */
   getChatTemplate(): Promise<string | null>
+  /** Token probabilities of the last reply, when the request asked for them. Only KoboldCpp offers this. */
+  lastLogprobs?(): Promise<TokenProb[]>
 }
 
 /** Lightweight reachability+auth probe implemented by every non-KoboldCpp backend, for Settings → Connection. */

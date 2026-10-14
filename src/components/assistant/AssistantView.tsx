@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { FolderOpen, Paperclip, Plus, Send, Square, Trash2, UserPlus, X } from 'lucide-react'
+import { FolderOpen, Paperclip, Plus, Send, Square, Trash2, X } from 'lucide-react'
 import { agentApi, assistantThreadsApi, type WorkspaceConfig } from '@/lib/api/client'
 import { composeMessageText, readAttachment, type PendingAttachment } from '@/lib/attachments'
 import { shrinkImage } from '@/lib/images'
@@ -7,6 +7,7 @@ import { useApiQuery } from '@/lib/hooks/useApiQuery'
 import { useAssistant } from '@/lib/assistant/useAssistant'
 import { detectProducer, PRODUCER_DETAIL, PRODUCER_LABEL, type ProducerKind } from '@/lib/assistant/requests'
 import type { AssistantMessage, AssistantThread } from '@/lib/assistant/thread'
+import { CharacterDraftCard } from './CharacterDraftCard'
 import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
@@ -68,54 +69,6 @@ function AssistantText({ text }: { text: string }) {
   )
 }
 
-/** A generated character, with the one action that matters: put it in the library. */
-function CharacterCard({ message, onSave }: { message: AssistantMessage; onSave: () => void }) {
-  const generated = message.attachment?.character
-  if (!generated) return null
-  const { card, profile, outfits, characterBook, failedStages, savedCharacterId } = generated
-  const rows: { label: string; value: string }[] = [
-    { label: 'Personality', value: card.personality },
-    { label: 'Scenario', value: card.scenario },
-    ...(profile?.occupation ? [{ label: 'Occupation', value: profile.occupation }] : []),
-    ...(profile?.likes?.length ? [{ label: 'Likes', value: profile.likes.join(', ') }] : []),
-    ...(profile?.goals?.length ? [{ label: 'Goals', value: profile.goals.join(', ') }] : []),
-    ...(profile?.boundaries?.length ? [{ label: 'Boundaries', value: profile.boundaries.join(', ') }] : []),
-    ...(outfits?.length ? [{ label: 'Wardrobe', value: outfits.map((o) => o.label ?? o.id).join(', ') }] : []),
-    ...(characterBook?.entries?.length ? [{ label: 'Lore', value: `${characterBook.entries.length} entries` }] : []),
-  ].filter((r) => r.value?.trim())
-
-  return (
-    <div className="mt-3 rounded-xl border border-romance/40 bg-romance/5 p-4">
-      <div className="text-base font-semibold text-romance">{card.name}</div>
-      <p className="mt-1 whitespace-pre-wrap text-xs text-text-muted">{card.description}</p>
-      <dl className="mt-3 space-y-1.5 border-t border-romance/20 pt-3 text-xs">
-        {rows.map((row) => (
-          <div key={row.label} className="flex gap-2">
-            <dt className="w-24 shrink-0 text-[10px] uppercase tracking-[0.06em] text-text-muted/70">{row.label}</dt>
-            <dd className="min-w-0 flex-1 whitespace-pre-wrap text-text">{row.value}</dd>
-          </div>
-        ))}
-      </dl>
-      {!!failedStages?.length && (
-        // Says what didn't come back, so a partial character doesn't look complete.
-        <p className="mt-3 text-xs text-warning">
-          Some steps produced nothing usable ({failedStages.join(', ')}). You can fill those in after saving.
-        </p>
-      )}
-      <div className="mt-3">
-        {savedCharacterId ? (
-          <span className="text-xs text-success">Saved to your characters.</span>
-        ) : (
-          <Button variant="primary" onClick={onSave} className="inline-flex items-center gap-1.5">
-            <UserPlus size={14} />
-            Save to characters
-          </Button>
-        )}
-      </div>
-    </div>
-  )
-}
-
 /** A generated story: the outline up front, each chapter as it lands. */
 function StoryCard({ message }: { message: AssistantMessage }) {
   const story = message.attachment?.story
@@ -167,7 +120,7 @@ function Pictures({ images }: { images: string[] }) {
 }
 
 /** One tool the assistant used: a quiet line that opens to the arguments and what came back. */
-function ToolCard({ tool }: { tool: NonNullable<AssistantMessage['tool']> }) {
+function ToolCard({ tool, onRevert }: { tool: NonNullable<AssistantMessage['tool']>; onRevert?: () => void }) {
   const brief = tool.result.replace(/\s+/g, ' ').slice(0, 90)
   return (
     <div>
@@ -184,6 +137,17 @@ function ToolCard({ tool }: { tool: NonNullable<AssistantMessage['tool']> }) {
         </pre>
       </details>
       {tool.images && <Pictures images={tool.images} />}
+      {tool.undo && (
+        <div className="mt-1 flex items-center gap-2 px-3 text-xs text-text-muted">
+          {tool.undo.reverted ? (
+            <span>Reverted</span>
+          ) : (
+            <Button variant="ghost" onClick={onRevert}>
+              Revert this change to {tool.undo.name}
+            </Button>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -199,8 +163,9 @@ export function AssistantView() {
   const [workspace, setWorkspace] = useState<WorkspaceConfig | null>(null)
   const assistantTools = useSettingsStore((s) => s.assistantTools)
   const setAssistantTools = useSettingsStore((s) => s.setAssistantTools)
+  const autoBuild = useSettingsStore((s) => s.assistantAutoBuild)
 
-  const { thread, load, isBusy, streamingText, progress, sendMessage, produceCharacter, produceStory, saveCharacter, abort } =
+  const { thread, load, isBusy, streamingText, progress, sendMessage, produceCharacter, produceStory, redoStage, saveCharacter, revertEdit, abort } =
     useAssistant(threadId, () => setRefreshKey((k) => k + 1))
 
   // Newest thread selected on first load, so the view is never an empty shell when history exists.
@@ -254,7 +219,8 @@ export function AssistantView() {
   /** What the composer's text looks like it's asking to have made, for the offer chip. */
   const offered: ProducerKind | undefined = useMemo(() => detectProducer(draft), [draft])
 
-  const submit = async () => {
+  /** Sends the composer's text. A request for a character builds a draft card instead, unless `plain` asks for an ordinary reply. */
+  const submit = async ({ plain = false }: { plain?: boolean } = {}) => {
     const text = composeMessageText(draft.trim(), attachments).trim()
     const pictures = attachments.filter((a): a is Extract<PendingAttachment, { kind: 'image' }> => a.kind === 'image')
     if ((!text && !pictures.length) || isBusy) return
@@ -266,6 +232,7 @@ export function AssistantView() {
     }
     setDraft('')
     setAttachments([])
+    if (autoBuild && !plain && detectProducer(text) === 'character') return void (await produceCharacter(text, id))
     await sendMessage(text, id, await Promise.all(pictures.map((a) => shrinkImage(a.dataUrl))))
   }
 
@@ -280,8 +247,6 @@ export function AssistantView() {
       setThreadId(id)
     }
     setDraft('')
-    // The brief is kept in the thread as the user's own turn, so the request reads as a request.
-    await sendMessage(text, id)
     if (kind === 'character') await produceCharacter(text, id)
     else await produceStory(text, id)
   }
@@ -349,7 +314,12 @@ export function AssistantView() {
               </div>
             )}
             {messages.map((m) => m.tool ? (
-              <ToolCard key={m.id} tool={m.tool} />
+              <div key={m.id}>
+                <ToolCard tool={m.tool} onRevert={() => void revertEdit(m.id)} />
+                {m.attachment?.kind === 'character' && m.attachment.character && (
+                  <CharacterDraftCard generated={m.attachment.character} busy={isBusy} onSave={() => void saveCharacter(m.id)} onRedo={(stage) => void redoStage(m.id, stage)} />
+                )}
+              </div>
             ) : (
               <div key={m.id}>
                 <div className="mb-1 text-[10px] uppercase tracking-[0.06em] text-text-muted/70">
@@ -358,10 +328,18 @@ export function AssistantView() {
                 {m.error ? (
                   <p className="text-sm text-danger">{m.error}</p>
                 ) : (
-                  <AssistantText text={m.text} />
+                  // A card shows its own title and summary; the text stays in the thread for the model's context.
+                  !m.attachment && <AssistantText text={m.text} />
                 )}
                 {m.images && <Pictures images={m.images} />}
-                {m.attachment?.kind === 'character' && <CharacterCard message={m} onSave={() => void saveCharacter(m.id)} />}
+                {m.attachment?.kind === 'character' && m.attachment.character && (
+                  <CharacterDraftCard
+                    generated={m.attachment.character}
+                    busy={isBusy}
+                    onSave={() => void saveCharacter(m.id)}
+                    onRedo={(stage) => void redoStage(m.id, stage)}
+                  />
+                )}
                 {m.attachment?.kind === 'story' && <StoryCard message={m} />}
               </div>
             ))}
@@ -391,12 +369,21 @@ export function AssistantView() {
         <div className="shrink-0 border-t border-border px-6 py-3">
           <div className="mx-auto max-w-chat">
             {offered && !isBusy && (
-              // Offered, never assumed: sending it as an ordinary message stays one keypress away.
               <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-accent/40 bg-accent/5 px-3 py-2">
-                <Button variant="primary" onClick={() => void runProducer(offered)}>
-                  {PRODUCER_LABEL[offered]}
-                </Button>
-                <span className="min-w-0 flex-1 text-[11px] text-text-muted">{PRODUCER_DETAIL[offered]}</span>
+                {autoBuild && offered === 'character' ? (
+                  // Enter builds the card; the button is the way out when the request was not really for a character.
+                  <>
+                    <span className="min-w-0 flex-1 text-[11px] text-text-muted">Enter drafts every section as a card for you to review. Nothing is saved until you click Save.</span>
+                    <Button onClick={() => void submit({ plain: true })}>Send as plain chat</Button>
+                  </>
+                ) : (
+                  <>
+                    <Button variant="primary" onClick={() => void runProducer(offered)}>
+                      {PRODUCER_LABEL[offered]}
+                    </Button>
+                    <span className="min-w-0 flex-1 text-[11px] text-text-muted">{PRODUCER_DETAIL[offered]}</span>
+                  </>
+                )}
               </div>
             )}
             <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">

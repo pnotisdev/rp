@@ -16,7 +16,7 @@ import { Slider } from '@/components/ui/Slider'
 import { Toggle } from '@/components/ui/Toggle'
 import { Chip } from '@/components/ui/Chip'
 import { Button } from '@/components/ui/Button'
-import { TextField, NumberField } from '@/components/ui/Field'
+import { TextField, NumberField, SelectField } from '@/components/ui/Field'
 import { Section } from '@/components/ui/Section'
 import { SettingsPage } from '@/components/ui/SettingsPage'
 import { SettingsEyebrow } from '@/components/ui/SettingsEyebrow'
@@ -28,6 +28,18 @@ import { WritingStyleSection } from './WritingStyleSection'
 import { QuickRepliesSection } from './QuickRepliesSection'
 import { ChatCompletionSamplerSection } from './ChatCompletionSamplerSection'
 import { ComputeUsage } from './ComputeUsage'
+import { SamplerExtras } from './SamplerExtras'
+import { VectorSettings } from './VectorSettings'
+import { stSamplerToParams } from '@/lib/prompt/samplerExtras'
+
+/** Marker pairs for the common reasoning formats (SillyTavern's reasoning presets); blank pairs mean automatic. */
+const REASONING_FORMATS = [
+  { id: 'auto', name: 'Automatic', prefix: '', suffix: '' },
+  { id: 'think-xml', name: 'Think XML', prefix: '<think>', suffix: '</think>' },
+  { id: 'deepseek', name: 'DeepSeek', prefix: '<think>\n', suffix: '\n</think>' },
+  { id: 'gemma4', name: 'Gemma 4', prefix: '<|channel>thought\n', suffix: '<channel|>' },
+  { id: 'harmony', name: 'OpenAI Harmony', prefix: '<|channel|>analysis<|message|>', suffix: '<|end|>' },
+]
 
 const ADVANCED_FIELDS: { key: string; label: string; step?: number; min?: number; max?: number }[] = [
   { key: 'temperature', label: 'Temperature', step: 0.01, min: 0 },
@@ -46,6 +58,14 @@ const ADVANCED_FIELDS: { key: string; label: string; step?: number; min?: number
   { key: 'mirostat', label: 'Mirostat Mode', step: 1, min: 0, max: 2 },
   { key: 'mirostat_tau', label: 'Mirostat Tau', step: 0.1, min: 0 },
   { key: 'mirostat_eta', label: 'Mirostat Eta', step: 0.01, min: 0 },
+  { key: 'top_a', label: 'Top A', step: 0.01, min: 0, max: 1 },
+  { key: 'xtc_threshold', label: 'XTC Threshold', step: 0.01, min: 0, max: 0.5 },
+  { key: 'xtc_probability', label: 'XTC Probability', step: 0.05, min: 0, max: 1 },
+  { key: 'dynatemp_range', label: 'Dynamic Temp. Range', step: 0.05, min: 0 },
+  { key: 'dynatemp_exponent', label: 'Dynamic Temp. Exponent', step: 0.05, min: 0 },
+  { key: 'smoothing_factor', label: 'Smoothing Factor', step: 0.05, min: 0 },
+  { key: 'nsigma', label: 'Top-n-sigma', step: 0.1, min: 0 },
+  { key: 'guidance_scale', label: 'Guidance Scale (CFG)', step: 0.05, min: 1 },
 ]
 
 export function SamplingControls() {
@@ -58,6 +78,13 @@ export function SamplingControls() {
   const setContextLengthAuto = useSettingsStore((s) => s.setContextLengthAuto)
   const reasoningTokenReserve = useSettingsStore((s) => s.reasoningTokenReserve)
   const setReasoningTokenReserve = useSettingsStore((s) => s.setReasoningTokenReserve)
+  const showReasoning = useSettingsStore((s) => s.showReasoning)
+  const showTokenProbabilities = useSettingsStore((s) => s.showTokenProbabilities)
+  const setShowTokenProbabilities = useSettingsStore((s) => s.setShowTokenProbabilities)
+  const setShowReasoning = useSettingsStore((s) => s.setShowReasoning)
+  const reasoningPrefix = useSettingsStore((s) => s.reasoningPrefix)
+  const reasoningSuffix = useSettingsStore((s) => s.reasoningSuffix)
+  const setReasoningMarkers = useSettingsStore((s) => s.setReasoningMarkers)
   const autoSummarize = useSettingsStore((s) => s.autoSummarize)
   const setAutoSummarize = useSettingsStore((s) => s.setAutoSummarize)
   const keepRecentMessages = useSettingsStore((s) => s.keepRecentMessages)
@@ -86,9 +113,11 @@ export function SamplingControls() {
   const fileRef = useRef<HTMLInputElement>(null)
 
   // Which built-in preset the current sampler exactly matches on every field that preset sets (fields it leaves alone don't count)…
-  const current = sampler as unknown as Record<string, number>
+  const current = sampler as unknown as Record<string, unknown>
+  // A list-valued field (the sampler order) matches by its contents.
+  const same = (a: unknown, b: unknown) => (Array.isArray(a) || Array.isArray(b) ? JSON.stringify(a) === JSON.stringify(b) : a === b)
   const activeBuiltin = BUILTIN_PRESETS.find((p) =>
-    Object.entries(p.params).every(([k, v]) => current[k] === v),
+    Object.entries(p.params).every(([k, v]) => same(current[k], v)),
   )
   const activeBuiltinPreset = activeBuiltin?.id ?? null
   const activeBuiltinPresetUse = activeBuiltin?.use ?? null
@@ -107,7 +136,8 @@ export function SamplingControls() {
   }
   const importPreset = async (file: File) => {
     const data = JSON.parse(await file.text())
-    setSampler(data)
+    // A SillyTavern sampler preset has its own field names.
+    setSampler(stSamplerToParams(data) ?? data)
   }
 
   // Section 9(c)'s "one-switch minimal assists profile"
@@ -208,6 +238,38 @@ export function SamplingControls() {
           onChange={(e) => setReasoningTokenReserve(Number(e.target.value) || 0)}
           hint="Thinking/reasoning models only (DeepSeek R1, Qwen3, GPT-OSS, and similar local GGUF thinking models). Its hidden reasoning phase counts against the same reply cap as the visible text, so a tight reply-length band can cut the model off before it even finishes thinking. Adds this many extra tokens on top of that band's cap. Leave at 0 for ordinary models."
         />
+        <Toggle
+          checked={showReasoning}
+          onChange={setShowReasoning}
+          label="Show the model's reasoning"
+          description="Keeps a thinking model's reasoning in a collapsible block above its reply, and shows it live while it writes. Off hides it, as before. It is never sent back to the model."
+        />
+        <Toggle
+          checked={showTokenProbabilities}
+          onChange={setShowTokenProbabilities}
+          label="Show token probabilities"
+          description="Asks KoboldCpp for how likely each word was and shows it under each new reply: tinted by confidence, with the runner-up words on click. KoboldCpp only; held in memory, not saved with the chat."
+        />
+        <SelectField
+          label="Reasoning format"
+          value={REASONING_FORMATS.find((f) => f.prefix === reasoningPrefix && f.suffix === reasoningSuffix)?.id ?? 'custom'}
+          onChange={(e) => {
+            const f = REASONING_FORMATS.find((x) => x.id === e.target.value)
+            if (f) setReasoningMarkers(f.prefix, f.suffix)
+          }}
+          hint="Automatic already handles think tags, Gemma 4's thought channel and gpt-oss. Pick one, or write your own markers, for a model that tags its reasoning differently."
+        >
+          {REASONING_FORMATS.map((f) => (
+            <option key={f.id} value={f.id}>
+              {f.name}
+            </option>
+          ))}
+          <option value="custom">Custom</option>
+        </SelectField>
+        <div className="grid grid-cols-2 gap-3">
+          <TextField label="Reasoning starts with" value={reasoningPrefix} onChange={(e) => setReasoningMarkers(e.target.value, reasoningSuffix)} />
+          <TextField label="Reasoning ends with" value={reasoningSuffix} onChange={(e) => setReasoningMarkers(reasoningPrefix, e.target.value)} />
+        </div>
       </Section>
 
       <Section
@@ -270,6 +332,8 @@ export function SamplingControls() {
           </p>
         </div>
       </Section>
+
+      <VectorSettings />
 
       <Section
         title="Objectives"
@@ -458,6 +522,7 @@ export function SamplingControls() {
               />
             </div>
           )}
+          {advancedSamplerMode && <SamplerExtras />}
         </Section>
       )}
 

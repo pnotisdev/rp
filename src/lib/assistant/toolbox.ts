@@ -4,7 +4,9 @@ import { agentApi } from '@/lib/api/client'
 import type { ImageBackendSettings } from '@/lib/api/createImageBackend'
 import { errorMessage } from '@/lib/store/useToastStore'
 import { extensionAgentTools, runExtensionTool } from '@/lib/extensions/assistantTools'
+import type { ChatBackend } from '@/lib/api/chatBackend'
 import { alwaysAsk, describeToolCall, type ApprovalPrompt } from './approval'
+import { BUILD_CHARACTER, EDIT_CHARACTER_SECTION, characterTools, runBuildCharacter, runEditCharacterSection } from './characterTools'
 import { GENERATE_IMAGE, generateImageTool, runGenerateImage } from './imageTool'
 import { toolList, type AgentTool, type ToolCall, type ToolResult } from './tools'
 
@@ -16,6 +18,8 @@ export interface ToolboxOptions {
   /** Shows the question and resolves with the user's answer. */
   ask: (prompt: ApprovalPrompt) => Promise<boolean>
   signal?: AbortSignal
+  /** What the character tools need to write with the user's model. Without it they are not offered. */
+  character?: { client: ChatBackend; styleGuidance: string; onProgress?: (label: string) => void }
 }
 
 export interface Toolbox {
@@ -29,7 +33,7 @@ export async function buildToolbox(opts: ToolboxOptions): Promise<Toolbox> {
   if (opts.mode === 'off') return { tools: [], run: async () => ({ text: 'Tools are turned off.', isError: true }) }
   const allowWrites = opts.mode === 'write'
   const image = generateImageTool(opts.imageSettings)
-  const known = [...(await agentApi.tools().catch(() => [])), ...extensionAgentTools(), ...(image ? [image] : [])]
+  const known = [...(await agentApi.tools().catch(() => [])), ...extensionAgentTools(), ...(image ? [image] : []), ...(opts.character ? characterTools() : [])]
   const tools = toolList(known, allowWrites)
   const byName = new Map(tools.map((t) => [t.name, t]))
 
@@ -60,6 +64,11 @@ export async function buildToolbox(opts: ToolboxOptions): Promise<Toolbox> {
           if (!ok) return { ...made, text: `${made.text} The user chose not to keep it in the workspace.` }
           const saved = await agentApi.saveImage(saveAs, made.images[0], true)
           return { ...made, text: `${made.text} ${saved.text}`, isError: false }
+        }
+
+        if (call.name === BUILD_CHARACTER || call.name === EDIT_CHARACTER_SECTION) {
+          const ctx = { ...opts.character!, signal: opts.signal, approve: async (p: ApprovalPrompt) => opts.autoApprove || opts.ask(p) }
+          return call.name === BUILD_CHARACTER ? runBuildCharacter(call, ctx) : runEditCharacterSection(call, ctx)
         }
 
         const out = await agentApi.call(call.name, call.arguments, allowWrites, tool.confirm === true)

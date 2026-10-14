@@ -12,6 +12,26 @@ The switch above the message box:
 | Look | Read your library, the workspace folder and web pages. Nothing is changed. |
 | Look and change | Also create and edit library items and workspace files, and save pictures. |
 
+## Making a character
+
+Ask in plain words ("create a quiet night-shift librarian with a dry sense of humor and a secret"). The Assistant drafts the character one section at a time and shows a card. Nothing is saved until you click **Save to characters**.
+
+- **What it writes:** the core card (description, personality, scenario, first message, example dialogue), alternate greetings, life and background, gift tastes and relationship starters, connections and behavioral rules, voice, gift scores, schedule, birthday and how often they text first, wardrobe names, and a character lorebook.
+- **Review:** each section is a collapsible block on the card. **Redo this section** writes one again without touching the rest. A section that failed says so, and can be written the same way.
+- **Boundaries:** when the brief or the card gives an age under 18, or describes a child or schoolchild, the intimacy settings are left blank (the card says why) and the wardrobe gets no undressed state. Hard limits and off-limit regions are only ever copied from what you wrote in the brief or the character's boundaries, never chosen by the model. The persona engine is drafted but stays switched off.
+- **Not filled in yet:** the voice provider and speaker, system prompt overrides, and all art. Open the saved character in the editor for those.
+- **Not a character request?** When your message looks like one, a strip above the message box offers **Send as plain chat**. **Settings, Agents, Building characters** turns the automatic build off; you then get a button instead.
+- The character editor's **Generate with AI** runs the same steps and fills the form for you to review.
+- Each section is its own model call, so a full character takes a few minutes on a local model. **Stop** cancels it.
+
+### Drafting and editing through tools
+
+With Tools on, the model can also call `build_character` itself (it only drafts: the same review card appears, nothing is saved) and, in **Look and change**, `edit_character_section`. That tool rewrites one section of a saved character from an instruction (voice, schedule, gift scores, wardrobe and so on; the core card text is changed with `update_character`). It shows the section before and after and asks first, unless auto-approve is on. Every change leaves a **Revert** button in the thread that puts that section back as it was. A rewritten persona-engine section keeps your on/off switch and your impulse lists.
+
+`update_character` and `create_character` also take birthday, gift likes and dislikes, weather loves and hates, reply length, outreach frequency and sound words. External MCP clients (the port 3002 server) additionally see the nested sections with full schemas: schedule, connections, rules, voice fingerprint, gift scores, touch and kink profiles, and persona settings. The Assistant's own tool list leaves those out because a small local model cannot fill nested JSON from a plain-text call. Intimacy settings are refused for a card that describes someone under 18, and the persona engine is never switched on from a tool.
+
+An open character editor remembers the version it loaded. If the Assistant or an MCP client changed the character since, **Save** asks before it overwrites those changes.
+
 ## The workspace folder
 
 Pick a folder in **Settings, Agents, Assistant workspace**. The Assistant can then list, read, search and (in Look and change) edit, write, create and move files inside it.

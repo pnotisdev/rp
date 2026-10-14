@@ -50,7 +50,7 @@ export interface AiLoreSubject {
   extra?: string
 }
 
-function contextSummary(subject: AiLoreSubject, omitField?: string): string {
+export function contextSummary(subject: AiLoreSubject, omitField?: string): string {
   const lines = [`Name: ${subject.name}`]
   if (omitField !== 'description' && subject.description?.trim())
     lines.push(`Description: ${subject.description.trim()}`)
@@ -174,33 +174,57 @@ export async function draftCharacterFromPortrait(
   portraitBase64: string,
   opts?: { brief?: string; worldTone?: string; styleGuidance?: string; signal?: AbortSignal; shaping?: AssistShaping },
 ): Promise<{ card: CharacterCardData; rawOutput: string }> {
-  const prompt = [
+  const parts = [
     PORTRAIT_SYSTEM_INSTRUCTION,
     writerStyleNote(opts?.styleGuidance),
     opts?.worldTone?.trim() ? `Fit the character to this world's own tone and setting:\n${opts.worldTone.trim()}` : '',
     opts?.brief?.trim() ? `Additional guidance from the creator: ${opts.brief.trim()}` : '',
-    'JSON:',
   ]
-    .filter(Boolean)
-    .join('\n\n')
+  return generateCard(client, parts, 'Draft character from portrait', { images: [portraitBase64], signal: opts?.signal, shaping: opts?.shaping })
+}
 
-  const text = await generateWithTimeout(
-    client,
-    {
-      prompt,
-      images: [portraitBase64],
-      max_length: 1200,
-      max_context_length: await client.getEffectiveMaxContext(),
-      ...ASSIST_SAMPLER,
-      stop_sequence: ['\n\n\n', '```'],
-      trim_stop: true,
-    },
-    'Draft character from portrait',
-    opts?.signal,
-    opts?.shaping,
-  )
-  const card = normalizeCardJson(parseLenientJson(text))
-  return { card, rawOutput: text }
+const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e))
+
+/** One card call, tried twice: a single malformed answer should not end a whole build, so the retry says what was wrong. */
+async function generateCard(
+  client: ChatBackend,
+  parts: string[],
+  label: string,
+  opts: { images?: string[]; signal?: AbortSignal; shaping?: AssistShaping },
+): Promise<{ card: CharacterCardData; rawOutput: string }> {
+  let failure: unknown
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const prompt = [
+      ...parts,
+      failure
+        ? `Your previous answer could not be read (${errorText(failure).slice(0, 160)}). Write the card again as strictly valid JSON: every string in double quotes with \\n for line breaks, a comma after every property, and no stray quotes inside a string.`
+        : '',
+      'JSON:',
+    ]
+      .filter(Boolean)
+      .join('\n\n')
+    const text = await generateWithTimeout(
+      client,
+      {
+        prompt,
+        ...(opts.images ? { images: opts.images } : {}),
+        max_length: 1200,
+        max_context_length: await client.getEffectiveMaxContext(),
+        ...ASSIST_SAMPLER,
+        stop_sequence: ['\n\n\n', '```'],
+        trim_stop: true,
+      },
+      label,
+      opts.signal,
+      opts.shaping,
+    )
+    try {
+      return { card: normalizeCardJson(parseLenientJson(text)), rawOutput: text }
+    } catch (e) {
+      failure = e
+    }
+  }
+  throw failure
 }
 
 const BRIEF_SYSTEM_INSTRUCTION = `You write character cards for a roleplay app from a short brief. Take the brief as the seed and fill in the specifics it leaves open.
@@ -217,32 +241,13 @@ export async function draftCharacterFromBrief(
   brief: string,
   opts?: { worldTone?: string; styleGuidance?: string; signal?: AbortSignal; shaping?: AssistShaping },
 ): Promise<{ card: CharacterCardData; rawOutput: string }> {
-  const prompt = [
+  const parts = [
     BRIEF_SYSTEM_INSTRUCTION,
     writerStyleNote(opts?.styleGuidance),
     opts?.worldTone?.trim() ? `Fit the character to this world's own tone and setting:\n${opts.worldTone.trim()}` : '',
     `Brief: ${brief.trim()}`,
-    'JSON:',
   ]
-    .filter(Boolean)
-    .join('\n\n')
-
-  const text = await generateWithTimeout(
-    client,
-    {
-      prompt,
-      max_length: 1200,
-      max_context_length: await client.getEffectiveMaxContext(),
-      ...ASSIST_SAMPLER,
-      stop_sequence: ['\n\n\n', '```'],
-      trim_stop: true,
-    },
-    'Generate character',
-    opts?.signal,
-    opts?.shaping,
-  )
-  const card = normalizeCardJson(parseLenientJson(text))
-  return { card, rawOutput: text }
+  return generateCard(client, parts, 'Generate character', { signal: opts?.signal, shaping: opts?.shaping })
 }
 
 /** The option pool behind "combinatorial" character creation (`GenerateCharacterDialog`'s "From traits" mode) */
@@ -318,7 +323,7 @@ export interface DraftedProfile {
   loveLanguage: string
 }
 
-function strList(v: unknown, max: number): string[] {
+export function strList(v: unknown, max: number): string[] {
   if (!Array.isArray(v)) return []
   return v
     .filter((x): x is string => typeof x === 'string')

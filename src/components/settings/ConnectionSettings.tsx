@@ -12,6 +12,7 @@ import { SettingsPage } from '@/components/ui/SettingsPage'
 import { Button } from '@/components/ui/Button'
 import { toastSuccess } from '@/lib/store/useToastStore'
 import { HostedConnectionStatus, STATUS_DOT, STATUS_LABEL } from './HostedConnectionStatus'
+import { ConnectionProfilesSection } from './ConnectionProfilesSection'
 import { OpenMayhemSetup } from './OpenMayhemSetup'
 import { OpenMayhemModelSelect } from './OpenMayhemModelSelect'
 import { isOpenMayhem } from '@/lib/api/openMayhem'
@@ -68,6 +69,7 @@ export function ConnectionSettings() {
 
   return (
     <SettingsPage>
+      <ConnectionProfilesSection />
       <Section
         title="Where replies come from"
         description="Pick the model that writes replies. Run one on your own computer, or connect a hosted provider with an API key."

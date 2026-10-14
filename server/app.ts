@@ -22,8 +22,10 @@ import {
   extensionStore,
   extensionFileStore,
   extensionDataStore,
+  vectorChunkStore,
 } from './db.ts'
 import { cloneScopeData, extensionsRouter, purgeScopeData } from './extensions.ts'
+import { forgetAllVectors, purgeVectors, vectorsRouter } from './vectors.ts'
 import { mcpRouter, mcpSettingsRouter } from './mcp.ts'
 import { agentRouter } from './agentTools.ts'
 import { mcpServersRouter } from './mcpClient.ts'
@@ -48,6 +50,7 @@ app.use(express.json({ limit: '150mb' }))
 app.use(mcpSettingsRouter())
 app.use(mcpServersRouter())
 app.use(agentRouter())
+app.use(vectorsRouter())
 app.use('/api/openmayhem', openMayhemRouter())
 app.use(imageProxyRouter())
 app.use('/api/extensions', extensionsRouter())
@@ -529,7 +532,12 @@ app.post('/api/characters', (req, res) => {
 
 app.put('/api/characters/:id', (req, res) => {
   const id = req.params.id
-  if (!characterStore.get(id)) return notFound(res)
+  const existing = characterStore.get(id)
+  if (!existing) return notFound(res)
+  // The editor sends the version it opened, so a save cannot silently overwrite a change made elsewhere (the Assistant, an MCP client).
+  if (typeof req.body.ifUpdatedAt === 'number' && req.body.ifUpdatedAt !== existing.updatedAt) {
+    return res.status(409).json({ error: 'This character was changed after you opened it.' })
+  }
   const patch: Record<string, unknown> = { updatedAt: Date.now() }
   if ('card' in req.body) patch.card = req.body.card
   if ('worldId' in req.body) patch.worldId = req.body.worldId || undefined
@@ -593,6 +601,7 @@ app.delete('/api/characters/:id', (req, res) => {
   // Removes the whole per-character folder in one shot (avatar, sprites, gallery — see avatars.ts).
   removeAvatar('characters', characterId)
   purgeScopeData('character', characterId)
+  purgeVectors('character', characterId)
   characterStore.remove(characterId)
   res.status(204).end()
 })
@@ -657,6 +666,7 @@ function purgeChat(chatId: string): void {
   for (const e of relationshipEventStore.list({ where: 'chatId = ?', params: [chatId] })) relationshipEventStore.remove(e.id as string)
   for (const f of chatFactStore.list({ where: 'chatId = ?', params: [chatId] })) chatFactStore.remove(f.id as string)
   purgeScopeData('chat', chatId)
+  purgeVectors('chat', chatId)
   // Un-parent any chat forked from this one (parentChatId isn't indexed, so a full scan).
   for (const chat of chatStore.list()) {
     if (chat.parentChatId !== chatId) continue
@@ -1173,10 +1183,11 @@ const BACKUP_STORES = {
   extensions: extensionStore,
   extensionFiles: extensionFileStore,
   extensionData: extensionDataStore,
+  vectorChunks: vectorChunkStore,
 } as const
 
 // Backups made before extensions existed lack these keys; restoring one must leave these tables alone.
-const OPTIONAL_BACKUP_KEYS = new Set(['extensions', 'extensionFiles', 'extensionData'])
+const OPTIONAL_BACKUP_KEYS = new Set(['extensions', 'extensionFiles', 'extensionData', 'vectorChunks'])
 
 function listAvatarFiles(): { relPath: string; base64: string }[] {
   const results: { relPath: string; base64: string }[] = []
@@ -1216,6 +1227,7 @@ app.post('/api/restore', express.json({ limit: '1gb' }), (req, res) => {
       for (const row of rows) store.insert(row)
     }
     db.exec('COMMIT')
+    forgetAllVectors()
   } catch (e) {
     db.exec('ROLLBACK')
     throw e

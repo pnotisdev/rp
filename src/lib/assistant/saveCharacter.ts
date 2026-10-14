@@ -1,8 +1,12 @@
-import type { GeneratedCharacter } from '@/lib/assistant/thread'
+import type { Character, CharacterCardData } from '@/lib/characters/cardSpec'
+import type { DraftSections } from '@/lib/characters/generateFullCharacter'
 
-/** A generated character flattened into the shape `charactersApi.create` takes. */
-export function generatedToCharacterInput(generated: GeneratedCharacter): Record<string, unknown> {
-  const { card, profile, bonds, outfits, characterBook } = generated
+/** The body `charactersApi.create` takes. Typed so a key the character does not have cannot slip in. */
+export type CharacterInput = Partial<Omit<Character, 'id' | 'createdAt' | 'updatedAt' | 'card'>> & { card: CharacterCardData }
+
+/** A drafted character flattened into the shape `charactersApi.create` takes. */
+export function generatedToCharacterInput(generated: DraftSections): CharacterInput {
+  const { card, profile, bonds, outfits, characterBook, extras } = generated
   return {
     // The lorebook lives inside the card, exactly as the editor sets it.
     card: characterBook ? { ...card, character_book: characterBook } : card,
@@ -23,10 +27,12 @@ export function generatedToCharacterInput(generated: GeneratedCharacter): Record
       ? {
           giftLikes: bonds.giftLikes,
           giftDislikes: bonds.giftDislikes,
-          weatherLoves: bonds.weatherLoves,
-          weatherHates: bonds.weatherHates,
           relationshipStarters: bonds.relationshipStarters,
+          ...(bonds.weatherLoves.length || bonds.weatherHates.length
+            ? { weatherPreferences: { loves: bonds.weatherLoves, hates: bonds.weatherHates } }
+            : {}),
         }
       : {}),
+    ...extras,
   }
 }

@@ -14,6 +14,8 @@ import { Toggle } from '@/components/ui/Toggle'
 export function AssistantWorkspaceSettings() {
   const autoApprove = useSettingsStore((s) => s.assistantAutoApprove)
   const setAutoApprove = useSettingsStore((s) => s.setAssistantAutoApprove)
+  const autoBuild = useSettingsStore((s) => s.assistantAutoBuild)
+  const setAutoBuild = useSettingsStore((s) => s.setAssistantAutoBuild)
   const [saved, setSaved] = useState<WorkspaceConfig | null>(null)
   const [folder, setFolder] = useState('')
   const [error, setError] = useState('')
@@ -107,6 +109,10 @@ export function AssistantWorkspaceSettings() {
         </div>
         <Toggle checked={autoApprove} onChange={setAutoApprove} label="Apply file edits without asking" description="Off: every edit shows what will change and waits for you. Commands and paid pictures always ask." />
         <Toggle checked={saved?.allowCommands ?? false} onChange={(v) => void toggleCommands(v)} label="Let it run commands" description="Needs a workspace folder. Every command still asks first." />
+      </Section>
+
+      <Section title="Building characters" description="What the Assistant does when you ask it to make a character.">
+        <Toggle checked={autoBuild} onChange={setAutoBuild} label="Build the card as soon as I send" description="On: the Assistant drafts every section and shows the card for you to review, and nothing is saved until you click Save. Off: you get a button first and an ordinary reply if you just press Enter." />
       </Section>
 
       <Section title="Assistant memory" description="Short notes the Assistant keeps about you across conversations. It adds to them itself when you tell it something worth remembering, and you can edit them here.">

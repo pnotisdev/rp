@@ -1,3 +1,6 @@
+import { splitReasoning } from '@/lib/text/slop'
+import { tokenProbStore } from '@/lib/api/logprobs'
+import { TokenProbabilities } from './TokenProbabilities'
 import { memo, useState } from 'react'
 import { AlertCircle, ChevronLeft, ChevronRight, Compass, GitFork, Heart, History, MessageSquareWarning, RotateCcw, Star, TriangleAlert, Unlink, X } from 'lucide-react'
 import type { StoredMessage } from '@/lib/types'
@@ -87,7 +90,9 @@ export const MessageBubble = memo(function MessageBubble({
 }: MessageBubbleProps) {
   const chatStyle = useSettingsStore((s) => s.chatStyle)
   // Texting: the reply as bubbles, cleaned the same way the stored text will be, with the line still being written held back.
-  const textingSource = !texting || message.role === 'user' ? '' : isStreaming ? toTextingReply(streamingText ?? '', { charName: message.name, streaming: true }) + ((streamingText ?? '').endsWith('\n') ? '\n' : '') : message.text
+  const streamed = isStreaming && message.role !== 'user' ? splitReasoning(streamingText ?? '') : null
+  const streamedReply = streamed ? streamed.reply : streamingText ?? ''
+  const textingSource = !texting || message.role === 'user' ? '' : isStreaming ? toTextingReply(streamedReply, { charName: message.name, streaming: true }) + (streamedReply.endsWith('\n') ? '\n' : '') : message.text
   const { bubbles: textingBubbles, pending: textingPending } = splitBubbles(textingSource, !!isStreaming)
   const reveal = useBubbleReveal(message.id, textingBubbles, {
     streaming: texting && !!isStreaming && message.role !== 'user',
@@ -108,7 +113,12 @@ export const MessageBubble = memo(function MessageBubble({
   const [steerDraft, setSteerDraft] = useState('')
 
   const isUser = message.role === 'user'
-  const displayText = isStreaming ? streamingText ?? '' : message.text
+  const displayText = isStreaming ? streamedReply : message.text
+  // The model's reasoning, from the raw output kept on the message (or the stream so far). Only when the writer asked to see it.
+  const showReasoning = useSettingsStore((s) => s.showReasoning)
+  const rawForReasoning = isUser ? '' : isStreaming ? streamingText ?? '' : message.swipeRawTexts?.[message.activeSwipe ?? 0] ?? message.rawText ?? ''
+  const thought = !isUser && showReasoning ? splitReasoning(rawForReasoning) : null
+  const probs = !isUser && !isStreaming ? tokenProbStore.get(message.id) : undefined
   const swipes = message.swipes ?? []
   const canSwipe = !isUser && swipes.length > 0 && !isStreaming
   // Text stays empty on a failed generation
@@ -203,7 +213,7 @@ export const MessageBubble = memo(function MessageBubble({
     </div>
   ) : null
 
-  const textBlock = editing ? (
+  const textCore = editing ? (
     <textarea
       autoFocus
       value={draft}
@@ -231,6 +241,19 @@ export const MessageBubble = memo(function MessageBubble({
       )}
       {isStreaming && <span className="cursor-blink font-mono">▋</span>}
     </div>
+  )
+
+  const textBlock = (
+    <>
+      {thought?.reasoning && (
+        <details open={thought.open} className="mb-2 rounded-lg bg-bg-sunken px-3 py-2 text-xs text-text-muted">
+          <summary className="cursor-pointer select-none">{thought.open ? 'Thinking...' : 'Thought process'}</summary>
+          <div className="mt-2 whitespace-pre-wrap break-words leading-relaxed">{thought.reasoning}</div>
+        </details>
+      )}
+      {textCore}
+      {probs && <TokenProbabilities probs={probs} />}
+    </>
   )
 
   const meta = (

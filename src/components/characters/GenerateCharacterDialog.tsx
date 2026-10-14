@@ -2,20 +2,14 @@ import { useRef, useState } from 'react'
 import { Dices, RefreshCw } from 'lucide-react'
 import { useChatBackendClient } from '@/lib/hooks/useChatBackendClient'
 import { resolveAssistShaping } from '@/lib/api/assistShaping'
-import type { CharacterCardData, Lorebook } from '@/lib/characters/cardSpec'
-import type { Outfit } from '@/lib/vn/outfits'
-import {
-  draftCharacterFromBrief,
-  draftCharacterFromPortrait,
-  generateTraitOptions,
-  type DraftedBonds,
-  type DraftedProfile,
-} from '@/lib/characters/aiAssist'
+import type { GiftItem } from '@/lib/types'
+import { draftCharacterFromBrief, draftCharacterFromPortrait, generateTraitOptions } from '@/lib/characters/aiAssist'
 import {
   OPTIONAL_STAGES,
   STAGE_LABELS,
   draftFullCharacter,
   isAbortError,
+  type DraftSections,
   type FullCharacterStage,
   type StageStatus,
 } from '@/lib/characters/generateFullCharacter'
@@ -38,16 +32,6 @@ import { Modal } from '@/components/ui/Modal'
 import { Chip } from '@/components/ui/Chip'
 import { TextAreaField } from '@/components/ui/Field'
 
-/** What the dialog hands back — a card always, plus the extra `Character`-level fields when the user
- *  picked "Full character". `CharacterEditor` spreads these into its own field state for review. */
-export interface GeneratedCharacter {
-  card: CharacterCardData
-  profile?: DraftedProfile | null
-  bonds?: DraftedBonds | null
-  outfits?: Outfit[] | null
-  characterBook?: Lorebook | null
-}
-
 type StageState = Record<FullCharacterStage, StageStatus | 'pending'>
 
 const ALL_STAGES: FullCharacterStage[] = ['card', ...OPTIONAL_STAGES]
@@ -57,17 +41,22 @@ const STATUS_GLYPH: Record<StageStatus | 'pending', string> = {
   start: '…',
   done: '✓',
   failed: '✕',
+  skipped: '–',
 }
 
+/** Hands back a card always, plus the other sections when the user picked "Full character". */
 export function GenerateCharacterDialog({
   onGenerated,
   onClose,
   worldTone,
+  giftCatalog,
 }: {
-  onGenerated: (result: GeneratedCharacter) => void
+  onGenerated: (result: DraftSections) => void
   onClose: () => void
   /** The currently-selected world's own description, if any — fits the draft to its tone/setting instead of inventing one that might contradict it. */
   worldTone?: string
+  /** The selected world's gifts, so gift scores name real ones. */
+  giftCatalog?: readonly GiftItem[]
 }) {
   const client = useChatBackendClient()
   const styleGuidance = useSettingsStore((s) => s.styleGuidance)
@@ -177,6 +166,7 @@ export function GenerateCharacterDialog({
           portraitBase64: mode === 'portrait' ? await portraitBase64() : undefined,
           worldTone,
           styleGuidance,
+          giftCatalog,
         },
         {
           shaping: await resolveAssistShaping(120_000),
@@ -192,13 +182,8 @@ export function GenerateCharacterDialog({
             .join(', ')}. You can fill those in or regenerate them in the editor.`,
         )
       }
-      onGenerated({
-        card: draft.card,
-        profile: draft.profile,
-        bonds: draft.bonds,
-        outfits: draft.outfits,
-        characterBook: draft.characterBook,
-      })
+      for (const s of draft.skipped) toastInfo(`${STAGE_LABELS[s.stage]}: ${s.reason}`)
+      onGenerated(draft)
     } catch (e) {
       if (isAbortError(e) || controller.signal.aborted) return
       setFailed(true)
@@ -241,7 +226,7 @@ export function GenerateCharacterDialog({
       </div>
       <p className="mb-3 text-[11px] text-text-muted">
         {scope === 'full'
-          ? 'Drafts the card, then life & background, gift and relationship starters, wardrobe, and a character lorebook. One step at a time.'
+          ? 'Drafts the card, then greetings, life & background, relationship starters, connections and rules, voice, gift scores, routine, persona engine settings (left off), intimacy settings, wardrobe, and a character lorebook. One step at a time.'
           : 'Drafts just the core card: identity, personality, scenario, first message.'}
         {styleGuidance.trim() && ' Your writing style from Settings is applied.'}
       </p>
@@ -381,7 +366,8 @@ export function GenerateCharacterDialog({
                 <span className="inline-block w-4 tabular-nums">{STATUS_GLYPH[st]}</span>
                 {STAGE_LABELS[s]}
                 {st === 'start' && ' …'}
-                {st === 'failed' && ' (skipped)'}
+                {st === 'failed' && ' (failed)'}
+                {st === 'skipped' && ' (left blank)'}
               </li>
             )
           })}

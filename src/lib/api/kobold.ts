@@ -7,6 +7,7 @@ import type {
 } from './types'
 import { KoboldApiError } from './types'
 import type { ChatBackend } from './chatBackend'
+import { parseKoboldLogprobs, type TokenProb } from './logprobs'
 
 // Background judge/choice calls (relationshipAssist.ts, choices.ts, objectiveAssist.ts, aiAssist.ts) never pass their own AbortSignal
 const DEFAULT_TIMEOUT_MS = 30000
@@ -73,6 +74,15 @@ export class KoboldClient implements ChatBackend {
       return typeof r.chat_template === 'string' && r.chat_template.trim() ? r.chat_template : null
     } catch {
       return null
+    }
+  }
+
+  /** Top token probabilities for the last generation (it must have been requested with `logprobs: true`). Empty when the server has none. */
+  async lastLogprobs(): Promise<TokenProb[]> {
+    try {
+      return parseKoboldLogprobs(await req<unknown>(this.baseUrl, '/api/extra/last_logprobs'))
+    } catch {
+      return []
     }
   }
 

@@ -157,6 +157,16 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_extension_data_ext ON extension_data(extId, scope, scopeId);
   CREATE INDEX IF NOT EXISTS idx_extension_data_scope ON extension_data(scope, scopeId);
+
+  CREATE TABLE IF NOT EXISTS vector_chunks (
+    id TEXT PRIMARY KEY,
+    scope TEXT NOT NULL,
+    scopeId TEXT NOT NULL,
+    source TEXT NOT NULL,
+    createdAt INTEGER NOT NULL,
+    data TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_vector_chunks_scope ON vector_chunks(scope, scopeId, source);
 `)
 
 type Row = Record<string, unknown>
@@ -263,6 +273,7 @@ export const objectiveStore = createStore('objectives', [
 export const relationshipEventStore = createStore('relationship_events', [{ name: 'chatId' }, { name: 'createdAt' }])
 export const chatFactStore = createStore('chat_facts', [{ name: 'chatId' }, { name: 'createdAt' }])
 export const appSettingsStore = createStore('app_settings', [{ name: 'updatedAt' }])
+export const vectorChunkStore = createStore('vector_chunks', [{ name: 'scope' }, { name: 'scopeId' }, { name: 'source' }, { name: 'createdAt' }])
 export const extensionStore = createStore('extensions', [{ name: 'createdAt' }, { name: 'updatedAt' }])
 export const extensionFileStore = createStore('extension_files', [{ name: 'extId' }, { name: 'updatedAt' }])
 export const extensionDataStore = createStore('extension_data', [

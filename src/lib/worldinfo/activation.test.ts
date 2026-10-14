@@ -459,3 +459,107 @@ describe('describeEntry', () => {
     expect(describeEntry({ keys: ['  '], comment: '  ', content: '  ' })).toBe('(untitled entry)')
   })
 })
+
+describe('SillyTavern entry options', () => {
+  const act = (entries: LorebookEntry[], text: string, over: Partial<Lorebook> = {}, texts?: string[]) =>
+    activateWorldInfo([{ ...book(entries), ...over }], text, 0, undefined, texts).activated.map((e) => e.content)
+
+  describe('secondary key logic', () => {
+    const e = (selectiveLogic?: LorebookEntry['selectiveLogic']) => entry({ content: 'X', keys: ['gate'], secondary_keys: ['red', 'blue'], selective: true, selectiveLogic })
+
+    it('fires on any secondary key by default', () => {
+      expect(act([e()], 'gate red')).toEqual(['X'])
+      expect(act([e()], 'gate green')).toEqual([])
+    })
+
+    it('and_all needs every secondary key', () => {
+      expect(act([e('and_all')], 'gate red blue')).toEqual(['X'])
+      expect(act([e('and_all')], 'gate red')).toEqual([])
+    })
+
+    it('not_any fires only when no secondary key is found', () => {
+      expect(act([e('not_any')], 'gate green')).toEqual(['X'])
+      expect(act([e('not_any')], 'gate red')).toEqual([])
+    })
+
+    it('not_all fires unless every secondary key is found', () => {
+      expect(act([e('not_all')], 'gate red')).toEqual(['X'])
+      expect(act([e('not_all')], 'gate red blue')).toEqual([])
+    })
+
+    it('still needs the primary key', () => {
+      expect(act([e('not_any')], 'nothing')).toEqual([])
+    })
+  })
+
+  it('matches whole words only for a single-word key when asked', () => {
+    const plain = entry({ content: 'A', keys: ['cat'] })
+    const whole = entry({ content: 'B', keys: ['cat'], matchWholeWords: true })
+    expect(act([plain, whole], 'the catalog')).toEqual(['A'])
+    expect(act([plain, whole], 'the cat sat').sort()).toEqual(['A', 'B'])
+    expect(act([entry({ content: 'C', keys: ['black cat'], matchWholeWords: true })], 'a black cats')).toEqual(['C'])
+    expect(act([entry({ content: 'D', keys: ['cat'], matchWholeWords: true })], 'CAT!')).toEqual(['D'])
+  })
+
+  it('scans its own number of messages when it sets a scan depth', () => {
+    const texts = ['old news about dragons', 'middle', 'latest']
+    const recent = texts.slice(-1).join('\n')
+    expect(act([entry({ content: 'D', keys: ['dragons'] })], recent, {}, texts)).toEqual([])
+    expect(act([entry({ content: 'D', keys: ['dragons'], scanDepth: 3 })], recent, {}, texts)).toEqual(['D'])
+    expect(act([entry({ content: 'D', keys: ['latest'], scanDepth: 1 })], recent, {}, texts)).toEqual(['D'])
+    expect(act([entry({ content: 'D', keys: ['dragons'], scanDepth: 3 })], recent)).toEqual([])
+  })
+
+  describe('inclusion groups', () => {
+    it('lets a prioritized entry beat a higher order one', () => {
+      const a = entry({ content: 'A', keys: ['x'], group: 'g', insertion_order: 900 })
+      const b = entry({ content: 'B', keys: ['x'], group: 'g', insertion_order: 10, groupOverride: true })
+      expect(act([a, b], 'x')).toEqual(['B'])
+    })
+
+    it('takes the highest order among several prioritized ones', () => {
+      const a = entry({ content: 'A', keys: ['x'], group: 'g', insertion_order: 5, groupOverride: true })
+      const b = entry({ content: 'B', keys: ['x'], group: 'g', insertion_order: 50, groupOverride: true })
+      expect(act([a, b], 'x')).toEqual(['B'])
+    })
+
+    it('scores by how many keys were found when scoring is on', () => {
+      const a = entry({ content: 'A', keys: ['x', 'y'], group: 'g', insertion_order: 100, useGroupScoring: true })
+      const b = entry({ content: 'B', keys: ['x', 'y', 'z'], group: 'g', insertion_order: 10, useGroupScoring: true })
+      expect(act([a, b], 'x y z')).toEqual(['B'])
+      expect(act([a, b], 'x y')).toEqual(['A'])
+    })
+  })
+
+  describe('recursion flags', () => {
+    const trigger = entry({ content: 'The amulet hums.', keys: ['start'] })
+    const target = (over: Partial<LorebookEntry>) => entry({ content: 'Amulet lore.', keys: ['amulet'], ...over })
+
+    it('lets one entry trigger another when the book recurses', () => {
+      expect(act([trigger, target({})], 'start', { recursive_scanning: true }).sort()).toEqual(['Amulet lore.', 'The amulet hums.'])
+    })
+
+    it('excludeRecursion keeps an entry from being triggered by another', () => {
+      expect(act([trigger, target({ excludeRecursion: true })], 'start', { recursive_scanning: true })).toEqual(['The amulet hums.'])
+      expect(act([target({ excludeRecursion: true })], 'amulet', { recursive_scanning: true })).toEqual(['Amulet lore.'])
+    })
+
+    it('preventRecursion keeps an entry from triggering others', () => {
+      expect(act([{ ...trigger, preventRecursion: true }, target({})], 'start', { recursive_scanning: true })).toEqual(['The amulet hums.'])
+    })
+
+    it('delayUntilRecursion fires only from another entry, never from the chat', () => {
+      expect(act([target({ delayUntilRecursion: true })], 'amulet', { recursive_scanning: true })).toEqual([])
+      expect(act([trigger, target({ delayUntilRecursion: true })], 'start', { recursive_scanning: true }).sort()).toEqual(['Amulet lore.', 'The amulet hums.'])
+    })
+  })
+
+  it('keeps an ignoreBudget entry when the budget is spent', () => {
+    const big = 'word '.repeat(200)
+    const a = entry({ content: big, keys: ['x'], insertion_order: 200 })
+    const b = entry({ content: big, keys: ['x'], insertion_order: 100, ignoreBudget: true })
+    expect(act([a, b], 'x', { token_budget: 100 })).toEqual([big])
+    const c = entry({ content: big, keys: ['x'], insertion_order: 50, ignoreBudget: true })
+    expect(act([a, c], 'x', { token_budget: 100 })).toEqual([big])
+  })
+})

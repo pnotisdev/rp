@@ -134,6 +134,23 @@ describe('draftCharacterFromBrief', () => {
     await expect(draftCharacterFromBrief(mockClient('sorry, not json'), 'brief')).rejects.toThrow()
   })
 
+  it('asks once more, saying why, when the first answer cannot be read', async () => {
+    const client = mockClient(VALID_CARD_JSON)
+    ;(client.generate as ReturnType<typeof vi.fn>).mockResolvedValueOnce('{"name": "Mira" "description": "x"}'.replace('"Mira" ', '"Mira" @@'))
+    const { card } = await draftCharacterFromBrief(client, 'brief')
+    const calls = (client.generate as ReturnType<typeof vi.fn>).mock.calls
+    expect(card.name).toBe('Mira')
+    expect(calls).toHaveLength(2)
+    expect(calls[0][0].prompt).not.toContain('could not be read')
+    expect(calls[1][0].prompt).toContain('Your previous answer could not be read')
+  })
+
+  it('gives up after the second unreadable answer', async () => {
+    const client = mockClient('sorry, not json')
+    await expect(draftCharacterFromBrief(client, 'brief')).rejects.toThrow()
+    expect(client.generate).toHaveBeenCalledTimes(2)
+  })
+
   it('folds the global writing-style setting into the prompt when set', async () => {
     const client = mockClient(VALID_CARD_JSON)
     await draftCharacterFromBrief(client, 'brief', { styleGuidance: 'Second person, present tense. STYLE_MARKER.' })

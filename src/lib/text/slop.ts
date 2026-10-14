@@ -97,9 +97,86 @@ const EXCESS_BLANKS_RE = /\n{3,}/g
 /** A thinking/reasoning model's hidden reasoning phase (DeepSeek R1, Qwen3, GPT-OSS */
 const THINK_BLOCK_RE = /<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>|<\|channel>[\s\S]*?<channel\|>/gi
 
-/** Removes closed reasoning blocks (`<think>…</think>` and Gemma 4's `<|channel>thought …<channel|>`) from a completed generation. */
+/** gpt-oss (Harmony): reasoning channels, and the markers that open the `final` channel the reply is in. */
+const HARMONY_REASONING_RE = /(?:<\|start\|>assistant)?<\|channel\|>(?:analysis|commentary)<\|message\|>[\s\S]*?<\|end\|>/gi
+const HARMONY_MARKERS_RE = /(?:<\|start\|>assistant)?<\|channel\|>final<\|message\|>|<\|(?:return|end)\|>\s*$/gi
+/** A reasoning block that opened and never closed (a reply cut off mid-thought, or one still streaming). */
+const OPEN_REASONING_RE = /(?:<think(?:ing)?>|<\|channel>thought|(?:<\|start\|>assistant)?<\|channel\|>analysis<\|message\|>)[\s\S]*$/i
+/** Tag text to drop when showing a block's contents. */
+const REASONING_TAG_RE = /<\/?think(?:ing)?>|<\|channel>(?:thought)?|<channel\|>|(?:<\|start\|>assistant)?<\|channel\|>(?:analysis|commentary)<\|message\|>|<\|end\|>/gi
+
+let customMarkers: { prefix: string; suffix: string } | null = null
+
+/** The user's own reasoning markers, for a model whose tags are not one of the built-in kinds. Blank turns it off. */
+export function configureReasoning(prefix: string, suffix: string): void {
+  customMarkers = prefix.trim() && suffix.trim() ? { prefix, suffix } : null
+}
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+export interface SplitReasoning {
+  /** What the model thought, tags removed. Empty when it did not. */
+  reasoning: string
+  /** The reply without the reasoning. */
+  reply: string
+  /** The reasoning is still being written: it opened and has not closed. */
+  open: boolean
+}
+
+/** `hideOpen`: also take out a block that never closed. A finished reply keeps one as written (it is not guessed at); a streaming one shows it as reasoning in progress. */
+function scan(text: string, hideOpen: boolean): SplitReasoning {
+  const parts: string[] = []
+  let rest = text
+  const take = (re: RegExp) => {
+    rest = rest.replace(re, (m) => {
+      parts.push(m)
+      return ''
+    })
+  }
+  if (customMarkers) {
+    const own = new RegExp(`${escapeRe(customMarkers.prefix)}[\\s\\S]*?${escapeRe(customMarkers.suffix)}`, 'g')
+    rest = rest.replace(own, (m) => {
+      parts.push(m.slice(customMarkers!.prefix.length, m.length - customMarkers!.suffix.length))
+      return ''
+    })
+  }
+  take(THINK_BLOCK_RE)
+  take(HARMONY_REASONING_RE)
+  // A template that opens the block in the prompt writes only the close, so everything before it is reasoning.
+  const orphan = /<\/think(?:ing)?>/i.exec(rest)
+  if (orphan) {
+    parts.push(rest.slice(0, orphan.index))
+    rest = rest.slice(orphan.index + orphan[0].length)
+  }
+  let open = false
+  if (hideOpen) {
+    rest = rest.replace(OPEN_REASONING_RE, (m) => {
+      open = true
+      parts.push(m)
+      return ''
+    })
+  }
+  rest = rest.replace(HARMONY_MARKERS_RE, '')
+  const reasoning = parts
+    .map((p) => p.replace(REASONING_TAG_RE, '').trim())
+    .filter(Boolean)
+    .join('\n\n')
+  return { reasoning, reply: rest, open }
+}
+
+/** Separates a generation into its reasoning and its reply for display, covering `<think>`, Gemma 4's thought channel, Harmony's analysis channel, a lone `</think>` and the user's own markers. */
+export function splitReasoning(text: string): SplitReasoning {
+  const s = scan(text, true)
+  return { ...s, reply: s.reply.trimStart() }
+}
+
+/** Removes reasoning from a completed generation. */
+export function stripReasoning(text: string): string {
+  return scan(text, false).reply
+}
+
 export function stripThinkBlocks(text: string): string {
-  return text.replace(THINK_BLOCK_RE, '').trimStart()
+  return stripReasoning(text).trimStart()
 }
 
 /** Swaps em dashes for punctuation that reads naturally: an interrupted or trailing line becomes an ellipsis, anything else a comma. */
@@ -205,7 +282,7 @@ export function trimToLastSentence(text: string, maxLossRatio = 0.35): string {
 /** The deterministic scrub applied once to a completed generation before it's stored. */
 export function cleanModelOutput(text: string, opts: CleanModelOutputOptions = {}): string {
   if (!text) return text
-  let out = text.replace(THINK_BLOCK_RE, '')
+  let out = stripReasoning(text)
 
   if (opts.charName || opts.personaName) {
     out = truncateAtStrayTurnMarker(out, opts.charName ?? '', opts.personaName ?? '')

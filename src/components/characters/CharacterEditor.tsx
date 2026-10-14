@@ -2,6 +2,7 @@ import type { Character } from '@/lib/characters/cardSpec'
 import { Button } from '@/components/ui/Button'
 import { MenuButton } from '@/components/ui/MenuButton'
 import { downloadJson, downloadPng } from '@/lib/characters/importExport'
+import { getGiftCatalog } from '@/lib/dating/gifts'
 import { EditorShell } from '@/components/ui/EditorShell'
 import { GenerateExpressionSetDialog } from './GenerateExpressionSetDialog'
 import { GenerateCharacterDialog } from './GenerateCharacterDialog'
@@ -23,10 +24,8 @@ export function CharacterEditor(props: {
 }) {
   const f = useCharacterEditor(props)
   const {
-    character, onDeleted, avatarDataUrl, exportPack, tab, setTab, form, setForm, sprites, setSprites, setOutfits,
-    showExpressionSetDialog, setShowExpressionSetDialog, setGiftLikes, setGiftDislikes,
-    setLoveLanguage, setRelationshipStarters, setWeatherLoves, setWeatherHates, setOccupation,
-    setWorkplace, setHomeLocation, setFrequentedLocations, setLikes, setGoals, setBoundaries,
+    character, onDeleted, avatarDataUrl, exportPack, tab, setTab, form, setForm, sprites, setSprites,
+    showExpressionSetDialog, setShowExpressionSetDialog, applyGenerated,
     showGenerate, setShowGenerate, showTemplates, setShowTemplates, saving, editingWorld, save,
     remove, allExpressions, tabs,
   } = f
@@ -88,29 +87,12 @@ export function CharacterEditor(props: {
       {showGenerate && (
         <GenerateCharacterDialog
           onClose={() => setShowGenerate(false)}
-          onGenerated={({ card, profile, bonds, outfits: draftedOutfits, characterBook }) => {
-            setForm(characterBook ? { ...card, character_book: characterBook } : card)
-            if (draftedOutfits?.length) setOutfits(draftedOutfits)
-            if (profile) {
-              setOccupation(profile.occupation)
-              setWorkplace(profile.workplace)
-              setHomeLocation(profile.homeLocation)
-              setFrequentedLocations(profile.frequentedLocations)
-              setLikes(profile.likes)
-              setGoals(profile.goals)
-              setBoundaries(profile.boundaries)
-              setLoveLanguage(profile.loveLanguage)
-            }
-            if (bonds) {
-              setGiftLikes(bonds.giftLikes)
-              setGiftDislikes(bonds.giftDislikes)
-              setWeatherLoves(bonds.weatherLoves)
-              setWeatherHates(bonds.weatherHates)
-              setRelationshipStarters(bonds.relationshipStarters)
-            }
+          onGenerated={(draft) => {
+            applyGenerated(draft)
             setShowGenerate(false)
           }}
           worldTone={editingWorld?.description}
+          giftCatalog={getGiftCatalog(editingWorld)}
         />
       )}
       {showTemplates && (

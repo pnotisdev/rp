@@ -21,6 +21,9 @@ import { toastError, toastSuccess, useToastStore } from '@/lib/store/useToastSto
 // The local API server runs on the same machine
 const DEFAULT_TIMEOUT_MS = 15000
 
+/** True for the 409 a save gets when what it edited has changed since it was loaded. */
+export const isConflict = (e: unknown): boolean => (e as { status?: number } | null)?.status === 409
+
 /** Every read/write in this file funnels through `request()` */
 let unreachableToastId: string | null = null
 
@@ -78,7 +81,7 @@ async function request<T>(
     const text = await res.text().catch(() => '')
     // Validation errors (4xx) carry a message meant for people; show just that.
     const reason = res.status < 500 ? (() => { try { return (JSON.parse(text) as { error?: unknown } | null)?.error } catch { return null } })() : null
-    if (typeof reason === 'string' && reason) throw new Error(reason)
+    if (typeof reason === 'string' && reason) throw Object.assign(new Error(reason), { status: res.status })
     throw new Error(`${method} ${path} failed (${res.status})${text ? `: ${text}` : ''}`)
   }
   if (res.status === 204) return undefined as T
@@ -394,4 +397,46 @@ export const extensionsApi = {
     request<void>('PUT', `/extensions/${id}/data`, { scope, scopeId, key, value }),
   kvRemove: (id: string, scope: string, scopeId: string, key: string) =>
     request<void>('DELETE', `/extensions/${id}/data?scope=${scope}&scopeId=${encodeURIComponent(scopeId)}&key=${encodeURIComponent(key)}`),
+}
+
+export type VectorScope = 'global' | 'character' | 'chat'
+
+export interface VectorSource {
+  source: string
+  sourceName: string
+  chunks: number
+  dim: number
+  createdAt: number
+}
+
+export interface VectorHit {
+  id: string
+  text: string
+  score: number
+  source: string
+  sourceName: string
+  scope: VectorScope
+}
+
+/** Stored text chunks and their embeddings (see `server/vectors.ts`). Search runs on the server. */
+export const vectorsApi = {
+  async index(scope: VectorScope, scopeId: string, source: string, sourceName: string, chunks: { text: string; vector: number[] }[]): Promise<{ chunks: number }> {
+    const r = await request<{ chunks: number }>('POST', '/vectors/index', { scope, scopeId, source, sourceName, chunks }, { timeoutMs: 120_000 })
+    invalidate('vector-sources')
+    return r
+  },
+  sources(scope: VectorScope, scopeId = ''): Promise<VectorSource[]> {
+    return request<VectorSource[]>('GET', `/vectors/sources?scope=${scope}&scopeId=${encodeURIComponent(scopeId)}`)
+  },
+  async removeSource(scope: VectorScope, scopeId: string, source: string): Promise<void> {
+    await request<void>('DELETE', `/vectors/source?scope=${scope}&scopeId=${encodeURIComponent(scopeId)}&source=${encodeURIComponent(source)}`)
+    invalidate('vector-sources')
+  },
+  async removeScope(scope: VectorScope, scopeId = ''): Promise<void> {
+    await request<void>('DELETE', `/vectors/scope?scope=${scope}&scopeId=${encodeURIComponent(scopeId)}`)
+    invalidate('vector-sources')
+  },
+  search(targets: { scope: VectorScope; scopeId?: string }[], vector: number[], opts: { k?: number; minScore?: number; excludeSources?: string[] } = {}): Promise<VectorHit[]> {
+    return request<VectorHit[]>('POST', '/vectors/search', { targets, vector, ...opts })
+  },
 }

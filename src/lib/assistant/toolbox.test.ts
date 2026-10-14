@@ -19,6 +19,9 @@ vi.mock('@/lib/api/client', () => ({
 }))
 vi.mock('@/lib/extensions/assistantTools', () => ({ extensionAgentTools: () => [], runExtensionTool: async () => null }))
 const generate = vi.fn()
+const build = vi.fn()
+const editSection = vi.fn()
+vi.mock('./characterTools', async (orig) => ({ ...(await orig<typeof import('./characterTools')>()), runBuildCharacter: (...a: unknown[]) => build(...a), runEditCharacterSection: (...a: unknown[]) => editSection(...a) }))
 vi.mock('./imageTool', async (orig) => ({ ...(await orig<typeof import('./imageTool')>()), runGenerateImage: (...args: unknown[]) => generate(...args) }))
 
 import { buildToolbox, type ToolboxOptions } from './toolbox'
@@ -37,6 +40,28 @@ describe('what is offered', () => {
     expect((await buildToolbox(opts({ mode: 'off' }))).tools).toEqual([])
     expect((await buildToolbox(opts({ mode: 'read' }))).tools.map((t) => t.name)).toEqual(['read_file', 'generate_image'])
     expect((await buildToolbox(opts())).tools.map((t) => t.name)).toEqual(['read_file', 'edit_file', 'run_command', 'create_world', 'generate_image'])
+  })
+
+  it('offers the character tools only with a model client: drafting in read mode, editing in write mode', async () => {
+    const character = { client: {} as never, styleGuidance: '' }
+    expect((await buildToolbox(opts())).tools.map((t) => t.name)).not.toContain('build_character')
+    expect((await buildToolbox(opts({ mode: 'read', character }))).tools.map((t) => t.name)).toEqual(['read_file', 'generate_image', 'build_character'])
+    expect((await buildToolbox(opts({ character }))).tools.map((t) => t.name)).toEqual(expect.arrayContaining(['build_character', 'edit_character_section']))
+  })
+
+  it('runs the character tools in the browser, waiving approval only when auto-approve is on', async () => {
+    const character = { client: {} as never, styleGuidance: '' }
+    editSection.mockResolvedValue({ text: 'ok', isError: false })
+    const ask = vi.fn().mockResolvedValue(false)
+    const box = await buildToolbox(opts({ character, ask }))
+    await box.run({ name: 'edit_character_section', arguments: {} })
+    expect(call).not.toHaveBeenCalled()
+    expect(await editSection.mock.calls[0][1].approve({ title: 't', detail: 'd', confirmLabel: 'c' })).toBe(false)
+    expect(ask).toHaveBeenCalledOnce()
+    const auto = await buildToolbox(opts({ character, ask, autoApprove: true }))
+    await auto.run({ name: 'edit_character_section', arguments: {} })
+    expect(await editSection.mock.calls[1][1].approve({ title: 't', detail: 'd', confirmLabel: 'c' })).toBe(true)
+    expect(ask).toHaveBeenCalledOnce()
   })
 
   it('leaves out picture making when no image backend is set up', async () => {

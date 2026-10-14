@@ -18,7 +18,8 @@ export async function importLorebookFile(file: File): Promise<Lorebook> {
   return { ...book, name: book.name || file.name.replace(/\.[^.]+$/, '') }
 }
 
-const ST_POSITION = { before_char: 0, after_char: 1, at_depth: 4 } as const
+const ST_POSITION = { before_char: 0, after_char: 1, at_depth: 4, outlet: 7 } as const
+const ST_LOGIC = { and_any: 0, not_all: 1, not_any: 2, and_all: 3 } as const
 
 /** The book as a SillyTavern World Info file (entries keyed by uid), which ST and this app both re-import. */
 export function lorebookToStJson(book: Lorebook) {
@@ -40,6 +41,21 @@ export function lorebookToStJson(book: Lorebook) {
       probability: e.probability ?? 100,
       useProbability: e.probability !== undefined,
       caseSensitive: !!e.case_sensitive,
+      group: e.group ?? '',
+      ...(e.groupWeight !== undefined ? { groupWeight: e.groupWeight } : {}),
+      groupOverride: !!e.groupOverride,
+      useGroupScoring: e.useGroupScoring ?? null,
+      sticky: e.sticky ?? null,
+      cooldown: e.cooldown ?? null,
+      delay: e.delay ?? null,
+      selectiveLogic: ST_LOGIC[e.selectiveLogic ?? 'and_any'],
+      scanDepth: e.scanDepth ?? null,
+      matchWholeWords: e.matchWholeWords ?? null,
+      excludeRecursion: !!e.excludeRecursion,
+      preventRecursion: !!e.preventRecursion,
+      delayUntilRecursion: !!e.delayUntilRecursion,
+      ignoreBudget: !!e.ignoreBudget,
+      outletName: e.outletName ?? '',
     }
   })
   return { name: book.name, entries }

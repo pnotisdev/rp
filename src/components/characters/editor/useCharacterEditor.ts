@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { useApiQuery } from '@/lib/hooks/useApiQuery'
-import { charactersApi, instructTemplatesApi, worldsApi } from '@/lib/api/client'
+import { charactersApi, instructTemplatesApi, isConflict, worldsApi } from '@/lib/api/client'
 import type { BehavioralRule, Character, GalleryEntry, OutreachFrequency, RelationshipStarter, SocialConnection } from '@/lib/characters/cardSpec'
 import { blankCharacterData } from '@/lib/characters/cardSpec'
+import type { DraftSections } from '@/lib/characters/generateFullCharacter'
+import { generatedToCharacterInput } from '@/lib/assistant/saveCharacter'
 import { type DriveConfig } from '@/lib/persona/drive'
 import {
   detectVoiceFingerprint,
@@ -242,7 +244,19 @@ export function useCharacterEditor({
     }
     try {
       if (character) {
-        await charactersApi.update(character.id, payload)
+        try {
+          await charactersApi.update(character.id, { ...payload, ifUpdatedAt: character.updatedAt })
+        } catch (e) {
+          if (!isConflict(e)) throw e
+          const overwrite = await confirmDialog({
+            title: 'Changed since you opened it',
+            body: 'This character was edited elsewhere, for example by the Assistant. Saving now replaces those changes with what is in this editor.',
+            confirmLabel: 'Overwrite',
+            tone: 'danger',
+          })
+          if (!overwrite) return
+          await charactersApi.update(character.id, payload)
+        }
         onSaved(character.id)
       } else {
         const created = await charactersApi.create(payload)
@@ -419,6 +433,63 @@ export function useCharacterEditor({
     }
     if (result.sprites && Object.keys(result.sprites).length) {
       toastSuccess(`Imported ${Object.keys(result.sprites).length} expression sprite(s) from the card.`)
+    }
+  }
+
+  /** Applies an AI draft into the form for review; sections the draft lacks stay as they are. */
+  const applyGenerated = (draft: DraftSections) => {
+    const input = generatedToCharacterInput(draft)
+    const apply = <T,>(value: T | undefined, setter: (v: T) => void) => {
+      if (value !== undefined) setter(value)
+    }
+    setForm(input.card)
+    apply(input.outfits, setOutfits)
+    apply(input.occupation, setOccupation)
+    apply(input.workplace, setWorkplace)
+    apply(input.homeLocation, setHomeLocation)
+    apply(input.frequentedLocations, setFrequentedLocations)
+    apply(input.likes, setLikes)
+    apply(input.goals, setGoals)
+    apply(input.boundaries, setBoundaries)
+    apply(input.loveLanguage, setLoveLanguage)
+    apply(input.giftLikes, setGiftLikes)
+    apply(input.giftDislikes, setGiftDislikes)
+    apply(input.giftPreferences, setGiftPreferences)
+    apply(input.relationshipStarters, setRelationshipStarters)
+    apply(input.socialConnections, setSocialConnections)
+    apply(input.behavioralRules, setBehavioralRules)
+    apply(input.schedule, setSchedule)
+    apply(input.birthday, setBirthday)
+    apply(input.outreach?.frequency, setOutreachFrequency)
+    apply(input.sfxWords, setSfxWords)
+    const weather = input.weatherPreferences
+    if (weather) {
+      setWeatherLoves(weather.loves ?? [])
+      setWeatherHates(weather.hates ?? [])
+    }
+    const voiceDraft = input.voiceFingerprint
+    if (voiceDraft) {
+      setVerbalTics(voiceDraft.verbalTics ?? [])
+      setCatchphrases(voiceDraft.catchphrases ?? [])
+      setDialectNotes(voiceDraft.dialectNotes ?? '')
+      setSentenceRhythm(voiceDraft.sentenceRhythm ?? '')
+    }
+    apply(input.explicitVoiceNote, setExplicitVoiceNote)
+    if (input.drive) {
+      setDrive(input.drive)
+      setDriveLists(driveListText(input.drive))
+    }
+    const touch = input.touchProfile
+    if (touch) {
+      setSensitiveRegions(regionsAt(touch.sensitivity, 3))
+      setUnresponsiveRegions(regionsAt(touch.sensitivity, 0))
+      setOffLimitRegions((touch.offLimits ?? []).join(', '))
+    }
+    const kinks = input.kinkProfile
+    if (kinks) {
+      setLikedKinks(kinksAt(kinks.valence, 2))
+      setDislikedKinks(kinksAt(kinks.valence, -1))
+      setHardLimitKinks((kinks.hardLimits ?? []).join(', '))
     }
   }
 
@@ -610,6 +681,7 @@ export function useCharacterEditor({
     updateRelationshipStarter,
     removeRelationshipStarter,
     applyImport,
+    applyGenerated,
     exportPack,
     allExpressions,
     tabs,

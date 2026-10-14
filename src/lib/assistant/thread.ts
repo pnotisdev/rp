@@ -1,7 +1,5 @@
-import type { CharacterCardData, Lorebook } from '@/lib/characters/cardSpec'
-import type { Outfit } from '@/lib/vn/outfits'
-import type { DraftedBonds, DraftedProfile } from '@/lib/characters/aiAssist'
-import { formatToolResult } from './tools'
+import type { DraftSections } from '@/lib/characters/generateFullCharacter'
+import { formatToolResult, type ToolUndo } from './tools'
 
 /** An assistant thread: a plain model conversation, stored whole. */
 
@@ -15,14 +13,11 @@ export interface AssistantAttachment {
 }
 
 /** A finished character draft, in the shape the character library already accepts. */
-export interface GeneratedCharacter {
-  card: CharacterCardData
-  profile?: DraftedProfile | null
-  bonds?: DraftedBonds | null
-  outfits?: Outfit[] | null
-  characterBook?: Lorebook | null
+export interface GeneratedCharacter extends DraftSections {
   /** Stages that failed, so a partial result says so instead of looking complete. */
   failedStages?: string[]
+  /** Stages that left their section blank on purpose, with why. */
+  skippedStages?: { stage: string; reason: string }[]
   /** Set once the player has actually saved it, so the button can't create duplicates. */
   savedCharacterId?: string
 }
@@ -50,7 +45,7 @@ export interface AssistantMessage {
   /** Set when generation failed, so the turn renders as an error rather than an empty reply. */
   error?: string
   /** A tool the assistant called this turn, with what came back. The message has no text of its own. */
-  tool?: { name: string; arguments: Record<string, unknown>; result: string; isError: boolean; images?: string[] }
+  tool?: { name: string; arguments: Record<string, unknown>; result: string; isError: boolean; images?: string[]; undo?: ToolUndo }
   /** Pictures the user attached to this message (shrunken data URLs). */
   images?: string[]
 }
